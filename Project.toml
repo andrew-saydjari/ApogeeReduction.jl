@@ -3,6 +3,18 @@ uuid = "54a60710-c70b-4ca7-b418-a99a7825ced3"
 authors = ["andrew-saydjari <saydjari@g.harvard.edu> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+EllipsisNotation = "da5c29d0-fa7d-589e-88eb-ea29b0a81949"
+FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+LibGit2 = "76f85450-5226-5b5a-8eaa-529ad045b433"
+ParallelDataTransfer = "2dcacdae-9679-587a-88bb-8b444fb7085b"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+
 [compat]
 julia = "1.6.7"
 
