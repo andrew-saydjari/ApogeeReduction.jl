@@ -16,6 +16,7 @@ ParallelDataTransfer = "2dcacdae-9679-587a-88bb-8b444fb7085b"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+DataFrames = "1"
 julia = "1.6.7"
 
 [extras]
