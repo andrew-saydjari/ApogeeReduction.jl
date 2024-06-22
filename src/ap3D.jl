@@ -43,3 +43,5 @@ function horz_ref_edge_corr(dcubedat_out_v)
     dcubedat_out_vh .-= horzbias
     return dcubedat_out_vh
 end
+
+# Note: Add functions for dark frams. Need location of dark frames
