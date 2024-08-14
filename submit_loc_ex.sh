@@ -6,14 +6,19 @@
 module load sdssdb/main almanac sdsstools postgresql
 
 # hardcode the mjd and expid for now
+runname="arctest"
 mjd=60356
 expid=8
+outdir="../outdir/"
+
+# set up the output directory (if does not exist)
+mkdir -p ${outdir}almanac
 
 # get the data summary file for the MJD (APO for now hardcoded)
-almanac --mjd $mjd --apo --fibers --output ${mjd}.h5
+almanac --mjd $mjd --apo --fibers --output ${outdir}almanac/${runname}.h5
 
 # run the reduction pipeline
-julia +1.10.0 pipeline.jl --mjd $mjd --expid $expid
+julia +1.10.0 pipeline.jl --mjd $mjd --expid $expid --outdir $outdir --runname $runname
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
