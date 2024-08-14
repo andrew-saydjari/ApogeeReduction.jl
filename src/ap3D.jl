@@ -43,3 +43,10 @@ function horz_ref_edge_corr(dcubedat_out_v)
     dcubedat_out_vh .-= horzbias
     return dcubedat_out_vh
 end
+
+function dcs(dcubedat,gainMat,readVarMat;firstind=2)
+    dimage = gainMat.*(dcubedat[:,:,end].-dcubedat[:,:,firstind])
+    # bad to use measured flux as the photon noise
+    ivarimage = 1 ./(2 .*readVarMat .+ abs.(dimage))
+    return dimage, ivarimage
+end

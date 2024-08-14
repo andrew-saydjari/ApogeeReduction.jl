@@ -29,20 +29,38 @@ function process_3D(release_dir,mjd,expid)
     df = DataFrame(read(f["apo/$(mjd)/exposures"]))
     close(f)
 
+    # load gain and readnoise calibrations
+    gainMat = 1.9*ones(Float32,2560,2048)
+    readVarMat = 25*ones(Float32,2560,2048)
+    # ADD load the dark currrent map
+    # load SIRS.jl models
+    # sirs4amps = SIRS.restore("sirs_test_d12_r60_n15.jld");
+    # sirsrefas2 = SIRS.restore("sirs_test_ref2_d12_r60_n15.jld");
+
     # this is only doing chip A for now (because of almanac)
     rawpath = build_raw_path(release_dir,df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid])
     # decompress and convert apz data format to a standard 3D cube of reads
     cubedat, hdr = apz2cube(rawpath);
-    # drop first read, then convert cube to differences
-    dcubedat = diff(cubedat[:,:,2:end],dims=3);
-    dcubedat_out = refcorr(dcubedat);
-    dcubedat_out_v = vert_ref_edge_corr(dcubedat_out);
-    # dcubedat_out_vh = horz_ref_edge_corr(dcubedat_out_v);
+
+    # ADD? reset anomaly fix
+
+    # remove 1/f correlated noise (using SIRS.jl)
+    # fixing the reference array is a bit of a hack right now (IRRC might fix)
+
+
+    # ADD? reference array-based masking/correction
+
+    # ADD? nonlinearity correction
+
+    # extraction 3D -> 2D
+    dimage, ivarimage = dcs(cubedat,gainMat,readVarMat,firstind=2);
+
+    # dark current subtraction
 
     # need to clean up exptype to account for FPI versus ARCLAMP
-    outfname = join(["ap3D",df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid],df.exptype[expid]],"_")
+    outfname = join(["ap2D",df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid],df.exptype[expid]],"_")
     # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-    jldsave(outfname*".jld2"; dcubedat_out_v)
+    jldsave(outfname*".jld2"; dimage, ivarimage)
 end
 
 ## Parse command line arguments
