@@ -76,6 +76,8 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
             outdat = Float64.(tdat)
         end
 
+        ## wondering if we need to add back in the vert_ref_edge_corr?
+
         # ADD? reference array-based masking/correction
 
         # ADD? nonlinearity correction
