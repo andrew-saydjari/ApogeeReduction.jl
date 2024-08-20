@@ -13,6 +13,7 @@ HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 LibGit2 = "76f85450-5226-5b5a-8eaa-529ad045b433"
 ParallelDataTransfer = "2dcacdae-9679-587a-88bb-8b444fb7085b"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SIRS = "40ae95f3-0455-409b-a0fb-071cca222575"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
