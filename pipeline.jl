@@ -2,7 +2,12 @@
 
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
-Pkg.activate("./"); Pkg.instantiate(); Pkg.precompile()
+Pkg.activate("./")
+Pkg.add("ProgressMeter")
+Pkg.rm("SIRS")
+Pkg.add(url="https://github.com/nasa/SIRS.git")
+Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()
+
 using Distributed, ArgParse
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Package activation took $dt"); t_then = t_now; flush(stdout)
 if "SLURM_JOB_ID" in keys(ENV)
@@ -34,6 +39,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 ##### 3D stage
 @everywhere begin
     function process_3D(release_dir,outdir,runname,mjd,expid;firstind=2,cor1fnoise=true)
+	caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/"
         dirName = outdir*"/ap2D/"
         if !ispath(dirName)
             mkpath(dirName)
@@ -48,8 +54,8 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         readVarMat = 25*ones(Float32,2560,2048)
         # ADD load the dark currrent map
         # load SIRS.jl models
-        sirs4amps = SIRS.restore(outdir*"cal/sirs_test_d12_r60_n15.jld");
-        sirsrefas2 = SIRS.restore(outdir*"cal/sirs_test_ref2_d12_r60_n15.jld");
+        sirs4amps = SIRS.restore(caldir*"sirs_test_d12_r60_n15.jld");
+        sirsrefas2 = SIRS.restore(caldir*"sirs_test_ref2_d12_r60_n15.jld");
         # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
         # this is only doing chip A for now (because of almanac)
@@ -75,6 +81,8 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         else
             outdat = Float64.(tdat)
         end
+
+        ## wondering if we need to add back in the vert_ref_edge_corr?
 
         # ADD? reference array-based masking/correction
 
