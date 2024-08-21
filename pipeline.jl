@@ -36,8 +36,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
 ##### 3D stage
 @everywhere begin
-    function process_3D(release_dir,outdir,runname,mjd,expid;firstind=2,cor1fnoise=true)
-	caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/"
+    function process_3D(release_dir,outdir,caldir,runname,mjd,expid;firstind=2,cor1fnoise=true)
         dirName = outdir*"/ap2D/"
         if !ispath(dirName)
             mkpath(dirName)
@@ -88,7 +87,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
         # extraction 3D -> 2D
 #        dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1); 
-        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1); #maybe don't use first index
+        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1); # global firstind removes first read
 
         # dark current subtraction
 
@@ -142,10 +141,13 @@ t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); prin
 
 parg = parse_commandline()
 @passobj 1 workers() parg
+
+caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
+
 if parg["runlist"] != ""
     subDic = load(parg["runlist"])
     subiter = Iterators.zip(subDic["mjd"],subDic["expid"])
-    @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],parg["runname"],mjd,expid)
+    @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
     @showprogress pmap(process_3D_partial,subiter)
 else
     process_3D(parg["release_dir"],parg["outdir"],parg["runname"],parg["mjd"],parg["expid"])
