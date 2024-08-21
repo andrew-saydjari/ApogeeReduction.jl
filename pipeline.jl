@@ -2,7 +2,10 @@
 
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
-Pkg.activate("./"); Pkg.instantiate(); Pkg.precompile()
+Pkg.activate("./")
+Pkg.add(url="https://github.com/nasa/SIRS.git")
+Pkg.instantiate(); Pkg.precompile()
+
 using Distributed, ArgParse
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Package activation took $dt"); t_then = t_now; flush(stdout)
 if "SLURM_JOB_ID" in keys(ENV)
@@ -33,7 +36,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
 ##### 3D stage
 @everywhere begin
-    function process_3D(release_dir,outdir,runname,mjd,expid;firstind=2,cor1fnoise=true)
+    function process_3D(release_dir,outdir,caldir,runname,mjd,expid;firstind=2,cor1fnoise=true)
         dirName = outdir*"/ap2D/"
         if !ispath(dirName)
             mkpath(dirName)
@@ -48,8 +51,8 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         readVarMat = 25*ones(Float32,2560,2048)
         # ADD load the dark currrent map
         # load SIRS.jl models
-        sirs4amps = SIRS.restore(outdir*"cal/sirs_test_d12_r60_n15.jld");
-        sirsrefas2 = SIRS.restore(outdir*"cal/sirs_test_ref2_d12_r60_n15.jld");
+        sirs4amps = SIRS.restore(caldir*"sirs_test_d12_r60_n15.jld");
+        sirsrefas2 = SIRS.restore(caldir*"sirs_test_ref2_d12_r60_n15.jld");
         # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
         # this is only doing chip A for now (because of almanac)
@@ -83,7 +86,8 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1);
+#        dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1); 
+        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1); # global firstind removes first read
 
         # dark current subtraction
 
@@ -137,10 +141,13 @@ t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); prin
 
 parg = parse_commandline()
 @passobj 1 workers() parg
+
+caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
+
 if parg["runlist"] != ""
     subDic = load(parg["runlist"])
     subiter = Iterators.zip(subDic["mjd"],subDic["expid"])
-    @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],parg["runname"],mjd,expid)
+    @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
     @showprogress pmap(process_3D_partial,subiter)
 else
     process_3D(parg["release_dir"],parg["outdir"],parg["runname"],parg["mjd"],parg["expid"])
