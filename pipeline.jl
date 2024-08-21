@@ -89,10 +89,9 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        #dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1);
-        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1);
+#        dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1); 
+        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=2); #don't use first index
 
-	print(mean(dimage),"max",maximum(dimage))
         # dark current subtraction
 
         # need to clean up exptype to account for FPI versus ARCLAMP
