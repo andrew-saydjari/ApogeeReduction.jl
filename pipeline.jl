@@ -3,10 +3,8 @@
 import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
 Pkg.activate("./")
-Pkg.add("ProgressMeter")
-Pkg.rm("SIRS")
 Pkg.add(url="https://github.com/nasa/SIRS.git")
-Pkg.resolve(); Pkg.instantiate(); Pkg.precompile()
+Pkg.instantiate(); Pkg.precompile()
 
 using Distributed, ArgParse
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Package activation took $dt"); t_then = t_now; flush(stdout)
