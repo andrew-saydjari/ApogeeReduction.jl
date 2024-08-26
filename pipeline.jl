@@ -150,6 +150,6 @@ if parg["runlist"] != ""
     @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
     @showprogress pmap(process_3D_partial,subiter)
 else
-    process_3D(parg["release_dir"],parg["outdir"],parg["runname"],parg["mjd"],parg["expid"])
+    process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],parg["mjd"],parg["expid"])
 end
 rmprocs(workers())
