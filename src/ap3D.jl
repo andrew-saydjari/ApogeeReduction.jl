@@ -83,6 +83,7 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
 
     final_countrates = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
     final_vars = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
+    final_chisqs = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
 
     #slice the datacube to analyze each row sequentially to keep runtime down
 
@@ -200,6 +201,7 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
 
             final_countrates[s_ind,:] .= countrate[begin,:]
             final_vars[s_ind,:] .= var[begin,:]
+	    final_chisqs[s_ind,:] = chisq[begin,:]
 
 	end
 
@@ -210,7 +212,7 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
     count_mean = ndiffs .* final_countrates
     count_var = ndiffs.^2 .* final_vars
     
-    return count_mean,count_var.^(-1)
+    return count_mean,count_var.^(-1),final_chisqs
 end
 
 

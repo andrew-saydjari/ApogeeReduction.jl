@@ -87,7 +87,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
         # extraction 3D -> 2D
 #        dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1); 
-        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1); # global firstind removes first read
+        dimage, ivarimage, chisqimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1); # global firstind removes first read
 
         # dark current subtraction
 
