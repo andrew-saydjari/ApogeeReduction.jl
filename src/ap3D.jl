@@ -13,6 +13,7 @@ function apz2cube(fname)
     return cubedat, hdr
 end
 
+# feeling against this sort of subtraction, but we do see why one might want to do it in the darks
 function refcorr(dcubedat)
     # subtracts reference array with proper read ordering
     dcubedat_out = copy(dcubedat[1:2048,1:2048,..])
@@ -31,15 +32,6 @@ function refarray_zpt!(dcubedat)
     return
 end
 
-function vert_ref_edge_corr!(dcubedat_out)
-    # choosing NOT to do per quadrant without any clear cause to do so
-    top = dropdims(mean(dcubedat_out[1:2048,1:4,:],dims=(1,2)),dims=(1,2))
-    # top row seems to be bad on APO chip A (use end-1), check others visually
-    bot = dropdims(mean(dcubedat_out[1:2048,end-3:end-1,:],dims=(1,2)),dims=(1,2))
-    dcubedat_out .-= reshape((4*top+3*bot)./7,(1,1,:))
-    return
-end
-
 function vert_ref_edge_corr_amp!(dcubedat_out)
     dcubedat_out[1:512,..] .-= mean([mean(dcubedat_out[1:512,1:4,..]),mean(dcubedat_out[1:512,end-3:end-1,..])])
     dcubedat_out[513:1024,..] .-= mean([mean(dcubedat_out[513:1024,1:4,..]),mean(dcubedat_out[513:1024,end-3:end-1,..])])
@@ -47,16 +39,6 @@ function vert_ref_edge_corr_amp!(dcubedat_out)
     dcubedat_out[1537:2048,..] .-= mean([mean(dcubedat_out[1537:2048,1:4,..]),mean(dcubedat_out[1537:2048,end-3:end-1,..])])
     dcubedat_out[2049:end,..] .-= mean([mean(dcubedat_out[2049:end,1:4,..]),mean(dcubedat_out[2049:end,end-3:end-1,..])])
     return
-end
-
-# Need to revisit with SIRS.jl, this currently appears to add more bias than it removes
-function horz_ref_edge_corr(dcubedat_out_v)
-    # change to inplace after validate
-    # choosing NOT to do per quadrant (or flipping?) without any clear cause to do so
-    dcubedat_out_vh = copy(dcubedat_out_v)
-    horzbias = dropdims(median(vcat(dcubedat_out_v[1:4,:,:],dcubedat_out_v[2045:2048,:,:]),dims=1),dims=1);
-    dcubedat_out_vh .-= horzbias
-    return dcubedat_out_vh
 end
 
 function dcs(dcubedat,gainMat,readVarMat;firstind=1)
