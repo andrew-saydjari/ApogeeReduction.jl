@@ -55,7 +55,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(),exeflags=["--project=./"])
     else
-        addprocs(32)
+        addprocs(16)
     end
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker allocation took $dt"); t_then = t_now; flush(stdout)
@@ -148,7 +148,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(["ap2D",df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid],df.exptype[expid]],"_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        jldsave(outdir*"/ap2D/"*outfname*".jld2"; dimage, ivarimage)
+        jldsave(outdir*"/ap2D/"*outfname*".jld2"; dimage, ivarimage, chisqimage)
     end
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Function definitions took $dt"); t_then = t_now; flush(stdout)
@@ -163,7 +163,7 @@ try
         @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
         @showprogress pmap(process_3D_partial,subiter)
     else
-        process_3D(parg["release_dir"],parg["outdir"],caldir,caldir,parg["runname"],parg["mjd"],parg["expid"])
+        process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],parg["mjd"],parg["expid"])
     end
 finally
     rmprocs(workers())
