@@ -80,7 +80,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
 ##### 3D stage
 @everywhere begin
-    function process_3D(release_dir,outdir,caldir,runname,mjd,expid;firstind=2,cor1fnoise=true,extractMethod="sutr_tb")
+    function process_3D(release_dir,outdir,caldir,runname,mjd,expid;firstind=3,cor1fnoise=true,extractMethod="sutr_tb")
         dirName = outdir*"/ap2D/"
         if !ispath(dirName)
             mkpath(dirName)
