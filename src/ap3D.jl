@@ -23,15 +23,30 @@ function refcorr(dcubedat)
     return dcubedat_out
 end
 
-function vert_ref_edge_corr(dcubedat_out)
-    # change to inplace after validate
+function refarray_zpt!(dcubedat)
+    mean_ref_vec = mean(dcubedat[2049:end,:,..],dims=(1,2))
+    dcubedat .-= mean_ref_vec
+    mean_ref_val = mean(dcubedat[2049:end,..])
+    dcubedat .-= mean_ref_val
+    return
+end
+
+function vert_ref_edge_corr!(dcubedat_out)
     # choosing NOT to do per quadrant without any clear cause to do so
-    # seeing frequencies indicating that we need SIRS.jl
-    dcubedat_out_v = copy(dcubedat_out)
-    top = dropdims(mean(dcubedat_out[:,1:4,:],dims=(1,2)),dims=(1,2))
-    bot = dropdims(mean(dcubedat_out[:,end-3:end,:],dims=(1,2)),dims=(1,2))
-    dcubedat_out_v .-= reshape((top+bot)./2,(1,1,:))
-    return dcubedat_out_v
+    top = dropdims(mean(dcubedat_out[1:2048,1:4,:],dims=(1,2)),dims=(1,2))
+    # top row seems to be bad on APO chip A (use end-1), check others visually
+    bot = dropdims(mean(dcubedat_out[1:2048,end-3:end-1,:],dims=(1,2)),dims=(1,2))
+    dcubedat_out .-= reshape((4*top+3*bot)./7,(1,1,:))
+    return
+end
+
+function vert_ref_edge_corr_amp!(dcubedat_out)
+    dcubedat_out[1:512,..] .-= mean([mean(dcubedat_out[1:512,1:4,..]),mean(dcubedat_out[1:512,end-3:end-1,..])])
+    dcubedat_out[513:1024,..] .-= mean([mean(dcubedat_out[513:1024,1:4,..]),mean(dcubedat_out[513:1024,end-3:end-1,..])])
+    dcubedat_out[1025:1536,..] .-= mean([mean(dcubedat_out[1025:1536,1:4,..]),mean(dcubedat_out[1025:1536,end-3:end-1,..])])
+    dcubedat_out[1537:2048,..] .-= mean([mean(dcubedat_out[1537:2048,1:4,..]),mean(dcubedat_out[1537:2048,end-3:end-1,..])])
+    dcubedat_out[2049:end,..] .-= mean([mean(dcubedat_out[2049:end,1:4,..]),mean(dcubedat_out[2049:end,end-3:end-1,..])])
+    return
 end
 
 # Need to revisit with SIRS.jl, this currently appears to add more bias than it removes
@@ -44,21 +59,21 @@ function horz_ref_edge_corr(dcubedat_out_v)
     return dcubedat_out_vh
 end
 
-function dcs(dcubedat,gainMat,readVarMat;firstind=2)
+function dcs(dcubedat,gainMat,readVarMat;firstind=1)
     dimage = gainMat.*(dcubedat[:,:,end].-dcubedat[:,:,firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./(2 .*readVarMat .+ abs.(dimage))
     return dimage, ivarimage
 end
 
-function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
+function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
     # Last editted by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
-    #datacube has shape (npix_x,npix_y,n_reads)
-    #read_var_mat has shape (npix_x,npix_y)
-    #good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
+    # datacube has shape (npix_x,npix_y,n_reads)
+    # read_var_mat has shape (npix_x,npix_y)
+    # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
 	        
-    #assumes all images are sequential (ie separated by one read time)
+    # assumes all images are sequential (ie separated by one read time)
 
     dimages = gainMat.*(dcubedat[:,:,firstind+1:end]-dcubedat[:,:,firstind:end-1])
 
@@ -85,42 +100,38 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
     final_vars = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
 
     #slice the datacube to analyze each row sequentially to keep runtime down
-
     for s_ind in 1:size(dimages, 1)
         diffs = transpose(dimages[s_ind, :, :]) # shape = (ndiffs, npix)
         read_var = readVarMat[s_ind, :] # shape = (npix)
-	read_var = reshape(read_var,(1,size(read_var,1)))
+	    read_var = reshape(read_var,(1,size(read_var,1)))
         diffs2use = transpose(good_diffs[s_ind, :, :]) # shape = (ndiffs, npix)
 
         n_repeat = 2 # DO NOT CHANGE THIS!
         for r_ind in 1:n_repeat
             #repeat the process after getting a good first guess
-	    #to remove a bias (as discussed in the paper)
+	        #to remove a bias (as discussed in the paper)
             if r_ind == 1
                 #initialize first guess of countrates with mean
                 countrateguess = sum(diffs .* diffs2use, dims=1) ./ sum(diffs2use, dims=1)
-		countrateguess .*= (countrateguess .> 0)
+		        countrateguess .*= (countrateguess .> 0)
             else
                 countrateguess = final_countrates[s_ind, :] .* (final_countrates[s_ind, :] .> 0)
-		countrateguess = reshape(countrateguess, (1,size(countrateguess,1)))
+		        countrateguess = reshape(countrateguess, (1,size(countrateguess,1)))
             end
 	    
             # Elements of the covariance matrix
-
             alpha = countrateguess .* alpha_phnoise .+ read_var .* alpha_readnoise
             beta = countrateguess .* beta_phnoise .+ read_var .* beta_readnoise
 
             # rescale the covariance matrix to a determinant of order 1 to
             # avoid possible overflow/underflow.  The uncertainty and chi
             # squared value will need to be scaled back later.
-
             scale = exp.(mean(log.(alpha), dims=1))
 
             alpha ./= scale
             beta ./= scale
 
             ndiffs, npix = size(alpha)
-
             # Mask resultant differences that should be ignored.  This is half
             # of what we need to do to mask these resultant differences; the
             # rest comes later.
@@ -129,7 +140,6 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
             beta .= beta .* diffs2use[2:end, :] .* diffs2use[1:end-1, :]
 
             # All definitions and formulas here are in the paper.
-
             theta = ones(Float64, ndiffs + 1, npix)
             theta[2, :] .= alpha[1, :]
             for i in 3:ndiffs + 1
@@ -175,15 +185,14 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
 
             # C' and B' in the paper
 
-	    theta_ndiffs = theta[ndiffs + 1, :]
-	    theta_ndiffs = reshape(theta_ndiffs,(1,size(theta_ndiffs,1)))
+            theta_ndiffs = theta[ndiffs + 1, :]
+            theta_ndiffs = reshape(theta_ndiffs,(1,size(theta_ndiffs,1)))
             dC = sgn ./ theta_ndiffs .* (phi[2:end, :] .* Theta .+ theta[1:end-1, :] .* Phi)
             dC .*= diffs2use
 
             dB = sgn ./ theta_ndiffs .* (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:end-1, :] .* PhiD)
 
             # {\cal A}, {\cal B}, {\cal C} in the paper
-
             A = 2 * sum(d .* sgn ./ theta_ndiffs .* beta_extended .* phi[2:end, :] .* ThetaD[1:end-1, :], dims=1)
             A .+= sum(d.^2 .* theta[1:end-1, :] .* phi[2:end, :] ./ theta_ndiffs, dims=1)
 
@@ -197,16 +206,12 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=2,good_diffs=nothing)
 
             #use first countrate measurement to improve alpha,beta definitions
             #and extract better, unbiased countrate
-
             final_countrates[s_ind,:] .= countrate[begin,:]
             final_vars[s_ind,:] .= var[begin,:]
-
 	end
-
     end
     
     #to be similar to CDS outputs, we want to multiply by the number of differences
-
     count_mean = ndiffs .* final_countrates
     count_var = ndiffs.^2 .* final_vars
     

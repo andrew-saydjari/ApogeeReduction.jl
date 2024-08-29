@@ -6,9 +6,19 @@
 module load sdssdb/main almanac sdsstools postgresql
 
 # hardcode the mjd and expid for now
-runname="arctest"
-mjd=60356
-expid=8
+# runname="arctest"
+# mjd=60356
+# expid=8
+# outdir="../outdir/"
+
+# runname="darktest"
+# mjd=60399
+# expid=79
+# outdir="../outdir/"
+
+runname="darktest2"
+mjd=60350
+expid=16
 outdir="../outdir/"
 
 # set up the output directory (if does not exist)

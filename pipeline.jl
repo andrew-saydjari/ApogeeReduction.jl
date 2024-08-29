@@ -8,95 +8,6 @@ Pkg.instantiate(); Pkg.precompile()
 
 using Distributed, ArgParse
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Package activation took $dt"); t_then = t_now; flush(stdout)
-if "SLURM_JOB_ID" in keys(ENV)
-    using SlurmClusterManager
-    addprocs(SlurmManager(),exeflags=["--project=./"])
-else
-    addprocs(64)
-end
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker allocation took $dt"); t_then = t_now; flush(stdout)
-println("Running Main on ", gethostname()); flush(stdout)
-
-@everywhere begin
-    using LinearAlgebra
-    BLAS.set_num_threads(1)
-    using FITSIO, HDF5, FileIO, JLD2
-    using DataFrames, EllipsisNotation, StatsBase
-    using ParallelDataTransfer, SIRS, ProgressMeter
-
-    src_dir = "./"
-    include(src_dir*"src/ap3D.jl")
-    include(src_dir*"src/fileNameHandling.jl")
-    include(src_dir*"src/utils.jl")
-end
-
-println(BLAS.get_config()); flush(stdout)
-using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 workers() git_branch; @passobj 1 workers() git_commit
-## some hard coded parameters
-
-##### 3D stage
-@everywhere begin
-    function process_3D(release_dir,outdir,caldir,runname,mjd,expid;firstind=2,cor1fnoise=true)
-        dirName = outdir*"/ap2D/"
-        if !ispath(dirName)
-            mkpath(dirName)
-        end
-
-        f = h5open(outdir*"almanac/$(runname).h5")
-        df = DataFrame(read(f["apo/$(mjd)/exposures"]))
-        close(f)
-
-        # load gain and readnoise calibrations (is there a good way to move these outside?)
-        gainMat = 1.9*ones(Float32,2560,2048)
-        readVarMat = 25*ones(Float32,2560,2048)
-        # ADD load the dark currrent map
-        # load SIRS.jl models
-        sirs4amps = SIRS.restore(caldir*"sirs_test_d12_r60_n15.jld");
-        sirsrefas2 = SIRS.restore(caldir*"sirs_test_ref2_d12_r60_n15.jld");
-        # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
-
-        # this is only doing chip A for now (because of almanac)
-        rawpath = build_raw_path(release_dir,df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid])
-        # decompress and convert apz data format to a standard 3D cube of reads
-        cubedat, hdr = apz2cube(rawpath);
-
-        # ADD? reset anomaly fix (currently just drop first ind as our "fix")
-        tdat = @view cubedat[:,:,firstind:end]
-
-        ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
-        if cor1fnoise
-            in_data = Float64.(tdat[1:2048,:,:]);
-            outdat = zeros(Float64,size(tdat,1),size(tdat,2),size(in_data,3))
-            sirssub!(sirs4amps, in_data, f_max=95.);
-            outdat[1:2048,:,:] .= in_data
-            
-            # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-            in_data = Float64.(tdat[1:2048,:,:]);
-            in_data[513:1024,:,:].=tdat[2049:end,:,:]
-            sirssub!(sirsrefas2, in_data, f_max=95.);
-            outdat[2049:end,:,:] .= in_data[513:1024,:,:]
-        else
-            outdat = Float64.(tdat)
-        end
-
-        ## wondering if we need to add back in the vert_ref_edge_corr?
-
-        # ADD? reference array-based masking/correction
-
-        # ADD? nonlinearity correction
-
-        # extraction 3D -> 2D
-#        dimage, ivarimage = dcs(outdat,gainMat,readVarMat,firstind=1); 
-        dimage, ivarimage = sutr_tb(outdat,gainMat,readVarMat,firstind=1); # global firstind removes first read
-
-        # dark current subtraction
-
-        # need to clean up exptype to account for FPI versus ARCLAMP
-        outfname = join(["ap2D",df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid],df.exptype[expid]],"_")
-        # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        jldsave(outdir*"/ap2D/"*outfname*".jld2"; dimage, ivarimage)
-    end
-end
 
 ## Parse command line arguments
 function parse_commandline()
@@ -137,19 +48,123 @@ function parse_commandline()
     end
     return parse_args(s)
 end
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Function definitions took $dt"); t_then = t_now; flush(stdout)
 
 parg = parse_commandline()
-@passobj 1 workers() parg
-
-caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
-
-if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    subiter = Iterators.zip(subDic["mjd"],subDic["expid"])
-    @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
-    @showprogress pmap(process_3D_partial,subiter)
-else
-    process_3D(parg["release_dir"],parg["outdir"],parg["runname"],parg["mjd"],parg["expid"])
+if parg["runlist"] != "" # only multiprocess if we have a list of exposures
+    if "SLURM_JOB_ID" in keys(ENV)
+        using SlurmClusterManager
+        addprocs(SlurmManager(),exeflags=["--project=./"])
+    else
+        addprocs(32)
+    end
 end
-rmprocs(workers())
+t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker allocation took $dt"); t_then = t_now; flush(stdout)
+println("Running Main on ", gethostname()); flush(stdout)
+
+@everywhere begin
+    using LinearAlgebra
+    BLAS.set_num_threads(1)
+    using FITSIO, HDF5, FileIO, JLD2
+    using DataFrames, EllipsisNotation, StatsBase
+    using ParallelDataTransfer, SIRS, ProgressMeter
+
+    src_dir = "./"
+    include(src_dir*"src/ap3D.jl")
+    include(src_dir*"src/fileNameHandling.jl")
+    include(src_dir*"src/utils.jl")
+end
+
+println(BLAS.get_config()); flush(stdout)
+using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 workers() git_branch; @passobj 1 workers() git_commit
+## some hard coded parameters
+
+##### 3D stage
+@everywhere begin
+    function process_3D(release_dir,outdir,caldir,runname,mjd,expid;firstind=2,cor1fnoise=true,extractMethod="sutr_tb")
+        dirName = outdir*"/ap2D/"
+        if !ispath(dirName)
+            mkpath(dirName)
+        end
+
+        f = h5open(outdir*"almanac/$(runname).h5")
+        df = DataFrame(read(f["apo/$(mjd)/exposures"]))
+        close(f)
+
+        ## feel like we need an outer loop on detector properties
+        # load gain and readnoise calibrations (is there a good way to move these outside?)
+        gainMat = 1.9*ones(Float32,2560,2048)
+        readVarMat = 25*ones(Float32,2560,2048)
+        # ADD load the dark currrent map
+        # load SIRS.jl models
+        sirs4amps = SIRS.restore(caldir*"sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
+        sirsrefas2 = SIRS.restore(caldir*"sirs_test_ref2_d12_r60_n15.jld");
+        # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
+
+        # this is only doing chip A for now (because of almanac)
+        rawpath = build_raw_path(release_dir,df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid])
+        # decompress and convert apz data format to a standard 3D cube of reads
+        cubedat, hdr = apz2cube(rawpath);
+
+        # ADD? reset anomaly fix (currently just drop first ind as our "fix")
+        # REMOVES FIRST READ (as a view)
+        tdat = @view cubedat[:,:,firstind:end]
+
+        ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
+        if cor1fnoise
+            in_data = Float64.(tdat[1:2048,:,:]);
+            outdat = zeros(Float64,size(tdat,1),size(tdat,2),size(in_data,3)) #obviously prealloc...
+            sirssub!(sirs4amps, in_data, f_max=95.);
+            outdat[1:2048,:,:] .= in_data
+            
+            # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
+            in_data = Float64.(tdat[1:2048,:,:]);
+            in_data[513:1024,:,:].=tdat[2049:end,:,:]
+            sirssub!(sirsrefas2, in_data, f_max=95.);
+            outdat[2049:end,:,:] .= in_data[513:1024,:,:]
+        else
+            outdat = Float64.(tdat)
+        end
+
+        ## should this be done on the difference cube, or is this enough?
+        # vert_ref_edge_corr!(outdat)
+        refarray_zpt!(outdat)
+        vert_ref_edge_corr_amp!(outdat)
+
+        # ADD? reference array-based masking/correction
+
+        # ADD? nonlinearity correction
+
+        # extraction 3D -> 2D
+        dimage, ivarimage = if extractMethod == "dcs"
+            dcs(outdat,gainMat,readVarMat); 
+        elseif extractMethod == "sutr_tb"
+            sutr_tb(outdat,gainMat,readVarMat); 
+        else
+            error("Extraction method not recognized")
+        end
+
+        # dark current subtraction
+
+        # need to clean up exptype to account for FPI versus ARCLAMP
+        outfname = join(["ap2D",df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid],df.exptype[expid]],"_")
+        # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
+        jldsave(outdir*"/ap2D/"*outfname*".jld2"; dimage, ivarimage)
+    end
+end
+t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Function definitions took $dt"); t_then = t_now; flush(stdout)
+
+@passobj 1 workers() parg
+@everywhere caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
+
+try
+    if parg["runlist"] != ""
+        subDic = load(parg["runlist"])
+        subiter = Iterators.zip(subDic["mjd"],subDic["expid"])
+        @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
+        @showprogress pmap(process_3D_partial,subiter)
+    else
+        process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],parg["mjd"],parg["expid"])
+    end
+finally
+    rmprocs(workers())
+end
