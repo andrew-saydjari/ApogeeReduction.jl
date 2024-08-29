@@ -63,7 +63,7 @@ function dcs(dcubedat,gainMat,readVarMat;firstind=1)
     dimage = gainMat.*(dcubedat[:,:,end].-dcubedat[:,:,firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./(2 .*readVarMat .+ abs.(dimage))
-    return dimage, ivarimage
+    return dimage, ivarimage, nothing # no chisq, just to mirror sutr_tb
 end
 
 function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
@@ -209,7 +209,7 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
             #and extract better, unbiased countrate
             final_countrates[s_ind,:] .= countrate[begin,:]
             final_vars[s_ind,:] .= var[begin,:]
-	    final_chisqs[s_ind,:] = chisq[begin,:]
+	        final_chisqs[s_ind,:] = chisq[begin,:]
 
 	end
     end
