@@ -135,7 +135,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage = if extractMethod == "dcs"
+        dimage, ivarimage, chisqimage = if extractMethod == "dcs"
             dcs(outdat,gainMat,readVarMat); 
         elseif extractMethod == "sutr_tb"
             sutr_tb(outdat,gainMat,readVarMat); 
@@ -163,7 +163,7 @@ try
         @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],mjd,expid)
         @showprogress pmap(process_3D_partial,subiter)
     else
-        process_3D(parg["release_dir"],parg["outdir"],caldir,parg["runname"],parg["mjd"],parg["expid"])
+        process_3D(parg["release_dir"],parg["outdir"],caldir,caldir,parg["runname"],parg["mjd"],parg["expid"])
     end
 finally
     rmprocs(workers())
