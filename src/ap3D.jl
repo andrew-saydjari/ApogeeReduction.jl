@@ -54,7 +54,7 @@ function horz_ref_edge_corr(dcubedat_out_v)
     # change to inplace after validate
     # choosing NOT to do per quadrant (or flipping?) without any clear cause to do so
     dcubedat_out_vh = copy(dcubedat_out_v)
-    horzbias = dropdims(median(vcat(dcubedat_out_v[1:4,:,:],dcubedat_out_v[end-3:end,:,:]),dims=1),dims=1);
+    horzbias = dropdims(median(vcat(dcubedat_out_v[1:4,:,:],dcubedat_out_v[2045:2048,:,:]),dims=1),dims=1);
     dcubedat_out_vh .-= horzbias
     return dcubedat_out_vh
 end
@@ -63,7 +63,7 @@ function dcs(dcubedat,gainMat,readVarMat;firstind=1)
     dimage = gainMat.*(dcubedat[:,:,end].-dcubedat[:,:,firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./(2 .*readVarMat .+ abs.(dimage))
-    return dimage, ivarimage
+    return dimage, ivarimage, nothing # no chisq, just mirroring sutr_tb
 end
 
 function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
@@ -209,8 +209,7 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
             #and extract better, unbiased countrate
             final_countrates[s_ind,:] .= countrate[begin,:]
             final_vars[s_ind,:] .= var[begin,:]
-	    final_chisqs[s_ind,:] = chisq[begin,:]
-
+	        final_chisqs[s_ind,:] = chisq[begin,:]
 	end
     end
     
