@@ -42,12 +42,14 @@ function vert_ref_edge_corr_amp!(dcubedat_out)
 end
 
 function dcs(dcubedat,gainMat,readVarMat;firstind=1)
+    ndiffs = size(dcubedat, 3)-firstind
     dimage = gainMat.*(dcubedat[:,:,end].-dcubedat[:,:,firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./(2 .*readVarMat .+ abs.(dimage))
-    return dimage, ivarimage, nothing # no chisq, just mirroring sutr_tb
+    return dimage./ndiffs, (ndiffs.^2).*ivarimage, nothing # no chisq, just mirroring sutr_tb
 end
 
+## Andrew should speed this up a bit, excess allocs
 function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
     # Last editted by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
@@ -56,7 +58,6 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
     # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
 	        
     # assumes all images are sequential (ie separated by one read time)
-
     dimages = gainMat.*(dcubedat[:,:,firstind+1:end]-dcubedat[:,:,firstind:end-1])
 
     if isnothing(good_diffs)
@@ -192,14 +193,10 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
             final_countrates[s_ind,:] .= countrate[begin,:]
             final_vars[s_ind,:] .= var[begin,:]
 	        final_chisqs[s_ind,:] = chisq[begin,:]
-	end
+	    end
     end
     
-    #to be similar to CDS outputs, we want to multiply by the number of differences
-    count_mean = ndiffs .* final_countrates
-    count_var = ndiffs.^2 .* final_vars
-    
-    return count_mean,count_var.^(-1),final_chisqs
+    return final_countrates,final_vars.^(-1),final_chisqs
 end
 
 
