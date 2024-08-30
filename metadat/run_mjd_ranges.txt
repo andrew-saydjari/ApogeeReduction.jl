@@ -1,8 +1,14 @@
-apo 56902 57207
-apo 57255 57580
-apo 57643 57942
-apo 58006 58301
-apo 58382 58672
-apo 58731 58932
-apo 59003 59085
-apo 59146 59160
+# Tele SJD-Start SJD-End RunNumComment
+apo 56902 57232 # Run 4   (2014-2015)
+apo 57245 57583 # Run 5   (2015-2016)
+apo 57618 57952 # Run 6   (2016-2017) [instrument warmed between 6/7]
+apo 57991 58306 # Run 7   (2017-2018)
+apo 58347 58672 # Run 8   (2018-2019)
+apo 58718 59095 # Run 9   (2019-2020)
+apo 59107 59399 # Run 10  (2020-2021) [instrument warmed, FPS installed]
+apo 59423 59765 # Run 11  (2021-2022) # past lore says 59654 end of comissioning for FPS (and 59550 is start of FPS)
+apo 59783 60130 # Run 12  (2022-2023)
+apo 60180 60501 # Run 13  (2023-2024)
+apo 60521 -1000 # Run 14  (2024-2025)
+
+# need to handle commissioning data flagging somehow

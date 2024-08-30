@@ -1,4 +1,4 @@
-using HDF5, JLD2, ArgParse
+using HDF5, JLD2, ArgParse, DataFrames
 
 ## Parse command line arguments
 function parse_commandline()

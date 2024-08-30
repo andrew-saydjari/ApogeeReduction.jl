@@ -11,7 +11,7 @@ mjd_start=$2
 mjd_end=$3
 
 runname="dark_cal_${mjd_start}_${mjd_end}"
-outdir="../../outdir/"
+outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.jld2
@@ -20,18 +20,18 @@ runlist=${outdir}almanac/runlist_${runname}.jld2
 mkdir -p ${outdir}almanac
 
 # get the data summary file for the MJD
-## should I choose to invoke almanac with parallism? This was buggy before.
+# should I choose to invoke almanac with parallism? This was buggy before.
 almanac -v --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $almanac_file
 
-# get the runlist file
-julia +1.10.0 --project="../" make_runlist_darks.jl --tele $tele --almanac_file $almanac_file --output $runlist
+# get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
+julia +1.10.0 --project="./" src/cal_build/make_runlist_darks.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.10.0 --project="../" pipeline.jl --runlist $runlist --outdir $doutdir --runname $runname
+julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname
 
 # make the stacked darks
 mkdir -p ${doutdir}darks
-julia +1.10.0 --project="../" make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --dark_dir ${doutdir}
+julia +1.10.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --dark_dir ${doutdir}
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

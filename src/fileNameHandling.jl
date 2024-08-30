@@ -14,8 +14,8 @@ function getUtahBase(release_dir, redux_ver)
     return "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/apogee/spectro/redux/$(redux_ver)/"
 end
 
-function build_raw_path(release_dir,obs,mjd,chip,expid)
-    base = "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/data/apogee"
+function build_raw_path(obs,mjd,chip,expid)
+    base = "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
     fname = "apR-$chip-$expid.apz"
     return join([base,obs,mjd,fname],"/")
 end
