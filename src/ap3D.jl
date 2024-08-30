@@ -13,6 +13,7 @@ function apz2cube(fname)
     return cubedat, hdr
 end
 
+# feeling against this sort of subtraction, but we do see why one might want to do it in the darks
 function refcorr(dcubedat)
     # subtracts reference array with proper read ordering
     dcubedat_out = copy(dcubedat[1:2048,1:2048,..])
@@ -31,15 +32,6 @@ function refarray_zpt!(dcubedat)
     return
 end
 
-function vert_ref_edge_corr!(dcubedat_out)
-    # choosing NOT to do per quadrant without any clear cause to do so
-    top = dropdims(mean(dcubedat_out[1:2048,1:4,:],dims=(1,2)),dims=(1,2))
-    # top row seems to be bad on APO chip A (use end-1), check others visually
-    bot = dropdims(mean(dcubedat_out[1:2048,end-3:end-1,:],dims=(1,2)),dims=(1,2))
-    dcubedat_out .-= reshape((4*top+3*bot)./7,(1,1,:))
-    return
-end
-
 function vert_ref_edge_corr_amp!(dcubedat_out)
     dcubedat_out[1:512,..] .-= mean([mean(dcubedat_out[1:512,1:4,..]),mean(dcubedat_out[1:512,end-3:end-1,..])])
     dcubedat_out[513:1024,..] .-= mean([mean(dcubedat_out[513:1024,1:4,..]),mean(dcubedat_out[513:1024,end-3:end-1,..])])
@@ -49,23 +41,15 @@ function vert_ref_edge_corr_amp!(dcubedat_out)
     return
 end
 
-# Need to revisit with SIRS.jl, this currently appears to add more bias than it removes
-function horz_ref_edge_corr(dcubedat_out_v)
-    # change to inplace after validate
-    # choosing NOT to do per quadrant (or flipping?) without any clear cause to do so
-    dcubedat_out_vh = copy(dcubedat_out_v)
-    horzbias = dropdims(median(vcat(dcubedat_out_v[1:4,:,:],dcubedat_out_v[2045:2048,:,:]),dims=1),dims=1);
-    dcubedat_out_vh .-= horzbias
-    return dcubedat_out_vh
-end
-
 function dcs(dcubedat,gainMat,readVarMat;firstind=1)
+    ndiffs = size(dcubedat, 3)-firstind
     dimage = gainMat.*(dcubedat[:,:,end].-dcubedat[:,:,firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./(2 .*readVarMat .+ abs.(dimage))
-    return dimage, ivarimage, nothing # no chisq, just mirroring sutr_tb
+    return dimage./ndiffs, (ndiffs.^2).*ivarimage, nothing # no chisq, just mirroring sutr_tb
 end
 
+## Andrew should speed this up a bit, excess allocs
 function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
     # Last editted by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
@@ -74,7 +58,6 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
     # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
 	        
     # assumes all images are sequential (ie separated by one read time)
-
     dimages = gainMat.*(dcubedat[:,:,firstind+1:end]-dcubedat[:,:,firstind:end-1])
 
     if isnothing(good_diffs)
@@ -210,14 +193,10 @@ function sutr_tb(dcubedat,gainMat,readVarMat;firstind=1,good_diffs=nothing)
             final_countrates[s_ind,:] .= countrate[begin,:]
             final_vars[s_ind,:] .= var[begin,:]
 	        final_chisqs[s_ind,:] = chisq[begin,:]
-	end
+	    end
     end
     
-    #to be similar to CDS outputs, we want to multiply by the number of differences
-    count_mean = ndiffs .* final_countrates
-    count_var = ndiffs.^2 .* final_vars
-    
-    return count_mean,count_var.^(-1),final_chisqs
+    return final_countrates,final_vars.^(-1),final_chisqs
 end
 
 

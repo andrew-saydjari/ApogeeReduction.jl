@@ -143,8 +143,6 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
             error("Extraction method not recognized")
         end
 
-        # dark current subtraction
-
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(["ap2D",df.observatory[expid],df.mjd[expid],df.chip[expid],df.exposure[expid],df.exptype[expid]],"_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)

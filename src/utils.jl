@@ -1,3 +1,5 @@
+ENV["SLACK_CHANNEL"]="C07KQ7BJY5P"
+
 function initalize_git(git_dir)
     git_commit = LibGit2.head(git_dir)
     git_repo = LibGit2.GitRepo(git_dir)
