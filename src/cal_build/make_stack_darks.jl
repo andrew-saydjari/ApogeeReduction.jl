@@ -1,19 +1,14 @@
-using JLD2, ProgressMeter, ArgParse, SlackThreads
+using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob
 
 src_dir = "../"
-include(src_dir*"src/utils.jl")
+include(src_dir*"/utils.jl")
 
 ## Parse command line arguments
 function parse_commandline()
     s=ArgParseSettings()
     @add_arg_table s begin
-        "--output"
-            required = true
-            help = "path to output runlist file"
-            arg_type = String
-            default = ""
         "--chip"
-            required = true
+            required = false
             help = "chip name (a, b, c, or all), default is all"
             arg_type = String
             default = "all"
@@ -43,17 +38,26 @@ end
 
 parg = parse_commandline()
 
-chip_list = if parg["chip"] == "all" ["a","b","c"] else [parg["chip"]] end
+chip_list = if (parg["chip"] == "all") 
+    ["a","b","c"] 
+else
+    [parg["chip"]]
+end
 
 # make summary plots and gifs and send to slack in outer loop
 thread = SlackThread();
 thread("Starting dark stack for $(parg["tele"]) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
+bad_pix_bits = 2^2 + 2^4 + 2^5;
+sig_measure = 5
+sig_bad_lower = 5
+sig_bad_upper = 7
+
 for chip in chip_list
     flist_all = glob("ap2D_$(parg["tele"])*_$(chip)_*DARK.jld2",parg["dark_dir"]*"ap2D/");
-    mjd_flist = map(x->parse(Int,split(x,"_")[end-1]),flist)
+    mjd_flist = map(x->parse(Int,split(x,"_")[end-1]),flist_all)
     mskMJD = parg["mjd-start"] .<= mjd_flist .<= parg["mjd-end"]
-    flist  = flist_all[mskMJD]
+    flist = flist_all[mskMJD]
 
     # this is dumb and should probably be replaced by ivar weighting
     ref_val_vec = zeros(length(flist))
@@ -73,7 +77,6 @@ for chip in chip_list
     dat = dark_im[1:2048,1:2048][:];
     sig_est = nanzeroiqr(dat)
 
-    bad_pix_bits = 2^2 + 2^4 + 2^5;
     pix_bit_mask = zeros(Int,2560,2048);
     pix_bit_mask[2049:end,:] .|=2^0 # refArray
     pix_bit_mask[1:4,:] .|=2^1 # refPixels
@@ -89,7 +92,7 @@ for chip in chip_list
     sig_after = nanzeroiqr(dat)
 
     # save dark_pix_bitmask and dark_rate (electron per read)
-    jldsave(parg["dark_dir"]*"darks/darkRate_$(tele)_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"])"; dark_rate=dark_im, dark_pix_bitmask=pix_bit_mask, ref_val_vec=ref_val_vec, cen_dar=cen_dark, sig_est=sig_est, sig_after=sig_after)
+    jldsave(parg["dark_dir"]*"darks/darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"])"; dark_rate=dark_im, dark_pix_bitmask=pix_bit_mask, ref_val_vec=ref_val_vec, cen_dar=cen_dark, sig_est=sig_est, sig_after=sig_after)
 
     thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
 end
