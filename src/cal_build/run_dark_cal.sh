@@ -30,7 +30,7 @@ julia +1.10.0 --project="./" src/cal_build/make_runlist_darks.jl --tele $tele --
 julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname
 
 # make the stacked darks
-mkdir -p ${doutdir}darks
+mkdir -p ${outdir}darks
 julia +1.10.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --dark_dir ${doutdir}
 
 # Clean up logs and Report Timing

@@ -1,4 +1,4 @@
-using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob
+using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
 src_dir = "../"
 include(src_dir*"/utils.jl")

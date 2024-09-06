@@ -16,17 +16,23 @@ module load sdssdb/main almanac sdsstools postgresql
 # expid=79
 # outdir="../outdir/"
 
-runname="darktest2"
-tele="apo"
-mjd=60350
-expid=16
+# runname="darktest2"
+# tele="apo"
+# mjd=60350
+# expid=16
+# outdir="../outdir/"
+
+runname="lcodometest"
+tele="lco"
+mjd=60555
+expid=10
 outdir="../outdir/"
 
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}almanac
 
 # get the data summary file for the MJD (APO for now hardcoded)
-almanac --mjd $mjd --apo --output ${outdir}almanac/${runname}.h5
+almanac --mjd $mjd --${tele} --output ${outdir}almanac/${runname}.h5
 
 # run the reduction pipeline
 julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname
