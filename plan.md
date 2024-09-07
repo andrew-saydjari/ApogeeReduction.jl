@@ -1,9 +1,5 @@
 # Code Development Plan
 
-## Introduction
-- Purpose of the code
-- Overview of the code base
-
 ## Big Picture Questions
 - When do we split from all fibers in exposure to single object files
 - What tuple do we want to use as an identifier (file naming)? Currently using (tele,mjd,chip,expid).
@@ -62,3 +58,4 @@
 - flats clean
 - bad pixel mask evolution
 - sky flux variation over field of view
+- help fixing SlackThreads.jl for new API
