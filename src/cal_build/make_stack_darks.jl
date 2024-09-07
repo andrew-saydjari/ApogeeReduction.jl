@@ -60,7 +60,8 @@ if !ispath(dirNamePlots)
 end
 
 for chip in chip_list
-    flist_all = glob("ap2D_$(parg["tele"])*_$(chip)_*DARK.jld2",parg["dark_dir"]*"ap2D/");
+    # This is too permissive. We want to reduce even the darks we do not want to use... the lgoic in make_runlist_darks is ignored here/assumed to be the only darks run.
+    flist_all = sort(glob("ap2D_$(parg["tele"])*_$(chip)_*DARK.jld2",parg["dark_dir"]*"ap2D/"));
     mjd_flist = map(x->parse(Int,split(x,"_")[end-3]),flist_all)
     mskMJD = parg["mjd-start"] .<= mjd_flist .<= parg["mjd-end"]
     flist = flist_all[mskMJD]
@@ -76,36 +77,33 @@ for chip in chip_list
     cax = divider.append_axes("right", size="5%", pad=0.05)
     cbar = plt.colorbar(mplcm.ScalarMappable(norm=mplcolors.Normalize(vmin=-0.2,vmax=0.2), cmap="cet_bkr"), cax=cax, orientation="vertical")
     im_lst = []
-    try
-        @showprogress for (indx,fname) in enumerate(flist)
-            sname = split(fname,"_")
-            tele, mjd, chip, expid = sname[end-4:end-1]
-            f = jldopen(fname)
-            temp_im = f["dimage"]
-            close(f)
-            ref_val_vec[indx] = nanzeromedian(temp_im[1:2048,1:2048])
-            temp_im[1:2048,1:2048] .-= ref_val_vec[indx]
-            dark_im .+= temp_im
+    @showprogress for (indx,fname) in enumerate(flist)
+        sname = split(fname,"_")
+        tele, mjd, chip, expid = sname[end-4:end-1]
+        f = jldopen(fname)
+        temp_im = f["dimage"]
+        close(f)
+        ref_val_vec[indx] = nanzeromedian(temp_im[1:2048,1:2048])
+        temp_im[1:2048,1:2048] .-= ref_val_vec[indx]
+        dark_im .+= temp_im
 
-            img = ax.imshow(temp_im',
-                vmin=-0.2,
-                vmax=0.2,
-                interpolation="none",
-                cmap="cet_bkr",
-                origin="lower",
-                aspect="auto"
-            )
+        img = ax.imshow(temp_im',
+            vmin=-0.2,
+            vmax=0.2,
+            interpolation="none",
+            cmap="cet_bkr",
+            origin="lower",
+            aspect="auto"
+        )
 
-            ttl = plt.text(0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip) Expid: $(expid)", ha="center", va="bottom", transform=ax.transAxes)
+        ttl = plt.text(0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip) Expid: $(expid)", ha="center", va="bottom", transform=ax.transAxes)
 
-            push!(im_lst,[img,ttl])
-        end
-        PythonPlot.plotclose()
-        ani = mplani.ArtistAnimation(fig, im_lst, interval=300, repeat_delay=300,blit=false)
-        ani.save(dirNamePlots*"darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4")
-    catch e
-        println(e)
+        push!(im_lst,[img,ttl])
     end
+    PythonPlot.plotclose()
+    ani = mplani.ArtistAnimation(fig, im_lst, interval=300, repeat_delay=300,blit=false)
+    vidPath = dirNamePlots*"darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+    ani.save(vidPath)
 
     dark_im ./= length(flist);
 
@@ -131,7 +129,27 @@ for chip in chip_list
     # save dark_pix_bitmask and dark_rate (electron per read)
     jldsave(parg["dark_dir"]*"darks/darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).jld2"; dark_rate=dark_im, dark_pix_bitmask=pix_bit_mask, ref_val_vec=ref_val_vec, cen_dar=cen_dark, sig_est=sig_est, sig_after=sig_after)
 
-    vidplot = replace(abspath(dirNamePlots*"darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"), r".*users" => sas_prefix)
-    thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done. See $(vidplot).")
+    # Figures for QA
+    fig = plt.figure(figsize=(8,8),dpi=300)
+    ax = fig.add_subplot(1,1,1)
+    img = ax.imshow(dark_im',
+        vmin=-0.2,
+        vmax=0.2,
+        interpolation="none",
+        cmap="cet_bkr",
+        origin="lower",
+        aspect="auto"
+    )
 
+    plt.text(0.5, 1.01, "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Scatter: $(round(sig_est,digits=4)) e-/read", ha="center", va="bottom", transform=ax.transAxes)
+
+    divider = mpltk.make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = plt.colorbar(img, cax=cax, orientation="vertical")
+    ratePath = dirNamePlots*"darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+    fig.savefig(ratePath, bbox_inches="tight", pad_inches=0.1);
+
+    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+    rateSasPath = replace(abspath(ratePath), r".*users" => sas_prefix)
+    thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.\n    See video of the frames included here $(vidSasPath).\n    See the final dark rate image here $(rateSasPath)")
 end
