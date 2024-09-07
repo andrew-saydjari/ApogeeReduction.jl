@@ -4,6 +4,7 @@ import Pkg; using Dates; t0 = now(); t_then = t0;
 using InteractiveUtils; versioninfo()
 # Pkg.activate("./") # just call with is the environment already activated
 Pkg.add(url="https://github.com/nasa/SIRS.git")
+Pkg.add(url="https://github.com/andrew-saydjari/SlackThreads.jl.git")
 Pkg.instantiate(); Pkg.precompile()
 
 using Distributed, ArgParse
