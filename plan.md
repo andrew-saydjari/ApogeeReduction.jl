@@ -1,6 +1,8 @@
 # Code Development Plan
 
 ## Big Picture Questions
+- I am leaning towards a slight refactoring, where we run everything per chip. It would really help with overheads. It would just mean we launch 6 jobs nightly.
+- Related to the first+next question. When do we want the chips combined?
 - When do we split from all fibers in exposure to single object files
 - What tuple do we want to use as an identifier (file naming)? Currently using (tele,mjd,chip,expid).
 - What foldering do we want? apMADGICS folders per fiber, because that is how the priors should be loaded at that stage. Nightly processing lends itself to MJD foldering.
