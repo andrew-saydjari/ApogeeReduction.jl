@@ -56,6 +56,7 @@
 - fluxing stability
 - darks clean
 - flats clean
+- should we be evolving the LSF?
 - bad pixel mask evolution
 - sky flux variation over field of view
-- help fixing SlackThreads.jl for new API
+- fix SlackThreads.jl for new API [completed, AKS]

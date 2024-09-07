@@ -1,3 +1,4 @@
+using Pkg; Pkg.instantiate()
 using HDF5, JLD2, ArgParse, DataFrames
 
 ## Parse command line arguments
@@ -32,7 +33,7 @@ mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
     df = DataFrame(read(f[parg["tele"]*"/$(tstmjd)/exposures"]))
     df.nreadInt = parse.(Int,df.nread)
-    expindx_list = findall((df.imagetyp .== "Dark") .& (df.nreadInt .>= 90)) #3
+    expindx_list = findall((df.imagetyp .== "Dark") .& (df.nreadInt .> 3))
     for expindx in expindx_list
         if expindx > 1 && df.imagetyp[expindx - 1] == "Dark"
             push!(darks_mjd,parse(Int,tstmjd))

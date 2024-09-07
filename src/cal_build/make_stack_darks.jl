@@ -106,7 +106,6 @@ for chip in chip_list
     ani.save(vidPath)
 
     dark_im ./= length(flist);
-
     cen_dark = nanzeromedian(dark_im)
 
     dat = dark_im[1:2048,1:2048][:];
@@ -148,8 +147,10 @@ for chip in chip_list
     cbar = plt.colorbar(img, cax=cax, orientation="vertical")
     ratePath = dirNamePlots*"darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
     fig.savefig(ratePath, bbox_inches="tight", pad_inches=0.1);
-
-    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-    rateSasPath = replace(abspath(ratePath), r".*users" => sas_prefix)
-    thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.\n    See video of the frames included here $(vidSasPath).\n    See the final dark rate image here $(rateSasPath)")
+    thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
+    thread("Here is the final dark rate image", ratePath)
+    thread("Here is the video of all of the frames included in the stack", vidPath)    
+    # vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+    # rateSasPath = replace(abspath(ratePath), r".*users" => sas_prefix)
+    # thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.\n    See video of the frames included here $(vidSasPath).\n    See the final dark rate image here $(rateSasPath)")
 end
