@@ -79,6 +79,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
 ##### 3D stage
 @everywhere begin
+    # firstind overriden for APO dome flats
     function process_3D(outdir,caldir,runname,mjd,expid;firstind=3,cor1fnoise=true,extractMethod="sutr_tb")
         dirName = outdir*"/ap2D/"
         if !ispath(dirName)
@@ -106,7 +107,14 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
 
             # ADD? reset anomaly fix (currently just drop first ind as our "fix")
             # REMOVES FIRST READ (as a view)
-            tdat = @view cubedat[:,:,firstind:end]
+            # might need to adjust for the few read cases (2,3,4,5)
+            firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") & (df.observatory[expid]=="apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+                2
+            else
+                firstind
+            end
+
+            tdat = @view cubedat[:,:,firstind_loc:end]
 
             ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
             if cor1fnoise

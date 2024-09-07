@@ -3,7 +3,7 @@
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
-module load sdssdb/main almanac sdsstools postgresql
+module load sdssdb/main almanac sdsstools postgresql ffmpeg
 
 # hardcode the mjd and expid for now
 # runname="arctest"
@@ -22,10 +22,16 @@ module load sdssdb/main almanac sdsstools postgresql
 # expid=16
 # outdir="../outdir/"
 
-runname="lcodometest"
-tele="lco"
-mjd=60555
-expid=10
+# runname="lcodometest"
+# tele="lco"
+# mjd=60555
+# expid=10
+# outdir="../outdir/"
+
+runname="apodometest"
+tele="apo"
+mjd=60546
+expid=13
 outdir="../outdir/"
 
 # set up the output directory (if does not exist)
