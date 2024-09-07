@@ -16,6 +16,12 @@ end
 
 function build_raw_path(obs,mjd,chip,expid)
     base = "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
-    fname = "apR-$chip-$expid.apz"
+    fname = if obs=="apo" 
+        "apR-$chip-$expid.apz"
+    elseif obs=="lco"
+        "asR-$chip-$expid.apz"
+    else
+        error("Unknown telescope")
+    end
     return join([base,obs,mjd,fname],"/")
 end
