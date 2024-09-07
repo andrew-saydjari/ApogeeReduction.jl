@@ -23,6 +23,7 @@
 - reference array based masking/correction
 - nonlinearity corrections
 - correcting the first/second read
+- speed up (this is currently bottlenecking my development on the darks)
 
 ## 2D Cal
 - darkRate subtraction [in progress, AKS]
