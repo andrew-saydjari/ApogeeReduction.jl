@@ -24,7 +24,7 @@ jobs:
       matrix:
         version:
           - '1.10'
-          - '1.6'
+          - '1.8' # regress from 1.6 to support better ranges that are more readable
           - 'nightly'
         os:
           - ubuntu-latest
