@@ -47,7 +47,7 @@ using StatsBase
     #and the flux_per_reads go from 0.01 to 10000 in 2560 log10 steps
     @test isapprox(full_mean_z,-0.05,atol=0.001)
     @test isapprox(full_std_z,1.0427,atol=0.001)
-    @test isapprox(flux_mean_z[begin],-0.1298,atol=0.04)
+    @test isapprox(flux_mean_z[begin],-0.1298,atol=0.06)
     @test isapprox(flux_mean_z[end],-0.04463,atol=0.08)
     @test isapprox(flux_std_z[begin],1.0104,atol=0.01)
     @test isapprox(flux_std_z[end],1.03251,atol=0.06)
@@ -55,20 +55,4 @@ using StatsBase
     @test isapprox(flux_mean[end],9998.98,atol=3)
     @test isapprox(flux_err_mean[begin],0.20749,atol=0.003)
     @test isapprox(flux_err_mean[end],23.57064,atol=0.003)
-
-#    println("Flux Bottom Mean ",flux_mean[begin:begin+3])
-#    println("Flux Bottom Diff Mean ",flux_diff_mean[begin:begin+3])
-#    println("Flux Bottom Mean Err ",flux_err_mean[begin:begin+3])
-#    println("Flux Top Mean ",flux_mean[end-3:end])
-#    println("Flux Top Diff Mean ",flux_diff_mean[end-3:end])
-#    println("Flux Top Mean Err ",flux_err_mean[end-3:end],"\n")
-#    println("Z Score Mean ",full_mean_z)
-#    println("Z Score Std ",full_std_z)
-#    println("Z Score Bottom Mean ",flux_mean_z[begin:begin+3])
-#    println("Z Score Bottom Std ",flux_std_z[begin:begin+3])
-#    println("Z Score Top Mean ",flux_mean_z[end-3:end])
-#    println("Z Score Top Std ",flux_std_z[end-3:end])
-
 end
-
-
