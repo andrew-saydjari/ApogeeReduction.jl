@@ -1,55 +1,64 @@
 ## This is a reduction pipeline for APOGEE
 
-import Pkg; using Dates; t0 = now(); t_then = t0;
-using InteractiveUtils; versioninfo()
+import Pkg;
+using Dates;
+t0 = now();
+t_then = t0;
+using InteractiveUtils;
+versioninfo();
 # Pkg.activate("./") # just call with is the environment already activated
-Pkg.add(url="https://github.com/nasa/SIRS.git")
-Pkg.add(url="https://github.com/andrew-saydjari/SlackThreads.jl.git")
-Pkg.instantiate(); Pkg.precompile()
+Pkg.add(url = "https://github.com/nasa/SIRS.git")
+Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git")
+Pkg.instantiate();
+Pkg.precompile();
 
 using Distributed, ArgParse
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Package activation took $dt"); t_then = t_now; flush(stdout)
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Package activation took $dt");
+t_then = t_now;
+flush(stdout);
 
 ## Parse command line arguments
 function parse_commandline()
-    s=ArgParseSettings()
+    s = ArgParseSettings()
     @add_arg_table s begin
         "--tele"
-            required = true
-            help = "telescope name (apo or lco)"
-            arg_type = String
-            default = ""
+        required = true
+        help = "telescope name (apo or lco)"
+        arg_type = String
+        default = ""
         "--mjd"
-            required = false
-            help = "mjd of the exposure(s) to be run"
-            arg_type = Int
-            default = 1
+        required = false
+        help = "mjd of the exposure(s) to be run"
+        arg_type = Int
+        default = 1
         # probably want to add in defaults that loops over them all
         "--expid"
-            required = false
-            help = "exposure number to be run"
-            arg_type = Int
-            default = 1
+        required = false
+        help = "exposure number to be run"
+        arg_type = Int
+        default = 1
         "--chip"
-            required = true
-            help = "chip to run, usually a, b, or c"
-            arg_type = String
-            default = "a"
+        required = true
+        help = "chip to run, usually a, b, or c"
+        arg_type = String
+        default = "a"
         "--runlist"
-            required = false
-            help = "path name to hdf5 file with keys specifying list of exposures to run"
-            arg_type = String
-            default = ""
+        required = false
+        help = "path name to hdf5 file with keys specifying list of exposures to run"
+        arg_type = String
+        default = ""
         "--outdir"
-            required = false
-            help = "output directory"
-            arg_type = String
-            default = "../outdir/"
+        required = false
+        help = "output directory"
+        arg_type = String
+        default = "../outdir/"
         "--runname"
-            required = true
-            help = "name of the run (specifically almanac file)"
-            arg_type = String
-            default = "test"
+        required = true
+        help = "name of the run (specifically almanac file)"
+        arg_type = String
+        default = "test"
     end
     return parse_args(s)
 end
@@ -58,13 +67,18 @@ parg = parse_commandline()
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_JOB_ID" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(),exeflags=["--project=./"])
+        addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
         addprocs(36)
     end
 end
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker allocation took $dt"); t_then = t_now; flush(stdout)
-println("Running Main on ", gethostname()); flush(stdout)
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker allocation took $dt");
+t_then = t_now;
+flush(stdout);
+println("Running Main on ", gethostname());
+flush(stdout);
 
 @everywhere begin
     using LinearAlgebra
@@ -74,13 +88,17 @@ println("Running Main on ", gethostname()); flush(stdout)
     using ParallelDataTransfer, SIRS, ProgressMeter
 
     src_dir = "./"
-    include(src_dir*"src/ap3D.jl")
-    include(src_dir*"src/fileNameHandling.jl")
-    include(src_dir*"src/utils.jl")
+    include(src_dir * "src/ap3D.jl")
+    include(src_dir * "src/fileNameHandling.jl")
+    include(src_dir * "src/utils.jl")
 end
 
-println(BLAS.get_config()); flush(stdout)
-using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 workers() git_branch; @passobj 1 workers() git_commit
+println(BLAS.get_config());
+flush(stdout);
+using LibGit2;
+git_branch, git_commit = initalize_git(src_dir);
+@passobj 1 workers() git_branch;
+@passobj 1 workers() git_commit;
 ## some hard coded parameters
 
 ##### 3D stage
@@ -92,7 +110,7 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
             mkpath(dirName)
         end
 
-        f = h5open(outdir*"almanac/$(runname).h5")
+        f = h5open(outdir * "almanac/$(runname).h5")
         df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         close(f)
 
@@ -152,7 +170,11 @@ using LibGit2; git_branch, git_commit = initalize_git(src_dir); @passobj 1 worke
         jldsave(outdir*"/ap2D/"*outfname*".jld2"; dimage, ivarimage, chisqimage)
     end
 end
-t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Function definitions took $dt"); t_then = t_now; flush(stdout)
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Function definitions took $dt");
+t_then = t_now;
+flush(stdout);
 
 @passobj 1 workers() parg
 @everywhere caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
