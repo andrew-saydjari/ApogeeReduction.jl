@@ -27,6 +27,8 @@
 - dark bad pix mask [initial complete, AKS]
 - flat fielding (no clear route, internal flats are not flat)
 - flat bad pix mask
+- littrow masking, scattering light handling (2D component separation?)
+- persistence handling
 
 ## 2D -> 1D
 - find traces [in progress, KM]
