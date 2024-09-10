@@ -1,46 +1,46 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
 src_dir = "../"
-include(src_dir*"/utils.jl")
-include(src_dir*"/plotutils.jl")
+include(src_dir * "/utils.jl")
+include(src_dir * "/plotutils.jl")
 
 ## Parse command line arguments
 function parse_commandline()
-    s=ArgParseSettings()
+    s = ArgParseSettings()
     @add_arg_table s begin
         "--chip"
-            required = false
-            help = "chip name (a, b, c, or all), default is all"
-            arg_type = String
-            default = "all"
+        required = false
+        help = "chip name (a, b, c, or all), default is all"
+        arg_type = String
+        default = "all"
         "--tele"
-            required = true
-            help = "telescope name (apo or lco)"
-            arg_type = String
-            default = ""
+        required = true
+        help = "telescope name (apo or lco)"
+        arg_type = String
+        default = ""
         "--mjd-start"
-            required = true
-            help = "start mjd"
-            arg_type = Int
-            default = 0
+        required = true
+        help = "start mjd"
+        arg_type = Int
+        default = 0
         "--mjd-end"
-            required = true
-            help = "end mjd"
-            arg_type = Int
-            default = 0
+        required = true
+        help = "end mjd"
+        arg_type = Int
+        default = 0
         "--dark_dir"
-            required = true
-            help = "directory where 2D extractions of darks are stored"
-            arg_type = String
-            default = ""
+        required = true
+        help = "directory where 2D extractions of darks are stored"
+        arg_type = String
+        default = ""
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
 
-chip_list = if (parg["chip"] == "all") 
-    ["a","b","c"] 
+chip_list = if (parg["chip"] == "all")
+    ["a", "b", "c"]
 else
     [parg["chip"]]
 end
@@ -54,102 +54,125 @@ sig_measure = 5
 sig_bad_lower = 5
 sig_bad_upper = 7
 
-dirNamePlots = parg["dark_dir"]*"plots/"
+dirNamePlots = parg["dark_dir"] * "plots/"
 if !ispath(dirNamePlots)
     mkpath(dirNamePlots)
 end
 
 for chip in chip_list
     # This is too permissive. We want to reduce even the darks we do not want to use... the lgoic in make_runlist_darks is ignored here/assumed to be the only darks run.
-    flist_all = sort(glob("ap2D_$(parg["tele"])*_$(chip)_*DARK.jld2",parg["dark_dir"]*"ap2D/"));
-    mjd_flist = map(x->parse(Int,split(x,"_")[end-3]),flist_all)
+    flist_all = sort(glob(
+        "ap2D_$(parg["tele"])*_$(chip)_*DARK.jld2", parg["dark_dir"] * "ap2D/"))
+    mjd_flist = map(x -> parse(Int, split(x, "_")[end - 3]), flist_all)
     mskMJD = parg["mjd-start"] .<= mjd_flist .<= parg["mjd-end"]
     flist = flist_all[mskMJD]
 
     # this is dumb and should probably be replaced by ivar weighting
     ref_val_vec = zeros(length(flist))
-    dark_im = zeros(2560,2048)
+    dark_im = zeros(2560, 2048)
 
-    fig = plt.figure(figsize=(8,8),dpi=300)
-    ax = fig.add_subplot(1,1,1)
+    fig = plt.figure(figsize = (8, 8), dpi = 300)
+    ax = fig.add_subplot(1, 1, 1)
 
     divider = mpltk.make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    cbar = plt.colorbar(mplcm.ScalarMappable(norm=mplcolors.Normalize(vmin=-0.2,vmax=0.2), cmap="cet_bkr"), cax=cax, orientation="vertical")
+    cax = divider.append_axes("right", size = "5%", pad = 0.05)
+    cbar = plt.colorbar(
+        mplcm.ScalarMappable(
+            norm = mplcolors.Normalize(vmin = -0.2, vmax = 0.2), cmap = "cet_bkr"),
+        cax = cax,
+        orientation = "vertical")
     im_lst = []
-    @showprogress for (indx,fname) in enumerate(flist)
-        sname = split(fname,"_")
-        tele, mjd, chip, expid = sname[end-4:end-1]
+    @showprogress for (indx, fname) in enumerate(flist)
+        sname = split(fname, "_")
+        tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
         f = jldopen(fname)
         temp_im = f["dimage"]
         close(f)
-        ref_val_vec[indx] = nanzeromedian(temp_im[1:2048,1:2048])
-        temp_im[1:2048,1:2048] .-= ref_val_vec[indx]
+        ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
+        temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
         dark_im .+= temp_im
 
         img = ax.imshow(temp_im',
-            vmin=-0.2,
-            vmax=0.2,
-            interpolation="none",
-            cmap="cet_bkr",
-            origin="lower",
-            aspect="auto"
+            vmin = -0.2,
+            vmax = 0.2,
+            interpolation = "none",
+            cmap = "cet_bkr",
+            origin = "lower",
+            aspect = "auto"
         )
 
-        ttl = plt.text(0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip) Expid: $(expid)", ha="center", va="bottom", transform=ax.transAxes)
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip) Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 
-        push!(im_lst,[img,ttl])
+        push!(im_lst, [img, ttl])
     end
     PythonPlot.plotclose()
-    ani = mplani.ArtistAnimation(fig, im_lst, interval=300, repeat_delay=300,blit=false)
-    vidPath = dirNamePlots*"darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+    ani = mplani.ArtistAnimation(
+        fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
+    vidPath = dirNamePlots *
+              "darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
     ani.save(vidPath)
 
-    dark_im ./= length(flist);
+    dark_im ./= length(flist)
     cen_dark = nanzeromedian(dark_im)
 
-    dat = dark_im[1:2048,1:2048][:];
+    dat = dark_im[1:2048, 1:2048][:]
     sig_est = nanzeroiqr(dat)
 
-    pix_bit_mask = zeros(Int,2560,2048);
-    pix_bit_mask[2049:end,:] .|=2^0 # refArray
-    pix_bit_mask[1:4,:] .|=2^1 # refPixels
-    pix_bit_mask[2045:2048,:] .|=2^1 # refPixels
-    pix_bit_mask[:,1:4] .|=2^1 # refPixels
-    pix_bit_mask[:,end-3:end] .|=2^1 # refPixels
-    pix_bit_mask[:,end] .|=2^2 # bad refPixels (this is hard coded, only for chipA and APO for now)
-    pix_bit_mask .|= (abs.(dark_im).>sig_measure.*sig_est)*2^3
-    pix_bit_mask .|= (dark_im.<-sig_bad_lower.*sig_est)*2^4
-    pix_bit_mask .|= (dark_im.>sig_bad_upper.*sig_est)*2^5;
+    pix_bit_mask = zeros(Int, 2560, 2048)
+    pix_bit_mask[2049:end, :] .|= 2^0 # refArray
+    pix_bit_mask[1:4, :] .|= 2^1 # refPixels
+    pix_bit_mask[2045:2048, :] .|= 2^1 # refPixels
+    pix_bit_mask[:, 1:4] .|= 2^1 # refPixels
+    pix_bit_mask[:, (end - 3):end] .|= 2^1 # refPixels
+    pix_bit_mask[:, end] .|= 2^2 # bad refPixels (this is hard coded, only for chipA and APO for now)
+    pix_bit_mask .|= (abs.(dark_im) .> sig_measure .* sig_est) * 2^3
+    pix_bit_mask .|= (dark_im .< -sig_bad_lower .* sig_est) * 2^4
+    pix_bit_mask .|= (dark_im .> sig_bad_upper .* sig_est) * 2^5
 
-    dat = dark_im[1:2048,1:2048][pix_bit_mask[1:2048,1:2048] .& bad_pix_bits .== 0];
+    dat = dark_im[1:2048, 1:2048][pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .== 0]
     sig_after = nanzeroiqr(dat)
 
     # save dark_pix_bitmask and dark_rate (electron per read)
-    jldsave(parg["dark_dir"]*"darks/darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).jld2"; dark_rate=dark_im, dark_pix_bitmask=pix_bit_mask, ref_val_vec=ref_val_vec, cen_dar=cen_dark, sig_est=sig_est, sig_after=sig_after)
+    jldsave(
+        parg["dark_dir"] *
+        "darks/darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).jld2";
+        dark_rate = dark_im,
+        dark_pix_bitmask = pix_bit_mask,
+        ref_val_vec = ref_val_vec,
+        cen_dar = cen_dark,
+        sig_est = sig_est,
+        sig_after = sig_after)
 
     # Figures for QA
-    fig = plt.figure(figsize=(8,8),dpi=300)
-    ax = fig.add_subplot(1,1,1)
+    fig = plt.figure(figsize = (8, 8), dpi = 300)
+    ax = fig.add_subplot(1, 1, 1)
     img = ax.imshow(dark_im',
-        vmin=-0.2,
-        vmax=0.2,
-        interpolation="none",
-        cmap="cet_bkr",
-        origin="lower",
-        aspect="auto"
+        vmin = -0.2,
+        vmax = 0.2,
+        interpolation = "none",
+        cmap = "cet_bkr",
+        origin = "lower",
+        aspect = "auto"
     )
 
-    plt.text(0.5, 1.01, "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Scatter: $(round(sig_est,digits=4)) e-/read", ha="center", va="bottom", transform=ax.transAxes)
+    plt.text(0.5,
+        1.01,
+        "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Scatter: $(round(sig_est,digits=4)) e-/read",
+        ha = "center",
+        va = "bottom",
+        transform = ax.transAxes)
 
     divider = mpltk.make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    cbar = plt.colorbar(img, cax=cax, orientation="vertical")
-    ratePath = dirNamePlots*"darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
-    fig.savefig(ratePath, bbox_inches="tight", pad_inches=0.1);
+    cax = divider.append_axes("right", size = "5%", pad = 0.05)
+    cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
+    ratePath = dirNamePlots *
+               "darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+    fig.savefig(ratePath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
     thread("Here is the final dark rate image", ratePath)
-    thread("Here is the video of all of the frames included in the stack", vidPath)    
+    thread("Here is the video of all of the frames included in the stack", vidPath)
     # vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
     # rateSasPath = replace(abspath(ratePath), r".*users" => sas_prefix)
     # thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.\n    See video of the frames included here $(vidSasPath).\n    See the final dark rate image here $(rateSasPath)")
