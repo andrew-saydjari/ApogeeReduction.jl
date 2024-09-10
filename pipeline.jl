@@ -60,7 +60,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(),exeflags=["--project=./"])
     else
-        addprocs(24)
+        addprocs(36)
     end
 end
 t_now = now(); dt = Dates.canonicalize(Dates.CompoundPeriod(t_now-t_then)); println("Worker allocation took $dt"); t_then = t_now; flush(stdout)
