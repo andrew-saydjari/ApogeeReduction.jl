@@ -176,8 +176,8 @@ for chip in chip_list
     # if the length is bigger than 1 gigabyte, we need to upload the link to slack
     if len_vid > 1e9 # 1 GB
         vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-        thread("Here is the video of all of the frames included in the stack: $vidSasPath")    
+        thread("Here is the video of all of the frames included in the stack: $vidSasPath")
     else
-        thread("Here is the video of all of the frames included in the stack", vidPath)    
+        thread("Here is the video of all of the frames included in the stack", vidPath)
     end
 end
