@@ -1,4 +1,5 @@
 /Manifest.toml
+test/Manifest.toml
 *.h5
 *.jld2
 .CondaPkg
