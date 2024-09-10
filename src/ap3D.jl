@@ -1,6 +1,7 @@
 # Handling the 3D data cube
 
 function apz2cube(fname)
+
     f = FITS(fname)
     hdr = read_header(f[2])
     avg_dcounts = read(f[2])
