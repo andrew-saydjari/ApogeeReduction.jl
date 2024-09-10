@@ -6,10 +6,7 @@ using Random
 src_dir = "../"
 include(src_dir*"src/ap3D.jl")
 
-using LinearAlgebra
-BLAS.set_num_threads(1)
-using FITSIO, HDF5, FileIO, JLD2
-using DataFrames, EllipsisNotation, StatsBase
+using StatsBase
 
 @testset "ApogeeReduction.jl" begin
     # Write your tests here.
