@@ -172,8 +172,12 @@ for chip in chip_list
     fig.savefig(ratePath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
     thread("Here is the final dark rate image", ratePath)
-    thread("Here is the video of all of the frames included in the stack", vidPath)
-    # vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-    # rateSasPath = replace(abspath(ratePath), r".*users" => sas_prefix)
-    # thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.\n    See video of the frames included here $(vidSasPath).\n    See the final dark rate image here $(rateSasPath)")
+    len_vid = stat(vidPath).size
+    # if the length is bigger than 1 gigabyte, we need to upload the link to slack
+    if len_vid > 1e9 # 1 GB
+        vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+        thread("Here is the video of all of the frames included in the stack: $vidSasPath")    
+    else
+        thread("Here is the video of all of the frames included in the stack", vidPath)    
+    end
 end
