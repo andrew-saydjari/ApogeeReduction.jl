@@ -199,9 +199,10 @@ flush(stdout);
 try
     if parg["runlist"] != ""
         subDic = load(parg["runlist"])
-        subiter = Iterators.zip(subDic["mjd"],subDic["expid"])
-        @everywhere process_3D_partial((mjd,expid)) = process_3D(parg["outdir"],caldir,parg["runname"],mjd,expid,parg["chip"]) # does Julia LRU cache this?
-        @showprogress pmap(process_3D_partial,subiter)
+        subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
+        @everywhere process_3D_partial((mjd, expid)) = process_3D(
+            parg["outdir"], caldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
+        @showprogress pmap(process_3D_partial, subiter)
     else
         process_3D(parg["outdir"],caldir,parg["runname"],parg["mjd"],parg["expid"],parg["chip"])
     end
