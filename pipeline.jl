@@ -192,8 +192,8 @@ flush(stdout);
 @everywhere readVarMat = 25 * ones(Float32, 2560, 2048)
 # ADD load the dark currrent map
 # load SIRS.jl models
-@everywhere sirs4amps = SIRS.restore(caldir*"sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
-@everywhere sirsrefas2 = SIRS.restore(caldir*"sirs_test_ref2_d12_r60_n15.jld");
+@everywhere sirs4amps = SIRS.restore(caldir * "sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
+@everywhere sirsrefas2 = SIRS.restore(caldir * "sirs_test_ref2_d12_r60_n15.jld");
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
 try
