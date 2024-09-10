@@ -4,7 +4,7 @@ using Base
 using Random
 
 src_dir = "../"
-include(src_dir*"src/ap3D.jl")
+include(src_dir * "src/ap3D.jl")
 
 using LinearAlgebra
 BLAS.set_num_threads(1)
