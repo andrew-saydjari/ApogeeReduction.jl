@@ -204,7 +204,8 @@ try
             parg["outdir"], caldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
         @showprogress pmap(process_3D_partial, subiter)
     else
-        process_3D(parg["outdir"],caldir,parg["runname"],parg["mjd"],parg["expid"],parg["chip"])
+        process_3D(parg["outdir"], caldir, parg["runname"],
+            parg["mjd"], parg["expid"], parg["chip"])
     end
 finally
     rmprocs(workers())
