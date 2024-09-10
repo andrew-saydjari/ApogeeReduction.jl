@@ -24,6 +24,7 @@
 - nonlinearity corrections
 - correcting the first/second read
 - speed up (this is currently bottlenecking my development on the darks)
+- compute MJD-mid at this stage based on firstind selection
 
 ## 2D Cal
 - darkRate subtraction [in progress, AKS]
