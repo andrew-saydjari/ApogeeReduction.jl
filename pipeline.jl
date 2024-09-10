@@ -119,7 +119,7 @@ git_branch, git_commit = initalize_git(src_dir);
         rawpath = build_raw_path(
             df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
         # decompress and convert apz data format to a standard 3D cube of reads
-        cubedat, hdr = apz2cube(rawpath);
+        cubedat, hdr = apz2cube(rawpath)
 
         # ADD? reset anomaly fix (currently just drop first ind as our "fix")
         # REMOVES FIRST READ (as a view)
