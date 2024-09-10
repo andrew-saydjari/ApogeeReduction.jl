@@ -41,7 +41,9 @@ mkdir -p ${outdir}almanac
 almanac --mjd $mjd --${tele} --output ${outdir}almanac/${runname}.h5
 
 # run the reduction pipeline
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname
+julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "a"
+julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "b"
+julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "c"
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
