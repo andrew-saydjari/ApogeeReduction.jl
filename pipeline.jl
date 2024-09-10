@@ -116,7 +116,8 @@ git_branch, git_commit = initalize_git(src_dir);
         close(f)
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
-        rawpath = build_raw_path(df.observatory[expid],df.mjd[expid],chip,df.exposure[expid])
+        rawpath = build_raw_path(
+            df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
         # decompress and convert apz data format to a standard 3D cube of reads
         cubedat, hdr = apz2cube(rawpath);
 
