@@ -1,0 +1,5 @@
+# This file specifies the settings for the JuliaFormatter.jl package, 
+# which is used to format this codebase.
+# see https://domluna.github.io/JuliaFormatter.jl/stable/style/ for more info
+
+style = "sciml"
