@@ -135,11 +135,11 @@ git_branch, git_commit = initalize_git(src_dir);
 
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
-            in_data = Float64.(tdat[1:2048,:,:]);
-            outdat = zeros(Float64,size(tdat,1),size(tdat,2),size(in_data,3)) #obviously prealloc...
-            sirssub!(sirs4amps, in_data, f_max=95.);
-            outdat[1:2048,:,:] .= in_data
-            
+            in_data = Float64.(tdat[1:2048, :, :])
+            outdat = zeros(Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
+            sirssub!(sirs4amps, in_data, f_max = 95.0)
+            outdat[1:2048, :, :] .= in_data
+
             # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
             in_data = Float64.(tdat[1:2048,:,:]);
             in_data[513:1024,:,:].=tdat[2049:end,:,:]
