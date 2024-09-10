@@ -131,7 +131,7 @@ git_branch, git_commit = initalize_git(src_dir);
             firstind
         end
 
-        tdat = @view cubedat[:,:,firstind_loc:end]
+        tdat = @view cubedat[:, :, firstind_loc:end]
 
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
