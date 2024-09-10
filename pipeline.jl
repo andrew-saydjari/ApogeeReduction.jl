@@ -141,10 +141,10 @@ git_branch, git_commit = initalize_git(src_dir);
             outdat[1:2048, :, :] .= in_data
 
             # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-            in_data = Float64.(tdat[1:2048,:,:]);
-            in_data[513:1024,:,:].=tdat[2049:end,:,:]
-            sirssub!(sirsrefas2, in_data, f_max=95.);
-            outdat[2049:end,:,:] .= in_data[513:1024,:,:]
+            in_data = Float64.(tdat[1:2048, :, :])
+            in_data[513:1024, :, :] .= tdat[2049:end, :, :]
+            sirssub!(sirsrefas2, in_data, f_max = 95.0)
+            outdat[2049:end, :, :] .= in_data[513:1024, :, :]
         else
             outdat = Float64.(tdat)
         end
