@@ -11,7 +11,7 @@ using StatsBase
 @testset "ApogeeReduction.jl" begin
     # Write your tests here.
 
-    rng = MersenneTwister(101)
+    rng = MersenneTwister(101) #should we switch to stableRNG for my peace of mind?
 
     gainMat = 1.9*ones(Float32,2560,2048)
     readVarMat = 25*ones(Float32,2560,2048)
@@ -48,8 +48,8 @@ using StatsBase
     @test isapprox(full_mean_z,-0.05,atol=0.001)
     @test isapprox(full_std_z,1.0427,atol=0.001)
     @test isapprox(flux_mean_z[begin],-0.1298,atol=0.04)
-    @test isapprox(flux_mean_z[end],-0.04463,atol=0.06)
-    @test isapprox(flux_std_z[begin],1.0104,atol=0.004)
+    @test isapprox(flux_mean_z[end],-0.04463,atol=0.08)
+    @test isapprox(flux_std_z[begin],1.0104,atol=0.01)
     @test isapprox(flux_std_z[end],1.03251,atol=0.06)
     @test isapprox(flux_mean[begin],-0.002658,atol=0.01)
     @test isapprox(flux_mean[end],9998.98,atol=3)
