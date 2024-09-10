@@ -185,8 +185,8 @@ flush(stdout);
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
-@everywhere gainMat = 1.9*ones(Float32,2560,2048)
-@everywhere readVarMat = 25*ones(Float32,2560,2048)
+@everywhere gainMat = 1.9 * ones(Float32, 2560, 2048)
+@everywhere readVarMat = 25 * ones(Float32, 2560, 2048)
 # ADD load the dark currrent map
 # load SIRS.jl models
 @everywhere sirs4amps = SIRS.restore(caldir*"sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
