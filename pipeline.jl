@@ -124,7 +124,8 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? reset anomaly fix (currently just drop first ind as our "fix")
         # REMOVES FIRST READ (as a view)
         # might need to adjust for the few read cases (2,3,4,5)
-        firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") & (df.observatory[expid]=="apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+        firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
+                           (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
             2
         else
             firstind
