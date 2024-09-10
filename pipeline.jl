@@ -162,7 +162,7 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage, ivarimage, chisqimage = if extractMethod == "dcs"
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
-            sutr_tb(outdat,gainMat,readVarMat); 
+            sutr_tb(outdat, gainMat, readVarMat)
         else
             error("Extraction method not recognized")
         end
