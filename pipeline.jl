@@ -168,7 +168,10 @@ git_branch, git_commit = initalize_git(src_dir);
         end
 
         # need to clean up exptype to account for FPI versus ARCLAMP
-        outfname = join(["ap2D",df.observatory[expid],df.mjd[expid],chip,df.exposure[expid],df.exptype[expid]],"_")
+        outfname = join(
+            ["ap2D", df.observatory[expid], df.mjd[expid],
+                chip, df.exposure[expid], df.exptype[expid]],
+            "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(outdir * "/ap2D/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
     end
