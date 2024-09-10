@@ -104,8 +104,9 @@ git_branch, git_commit = initalize_git(src_dir);
 ##### 3D stage
 @everywhere begin
     # firstind overriden for APO dome flats
-    function process_3D(outdir,caldir,runname,mjd,expid,chip;firstind=3,cor1fnoise=true,extractMethod="sutr_tb")
-        dirName = outdir*"/ap2D/"
+    function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
+            cor1fnoise = true, extractMethod = "sutr_tb")
+        dirName = outdir * "/ap2D/"
         if !ispath(dirName)
             mkpath(dirName)
         end
