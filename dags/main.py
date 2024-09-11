@@ -100,9 +100,8 @@ with DAG(
     with TaskGroup(group_id="update") as group_git:
         p = BashOperator(
             task_id="git_pull",
-            bash_command=f"cd $MWM_SANDBOX/ApogeeReduction.jl; git pull",
+            bash_command=f"cd $MWM_SANDBOX/ApogeeReduction.jl; git checkout main; git pull",
         )
-
         r = BashOperator(
             task_id="refresh_dag",
             bash_command="airflow dags report"
