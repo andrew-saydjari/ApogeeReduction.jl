@@ -34,7 +34,7 @@ function gauss_fit_linear(fluxes,flux_errs,first_guess_params)
     return nothing
 end
 
-function trace_extract(image_data,ivar_image;image_mask=nothing)
+function trace_extract(image_data,ivar_image,tele,mjd,chip,expid;image_mask=nothing)
     # Last editted by Kevin McKinnon on Sept 10, 2024 
     # image_data has shape (npix_x,npix_y)
     # ivar_image has shape (npix_x,npix_y)
@@ -95,8 +95,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(y_vals[keep],smoothed_fluxes[keep],lw=1,color="C0")
         ax.errorbar(y_vals[keep],comb_fluxes[keep],yerr=comb_errs[keep],lw=1,color="C1")
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"smoothed_fluxes.png"
+			"smoothed_fluxes_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
     end
@@ -170,30 +173,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 	ax.plot(local_max_waves,poss_local_max_fluxes)
 	ax.plot(local_max_waves,med_min_fluxes)
 	ax.plot(local_max_waves,med_max_fluxes)
-
-#        img = ax.imshow(dark_im',
-#            vmin = -0.2,
-#            vmax = 0.2,
-#            interpolation = "none",
-#            cmap = "cet_bkr",
-#            origin = "lower",
-#            aspect = "auto"
-#        )
-#
-#        plt.text(0.5,
-#            1.01,
-#            "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Scatter: $(round(sig_est,digits=4)) e-/read",
-#            ha = "center",
-#            va = "bottom",
-#            transform = ax.transAxes)
-#
-#        divider = mpltk.make_axes_locatable(ax)
-#        cax = divider.append_axes("right", size = "5%", pad = 0.05)
-#        cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
-#        ratePath = dirNamePlots *
-#                   "darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"local_max_min_polynomials.png"
+			"local_max_min_polynomials_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
     end
@@ -322,16 +306,22 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(new_params[:, 2],new_params[:, 1],lw=1,color="C0")
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_heights.png"
+			"ave_middle_heights_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(new_params[:, 2],new_params[:, 3],lw=1,color="C0")
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_widths.png"
+			"ave_middle_widths_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -339,8 +329,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(peak_locs,peak_spacing, marker="o")
         ax.plot(peak_locs[good_peak_spacing],peak_spacing[good_peak_spacing], marker="o")
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_peak_spacing.png"
+			"ave_middle_peak_spacing_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
     end
@@ -369,8 +362,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         ax.plot(peak_locs[good_peak_spacing],peak_spacing[good_peak_spacing], marker="o")
         ax.plot(peak_locs[keep_space],peak_spacing[keep_space], marker="o")
         ax.plot(peak_locs,space_func_eval)
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_peak_spacing_func.png"
+			"ave_middle_peak_spacing_func_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -378,8 +374,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(peak_locs,peak_spacing ./ space_func_eval, marker="o")
         ax.plot(peak_locs,int_spacing)
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_int_spacing.png"
+			"ave_middle_int_spacing_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
     end
@@ -427,8 +426,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 	for ind in missing_ints
 	    ax.axvline(ind,c="w",lw=1)
 	end
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_missing_peaks.png"
+			"ave_middle_missing_peaks_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -440,8 +442,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 	for ind in missing_ints
 	    ax.axvline(ind,c="w",lw=1)
 	end
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
 	imagePath = dirNamePlots * 
-			"ave_middle_missing_peaks_resids.png"
+			"ave_middle_missing_peak_resids_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -549,16 +554,22 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
             ax = fig.add_subplot(1, 1, 1)
             ax.plot(all_rel_fluxes)
             ax.plot(comb_model_fluxes)
+            ttl = plt.text(
+                0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+                ha = "center", va = "bottom", transform = ax.transAxes)
     	    imagePath = dirNamePlots * 
-	  		"ave_middle_flux_comp.png"
+			"ave_middle_flux_comp_$(tele)_$(mjd)_$(expid)_$(chip).png"
             fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
    	    plt.close()
 
             fig = plt.figure(figsize = (10, 5), dpi = 300)
             ax = fig.add_subplot(1, 1, 1)
             ax.plot(all_rel_fluxes-comb_model_fluxes)
-	    imagePath = dirNamePlots * 
-			"ave_middle_flux_comp_resids.png"
+            ttl = plt.text(
+                0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+                ha = "center", va = "bottom", transform = ax.transAxes)
+    	    imagePath = dirNamePlots * 
+			"ave_middle_flux_comp_resids_$(tele)_$(mjd)_$(expid)_$(chip).png"
             fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	    plt.close()
         end
@@ -584,16 +595,22 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(new_params[:,2],new_params[:,1],marker="o")
-	imagePath = dirNamePlots * 
-			"ave_middle_heights_ALL.png"
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
+        imagePath = dirNamePlots * 
+			"ave_middle_heights_ALL_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(new_params[:,2],new_params[:,3],marker="o")
-	imagePath = dirNamePlots * 
-			"ave_middle_widths_ALL.png"
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
+        imagePath = dirNamePlots * 
+			"ave_middle_widths_ALL_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -601,16 +618,22 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(peak_locs,peak_spacing,marker="o")
         ax.plot(peak_locs[good_peak_spacing],peak_spacing[good_peak_spacing],marker="o")
-	imagePath = dirNamePlots * 
-			"ave_middle_peak_spacing_ALL.png"
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
+        imagePath = dirNamePlots * 
+			"ave_middle_peak_spacing_ALL_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(new_params[:,2],new_params[:,1]./med_flux,marker="o")
-	imagePath = dirNamePlots * 
-			"ave_middle_heightsScaled_ALL.png"
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
+        imagePath = dirNamePlots * 
+			"ave_middle_heightsScaled_ALL_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -793,16 +816,22 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
                 ax = fig.add_subplot(1, 1, 1)
                 ax.plot(all_rel_fluxes)
                 ax.plot(comb_model_fluxes)
-       	        imagePath = dirNamePlots * 
-	   		"x1025_flux_comp.png"
+                ttl = plt.text(
+                    0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+                    ha = "center", va = "bottom", transform = ax.transAxes)
+                imagePath = dirNamePlots * 
+   			"x1025_flux_comp_$(tele)_$(mjd)_$(expid)_$(chip).png"
                 fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	        plt.close()
 
                 fig = plt.figure(figsize = (10, 5), dpi = 300)
                 ax = fig.add_subplot(1, 1, 1)
                 ax.plot(all_rel_fluxes-comb_model_fluxes)
-	        imagePath = dirNamePlots * 
-			"x1025_flux_comp_resids.png"
+                ttl = plt.text(
+                    0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+                    ha = "center", va = "bottom", transform = ax.transAxes)
+                imagePath = dirNamePlots * 
+   			"x1025_flux_comp_resids_$(tele)_$(mjd)_$(expid)_$(chip).png"
                 fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	        plt.close()
             end
@@ -816,14 +845,14 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
         ax.plot(nanmedian(param_outputs[:,:,1],1)[1,:])
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
         imagePath = dirNamePlots * 
-	   		"final_median_flux.png"
+			"final_median_flux_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
-	title_name = ""
-
-#	fiber_inds = range(0,300,step=50) .+ 1
 	fiber_inds = collect(0:50:300) .+ 1
         fiber_inds[1] = 1
         fiber_inds[end] = size(param_outputs,2)
@@ -835,7 +864,6 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
-	ax.set_title(title_name)
 	ax.set_xlabel("X")
 #	ax.set_ylabel("Y$-\langle$Y$\rangle$")
 	ax.set_ylabel("Y")
@@ -846,14 +874,16 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 		    marker="o",lw=1,label=fiber_ind,alpha=0.7,ms=1)
 	end
 	leg = ax.legend(loc=6,bbox_to_anchor=(1.05,0.5))
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
         imagePath = dirNamePlots * 
-	   		"final_fiber_trace_funcs.png"
+			"final_fiber_trace_mean_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
-	ax.set_title(title_name)
 	ax.set_xlabel("X")
 	ax.set_ylabel("Flux")
 	for fiber_ind in fiber_inds
@@ -863,14 +893,16 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 		    marker="o",lw=1,label=fiber_ind,alpha=0.7,ms=1)
 	end
 	leg = ax.legend(loc=6,bbox_to_anchor=(1.05,0.5))
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
         imagePath = dirNamePlots * 
-	   		"final_fiber_trace_flux.png"
+			"final_fiber_trace_flux_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
         fig = plt.figure(figsize = (10, 5), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
-	ax.set_title(title_name)
 	ax.set_xlabel("X")
 	ax.set_ylabel("Y Width")
 	for fiber_ind in fiber_inds
@@ -880,8 +912,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 		    marker="o",lw=1,label=fiber_ind,alpha=0.7,ms=1)
 	end
 	leg = ax.legend(loc=6,bbox_to_anchor=(1.05,0.5))
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
         imagePath = dirNamePlots * 
-	   		"final_fiber_trace_width.png"
+			"final_fiber_trace_width_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -900,7 +935,6 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         vmax = param_summary[1] + 2*param_summary[3]
         fig = plt.figure(figsize = (15, 13), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
-	ax.set_title(title_name)
         img = ax.scatter(ravel_x_inds,ravel_y_centers,c=curr_params,
             	    alpha=0.7,s=5,vmin=vmin,vmax=vmax)
 	ax.set_xlabel("X")
@@ -910,8 +944,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         divider = mpltk.make_axes_locatable(ax)
         cax = divider.append_axes("right", size = "5%", pad = 0.05)
         cbar = plt.colorbar(img, cax = cax, orientation = "vertical",label="Y Width")
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
         imagePath = dirNamePlots * 
-	   		"final_trace_width_map.png"
+			"final_trace_width_map_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
 
@@ -924,7 +961,6 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         vmax = param_summary[1] + 2*param_summary[3]
         fig = plt.figure(figsize = (15, 13), dpi = 300)
         ax = fig.add_subplot(1, 1, 1)
-	ax.set_title(title_name)
         img = ax.scatter(ravel_x_inds,ravel_y_centers,c=curr_params,
             	    alpha=0.7,s=5,vmin=vmin,vmax=vmax)
 	ax.set_xlabel("X")
@@ -934,8 +970,11 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
         divider = mpltk.make_axes_locatable(ax)
         cax = divider.append_axes("right", size = "5%", pad = 0.05)
         cbar = plt.colorbar(img, cax = cax, orientation = "vertical",label="Flux")
+        ttl = plt.text(
+            0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chip), Expid: $(expid)",
+            ha = "center", va = "bottom", transform = ax.transAxes)
         imagePath = dirNamePlots * 
-	   		"final_trace_flux_map.png"
+			"final_trace_flux_map_$(tele)_$(mjd)_$(expid)_$(chip).png"
         fig.savefig(imagePath, bbox_inches = "tight", pad_inches = 0.1)
 	plt.close()
     end
@@ -944,14 +983,20 @@ function trace_extract(image_data,ivar_image;image_mask=nothing)
 end
 
 dataPath = "/uufs/chpc.utah.edu/common/home/u6057633/projects/outdir/ap2D/"
-fname = dataPath * "ap2D_apo_60546_c_49840013_DOMEFLAT.jld2"
+
+tele = "apo"
+mjd = "60546"
+chip = "c"
+expid = "49840013"
+ftype = "DOMEFLAT"
+fname = dataPath * "ap2D_$(tele)_$(mjd)_$(chip)_$(expid)_$(ftype).jld2"
+
 
 f = jldopen(fname)
 image_data = f["dimage"][1 : 2048, 1 : 2048]
 ivar_image = f["ivarimage"][1 : 2048, 1 : 2048]
 close(f)
 
-
-trace_funcs = trace_extract(image_data,ivar_image;image_mask=nothing)
+trace_funcs = trace_extract(image_data,ivar_image,tele,mjd,chip,expid;image_mask=nothing)
 
 
