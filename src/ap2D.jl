@@ -63,6 +63,12 @@ function trace_extract(image_data,ivar_image,tele,mjd,chip,expid;image_mask=noth
     cutout_ivars[.!cutout_masks] .= 0
     cutout_errs[.!cutout_masks] .= Inf
 
+    #use median to mask large outlier fluxes from average
+    med_flux = nanzeromedian(cutout_fluxes,2)
+    sigma_dists = (cutout_fluxes .- med_flux) .* (cutout_ivars .^ (-0.5))
+    good_sigmas = abs.(sigma_dists) .< 3
+    cutout_ivars[.!good_sigmas] .= 0
+
     y_vals = range(start = 1, stop = size(cutout_fluxes, 1), step = 1)
 
     comb_ivars = nansum(cutout_ivars, 2)
@@ -545,7 +551,7 @@ function trace_extract(image_data,ivar_image,tele,mjd,chip,expid;image_mask=noth
 
         new_params = curr_guess .+ v_hat
 	new_params[:, 1] .= clamp.(new_params[:, 1], 0.01, first_guess_params[:, 1]*10)
-	new_params[:, 2] .= clamp.(new_params[:, 2], all_peak_locs .- 3, all_peak_locs .+ 3)
+	new_params[:, 2] .= clamp.(clamp.(new_params[:, 2], all_peak_locs .- 3, all_peak_locs .+ 3),11,2048-11)
 	new_params[:, 3] .= clamp.(new_params[:, 3], 0.5, 2.0)
 
         curr_guess .= new_params
@@ -804,7 +810,7 @@ function trace_extract(image_data,ivar_image,tele,mjd,chip,expid;image_mask=noth
 
             new_params = curr_guess .+ v_hat
    	    new_params[:, 1] .= clamp.(new_params[:, 1], 0.01, first_guess_params[:, 1]*10)
-       	    new_params[:, 2] .= clamp.(new_params[:, 2], first_guess_params[:, 2] .- 3, first_guess_params[:, 2] .+ 3)
+       	    new_params[:, 2] .= clamp.(clamp.(new_params[:, 2], first_guess_params[:, 2] .- 3, first_guess_params[:, 2] .+ 3), 11, 2048-11)
 	    new_params[:, 3] .= clamp.(new_params[:, 3], 0.5, 2.0)
 
 #	    println(r_ind," ",x_ind," ",new_params[begin:begin+3,2])
@@ -986,8 +992,13 @@ dataPath = "/uufs/chpc.utah.edu/common/home/u6057633/projects/outdir/ap2D/"
 
 tele = "apo"
 mjd = "60546"
-chip = "c"
-expid = "49840013"
+chip = "a"
+chip = "b"
+#chip = "c"
+expid = "49840011"
+#expid = "49840012"
+#expid = "49840013"
+expid = "49840014"
 ftype = "DOMEFLAT"
 fname = dataPath * "ap2D_$(tele)_$(mjd)_$(chip)_$(expid)_$(ftype).jld2"
 
