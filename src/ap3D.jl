@@ -54,15 +54,23 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb
 end
 
-## Andrew should speed this up a bit, excess allocs
-function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
-    # Last editted by Kevin McKinnon on Aug 20, 2024 
-    # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
-    # datacube has shape (npix_x,npix_y,n_reads)
-    # read_var_mat has shape (npix_x,npix_y)
-    # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
+"""
+Created by Kevin McKinnon on Aug 20, 2024, slightly refactored by Adam Wheeler.
 
-    # assumes all images are sequential (ie separated by one read time)
+Based on Tim Brandt's [SUTR python code](https://github.com/t-brandt/fitramp).
+
+This assumes that all images are sequential (ie separated by one read time).
+
+# Arguments
+- datacube has shape (npix_x,npix_y,n_reads)
+- gainMat TODO
+- read_var_mat has shape (npix_x,npix_y)
+
+# Keyword Arguments
+- firstind TODO
+- good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1)
+"""
+function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
     dimages = gainMat .*
               (dcubedat[:, :, (firstind + 1):end] - dcubedat[:, :, firstind:(end - 1)])
 
