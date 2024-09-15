@@ -1,4 +1,6 @@
 # Handling the 3D data cube
+using LinearAlgebra: Tridiagonal
+using Statistics: mean
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -69,22 +71,21 @@ This assumes that all images are sequential (ie separated by one read time).
 
 # Keyword Arguments
 - firstind TODO
-- good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1)
+- good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
+  not provided, all diffs will be used.
 """
 function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
-    dimages = gainMat .*
-              (dcubedat[:, :, (firstind + 1):end] - dcubedat[:, :, firstind:(end - 1)])
+    dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
 
     if isnothing(good_diffs)
         good_diffs = ones(Bool, size(dimages))
     end
 
-    n_reads = size(dimages, 3) + 1
-    ndiffs = n_reads - 1
-    read_times = range(start = 1, stop = n_reads, step = 1)
-    mean_t = read_times
-    tau = read_times
-    N = ones(Float64, n_reads)
+    ndiffs = size(dimages, 3)
+    nreads = ndiffs + 1
+    mean_t = 1:nreads # TODO is this the same as tau?
+    tau = 1:nreads #variance weighted times
+    N = ones(Float64, nreads) #number of reads per group
 
     delta_t = mean_t[2:end] .- mean_t[1:(end - 1)]
 
@@ -96,6 +97,14 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
     beta_phnoise = (mean_t[2:(end - 1)] .- tau[2:(end - 1)]) ./
                    (delta_t[2:end] .* delta_t[1:(end - 1)])
 
+    println("size of alpha_readnoise: ", size(alpha_readnoise))
+    println("size of beta_readnoise: ", size(beta_readnoise))
+    println("size of alpha_phnoise: ", size(alpha_phnoise))
+    println("size of beta_phnoise: ", size(beta_phnoise))
+    println("size of readVarMat: ", size(readVarMat))
+    println("size of dcubedat: ", size(dcubedat))
+    println("size of dimages: ", size(dimages))
+
     final_countrates = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
     final_vars = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
     final_chisqs = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
@@ -106,20 +115,18 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
         read_var = readVarMat[s_ind, :] # shape = (npix)
         read_var = reshape(read_var, (1, size(read_var, 1)))
         diffs2use = transpose(good_diffs[s_ind, :, :]) # shape = (ndiffs, npix)
+        d = diffs .* diffs2use # diffs with bad values set to 0 
 
-        n_repeat = 2 # DO NOT CHANGE THIS!
-        for r_ind in 1:n_repeat
-            #repeat the process after getting a good first guess
-            #to remove a bias (as discussed in the paper)
+        # Repeat the process after getting a good first guess to remove a bias (as 
+        # discussed in the paper).
+        for r_ind in 1:2 # DO NOT CHANGE THIS!
             if r_ind == 1
                 #initialize first guess of countrates with mean
-                countrateguess = sum(diffs .* diffs2use, dims = 1) ./
-                                 sum(diffs2use, dims = 1)
+                countrateguess = sum(d, dims = 1) ./ sum(diffs2use, dims = 1)
                 countrateguess .*= (countrateguess .> 0)
             else
-                countrateguess = final_countrates[s_ind, :] .*
-                                 (final_countrates[s_ind, :] .> 0)
-                countrateguess = reshape(countrateguess, (1, size(countrateguess, 1)))
+                countrateguess = (final_countrates[s_ind, :] .*
+                                  (final_countrates[s_ind, :] .> 0))'
             end
 
             # Elements of the covariance matrix
@@ -130,7 +137,6 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
             # avoid possible overflow/underflow.  The uncertainty and chi
             # squared value will need to be scaled back later.
             scale = exp.(mean(log.(alpha), dims = 1))
-
             alpha ./= scale
             beta ./= scale
 
@@ -138,8 +144,6 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
             # Mask resultant differences that should be ignored.  This is half
             # of what we need to do to mask these resultant differences; the
             # rest comes later.
-
-            d = diffs .* diffs2use
             beta .= beta .* diffs2use[2:end, :] .* diffs2use[1:(end - 1), :]
 
             # All definitions and formulas here are in the paper.
@@ -227,4 +231,56 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
     end
 
     return final_countrates, final_vars .^ (-1), final_chisqs
+end
+
+"""
+assume all timesteps are the same.
+"""
+function sutr_aw(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
+    dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
+    if isnothing(good_diffs)
+        good_diffs = ones(Bool, size(dimages))
+    end
+    ndiffs = size(dimages, 3)
+
+    #ignore good_diffs for now TODO fix
+    countrate_guess = mean(dimages; dims = 3)
+    countrate_guess[countrate_guess .< 0] .= 0
+
+    # working arrays allocate here and reuse inside loop
+    α = ones(ndiffs)
+    β = ones(ndiffs - 1)
+
+    # returned arrays
+    rates = Matrix{Float64}(undef, size(dimages)[1:2])
+    ivars = Matrix{Float64}(undef, size(dimages)[1:2])
+    chi2s = Matrix{Float64}(undef, size(dimages)[1:2])
+    for pixel_ind in CartesianIndices(dimages[:, :, 1])
+        α .= 2 * readVarMat[pixel_ind] + countrate_guess[pixel_ind]
+        β .= -readVarMat[pixel_ind]
+        C = Tridiagonal(β, α, β)
+
+        first_pass_rate = max_likelihood_rate(dimages[pixel_ind, :], C)
+
+        α .= 2 * readVarMat[pixel_ind] + first_pass_rate
+        C = Tridiagonal(β, α, β)
+        rates[pixel_ind] = max_likelihood_rate(dimages[pixel_ind, :], C)
+        ivars[pixel_ind] = rate_estimator_var(C)
+
+        residuals = dimages[pixel_ind, :] .- rates[pixel_ind]
+        chi2s[pixel_ind] = residuals' * (C \ residuals)
+    end
+    rates, ivars, chi2s
+end
+
+# try this with another solve instead?
+function max_likelihood_rate(d, C)
+    s = size(C, 1)
+    ones_vec = ones(size(C, 1))
+    sum(C \ d) / (ones_vec' * (C \ ones_vec))
+end
+function rate_estimator_var(C)
+    s = size(C, 1)
+    ones_vec = ones(size(C, 1))
+    ones_vec' * (C \ ones_vec)
 end
