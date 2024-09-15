@@ -57,7 +57,8 @@ end
 """
 Created by Kevin McKinnon on Aug 20, 2024, slightly refactored by Adam Wheeler.
 
-Based on Tim Brandt's [SUTR python code](https://github.com/t-brandt/fitramp).
+Based on Tim Brandt's [SUTR python code](https://github.com/t-brandt/fitramp) described in 
+[Brandt 2024](https://doi.org/10.1088/1538-3873/ad38d9).
 
 This assumes that all images are sequential (ie separated by one read time).
 
