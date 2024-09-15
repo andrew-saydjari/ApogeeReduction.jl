@@ -1,5 +1,3 @@
 module ApogeeReduction
-
-# Write your package code here.
-
+include("ap3D.jl")
 end
