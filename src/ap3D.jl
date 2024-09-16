@@ -82,20 +82,12 @@ function sutr_reference(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs 
     end
 
     ndiffs = size(dimages, 3)
-    nreads = ndiffs + 1
-    mean_t = 1:nreads # TODO is this the same as tau?
-    tau = 1:nreads #variance weighted times
-    N = ones(Float64, nreads) #number of reads per group
 
-    delta_t = mean_t[2:end] .- mean_t[1:(end - 1)]
+    alpha_readnoise = 2
+    beta_readnoise = -1
 
-    alpha_readnoise = (1 ./ N[1:(end - 1)] .+ 1 ./ N[2:end]) ./ delta_t .^ 2
-    beta_readnoise = -1 ./ N[2:(end - 1)] ./ (delta_t[2:end] .* delta_t[1:(end - 1)])
-
-    alpha_phnoise = (tau[1:(end - 1)] .+ tau[2:end] .- 2 .* mean_t[1:(end - 1)]) ./
-                    delta_t .^ 2
-    beta_phnoise = (mean_t[2:(end - 1)] .- tau[2:(end - 1)]) ./
-                   (delta_t[2:end] .* delta_t[1:(end - 1)])
+    alpha_phnoise = ones(ndiffs)
+    beta_phnoise = zeros(ndiffs - 1)
 
     final_countrates = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
     final_vars = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
@@ -245,6 +237,7 @@ function sutr(
     α = ones(ndiffs)
     β = ones(ndiffs - 1)
     C = SymTridiagonal(α, β)
+    # C \ b uses the LDLt factorization
     ones_vec = ones(ndiffs)
 
     # returned arrays
@@ -269,7 +262,7 @@ end
 """
 assume all timesteps are the same.
 """
-function sutr_analytic(
+function sutr_eigen(
         dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_iter = 2)
     dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
     if isnothing(good_diffs)
@@ -309,4 +302,69 @@ function sutr_analytic(
         chi2s[pixel_ind] = residuals' * invC * residuals
     end
     rate, ivars, chi2s
+end
+
+function sutr_thomas(
+        dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_iter = 2)
+    dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
+
+    # TODO use good_diffs
+    if isnothing(good_diffs)
+        good_diffs = ones(Bool, size(dimages))
+    end
+    ndiffs = size(dimages, 3)
+
+    # this the starting guess, it will get refined to approach the maximum likelyhood estimate
+    rate = mean(dimages; dims = 3)
+    rate[rate .< 0] .= 0
+
+    # working variables allocate here and reuse inside loop
+    ones_vec = ones(ndiffs)
+    α = 0.0
+    β = 0.0
+    c_prime = ones(ndiffs - 1)
+    d_prime = ones(ndiffs)
+    x = ones(ndiffs)
+    residuals = ones(ndiffs)
+
+    # returned arrays
+    ivars = Matrix{Float64}(undef, size(dimages)[1:2])
+    chi2s = Matrix{Float64}(undef, size(dimages)[1:2])
+    for pixel_ind in CartesianIndices(dimages[:, :, 1])
+        β = -readVarMat[pixel_ind]
+
+        for _ in 1:n_iter
+            α = 2 * readVarMat[pixel_ind] + rate[pixel_ind]
+            solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, ones_vec)
+            ivars[pixel_ind] = sum(x)
+
+            solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, dimages[pixel_ind, :])
+            rate[pixel_ind] = sum(x) / ivars[pixel_ind]
+        end
+
+        residuals .= dimages[pixel_ind, :] .- rate[pixel_ind]
+        solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, residuals)
+        chi2s[pixel_ind] = residuals' * x
+    end
+    rate, ivars, chi2s
+end
+
+function solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, b)
+    n = length(b)
+
+    # Forward elimination
+    c_prime[1] = β / α
+    d_prime[1] = b[1] / α
+    for i in 2:(n - 1)
+        denominator = α - β * c_prime[i - 1]
+        c_prime[i] = β / denominator
+        d_prime[i] = (b[i] - β * d_prime[i - 1]) / denominator
+    end
+    d_prime[n] = (b[n] - β * d_prime[n - 1]) / (α - β * c_prime[n - 1])
+
+    # Back substitution
+    x[n] = d_prime[n]
+    for i in (n - 1):-1:1
+        x[i] = d_prime[i] - c_prime[i] * x[i + 1]
+    end
 end
