@@ -1,21 +1,22 @@
 @testset "ap3D" begin
     rng = MersenneTwister(101) #should we switch to stableRNG for my peace of mind?
 
-    dims = (2560, 2048) #TODO name better
-    gainMat = 1.9 * ones(Float32, dims)
-    readVarMat = 25 * ones(Float32, dims)
+    detector_dims = (2560, 2048) #TODO name better
+    gainMat = 1.9 * ones(Float32, detector_dims)
+    readVarMat = 25 * ones(Float32, detector_dims)
 
     n_reads = 20
     n_diffs = n_reads - 1
 
     flux_per_reads = 10 .^ (range(start = log10(0.01), stop = log10(10000), length = 2560))
-    dcounts = (randn(rng, (dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+ flux_per_reads
+    dcounts = (randn(rng, (detector_dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+
+              flux_per_reads
 
-    true_im = ones(Float32, dims) .* flux_per_reads
+    true_im = ones(Float32, detector_dims) .* flux_per_reads
 
-    outdat = zeros(Float32, (dims..., n_reads))
+    outdat = zeros(Float32, (detector_dims..., n_reads))
     outdat[:, :, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
-    outdat .+= randn(rng, (dims..., n_reads)) .* (readVarMat .^ 0.5)
+    outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5)
     outdat ./= gainMat
 
     for sutr in [ApogeeReduction.sutr_aw, ApogeeReduction.sutr_tb]

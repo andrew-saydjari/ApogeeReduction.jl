@@ -1,5 +1,5 @@
 # Handling the 3D data cube
-using LinearAlgebra: Tridiagonal
+using LinearAlgebra: SymTridiagonal, Diagonal
 using Statistics: mean
 
 function apz2cube(fname)
@@ -74,7 +74,7 @@ This assumes that all images are sequential (ie separated by one read time).
 - good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
   not provided, all diffs will be used.
 """
-function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
+function sutr_reference(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
     dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
 
     if isnothing(good_diffs)
@@ -96,14 +96,6 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
                     delta_t .^ 2
     beta_phnoise = (mean_t[2:(end - 1)] .- tau[2:(end - 1)]) ./
                    (delta_t[2:end] .* delta_t[1:(end - 1)])
-
-    println("size of alpha_readnoise: ", size(alpha_readnoise))
-    println("size of beta_readnoise: ", size(beta_readnoise))
-    println("size of alpha_phnoise: ", size(alpha_phnoise))
-    println("size of beta_phnoise: ", size(beta_phnoise))
-    println("size of readVarMat: ", size(readVarMat))
-    println("size of dcubedat: ", size(dcubedat))
-    println("size of dimages: ", size(dimages))
 
     final_countrates = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
     final_vars = zeros(Float64, size(dcubedat, 1), size(dcubedat, 2))
@@ -236,7 +228,8 @@ end
 """
 assume all timesteps are the same.
 """
-function sutr_aw(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
+function sutr(
+        dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_iter = 2)
     dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
     if isnothing(good_diffs)
         good_diffs = ones(Bool, size(dimages))
@@ -244,43 +237,74 @@ function sutr_aw(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
     ndiffs = size(dimages, 3)
 
     #ignore good_diffs for now TODO fix
-    countrate_guess = mean(dimages; dims = 3)
-    countrate_guess[countrate_guess .< 0] .= 0
+    # this the starting guess, it will get refined to approach the maximum likelyhood estimate
+    rate = mean(dimages; dims = 3)
+    rate[rate .< 0] .= 0
 
     # working arrays allocate here and reuse inside loop
     α = ones(ndiffs)
     β = ones(ndiffs - 1)
+    C = SymTridiagonal(α, β)
+    ones_vec = ones(ndiffs)
 
     # returned arrays
-    rates = Matrix{Float64}(undef, size(dimages)[1:2])
     ivars = Matrix{Float64}(undef, size(dimages)[1:2])
     chi2s = Matrix{Float64}(undef, size(dimages)[1:2])
     for pixel_ind in CartesianIndices(dimages[:, :, 1])
-        α .= 2 * readVarMat[pixel_ind] + countrate_guess[pixel_ind]
         β .= -readVarMat[pixel_ind]
-        C = Tridiagonal(β, α, β)
 
-        first_pass_rate = max_likelihood_rate(dimages[pixel_ind, :], C)
+        for _ in 1:n_iter
+            α .= 2 * readVarMat[pixel_ind] + rate[pixel_ind]
+            @views rate[pixel_ind] = (ones_vec' * (C \ dimages[pixel_ind, :])) /
+                                     (ones_vec' * (C \ ones_vec))
+        end
 
-        α .= 2 * readVarMat[pixel_ind] + first_pass_rate
-        C = Tridiagonal(β, α, β)
-        rates[pixel_ind] = max_likelihood_rate(dimages[pixel_ind, :], C)
-        ivars[pixel_ind] = rate_estimator_var(C)
+        ivars[pixel_ind] = ones_vec' * (C \ ones_vec)
 
-        residuals = dimages[pixel_ind, :] .- rates[pixel_ind]
+        residuals = dimages[pixel_ind, :] .- rate[pixel_ind]
         chi2s[pixel_ind] = residuals' * (C \ residuals)
     end
-    rates, ivars, chi2s
+    rate, ivars, chi2s
 end
 
-# try this with another solve instead?
-function max_likelihood_rate(d, C)
-    s = size(C, 1)
-    ones_vec = ones(size(C, 1))
-    sum(C \ d) / (ones_vec' * (C \ ones_vec))
-end
-function rate_estimator_var(C)
-    s = size(C, 1)
-    ones_vec = ones(size(C, 1))
-    ones_vec' * (C \ ones_vec)
+"""
+assume all timesteps are the same.
+"""
+function sutr_analytic(
+        dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_iter = 2)
+    dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
+    if isnothing(good_diffs)
+        good_diffs = ones(Bool, size(dimages))
+    end
+    ndiffs = size(dimages, 3)
+
+    #ignore good_diffs for now TODO fix
+    # this the starting guess, it will get refined to approach the maximum likelyhood estimate
+    rate = mean(dimages; dims = 3)
+    rate[rate .< 0] .= 0
+
+    # working arrays
+    ones_vec = ones(ndiffs)
+    invΛ = Diagonal(ones(ndiffs))
+    Q = zeros(Float64, ndiffs, ndiffs)
+    # returned arrays
+    ivars = Matrix{Float64}(undef, size(dimages)[1:2])
+    chi2s = Matrix{Float64}(undef, size(dimages)[1:2])
+    for pixel_ind in CartesianIndices(dimages[:, :, 1])
+        β = -readVarMat[pixel_ind]
+        Q .= @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
+        Q .= Q ./ sqrt.(sum(Q .^ 2, dims = 2)) #TODO do this analytically?
+        for _ in 1:n_iter
+            α = 2 * readVarMat[pixel_ind] + rate[pixel_ind]
+            invΛ.diag .= @. (α + 2β * cos((1:ndiffs) * π / (ndiffs + 1))) .^ (-1)
+            @views rate[pixel_ind] = (ones_vec' * (Q * invΛ * Q * dimages[pixel_ind, :])) /
+                                     sum(Q * invΛ * Q)
+        end
+
+        ivars[pixel_ind] = ones_vec' * Q * invΛ * Q * ones_vec
+
+        residuals = dimages[pixel_ind, :] .- rate[pixel_ind]
+        chi2s[pixel_ind] = residuals' * Q * invΛ * Q * residuals
+    end
+    rate, ivars, chi2s
 end
