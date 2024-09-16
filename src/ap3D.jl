@@ -255,11 +255,10 @@ function sutr(
 
         for _ in 1:n_iter
             α .= 2 * readVarMat[pixel_ind] + rate[pixel_ind]
+            ivars[pixel_ind] = ones_vec' * (C \ ones_vec)
             @views rate[pixel_ind] = (ones_vec' * (C \ dimages[pixel_ind, :])) /
-                                     (ones_vec' * (C \ ones_vec))
+                                     ivars[pixel_ind]
         end
-
-        ivars[pixel_ind] = ones_vec' * (C \ ones_vec)
 
         residuals = dimages[pixel_ind, :] .- rate[pixel_ind]
         chi2s[pixel_ind] = residuals' * (C \ residuals)
@@ -286,25 +285,28 @@ function sutr_analytic(
     # working arrays
     ones_vec = ones(ndiffs)
     invΛ = Diagonal(ones(ndiffs))
-    Q = zeros(Float64, ndiffs, ndiffs)
+    Q = @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
+    Q ./= sqrt.(sum(Q .^ 2, dims = 2)) #TODO do this analytically?
+    invC = Q * invΛ * Q
+
     # returned arrays
     ivars = Matrix{Float64}(undef, size(dimages)[1:2])
     chi2s = Matrix{Float64}(undef, size(dimages)[1:2])
+
     for pixel_ind in CartesianIndices(dimages[:, :, 1])
         β = -readVarMat[pixel_ind]
-        Q .= @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
-        Q .= Q ./ sqrt.(sum(Q .^ 2, dims = 2)) #TODO do this analytically?
         for _ in 1:n_iter
             α = 2 * readVarMat[pixel_ind] + rate[pixel_ind]
-            invΛ.diag .= @. (α + 2β * cos((1:ndiffs) * π / (ndiffs + 1))) .^ (-1)
-            @views rate[pixel_ind] = (ones_vec' * (Q * invΛ * Q * dimages[pixel_ind, :])) /
-                                     sum(Q * invΛ * Q)
+            @. invΛ.diag = (α + 2β * cos((1:ndiffs) * π / (ndiffs + 1)))^(-1)
+            invC .= Q * invΛ * Q
+            @views rate[pixel_ind] = (ones_vec' * (invC * dimages[pixel_ind, :])) /
+                                     sum(invC)
         end
 
-        ivars[pixel_ind] = ones_vec' * Q * invΛ * Q * ones_vec
+        ivars[pixel_ind] = sum(invC)
 
         residuals = dimages[pixel_ind, :] .- rate[pixel_ind]
-        chi2s[pixel_ind] = residuals' * Q * invΛ * Q * residuals
+        chi2s[pixel_ind] = residuals' * invC * residuals
     end
     rate, ivars, chi2s
 end
