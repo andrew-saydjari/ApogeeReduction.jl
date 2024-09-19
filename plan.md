@@ -23,16 +23,16 @@
 - reference array based masking/correction
 - nonlinearity corrections
 - correcting the first/second read
-- speed up (this is currently bottlenecking my development on the darks)
+- speed up (this is currently bottlenecking my development on the darks) [Adam]
 - compute MJD-mid at this stage based on firstind selection
+- persistence handling
 
 ## 2D Cal
 - darkRate subtraction [in progress, AKS]
 - dark bad pix mask [initial complete, AKS]
 - flat fielding (no clear route, internal flats are not flat)
 - flat bad pix mask
-- littrow masking, scattering light handling (2D component separation?)
-- persistence handling
+- littrow masking, scattering light handling (2D component separation?) [Andy commits to this]
 
 ## 2D -> 1D
 - find traces [in progress, KM]
