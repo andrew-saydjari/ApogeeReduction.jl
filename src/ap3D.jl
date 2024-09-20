@@ -363,6 +363,14 @@ function sutr_aw(
     PhiD = zeros(Float64, npix, ndiffs)
     Theta = zeros(Float64, npix, ndiffs)
     ThetaD = zeros(Float64, npix, ndiffs + 1)
+    alpha = Vector{Float64}(undef, npix)
+    scale = Vector{Float64}(undef, npix)
+    beta = Matrix{Float64}(undef, npix, ndiffs - 1)
+    beta_extended = ones(npix, ndiffs)
+    A = Vector{Float64}(undef, npix)
+    B = Vector{Float64}(undef, npix)
+    C = Vector{Float64}(undef, npix)
+
     # define this one here
     sgn = ones(Float64, npix, ndiffs)
     sgn[:, 1:2:end] .= -1
@@ -379,16 +387,13 @@ function sutr_aw(
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
 
         for _ in 1:n_repeat
-            #TODO eliminate and make non-adjoint
-            countrateguess = rates[:, c_ind] .* (rates[:, c_ind] .> 0)
-
-            alpha = countrateguess + 2read_var'
-            beta = -read_var' .* ones(npix, ndiffs - 1)
+            alpha .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) + 2read_var'
+            beta .= -read_var' .* ones(npix, ndiffs - 1)
 
             # rescale the covariance matrix to a determinant of order 1 to
             # avoid possible overflow/underflow.  The uncertainty and chi
             # squared value will need to be scaled back later.
-            scale = exp.(mean(log.(alpha), dims = 2))
+            scale .= alpha #TODO make less silly
 
             alpha ./= scale
             beta ./= scale
@@ -437,13 +442,11 @@ function sutr_aw(
                                     sgn[:, i] .* d[:, i] .* theta[:, i]
             end
 
-            beta_extended = ones(Float64, npix, ndiffs)
             beta_extended[:, 2:end] .= beta
 
             # C' and B' in the paper
 
-            theta_ndiffs = theta[:, ndiffs + 1]
-            dC = sgn ./ theta_ndiffs .*
+            dC = sgn ./ theta[:, ndiffs + 1] .*
                  (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
             dC .*= diffs2use
 
@@ -452,14 +455,14 @@ function sutr_aw(
             #     (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:(end - 1), :] .* PhiD)
 
             # {\cal A}, {\cal B}, {\cal C} in the paper
-            A = 2 * sum(
-                d .* sgn ./ theta_ndiffs .* beta_extended .* phi[:, 2:end] .*
+            A .= 2 * sum(
+                d .* sgn ./ theta[:, ndiffs + 1] .* beta_extended .* phi[:, 2:end] .*
                 ThetaD[:, 1:(end - 1)],
                 dims = 2)
             A .+= sum(
-                d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end] ./ theta_ndiffs, dims = 2)
-            B = sum(d .* dC, dims = 2)
-            C = sum(dC, dims = 2)
+                d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end] ./ theta[:, ndiffs + 1], dims = 2)
+            B .= sum(d .* dC, dims = 2)
+            C .= sum(dC, dims = 2)
 
             countrate = B ./ C
             chisq = (A .- B .^ 2 ./ C) ./ scale
