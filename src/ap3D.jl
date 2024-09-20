@@ -397,14 +397,13 @@ function sutr_aw(
                 # in the covariance matrix for stability
                 # The uncertainty and chi squared value will need to be scaled back later.
                 @views scale .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
-                @views beta .= -read_var .* ones(npix, ndiffs - 1)
+                @views beta .= -read_var
 
                 beta ./= scale
 
                 # Mask resultant differences that should be ignored.  This is half
                 # of what we need to do to mask these resultant differences; the
                 # rest comes later.
-
                 @views beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
             end
 
