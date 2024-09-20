@@ -461,14 +461,18 @@ function sutr_aw(
             #     (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:(end - 1), :] .* PhiD)
 
             @timeit "summary" @views begin
-                # {\cal A}, {\cal B}, {\cal C} in the paper
-                sum_second_dim!(A,
-                    2 .*
-                    (d .* sgn .* beta_extended .* phi[:, 2:end] .* ThetaD[:, 1:(end - 1)] .+
-                     d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end]) ./
-                    theta[:, ndiffs + 1])
-                sum_second_dim!(B, d .* dC)
-                sum_second_dim!(C, dC)
+                A .= 0
+                B .= 0
+                C .= 0
+                for i in 1:ndiffs
+                    A .+= 2 .*
+                          (d[:, i] .* sgn[:, i] .* beta_extended[:, i] .* phi[:, i + 1] .*
+                           ThetaD[:, i] .+
+                           d[:, i] .^ 2 .* theta[:, i] .* phi[:, i + 1]) ./
+                          theta[:, ndiffs + 1]
+                    B .+= d[:, i] .* dC[:, i]
+                    C .+= dC[:, i]
+                end
             end
 
             @timeit "writes" begin
@@ -482,14 +486,4 @@ function sutr_aw(
     end
 
     return rates, final_vars .^ (-1), final_chisqs
-end
-
-"""
-    Equivalent to `out = sum(arr, dims=2)`, but without allocation.
-"""
-function sum_second_dim!(out, arr)
-    out .= 0
-    for i in 1:size(arr, 2), j in 1:size(arr, 1)
-        out[j] += arr[j, i]
-    end
 end
