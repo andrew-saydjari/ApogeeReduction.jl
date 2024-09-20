@@ -1,7 +1,6 @@
 # Handling the 3D data cube
 using LinearAlgebra: SymTridiagonal, Diagonal
 using Statistics: mean
-using TimerOutputs
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -334,7 +333,6 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
     return final_countrates, final_vars .^ (-1), final_chisqs
 end
 
-## Andrew should speed this up a bit, excess allocs
 function sutr_aw(
         datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
     # Last editted by Kevin McKinnon on Aug 20, 2024 
@@ -366,7 +364,7 @@ function sutr_aw(
     theta = ones(Float64, npix, ndiffs + 1)
     phi = ones(Float64, npix, ndiffs + 1)
     Phi = zeros(Float64, npix, ndiffs)
-    PhiD = zeros(Float64, npix, ndiffs)
+    #PhiD = zeros(Float64, npix, ndiffs)
     Theta = zeros(Float64, npix, ndiffs)
     ThetaD = zeros(Float64, npix, ndiffs + 1)
     scale = Vector{Float64}(undef, npix)
@@ -382,7 +380,7 @@ function sutr_aw(
     sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
-    @timeit "main loop" for c_ind in axes(dimages, 2)
+    for c_ind in axes(dimages, 2)
         @views diffs .= dimages[:, c_ind, :]
         @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
         @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
@@ -391,7 +389,7 @@ function sutr_aw(
         # initial guess
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
 
-        @timeit "refine iterative" for _ in 1:n_repeat
+        for _ in 1:n_repeat
             # scale is the same at alpha in the paper, but we divide it out each Elements
             # in the covariance matrix for stability
             # The uncertainty and chi squared value will need to be scaled back later.
