@@ -383,10 +383,10 @@ function sutr_aw(
 
     #slice the datacube to analyze each row sequentially to keep runtime down
     @timeit "main loop" for c_ind in axes(dimages, 2)
-        diffs .= dimages[:, c_ind, :]
-        read_var .= readVarMat[:, c_ind] # TODO make not row vector
-        diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
-        d = (diffs .* diffs2use) #TODO make non-adjoint
+        @views diffs .= dimages[:, c_ind, :]
+        @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
+        @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
+        d .= (diffs .* diffs2use) #TODO make non-adjoint
 
         # initial guess
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
@@ -452,8 +452,8 @@ function sutr_aw(
 
                 # C' in the paper
                 @views dC .= sgn ./ theta[:, ndiffs + 1] .*
-                             (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
-                dC .*= diffs2use
+                             (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi) .*
+                             diffs2use
             end
 
             # TODO?
@@ -462,13 +462,13 @@ function sutr_aw(
 
             @timeit "summary" @views begin
                 # {\cal A}, {\cal B}, {\cal C} in the paper
-                A .= 2 * sum(
-                    d .* sgn ./ theta[:, ndiffs + 1] .* beta_extended .* phi[:, 2:end] .*
-                    ThetaD[:, 1:(end - 1)] .+
-                    d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end] ./
-                    theta[:, ndiffs + 1], dims = 2)
-                B .= sum(d .* dC, dims = 2)
-                C .= sum(dC, dims = 2)
+                sum_second_dim!(A,
+                    2 .*
+                    (d .* sgn .* beta_extended .* phi[:, 2:end] .* ThetaD[:, 1:(end - 1)] .+
+                     d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end]) ./
+                    theta[:, ndiffs + 1])
+                sum_second_dim!(B, d .* dC)
+                sum_second_dim!(C, dC)
             end
 
             @timeit "writes" begin
@@ -482,4 +482,14 @@ function sutr_aw(
     end
 
     return rates, final_vars .^ (-1), final_chisqs
+end
+
+"""
+    Equivalent to `out = sum(arr, dims=2)`, but without allocation.
+"""
+function sum_second_dim!(out, arr)
+    out .= 0
+    for i in 1:size(arr, 2), j in 1:size(arr, 1)
+        out[j] += arr[j, i]
+    end
 end
