@@ -432,13 +432,14 @@ function sutr_aw(
                 #                  beta[:, i]
                 #end
 
-                Theta[:, 1] .= -theta[:, 1]
+                Theta[:, 1] .= -1 .* theta[:, 1] # the explicit -1 makes it fully broadcast
                 for i in 2:(ndiffs - 1)
                     Theta[:, i] .= Theta[:, i - 1] .* beta[:, i - 1] .+
                                    sgn[:, i] .* theta[:, i]
                 end
 
-                ThetaD[:, 2] .= -d[:, 1] .* theta[:, 1]
+                # the explicit -1 makes it fully broadcast
+                ThetaD[:, 2] .= -1 .* d[:, 1] .* theta[:, 1]
                 for i in 2:(ndiffs - 1)
                     ThetaD[:, i + 1] .= beta[:, i - 1] .* ThetaD[:, i] .+
                                         sgn[:, i] .* d[:, i] .* theta[:, i]
