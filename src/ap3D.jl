@@ -354,6 +354,17 @@ function sutr_aw(
     final_vars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     final_chisqs = zeros(Float64, size(datacube, 1), size(datacube, 2))
 
+    npix, ndiffs = size(dimages)[[1, 3]]
+
+    #working arrays TODO move these out?
+    theta = ones(Float64, npix, ndiffs + 1)
+    phi = ones(Float64, npix, ndiffs + 1)
+    sgn = ones(Float64, npix, ndiffs)
+    Phi = zeros(Float64, npix, ndiffs)
+    PhiD = zeros(Float64, npix, ndiffs)
+    Theta = zeros(Float64, npix, ndiffs)
+    ThetaD = zeros(Float64, npix, ndiffs + 1)
+
     #slice the datacube to analyze each row sequentially to keep runtime down
     for c_ind in axes(dimages, 2)
         diffs = transpose(dimages[:, c_ind, :]) # shape = (ndiffs, npix)
@@ -361,7 +372,6 @@ function sutr_aw(
         diffs2use = good_diffs[:, c_ind, :]' # shape = (ndiffs, npix)
 
         d = (diffs .* diffs2use)' #TODO make non-adjoint
-        ndiffs, npix = size(diffs)
 
         # initial guess
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 1) ./ sum(diffs2use, dims = 1)
@@ -395,17 +405,14 @@ function sutr_aw(
                                beta[:, i - 2] .^ 2 .* theta[:, i - 2]
             end
 
-            phi = ones(Float64, npix, ndiffs + 1)
             phi[:, ndiffs] .= alpha
             for i in (ndiffs - 1):-1:1
                 phi[:, i] .= alpha .* phi[:, i + 1] .-
                              beta[:, i] .^ 2 .* phi[:, i + 2]
             end
 
-            sgn = ones(Float64, npix, ndiffs)
             sgn[:, 1:2:end] .= -1
 
-            Phi = zeros(Float64, npix, ndiffs)
             for i in (ndiffs - 1):-1:1
                 Phi[:, i] .= Phi[:, i + 1] .* beta[:, i] .+
                              sgn[:, i + 1] .* beta[:, i] .* phi[:, i + 2]
@@ -414,19 +421,16 @@ function sutr_aw(
             # This one is defined later in the paper and is used for jump
             # detection and pedestal fitting.
 
-            PhiD = zeros(Float64, npix, ndiffs)
             for i in (ndiffs - 1):-1:1
                 PhiD[:, i] .= (PhiD[:, i + 1] .+
                                sgn[:, i + 1] .* d[:, i + 1] .* phi[:, i + 2]) .* beta[:, i]
             end
 
-            Theta = zeros(Float64, npix, ndiffs)
             Theta[:, 1] .= -theta[:, 1]
             for i in 2:(ndiffs - 1)
                 Theta[:, i] .= Theta[:, i - 1] .* beta[:, i - 1] .+ sgn[:, i] .* theta[:, i]
             end
 
-            ThetaD = zeros(Float64, npix, ndiffs + 1)
             ThetaD[:, 2] .= -d[:, 1] .* theta[:, 1]
             for i in 2:(ndiffs - 1)
                 ThetaD[:, i + 1] .= beta[:, i - 1] .* ThetaD[:, i] .+
