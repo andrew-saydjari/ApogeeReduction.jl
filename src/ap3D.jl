@@ -359,6 +359,8 @@ function sutr_aw(
         diffs = transpose(dimages[:, c_ind, :]) # shape = (ndiffs, npix)
         read_var = readVarMat[:, c_ind]' # TODO make not row vector
         diffs2use = good_diffs[:, c_ind, :]' # shape = (ndiffs, npix)
+
+        d = (diffs .* diffs2use)' #TODO make non-adjoint
         ndiffs, npix = size(diffs)
 
         # initial guess
@@ -366,15 +368,15 @@ function sutr_aw(
 
         for _ in 1:n_repeat
             #TODO eliminate and make non-adjoint
-            countrateguess = (rates[:, c_ind] .* (rates[:, c_ind] .> 0))'
+            countrateguess = rates[:, c_ind] .* (rates[:, c_ind] .> 0)
 
-            alpha = countrateguess + 2read_var
-            beta = -read_var .* ones(ndiffs - 1, npix)
+            alpha = countrateguess + 2read_var'
+            beta = -read_var' .* ones(npix, ndiffs - 1)
 
             # rescale the covariance matrix to a determinant of order 1 to
             # avoid possible overflow/underflow.  The uncertainty and chi
             # squared value will need to be scaled back later.
-            scale = exp.(mean(log.(alpha), dims = 1))
+            scale = exp.(mean(log.(alpha), dims = 2))
 
             alpha ./= scale
             beta ./= scale
@@ -383,85 +385,78 @@ function sutr_aw(
             # of what we need to do to mask these resultant differences; the
             # rest comes later.
 
-            d = diffs .* diffs2use
-            beta .= beta .* diffs2use[2:end, :] .* diffs2use[1:(end - 1), :]
+            beta .*= (diffs2use[2:end, :] .* diffs2use[1:(end - 1), :])'
 
             # All definitions and formulas here are in the paper.
-            theta = ones(Float64, ndiffs + 1, npix)
-            theta[2, :] .= alpha[1, :]
+            theta = ones(Float64, npix, ndiffs + 1)
+            #TODO what is theta[:, 1]?
+            theta[:, 2] .= alpha[:, 1]
             for i in 3:(ndiffs + 1)
-                # TODO this is alpha' because countrateguess is a row vector
-                theta[i, :] .= alpha' .* theta[i - 1, :] .-
-                               beta[i - 2, :] .^ 2 .* theta[i - 2, :]
+                theta[:, i] .= alpha .* theta[:, i - 1] .-
+                               beta[:, i - 2] .^ 2 .* theta[:, i - 2]
             end
 
-            phi = ones(Float64, ndiffs + 1, npix)
-            # TODO this is alpha' because countrateguess is a row vector
-            phi[ndiffs, :] .= alpha'
+            phi = ones(Float64, npix, ndiffs + 1)
+            phi[:, ndiffs] .= alpha
             for i in (ndiffs - 1):-1:1
-                phi[i, :] .= alpha' .* phi[i + 1, :] .-
-                             beta[i, :] .^ 2 .* phi[i + 2, :]
+                phi[:, i] .= alpha .* phi[:, i + 1] .-
+                             beta[:, i] .^ 2 .* phi[:, i + 2]
             end
 
-            sgn = ones(Float64, ndiffs, npix)
-            sgn[1:2:end, :] .= -1
+            sgn = ones(Float64, npix, ndiffs)
+            sgn[:, 1:2:end] .= -1
 
-            Phi = zeros(Float64, ndiffs, npix)
+            Phi = zeros(Float64, npix, ndiffs)
             for i in (ndiffs - 1):-1:1
-                Phi[i, :] .= Phi[i + 1, :] .* beta[i, :] .+
-                             sgn[i + 1, :] .* beta[i, :] .* phi[i + 2, :]
+                Phi[:, i] .= Phi[:, i + 1] .* beta[:, i] .+
+                             sgn[:, i + 1] .* beta[:, i] .* phi[:, i + 2]
             end
 
             # This one is defined later in the paper and is used for jump
             # detection and pedestal fitting.
 
-            PhiD = zeros(Float64, ndiffs, npix)
+            PhiD = zeros(Float64, npix, ndiffs)
             for i in (ndiffs - 1):-1:1
-                PhiD[i, :] .= (PhiD[i + 1, :] .+
-                               sgn[i + 1, :] .* d[i + 1, :] .* phi[i + 2, :]) .* beta[i, :]
+                PhiD[:, i] .= (PhiD[:, i + 1] .+
+                               sgn[:, i + 1] .* d[:, i + 1] .* phi[:, i + 2]) .* beta[:, i]
             end
 
-            Theta = zeros(Float64, ndiffs, npix)
-            Theta[1, :] .= -theta[1, :]
+            Theta = zeros(Float64, npix, ndiffs)
+            Theta[:, 1] .= -theta[:, 1]
             for i in 2:(ndiffs - 1)
-                Theta[i, :] .= Theta[i - 1, :] .* beta[i - 1, :] .+ sgn[i, :] .* theta[i, :]
+                Theta[:, i] .= Theta[:, i - 1] .* beta[:, i - 1] .+ sgn[:, i] .* theta[:, i]
             end
 
-            ThetaD = zeros(Float64, ndiffs + 1, npix)
-            ThetaD[2, :] .= -d[1, :] .* theta[1, :]
+            ThetaD = zeros(Float64, npix, ndiffs + 1)
+            ThetaD[:, 2] .= -d[:, 1] .* theta[:, 1]
             for i in 2:(ndiffs - 1)
-                ThetaD[i + 1, :] .= beta[i - 1, :] .* ThetaD[i, :] .+
-                                    sgn[i, :] .* d[i, :] .* theta[i, :]
+                ThetaD[:, i + 1] .= beta[:, i - 1] .* ThetaD[:, i] .+
+                                    sgn[:, i] .* d[:, i] .* theta[:, i]
             end
 
-            beta_extended = ones(Float64, ndiffs, npix)
-            beta_extended[2:end, :] .= beta
+            beta_extended = ones(Float64, npix, ndiffs)
+            beta_extended[:, 2:end] .= beta
 
             # C' and B' in the paper
 
-            theta_ndiffs = theta[ndiffs + 1, :]
-            theta_ndiffs = reshape(theta_ndiffs, (1, size(theta_ndiffs, 1)))
+            theta_ndiffs = theta[:, ndiffs + 1]
             dC = sgn ./ theta_ndiffs .*
-                 (phi[2:end, :] .* Theta .+ theta[1:(end - 1), :] .* Phi)
-            dC .*= diffs2use
+                 (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
+            dC .*= diffs2use' #TODO eliminate adjoint?
 
-            dB = sgn ./ theta_ndiffs .*
-                 (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:(end - 1), :] .* PhiD)
+            # TODO?
+            #dB = sgn ./ theta_ndiffs .*
+            #     (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:(end - 1), :] .* PhiD)
 
             # {\cal A}, {\cal B}, {\cal C} in the paper
             A = 2 * sum(
-                d .* sgn ./ theta_ndiffs .* beta_extended .* phi[2:end, :] .*
-                ThetaD[1:(end - 1), :],
-                dims = 1)
+                d .* sgn ./ theta_ndiffs .* beta_extended .* phi[:, 2:end] .*
+                ThetaD[:, 1:(end - 1)],
+                dims = 2)
             A .+= sum(
-                d .^ 2 .* theta[1:(end - 1), :] .* phi[2:end, :] ./ theta_ndiffs, dims = 1)
-
-            B = sum(d .* dC, dims = 1)
-            C = sum(dC, dims = 1)
-
-            #@show size(A)
-            #@show size(B)
-            #@show size(C)
+                d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end] ./ theta_ndiffs, dims = 2)
+            B = sum(d .* dC, dims = 2)
+            C = sum(dC, dims = 2)
 
             countrate = B ./ C
             chisq = (A .- B .^ 2 ./ C) ./ scale
@@ -469,9 +464,9 @@ function sutr_aw(
 
             #use first countrate measurement to improve alpha,beta definitions
             #and extract better, unbiased countrate
-            rates[:, c_ind] .= countrate[begin, :]
-            final_vars[:, c_ind] .= var[begin, :]
-            final_chisqs[:, c_ind] = chisq[begin, :]
+            rates[:, c_ind] .= countrate
+            final_vars[:, c_ind] .= var
+            final_chisqs[:, c_ind] = chisq
         end
     end
 
