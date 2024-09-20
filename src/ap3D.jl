@@ -397,7 +397,7 @@ function sutr_aw(
                 # in the covariance matrix for stability
                 # The uncertainty and chi squared value will need to be scaled back later.
                 @views scale .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
-                @views beta .= -read_var
+                @views beta .= -1 .* read_var # the explicit -1 makes it fully broadcast
 
                 beta ./= scale
 
@@ -479,7 +479,7 @@ function sutr_aw(
                 #and extract better, unbiased countrate
                 rates[:, c_ind] .= B ./ C
                 final_vars[:, c_ind] .= scale ./ C
-                final_chisqs[:, c_ind] = (A .- B .^ 2 ./ C) ./ scale
+                final_chisqs[:, c_ind] .= (A .- B .^ 2 ./ C) ./ scale
             end
         end
     end
