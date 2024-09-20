@@ -1,6 +1,7 @@
 # Handling the 3D data cube
 using LinearAlgebra: SymTridiagonal, Diagonal
 using Statistics: mean
+using TimerOutputs
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -356,7 +357,12 @@ function sutr_aw(
 
     npix, ndiffs = size(dimages)[[1, 3]]
 
-    #working arrays TODO move these out?
+    #TODO rename some of these?
+    diffs = zeros(Float64, npix, ndiffs)
+    read_var = zeros(Float64, npix)
+    diffs2use = zeros(Bool, npix, ndiffs)
+    d = zeros(Float64, npix, ndiffs)
+
     theta = ones(Float64, npix, ndiffs + 1)
     phi = ones(Float64, npix, ndiffs + 1)
     Phi = zeros(Float64, npix, ndiffs)
@@ -376,19 +382,18 @@ function sutr_aw(
     sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
-    for c_ind in axes(dimages, 2)
-        diffs = dimages[:, c_ind, :]
-        read_var = readVarMat[:, c_ind]' # TODO make not row vector
-        diffs2use = good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
-
+    @timeit "main loop" for c_ind in axes(dimages, 2)
+        diffs .= dimages[:, c_ind, :]
+        read_var .= readVarMat[:, c_ind] # TODO make not row vector
+        diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
         d = (diffs .* diffs2use) #TODO make non-adjoint
 
         # initial guess
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
 
-        for _ in 1:n_repeat
-            alpha .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) + 2read_var'
-            beta .= -read_var' .* ones(npix, ndiffs - 1)
+        @timeit "refine iterative" for _ in 1:n_repeat
+            alpha .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) + 2read_var
+            beta .= -read_var .* ones(npix, ndiffs - 1)
 
             # rescale the covariance matrix to a determinant of order 1 to
             # avoid possible overflow/underflow.  The uncertainty and chi
