@@ -426,12 +426,11 @@ function sutr_aw(
 
                 # This one is defined later in the paper and is used for jump
                 # detection and pedestal fitting.
-
-                for i in (ndiffs - 1):-1:1
-                    PhiD[:, i] .= (PhiD[:, i + 1] .+
-                                   sgn[:, i + 1] .* d[:, i + 1] .* phi[:, i + 2]) .*
-                                  beta[:, i]
-                end
+                #for i in (ndiffs - 1):-1:1
+                #    PhiD[:, i] .= (PhiD[:, i + 1] .+
+                #                   sgn[:, i + 1] .* d[:, i + 1] .* phi[:, i + 2]) .*
+                #                  beta[:, i]
+                #end
 
                 Theta[:, 1] .= -theta[:, 1]
                 for i in 2:(ndiffs - 1)
