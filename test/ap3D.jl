@@ -19,35 +19,29 @@
     outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5)
     outdat ./= gainMat
 
-    for sutr in [ApogeeReduction.sutr_aw, ApogeeReduction.sutr_tb]
-        println("Testing $sutr")
-        @time dimage, ivarimage, chisqimage = sutr(outdat, gainMat, readVarMat)
-        display(dimage[1:3, 1:3])
-        display(ivarimage[1:3, 1:3])
-        display(chisqimage[1:3, 1:3])
-        #    dimage, ivarimage, chisqimage = dcs(outdat,gainMat,readVarMat)
+    @time dimage, ivarimage, chisqimage = ApogeeReduction.sutr_tb(
+        outdat, gainMat, readVarMat)
 
-        flux_diffs = (dimage .- true_im)
-        #zscores = flux_diffs .* sqrt.(ivarimage)
+    flux_diffs = (dimage .- true_im)
+    zscores = flux_diffs .* sqrt.(ivarimage)
 
-        #full_mean_z = mean(zscores)
-        #full_std_z = std(zscores)
-        #flux_mean_z = mean(zscores, dims = 2)
-        #flux_std_z = std(zscores, dims = 2)
-        flux_mean = mean(dimage, dims = 2)
-        flux_diff_mean = mean(flux_diffs, dims = 2)
-        #flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
+    full_mean_z = mean(zscores)
+    full_std_z = std(zscores)
+    flux_mean_z = mean(zscores, dims = 2)
+    flux_std_z = std(zscores, dims = 2)
+    flux_mean = mean(dimage, dims = 2)
+    flux_diff_mean = mean(flux_diffs, dims = 2)
+    flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
 
-        #expected outputs when n_reads=20, seed=101, extract_method=sutr_tb
-        #@test isapprox(full_mean_z, -0.05, atol = 0.001)
-        #@test isapprox(full_std_z, 1.0427, atol = 0.001)
-        #@test isapprox(flux_mean_z[begin], -0.1298, atol = 0.06)
-        #@test isapprox(flux_mean_z[end], -0.04463, atol = 0.08)
-        #@test isapprox(flux_std_z[begin], 1.0104, atol = 0.01)
-        #@test isapprox(flux_std_z[end], 1.03251, atol = 0.06)
-        @test isapprox(flux_mean[begin], -0.002658, atol = 0.01)
-        @test isapprox(flux_mean[end], 9998.98, atol = 3)
-        #@test isapprox(flux_err_mean[begin], 0.20749, atol = 0.003)
-        #@test isapprox(flux_err_mean[end], 23.57064, atol = 0.003)
-    end
+    #expected outputs when n_reads=20, seed=101, extract_method=sutr_tb
+    @test isapprox(full_mean_z, -0.05, atol = 0.001)
+    @test isapprox(full_std_z, 1.0427, atol = 0.001)
+    @test isapprox(flux_mean_z[begin], -0.1298, atol = 0.06)
+    @test isapprox(flux_mean_z[end], -0.04463, atol = 0.08)
+    @test isapprox(flux_std_z[begin], 1.0104, atol = 0.01)
+    @test isapprox(flux_std_z[end], 1.03251, atol = 0.06)
+    @test isapprox(flux_mean[begin], -0.002658, atol = 0.01)
+    @test isapprox(flux_mean[end], 9998.98, atol = 3)
+    @test isapprox(flux_err_mean[begin], 0.20749, atol = 0.003)
+    @test isapprox(flux_err_mean[end], 23.57064, atol = 0.003)
 end
