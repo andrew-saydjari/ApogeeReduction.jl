@@ -388,8 +388,7 @@ function sutr_aw(
             beta .*= (diffs2use[2:end, :] .* diffs2use[1:(end - 1), :])'
 
             # All definitions and formulas here are in the paper.
-            theta = ones(Float64, npix, ndiffs + 1)
-            #TODO what is theta[:, 1]?
+            theta[:, 1] .= 1
             theta[:, 2] .= alpha[:, 1]
             for i in 3:(ndiffs + 1)
                 theta[:, i] .= alpha .* theta[:, i - 1] .-
