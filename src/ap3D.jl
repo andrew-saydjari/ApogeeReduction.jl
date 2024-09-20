@@ -355,19 +355,18 @@ function sutr_aw(
     final_chisqs = zeros(Float64, size(datacube, 1), size(datacube, 2))
 
     #slice the datacube to analyze each row sequentially to keep runtime down
-    for s_ind in 1:size(dimages, 1)
-        diffs = transpose(dimages[s_ind, :, :]) # shape = (ndiffs, npix)
-        read_var = readVarMat[s_ind, :] # shape = (npix)
-        read_var = reshape(read_var, (1, size(read_var, 1)))
-        diffs2use = transpose(good_diffs[s_ind, :, :]) # shape = (ndiffs, npix)
+    for c_ind in axes(dimages, 2)
+        diffs = transpose(dimages[:, c_ind, :]) # shape = (ndiffs, npix)
+        read_var = readVarMat[:, c_ind]' # TODO make not row vector
+        diffs2use = good_diffs[:, c_ind, :]' # shape = (ndiffs, npix)
         ndiffs, npix = size(diffs)
 
         # initial guess
-        rates[s_ind, :] = sum(diffs .* diffs2use, dims = 1) ./ sum(diffs2use, dims = 1)
+        rates[:, c_ind] = sum(diffs .* diffs2use, dims = 1) ./ sum(diffs2use, dims = 1)
 
         for _ in 1:n_repeat
             #TODO eliminate and make non-adjoint
-            countrateguess = (rates[s_ind, :] .* (rates[s_ind, :] .> 0))'
+            countrateguess = (rates[:, c_ind] .* (rates[:, c_ind] .> 0))'
 
             alpha = countrateguess + 2read_var
             beta = -read_var .* ones(ndiffs - 1, npix)
@@ -470,9 +469,9 @@ function sutr_aw(
 
             #use first countrate measurement to improve alpha,beta definitions
             #and extract better, unbiased countrate
-            rates[s_ind, :] .= countrate[begin, :]
-            final_vars[s_ind, :] .= var[begin, :]
-            final_chisqs[s_ind, :] = chisq[begin, :]
+            rates[:, c_ind] .= countrate[begin, :]
+            final_vars[:, c_ind] .= var[begin, :]
+            final_chisqs[:, c_ind] = chisq[begin, :]
         end
     end
 
