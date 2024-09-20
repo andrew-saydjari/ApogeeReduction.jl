@@ -392,92 +392,99 @@ function sutr_aw(
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
 
         @timeit "refine iterative" for _ in 1:n_repeat
-            alpha .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) + 2read_var
-            beta .= -read_var .* ones(npix, ndiffs - 1)
+            @timeit "setup" begin
+                @views alpha .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
+                @views beta .= -read_var .* ones(npix, ndiffs - 1)
 
-            # rescale the covariance matrix to a determinant of order 1 to
-            # avoid possible overflow/underflow.  The uncertainty and chi
-            # squared value will need to be scaled back later.
-            scale .= alpha #TODO make less silly
+                # rescale the covariance matrix to a determinant of order 1 to
+                # avoid possible overflow/underflow.  The uncertainty and chi
+                # squared value will need to be scaled back later.
+                scale .= alpha #TODO make less silly
 
-            alpha ./= scale
-            beta ./= scale
+                alpha ./= scale
+                beta ./= scale
 
-            # Mask resultant differences that should be ignored.  This is half
-            # of what we need to do to mask these resultant differences; the
-            # rest comes later.
+                # Mask resultant differences that should be ignored.  This is half
+                # of what we need to do to mask these resultant differences; the
+                # rest comes later.
 
-            beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
-
-            # All definitions and formulas here are in the paper.
-            theta[:, 1] .= 1
-            theta[:, 2] .= alpha[:, 1]
-            for i in 3:(ndiffs + 1)
-                theta[:, i] .= alpha .* theta[:, i - 1] .-
-                               beta[:, i - 2] .^ 2 .* theta[:, i - 2]
+                beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
             end
 
-            phi[:, ndiffs] .= alpha
-            for i in (ndiffs - 1):-1:1
-                phi[:, i] .= alpha .* phi[:, i + 1] .-
-                             beta[:, i] .^ 2 .* phi[:, i + 2]
+            @timeit "recursion relations" @views begin
+                # All definitions and formulas here are in the paper.
+                theta[:, 1] .= 1
+                theta[:, 2] .= alpha[:, 1]
+                for i in 3:(ndiffs + 1)
+                    theta[:, i] .= alpha .* theta[:, i - 1] .-
+                                   beta[:, i - 2] .^ 2 .* theta[:, i - 2]
+                end
+
+                phi[:, ndiffs] .= alpha
+                for i in (ndiffs - 1):-1:1
+                    phi[:, i] .= alpha .* phi[:, i + 1] .-
+                                 beta[:, i] .^ 2 .* phi[:, i + 2]
+                end
+
+                for i in (ndiffs - 1):-1:1
+                    Phi[:, i] .= Phi[:, i + 1] .* beta[:, i] .+
+                                 sgn[:, i + 1] .* beta[:, i] .* phi[:, i + 2]
+                end
+
+                # This one is defined later in the paper and is used for jump
+                # detection and pedestal fitting.
+
+                for i in (ndiffs - 1):-1:1
+                    PhiD[:, i] .= (PhiD[:, i + 1] .+
+                                   sgn[:, i + 1] .* d[:, i + 1] .* phi[:, i + 2]) .*
+                                  beta[:, i]
+                end
+
+                Theta[:, 1] .= -theta[:, 1]
+                for i in 2:(ndiffs - 1)
+                    Theta[:, i] .= Theta[:, i - 1] .* beta[:, i - 1] .+
+                                   sgn[:, i] .* theta[:, i]
+                end
+
+                ThetaD[:, 2] .= -d[:, 1] .* theta[:, 1]
+                for i in 2:(ndiffs - 1)
+                    ThetaD[:, i + 1] .= beta[:, i - 1] .* ThetaD[:, i] .+
+                                        sgn[:, i] .* d[:, i] .* theta[:, i]
+                end
             end
 
-            for i in (ndiffs - 1):-1:1
-                Phi[:, i] .= Phi[:, i + 1] .* beta[:, i] .+
-                             sgn[:, i + 1] .* beta[:, i] .* phi[:, i + 2]
+            @timeit "other" begin
+                beta_extended[:, 2:end] .= beta
+
+                # C' and B' in the paper
+
+                dC = sgn ./ theta[:, ndiffs + 1] .*
+                     (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
+                dC .*= diffs2use
             end
-
-            # This one is defined later in the paper and is used for jump
-            # detection and pedestal fitting.
-
-            for i in (ndiffs - 1):-1:1
-                PhiD[:, i] .= (PhiD[:, i + 1] .+
-                               sgn[:, i + 1] .* d[:, i + 1] .* phi[:, i + 2]) .* beta[:, i]
-            end
-
-            Theta[:, 1] .= -theta[:, 1]
-            for i in 2:(ndiffs - 1)
-                Theta[:, i] .= Theta[:, i - 1] .* beta[:, i - 1] .+ sgn[:, i] .* theta[:, i]
-            end
-
-            ThetaD[:, 2] .= -d[:, 1] .* theta[:, 1]
-            for i in 2:(ndiffs - 1)
-                ThetaD[:, i + 1] .= beta[:, i - 1] .* ThetaD[:, i] .+
-                                    sgn[:, i] .* d[:, i] .* theta[:, i]
-            end
-
-            beta_extended[:, 2:end] .= beta
-
-            # C' and B' in the paper
-
-            dC = sgn ./ theta[:, ndiffs + 1] .*
-                 (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
-            dC .*= diffs2use
 
             # TODO?
             #dB = sgn ./ theta_ndiffs .*
             #     (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:(end - 1), :] .* PhiD)
 
-            # {\cal A}, {\cal B}, {\cal C} in the paper
-            A .= 2 * sum(
-                d .* sgn ./ theta[:, ndiffs + 1] .* beta_extended .* phi[:, 2:end] .*
-                ThetaD[:, 1:(end - 1)],
-                dims = 2)
-            A .+= sum(
-                d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end] ./ theta[:, ndiffs + 1], dims = 2)
-            B .= sum(d .* dC, dims = 2)
-            C .= sum(dC, dims = 2)
+            @timeit "summary" @views begin
+                # {\cal A}, {\cal B}, {\cal C} in the paper
+                A .= 2 * sum(
+                    d .* sgn ./ theta[:, ndiffs + 1] .* beta_extended .* phi[:, 2:end] .*
+                    ThetaD[:, 1:(end - 1)] .+
+                    d .^ 2 .* theta[:, 1:(end - 1)] .* phi[:, 2:end] ./
+                    theta[:, ndiffs + 1], dims = 2)
+                B .= sum(d .* dC, dims = 2)
+                C .= sum(dC, dims = 2)
+            end
 
-            countrate = B ./ C
-            chisq = (A .- B .^ 2 ./ C) ./ scale
-            var = scale ./ C
-
-            #use first countrate measurement to improve alpha,beta definitions
-            #and extract better, unbiased countrate
-            rates[:, c_ind] .= countrate
-            final_vars[:, c_ind] .= var
-            final_chisqs[:, c_ind] = chisq
+            @timeit "writes" begin
+                #use first countrate measurement to improve alpha,beta definitions
+                #and extract better, unbiased countrate
+                rates[:, c_ind] .= B ./ C
+                final_vars[:, c_ind] .= scale ./ C
+                final_chisqs[:, c_ind] = (A .- B .^ 2 ./ C) ./ scale
+            end
         end
     end
 
