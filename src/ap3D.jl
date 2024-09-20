@@ -392,22 +392,19 @@ function sutr_aw(
         rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
 
         @timeit "refine iterative" for _ in 1:n_repeat
-            @timeit "setup" begin
-                # scale is the same at alpha in the paper, but we divide it out each Elements
-                # in the covariance matrix for stability
-                # The uncertainty and chi squared value will need to be scaled back later.
-                @views scale .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
-                @views beta .= -1 .* read_var # the explicit -1 makes it fully broadcast
+            # scale is the same at alpha in the paper, but we divide it out each Elements
+            # in the covariance matrix for stability
+            # The uncertainty and chi squared value will need to be scaled back later.
+            @views scale .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
+            @views beta .= -1 .* read_var # the explicit -1 makes it fully broadcast
+            beta ./= scale
 
-                beta ./= scale
+            # Mask resultant differences that should be ignored.  This is half
+            # of what we need to do to mask these resultant differences; the
+            # rest comes later.
+            @views beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
 
-                # Mask resultant differences that should be ignored.  This is half
-                # of what we need to do to mask these resultant differences; the
-                # rest comes later.
-                @views beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
-            end
-
-            @timeit "recursion relations" @views begin
+            @views begin # recurence relations
                 # All definitions and formulas here are in the paper.
                 theta[:, 1:2] .= 1
                 for i in 3:(ndiffs + 1)
@@ -446,20 +443,18 @@ function sutr_aw(
                 end
             end
 
-            @timeit "other" begin
-                beta_extended[:, 2:end] .= beta
+            beta_extended[:, 2:end] .= beta
 
-                # C' in the paper
-                @views dC .= sgn ./ theta[:, ndiffs + 1] .*
-                             (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi) .*
-                             diffs2use
-            end
+            # C' in the paper
+            @views dC .= sgn ./ theta[:, ndiffs + 1] .*
+                         (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi) .*
+                         diffs2use
 
             # TODO?
             #dB = sgn ./ theta_ndiffs .*
             #     (phi[2:end, :] .* ThetaD[2:end, :] .+ theta[1:(end - 1), :] .* PhiD)
 
-            @timeit "summary" @views begin
+            @views begin # {\cal A}, {\cal B}, {\cal C} in the paper
                 A .= 0
                 B .= 0
                 C .= 0
@@ -474,13 +469,11 @@ function sutr_aw(
                 end
             end
 
-            @timeit "writes" begin
-                #use first countrate measurement to improve alpha,beta definitions
-                #and extract better, unbiased countrate
-                rates[:, c_ind] .= B ./ C
-                final_vars[:, c_ind] .= scale ./ C
-                final_chisqs[:, c_ind] .= (A .- B .^ 2 ./ C) ./ scale
-            end
+            #use first countrate measurement to improve alpha,beta definitions
+            #and extract better, unbiased countrate
+            rates[:, c_ind] .= B ./ C
+            final_vars[:, c_ind] .= scale ./ C
+            final_chisqs[:, c_ind] .= (A .- B .^ 2 ./ C) ./ scale
         end
     end
 
