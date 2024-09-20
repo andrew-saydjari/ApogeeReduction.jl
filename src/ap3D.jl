@@ -409,7 +409,7 @@ function sutr_aw(
                 # of what we need to do to mask these resultant differences; the
                 # rest comes later.
 
-                beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
+                @views beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
             end
 
             @timeit "recursion relations" @views begin
@@ -457,10 +457,9 @@ function sutr_aw(
             @timeit "other" begin
                 beta_extended[:, 2:end] .= beta
 
-                # C' and B' in the paper
-
-                dC .= sgn ./ theta[:, ndiffs + 1] .*
-                      (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
+                # C' in the paper
+                @views dC .= sgn ./ theta[:, ndiffs + 1] .*
+                             (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
                 dC .*= diffs2use
             end
 
