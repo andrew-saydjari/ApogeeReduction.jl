@@ -55,125 +55,8 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     ivarimage = 1 ./ (2 .* readVarMat .+ abs.(dimage))
     return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb
 end
-
-"""
-    TODO
-
-# Arguments
-- `datacube` has shape (npix_x,npix_y,n_reads)
-- `gainMat`: The gain for each pixel (npix_x,npix_y)
-- `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
-
-# Keyword Arguments
-- firstind TODO
-- good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
-  not provided, all diffs will be used.
-
-!!! note
-    This assumes that all images are sequential (ie separated by the same read time).
-
-This is loosely based on the algorithm described in 
-[Brandt 2024](https://doi.org/10.1088/1538-3873/ad38d9), but with significant simplifications arises 
-from the fact that all reads are sequential and that we don't need to group reads to save bandwidth,
- unlike JWST.
-"""
-function sutr(
-        dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_iter = 2)
-    dimages = gainMat .* diff(dcubedat[:, :, firstind:end], dims = 3)
-
-    # TODO use good_diffs
-    if isnothing(good_diffs)
-        good_diffs = ones(Bool, size(dimages))
-    end
-    ndiffs = size(dimages, 3)
-
-    # this the starting guess, it will get refined to approach the maximum likelyhood estimate
-    rate = mean(dimages; dims = 3)
-    rate[rate .< 0] .= 0
-
-    # working variables allocate here and reuse inside loop
-    ones_vec = ones(ndiffs)
-    α = 0.0
-    β = 0.0
-    c_prime = ones(ndiffs - 1)
-    d_prime = ones(ndiffs)
-    x = ones(ndiffs)
-    residuals = ones(ndiffs)
-
-    # returned arrays
-    ivars = Matrix{Float64}(undef, size(dimages)[1:2])
-    chi2s = Matrix{Float64}(undef, size(dimages)[1:2])
-    for pixel_ind in CartesianIndices(dimages[:, :, 1])
-        β = -readVarMat[pixel_ind]
-
-        for _ in 1:n_iter
-            α = 2 * readVarMat[pixel_ind] + rate[pixel_ind]
-            solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, ones_vec)
-            denom = sum(x)
-
-            solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, dimages[pixel_ind, :])
-            rate[pixel_ind] = sum(x) / denom
-        end
-
-        solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, dimages[pixel_ind, :])
-        ivars[pixel_ind] = 1 / (dimages[pixel_ind, :]' * x)
-
-        residuals .= dimages[pixel_ind, :] .- rate[pixel_ind]
-        solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, residuals)
-        chi2s[pixel_ind] = residuals' * x
-    end
-    rate, ivars, chi2s
-end
-
-"""
-    solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, b)
-
-Computes C^{-1}b for a tridiagonal Toeplitz matrix C, with diagonal value α and off-diagonal value 
-β.  When forward modelling photon counts given reads at a steady interal (sequential), assuming the 
-Poisson errors can be approximated as Gaussian, the read noise is constant, and flux is unchanging, 
-the covariance matrix, C,  corresponding to the data  is a tridiagonal Toeplitz matrix. 
-
-In computing the maximum likelihood estimate of the rate, the χ², and the estimated error of the 
-MLE, we need to solve the equation Cx = b. This function solves this equation given the above 
-assumptions about C using the Thomas algorithm.
-
-Arguments:
-- `x` is the output vector
-- `c_prime` and `d_prime` are working vectors (notation borrowed from wikipedia)
-- `α` is the diagonal value of the tridiagonal Toeplitz matrix
-- `β` is the off-diagonal value of the tridiagonal Toeplitz matrix
-- `b` is the right-hand side of the equation
-"""
-function solve_tridiagonal_toeplitz!(x, c_prime, d_prime, α, β, b)
-    #C = SymTridiagonal(α * ones(length(b)), β * ones(length(b) - 1))
-    #return C \ b
-
-    n = length(b)
-
-    # Forward elimination
-    c_prime[1] = β / α
-    d_prime[1] = b[1] / α
-    for i in 2:(n - 1)
-        denominator = α - β * c_prime[i - 1]
-        c_prime[i] = β / denominator
-        d_prime[i] = (b[i] - β * d_prime[i - 1]) / denominator
-    end
-    d_prime[n] = (b[n] - β * d_prime[n - 1]) / (α - β * c_prime[n - 1])
-
-    # Back substitution
-    x[n] = d_prime[n]
-    for i in (n - 1):-1:1
-        x[i] = d_prime[i] - c_prime[i] * x[i + 1]
-    end
-end
-
 ## Andrew should speed this up a bit, excess allocs
-function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
-    # Last editted by Kevin McKinnon on Aug 20, 2024 
-    # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
-    # datacube has shape (npix_x,npix_y,n_reads)
-    # read_var_mat has shape (npix_x,npix_y)
-    # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
+function sutr_old(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothing)
 
     # assumes all images are sequential (ie separated by one read time)
     dimages = gainMat .*
@@ -333,7 +216,27 @@ function sutr_tb(dcubedat, gainMat, readVarMat; firstind = 1, good_diffs = nothi
     return final_countrates, final_vars .^ (-1), final_chisqs
 end
 
-function sutr_aw(
+"""
+    sutr_tb(datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
+
+# Arguments
+- `datacube` has shape (npix_x,npix_y,n_reads)
+- `gainMat`: The gain for each pixel (npix_x,npix_y)
+- `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
+
+# Keyword Arguments
+- firstind 
+- good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
+  not provided, all diffs will be used.
+- 
+
+!!! note
+    This assumes that all images are sequential (ie separated by the same read time).
+
+Created by Kevin McKinnon and sped up by Adam Wheeler. 
+Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
+"""
+function sutr_tb(
         datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
     # Last editted by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
