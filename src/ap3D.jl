@@ -359,22 +359,24 @@ function sutr_aw(
     #working arrays TODO move these out?
     theta = ones(Float64, npix, ndiffs + 1)
     phi = ones(Float64, npix, ndiffs + 1)
-    sgn = ones(Float64, npix, ndiffs)
     Phi = zeros(Float64, npix, ndiffs)
     PhiD = zeros(Float64, npix, ndiffs)
     Theta = zeros(Float64, npix, ndiffs)
     ThetaD = zeros(Float64, npix, ndiffs + 1)
+    # define this one here
+    sgn = ones(Float64, npix, ndiffs)
+    sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
     for c_ind in axes(dimages, 2)
-        diffs = transpose(dimages[:, c_ind, :]) # shape = (ndiffs, npix)
+        diffs = dimages[:, c_ind, :]
         read_var = readVarMat[:, c_ind]' # TODO make not row vector
-        diffs2use = good_diffs[:, c_ind, :]' # shape = (ndiffs, npix)
+        diffs2use = good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
 
-        d = (diffs .* diffs2use)' #TODO make non-adjoint
+        d = (diffs .* diffs2use) #TODO make non-adjoint
 
         # initial guess
-        rates[:, c_ind] = sum(diffs .* diffs2use, dims = 1) ./ sum(diffs2use, dims = 1)
+        rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
 
         for _ in 1:n_repeat
             #TODO eliminate and make non-adjoint
@@ -395,7 +397,7 @@ function sutr_aw(
             # of what we need to do to mask these resultant differences; the
             # rest comes later.
 
-            beta .*= (diffs2use[2:end, :] .* diffs2use[1:(end - 1), :])'
+            beta .*= (diffs2use[:, 2:end] .* diffs2use[:, 1:(end - 1)])
 
             # All definitions and formulas here are in the paper.
             theta[:, 1] .= 1
@@ -410,8 +412,6 @@ function sutr_aw(
                 phi[:, i] .= alpha .* phi[:, i + 1] .-
                              beta[:, i] .^ 2 .* phi[:, i + 2]
             end
-
-            sgn[:, 1:2:end] .= -1
 
             for i in (ndiffs - 1):-1:1
                 Phi[:, i] .= Phi[:, i + 1] .* beta[:, i] .+
@@ -445,7 +445,7 @@ function sutr_aw(
             theta_ndiffs = theta[:, ndiffs + 1]
             dC = sgn ./ theta_ndiffs .*
                  (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
-            dC .*= diffs2use' #TODO eliminate adjoint?
+            dC .*= diffs2use
 
             # TODO?
             #dB = sgn ./ theta_ndiffs .*
