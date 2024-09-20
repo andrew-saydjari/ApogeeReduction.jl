@@ -369,7 +369,6 @@ function sutr_aw(
     PhiD = zeros(Float64, npix, ndiffs)
     Theta = zeros(Float64, npix, ndiffs)
     ThetaD = zeros(Float64, npix, ndiffs + 1)
-    alpha = Vector{Float64}(undef, npix)
     scale = Vector{Float64}(undef, npix)
     beta = Matrix{Float64}(undef, npix, ndiffs - 1)
     beta_extended = ones(npix, ndiffs)
@@ -394,15 +393,12 @@ function sutr_aw(
 
         @timeit "refine iterative" for _ in 1:n_repeat
             @timeit "setup" begin
-                @views alpha .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
+                # scale is the same at alpha in the paper, but we divide it out each Elements
+                # in the covariance matrix for stability
+                # The uncertainty and chi squared value will need to be scaled back later.
+                @views scale .= (rates[:, c_ind] .* (rates[:, c_ind] .> 0)) .+ 2 .* read_var
                 @views beta .= -read_var .* ones(npix, ndiffs - 1)
 
-                # rescale the covariance matrix to a determinant of order 1 to
-                # avoid possible overflow/underflow.  The uncertainty and chi
-                # squared value will need to be scaled back later.
-                scale .= alpha #TODO make less silly
-
-                alpha ./= scale
                 beta ./= scale
 
                 # Mask resultant differences that should be ignored.  This is half
@@ -414,17 +410,14 @@ function sutr_aw(
 
             @timeit "recursion relations" @views begin
                 # All definitions and formulas here are in the paper.
-                theta[:, 1] .= 1
-                theta[:, 2] .= alpha[:, 1]
+                theta[:, 1:2] .= 1
                 for i in 3:(ndiffs + 1)
-                    theta[:, i] .= alpha .* theta[:, i - 1] .-
-                                   beta[:, i - 2] .^ 2 .* theta[:, i - 2]
+                    theta[:, i] .= theta[:, i - 1] .- beta[:, i - 2] .^ 2 .* theta[:, i - 2]
                 end
 
-                phi[:, ndiffs] .= alpha
+                phi[:, ndiffs] .= 1
                 for i in (ndiffs - 1):-1:1
-                    phi[:, i] .= alpha .* phi[:, i + 1] .-
-                                 beta[:, i] .^ 2 .* phi[:, i + 2]
+                    phi[:, i] .= phi[:, i + 1] .- beta[:, i] .^ 2 .* phi[:, i + 2]
                 end
 
                 for i in (ndiffs - 1):-1:1
