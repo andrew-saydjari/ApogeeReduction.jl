@@ -373,6 +373,7 @@ function sutr_aw(
     scale = Vector{Float64}(undef, npix)
     beta = Matrix{Float64}(undef, npix, ndiffs - 1)
     beta_extended = ones(npix, ndiffs)
+    dC = zeros(Float64, npix, ndiffs)
     A = Vector{Float64}(undef, npix)
     B = Vector{Float64}(undef, npix)
     C = Vector{Float64}(undef, npix)
@@ -458,8 +459,8 @@ function sutr_aw(
 
                 # C' and B' in the paper
 
-                dC = sgn ./ theta[:, ndiffs + 1] .*
-                     (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
+                dC .= sgn ./ theta[:, ndiffs + 1] .*
+                      (phi[:, 2:end] .* Theta .+ theta[:, 1:(end - 1)] .* Phi)
                 dC .*= diffs2use
             end
 
