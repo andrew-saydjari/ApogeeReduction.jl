@@ -1,28 +1,29 @@
 @testset "ap3D" begin
     rng = MersenneTwister(101) #should we switch to stableRNG for my peace of mind?
 
-    gainMat = 1.9 * ones(Float32, 2560, 2048)
-    readVarMat = 25 * ones(Float32, 2560, 2048)
+    detector_dims = (2560, 2048) #TODO name better
+    gainMat = 1.9 * ones(Float32, detector_dims)
+    readVarMat = 25 * ones(Float32, detector_dims)
 
     n_reads = 20
     n_diffs = n_reads - 1
 
-    flux_per_reads = 10 .^ (LinRange(log10(0.01), log10(10000), 2560))
-    dcounts = (randn(rng, (2560, 2048, n_diffs)) .* (flux_per_reads .^ 0.5)) .+
+    flux_per_reads = 10 .^ (range(start = log10(0.01), stop = log10(10000), length = 2560))
+    dcounts = (randn(rng, (detector_dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+
               flux_per_reads
 
-    true_im = ones(Float32, 2560, 2048) .* flux_per_reads
+    true_im = ones(Float32, detector_dims) .* flux_per_reads
 
-    outdat = zeros(Float32, (2560, 2048, n_reads))
-    outdat[begin:end, begin:end, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
-    outdat .+= randn(rng, (2560, 2048, n_reads)) .* (readVarMat .^ 0.5)
+    outdat = zeros(Float32, (detector_dims..., n_reads))
+    outdat[:, :, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
+    outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5)
     outdat ./= gainMat
 
-    dimage, ivarimage, chisqimage = sutr_tb(outdat, gainMat, readVarMat)
-    #    dimage, ivarimage, chisqimage = dcs(outdat,gainMat,readVarMat)
+    @time dimage, ivarimage, chisqimage = ApogeeReduction.sutr_tb(
+        outdat, gainMat, readVarMat)
 
     flux_diffs = (dimage .- true_im)
-    zscores = flux_diffs ./ (ivarimage .^ (-0.5))
+    zscores = flux_diffs .* sqrt.(ivarimage)
 
     full_mean_z = mean(zscores)
     full_std_z = std(zscores)
