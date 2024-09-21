@@ -173,7 +173,8 @@ git_branch, git_commit = initalize_git(src_dir);
                 chip, df.exposure[expid], df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        jldsave(outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
+        jldsave(
+            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
     end
 end
 t_now = now();
