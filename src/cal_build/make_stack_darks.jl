@@ -108,7 +108,7 @@ PythonPlot.plotclose(fig)
 ani = mplani.ArtistAnimation(
     fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
 vidPath = dirNamePlots *
-            "darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+          "darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
 ani.save(vidPath)
 ani = nothing
 
