@@ -172,8 +172,8 @@ thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(pa
 PythonPlot.plotclose(fig)
 thread("Here is the final dark rate image", ratePath)
 
-dark_im[pix_bit_mask .& 2^3 .== 0].=0;
-dark_im[pix_bit_mask .& bad_pix_bits .!= 0].=NaN;
+dark_im[pix_bit_mask .& 2^3 .== 0] .= 0;
+dark_im[pix_bit_mask .& bad_pix_bits .!= 0] .= NaN;
 
 totNum = length(pix_bit_mask[1:2048, 1:2048])
 badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .!= 0
