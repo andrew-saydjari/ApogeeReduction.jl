@@ -69,7 +69,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
-        addprocs(36)
+        addprocs(16)
     end
 end
 t_now = now();
@@ -106,7 +106,7 @@ git_branch, git_commit = initalize_git(src_dir);
     # firstind overriden for APO dome flats
     function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
             cor1fnoise = true, extractMethod = "sutr_tb")
-        dirName = outdir * "/ap2D/"
+        dirName = outdir * "/apred/$(mjd)/"
         if !ispath(dirName)
             mkpath(dirName)
         end
@@ -173,7 +173,8 @@ git_branch, git_commit = initalize_git(src_dir);
                 chip, df.exposure[expid], df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        jldsave(outdir * "/ap2D/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
+        jldsave(
+            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
     end
 end
 t_now = now();
