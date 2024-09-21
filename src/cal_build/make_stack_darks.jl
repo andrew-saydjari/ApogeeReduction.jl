@@ -166,7 +166,7 @@ divider = mpltk.make_axes_locatable(ax)
 cax = divider.append_axes("right", size = "5%", pad = 0.05)
 cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
 ratePath = dirNamePlots *
-            "darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+           "darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
 fig.savefig(ratePath, bbox_inches = "tight", pad_inches = 0.1)
 thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
 PythonPlot.plotclose(fig)
