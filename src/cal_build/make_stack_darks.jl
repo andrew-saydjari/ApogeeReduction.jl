@@ -180,9 +180,9 @@ badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .!= 0
 corrVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .!= 0) .& .!badVec
 notCorVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .== 0)
 
-fracBad = count(badVec)/totNum
-fracCorr = count(corrVec)/totNum
-fracNotCorr = count(notCorVec)/totNum
+fracBad = count(badVec) / totNum
+fracCorr = count(corrVec) / totNum
+fracNotCorr = count(notCorVec) / totNum
 
 fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
 ax = fig.add_subplot(1, 1, 1)
