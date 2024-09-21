@@ -12,4 +12,6 @@ mpltk = pyimport("mpl_toolkits.axes_grid1");
 mplcm = pyimport("matplotlib.cm");
 mplani = pyimport("matplotlib.animation");
 
+PythonPlot.matplotlib.rcParams["figure.max_open_warning"] = 40
+
 sas_prefix = "https://data.sdss5.org/sas/sdsswork/users/"
