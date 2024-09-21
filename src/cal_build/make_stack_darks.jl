@@ -207,7 +207,7 @@ divider = mpltk.make_axes_locatable(ax)
 cax = divider.append_axes("right", size = "5%", pad = 0.05)
 cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
 maskPath = dirNamePlots *
-            "darkRateMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+           "darkRateMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
 fig.savefig(maskPath, bbox_inches = "tight", pad_inches = 0.1)
 thread("Here is the final dark mask image", maskPath)
 PythonPlot.plotclose(fig)
