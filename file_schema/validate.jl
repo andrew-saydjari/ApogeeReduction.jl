@@ -5,7 +5,7 @@ Checks that a file matches a spec.
 """
 function validate(path, spec_path)
     spec = YAML.load_file(spec_path)
-    layout = h5open(h5structure, path, "r") 
+    layout = h5open(h5structure, path, "r")
 
     @show spec
     println()
@@ -33,5 +33,6 @@ function same_up_to_order(spec, actual)
     sort(spec) == sort(actual)
 end
 
-println(validate("/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_24/outdir/apred/59142/ap2D_apo_59142_a_35800020_INTERNALFLAT.jld2", 
-"files/ap2D.yaml"))
+println(validate(
+    "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_24/outdir/apred/59142/ap2D_apo_59142_a_35800020_INTERNALFLAT.jld2",
+    "files/ap2D.yaml"))
