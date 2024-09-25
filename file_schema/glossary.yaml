@@ -1,0 +1,19 @@
+observatory:
+    desc: "Observatory (\"apo\" or \"lco\")"
+sjd5:
+    desc: "5 digit Sloan Julian data"
+chip:
+    desc: "\"a\", \"b\", or \"c\""
+exposure_id:
+    desc: ""
+image_type:
+    desc: ""
+dimage:
+    desc: "per-pixel estimated flux"
+    unit: "electrons / read"
+chisqimage:
+    desc: "per-pixel chi squared value"
+    unit:  "electrons / read"
+ivarimage:
+    desc: "per-pixel inverse variance value"
+    unit: "electrons / read"

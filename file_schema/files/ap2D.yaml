@@ -1,0 +1,5 @@
+filename: "ap2d_{observatory}_{sjd5}_{chip}_{exposure_id}_{image_type}.jld2"
+structure:
+  - "dimage"
+  - "chisqimage"
+  - "ivarimage"
