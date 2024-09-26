@@ -220,3 +220,55 @@ if len_vid > 1e9 # 1 GB
 else
     thread("Here is the video of all of the frames included in the stack", vidPath)
 end
+
+fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
+ax = fig.add_subplot(1, 1, 1)
+
+divider = mpltk.make_axes_locatable(ax)
+cax = divider.append_axes("right", size = "5%", pad = 0.05)
+cbar = plt.colorbar(
+    mplcm.ScalarMappable(
+        norm = mplcolors.Normalize(vmin = -0.2, vmax = 0.2), cmap = "cet_bkr"),
+    cax = cax,
+    orientation = "vertical")
+im_lst = []
+@showprogress for (indx, fname) in enumerate(flist)
+    sname = split(fname, "_")
+    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    f = jldopen(fname)
+    temp_im = f["dimage"]
+    close(f)
+    ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
+    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx] .-dark_im
+
+    img = ax.imshow(temp_im[1:2048, 1:2048]',
+        vmin = -0.2,
+        vmax = 0.2,
+        interpolation = "none",
+        cmap = "cet_bkr",
+        origin = "lower",
+        aspect = "auto"
+    )
+
+    ttl = plt.text(
+        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
+        ha = "center", va = "bottom", transform = ax.transAxes)
+
+    push!(im_lst, [img, ttl])
+end
+PythonPlot.plotclose(fig)
+ani = mplani.ArtistAnimation(
+    fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
+vidPath = dirNamePlots *
+          "darkStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+ani.save(vidPath)
+ani = nothing
+
+len_vid = stat(vidPath).size
+# if the length is bigger than 1 gigabyte, we need to upload the link to slack
+if len_vid > 1e9 # 1 GB
+    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+    thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
+else
+    thread("Here is the video of all of the residuals for frames included in the stack", vidPath)
+end
