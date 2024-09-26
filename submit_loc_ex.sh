@@ -28,11 +28,30 @@ module load sdssdb/main almanac sdsstools postgresql ffmpeg
 # expid=10
 # outdir="../outdir/"
 
-runname="apodometest"
-tele="apo"
-mjd=60546
-expid=13
+# runname="apodometest"
+# tele="apo"
+# mjd=60546
+# expid=13
+# outdir="../outdir/"
+
+# runname="apointernalflattest"
+# tele="apo"
+# mjd=60575
+# expid=96
+# outdir="../outdir/"
+
+# runname="apointernalflattest"
+# tele="apo"
+# mjd=60574
+# expid=49
+# outdir="../outdir/"
+
+runname="lcointernalflattest"
+tele="lco"
+mjd=59236
+expid=14
 outdir="../outdir/"
+
 
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}almanac
