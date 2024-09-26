@@ -64,10 +64,11 @@ function parse_commandline()
 end
 
 parg = parse_commandline()
+println(parg)
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_JOB_ID" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=./"])
+        addprocs(SlurmManager(; verbose=true), exeflags = ["--project=./"])
     else
         addprocs(16)
     end
