@@ -94,7 +94,9 @@ function sutr_tb(
     end
     @timeit "dimages view" dimages=view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
-    good_diffs = ones(Bool, size(dimages))
+    if isnothing(good_diffs)
+        good_diffs = ones(Bool, size(dimages))
+    end
 
     rates = zeros(Float64, size(datacube, 1), size(datacube, 2))
     final_vars = zeros(Float64, size(datacube, 1), size(datacube, 2))
@@ -127,16 +129,19 @@ function sutr_tb(
     sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
-    @timeit "hot loop" for c_ind in axes(dimages, 2)
-        @views diffs .= dimages[:, c_ind, :]
-        @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
-        @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
-        d .= (diffs .* diffs2use) #TODO make non-adjoint
+    @timeit "outer loop" for c_ind in axes(dimages, 2)
+        @timeit "subproblem setup" begin
+            @views diffs .= dimages[:, c_ind, :]
+            @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
+            @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
+            d .= (diffs .* diffs2use) #TODO make non-adjoint
 
-        # initial guess
-        rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
+            # initial guess
+            @timeit "initial guess" rates[:, c_ind]=sum(diffs .* diffs2use, dims = 2) ./
+                                                    sum(diffs2use, dims = 2)
+        end
 
-        for _ in 1:n_repeat
+        @timeit "hop loop" for _ in 1:n_repeat
             # scale is the same at alpha in the paper, but we divide it out each Elements
             # in the covariance matrix for stability
             # The uncertainty and chi squared value will need to be scaled back later.
