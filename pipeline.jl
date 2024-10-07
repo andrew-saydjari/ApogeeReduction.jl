@@ -20,7 +20,7 @@ versioninfo();
 Pkg.instantiate()
 Pkg.precompile()
 
-@timeit "imports" using Distributed, ArgParse
+using Distributed, ArgParse
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Package activation took $dt");
@@ -113,22 +113,22 @@ git_branch, git_commit = initalize_git(src_dir);
 @everywhere begin
     # firstind overriden for APO dome flats
     function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = false, extractMethod = "sutr_tb")
+            cor1fnoise = true, extractMethod = "sutr_tb")
         @timeit "setup" begin
             dirName = outdir * "/apred/$(mjd)/"
             if !ispath(dirName)
                 mkpath(dirName)
             end
 
-            f = h5open(outdir * "almanac/$(runname).h5")
-            df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-            close(f)
+            @timeit "df" df=h5open(outdir * "almanac/$(runname).h5") do f
+                df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+            end
 
             # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
             rawpath = build_raw_path(
                 df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
             # decompress and convert apz data format to a standard 3D cube of reads
-            cubedat, hdr = apz2cube(rawpath)
+            @timeit "apz2cube" cubedat, hdr=apz2cube(rawpath)
 
             # ADD? reset anomaly fix (currently just drop first ind as our "fix")
             # REMOVES FIRST READ (as a view)
@@ -184,16 +184,14 @@ git_branch, git_commit = initalize_git(src_dir);
             error("Extraction method not recognized")
         end
 
-        @timeit "post-3D" begin
-            # need to clean up exptype to account for FPI versus ARCLAMP
-            outfname = join(
-                ["ap2D", df.observatory[expid], df.mjd[expid],
-                    chip, df.exposure[expid], df.exptype[expid]],
-                "_")
-            # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-            jldsave(
-                outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
-        end
+        # need to clean up exptype to account for FPI versus ARCLAMP
+        outfname = join(
+            ["ap2D", df.observatory[expid], df.mjd[expid],
+                chip, df.exposure[expid], df.exptype[expid]],
+            "_")
+        # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
+        jldsave(
+            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
     end
 end
 t_now = now();
