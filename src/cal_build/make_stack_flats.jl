@@ -79,9 +79,10 @@ cmap_g = PythonPlot.get_cmap("cet_gouldian")
 cmap_g.set_bad("r")
 
 # Load in the exact set of exposures
-mjd = load(parg["runlist"],"mjd")
-expid = load(parg["runlist"],"expid");
-flist = get_cal_file.(Ref(parg["flat_dir"]),Ref(parg["tele"]),mjd,expid,Ref(chip),Ref("INTERNALFLAT"))
+mjd = load(parg["runlist"], "mjd")
+expid = load(parg["runlist"], "expid");
+flist = get_cal_file.(
+    Ref(parg["flat_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("INTERNALFLAT"))
 
 # this is dumb and should probably be replaced by ivar weighting
 nx, ny = 2040, 2040
