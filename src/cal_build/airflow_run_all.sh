@@ -26,7 +26,7 @@ export SLURM_JOB_NODELIST=$SLURM_NODELIST
 
 echo `printenv`
 
-runname="${mjd_start}_${mjd_end}"
+runname="all_${mjd_start}_${mjd_end}"
 outdir="../outdir/${mjd_start}_${mjd_end}/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
@@ -56,6 +56,10 @@ julia +1.10.0 --project="./" src/cal_build/make_runlist_internal_flats.jl --tele
 julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "a"
 julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "b"
 julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "c"
+
+julia +1.10.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --flat_dir $doutdir --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
+julia +1.10.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --flat_dir $doutdir --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
+julia +1.10.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --flat_dir $doutdir --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
