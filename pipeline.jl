@@ -113,7 +113,7 @@ git_branch, git_commit = initalize_git(src_dir);
 @everywhere begin
     # firstind overriden for APO dome flats
     function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = true, extractMethod = "sutr_tb")
+            cor1fnoise = false, extractMethod = "sutr_tb")
         @timeit "setup" begin
             dirName = outdir * "/apred/$(mjd)/"
             if !ispath(dirName)
@@ -143,7 +143,7 @@ git_branch, git_commit = initalize_git(src_dir);
             tdat = @view cubedat[:, :, firstind_loc:end]
         end
 
-        @timeit "1/f" begin
+        @timeit "SIRS" begin
             ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
             if cor1fnoise
                 @timeit "in_data" in_data=Float64.(tdat[1:2048, :, :])
@@ -156,8 +156,6 @@ git_branch, git_commit = initalize_git(src_dir);
                 outdat[1:2048, :, :] .= in_data
 
                 # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-                # TODO necessary to get again?
-                #@timeit "in_data" in_data=Float64.(tdat[1:2048, :, :])
                 in_data = copied_in_data
                 in_data[513:1024, :, :] .= tdat[2049:end, :, :]
                 @timeit "sirsub!" sirssub!(sirsrefas2, in_data, f_max = 95.0)
@@ -180,6 +178,7 @@ git_branch, git_commit = initalize_git(src_dir);
         @timeit "sutr" dimage, ivarimage, chisqimage=if extractMethod == "dcs"
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
+            # n.b. this will mutate outdat
             sutr_tb(outdat, gainMat, readVarMat)
         else
             error("Extraction method not recognized")

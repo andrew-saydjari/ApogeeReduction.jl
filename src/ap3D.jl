@@ -69,7 +69,9 @@ end
 - firstind 
 - good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
   not provided, all diffs will be used.
-- 
+
+!!! warning
+    This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
 
 !!! note
     This assumes that all images are sequential (ie separated by the same read time).
@@ -79,16 +81,18 @@ Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
 function sutr_tb(
         datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
-    # Last editted by Kevin McKinnon on Aug 20, 2024 
+    # First version by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
     # datacube has shape (npix_x,npix_y,n_reads)
     # read_var_mat has shape (npix_x,npix_y)
     # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
 
     # assumes all images are sequential (ie separated by one read time)
-    @timeit "dimages" @views dimages = gainMat .*
-                                       (datacube[:, :, (firstind + 1):end] .-
-                                        datacube[:, :, firstind:(end - 1)])
+
+    @timeit "compute diffs" for i in (firstind + 1):size(datacube, 3)
+        @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
+    end
+    @timeit "dimages view" dimages=view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
     good_diffs = ones(Bool, size(dimages))
 
