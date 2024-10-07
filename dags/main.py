@@ -47,8 +47,8 @@ srun_prefix = re.sub(r"\s+", " ", f"""
     --jobid={{{{ ti.xcom_pull(task_ids='slurm.submit') }}}} 
     -M {SLURM_CLUSTER}
     -D {REPO_DIR}
-    --export=ALL,SLURM_TASKS_PER_NODE=64\(x2\),SLURM_JOB_QOS=sdss-{nk}p,SLURM_JOB_ACCOUNT=sdss-{nk}k,SLURM_NPROCS=128,SLURM_STEP_NUM_TASKS=128,SLURM_NTASKS=32,SLURM_NNODES=2,SLURM_JOB_NUM_NODES=2,SLURM_STEP_NUM_NODES=2,SLURM_CLUSTERS={SLURM_CLUSTER},SLURM_CLUSTER={SLURM_CLUSTER}.peaks,
-    --mem=400G
+    --export=ALL,SLURM_TASKS_PER_NODE=64\(x2\),SLURM_JOB_QOS=sdss-{nk}p,SLURM_JOB_ACCOUNT=sdss-{nk}k,SLURM_NPROCS=128,SLURM_STEP_NUM_TASKS=128,SLURM_NTASKS=32,SLURM_NNODES=2,SLURM_JOB_NUM_NODES=2,SLURM_STEP_NUM_NODES=2,SLURM_CLUSTERS={SLURM_CLUSTER},SLURM_CLUSTER={SLURM_CLUSTER}.peaks
+    --mem=250G
 """) 
 
 
@@ -65,6 +65,9 @@ with DAG(
     start_date=datetime(2023, 9, 1),
     schedule_interval="@monthly",
     max_active_runs=1,
+    default_args=dict(
+        retries=3,
+    ),
     catchup=True,
 ) as dag:
     with TaskGroup(group_id="update") as group_git:
@@ -90,9 +93,13 @@ with DAG(
                 task_id="mjd_start",
                 python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd)
             ),
+            #PythonOperator(
+            #    task_id="mjd_end",
+            #    python_callable=lambda data_interval_end, **_: int(Time(data_interval_end).mjd)
+            #)
             PythonOperator(
                 task_id="mjd_end",
-                python_callable=lambda data_interval_end, **_: int(Time(data_interval_end).mjd)
+                python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) # one night at a time
             )
         ] >> (
             BashOperator(
@@ -102,6 +109,7 @@ with DAG(
                     f"mkdir -p {OUTPUT_DIR_TEMPLATE}/almanac;"
                     f"mkdir -p {OUTPUT_DIR_TEMPLATE}/logs;"
                     f"mkdir -p {OUTPUT_DIR_TEMPLATE}/darks;"
+                    f"mkdir -p {OUTPUT_DIR_TEMPLATE}/flats;"
                 )
             )        
         ) >> (
