@@ -104,7 +104,6 @@ function sutr_tb(
 
     npix, ndiffs = size(dimages)[[1, 3]]
 
-    #TODO rename some of these?
     diffs = zeros(Float64, npix, ndiffs)
     read_var = zeros(Float64, npix)
     diffs2use = zeros(Bool, npix, ndiffs)
@@ -129,20 +128,21 @@ function sutr_tb(
     sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
+    # THIS LOOP IS ENTIRELY NONALLOCATING SO EDIT WITH CARE
     @timeit "outer loop" for c_ind in axes(dimages, 2)
         @timeit "subproblem setup" begin
-            # these involve more copying than is really necessary
-            @views diffs .= dimages[:, c_ind, :]
+        # these involve more copying than is really necessary
+        @views diffs .= dimages[:, c_ind, :]
             @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
             @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
-            d .= (diffs .* diffs2use) #TODO make non-adjoint
+        d .= (diffs .* diffs2use)
 
-            # initial guess
-            @timeit "initial guess" rates[:, c_ind]=sum(d, dims = 2) ./
-                                                    sum(diffs2use, dims = 2)
+        # this is done in a loop to be nonallocating
+        for i in axes(rates, 1)
+            @views rates[i, c_ind] = sum(d[i, :]) / sum(diffs2use[i, :])
         end
 
-        @timeit "hop loop" for _ in 1:n_repeat
+        for _ in 1:n_repeat
             # scale is the same at alpha in the paper, but we divide it out each Elements
             # in the covariance matrix for stability
             # The uncertainty and chi squared value will need to be scaled back later.
