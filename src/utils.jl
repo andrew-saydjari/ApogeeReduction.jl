@@ -62,7 +62,7 @@ function grow_msk2d(msk; rad = 1)
     return msknew
 end
 
-function gen_design_mat(nx,ny,fx,fy,X,Y)
+function gen_design_mat(nx, ny, fx, fy, X, Y)
     n_points = nx * ny
     n_basis = 2 * (fx + 1) * (fy + 1) - 2 + 3 #+ ny  # Total number of basis functions (sin + cos + constant)
     design_matrix = zeros(Float64, n_points, n_basis)
