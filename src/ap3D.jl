@@ -89,9 +89,11 @@ function sutr_tb(
 
     # assumes all images are sequential (ie separated by one read time)
 
-    @timeit "compute diffs" for i in size(datacube, 3):-1:(firstind + 1)
+    # construct the differences images in place, overwriting datacube
+    for i in size(datacube, 3):-1:(firstind + 1)
         @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
     end
+    # this view is to minimize indexing headaches
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
     if isnothing(good_diffs)
@@ -129,12 +131,11 @@ function sutr_tb(
 
     #slice the datacube to analyze each row sequentially to keep runtime down
     # THIS LOOP IS ENTIRELY NONALLOCATING SO EDIT WITH CARE
-    @timeit "outer loop" for c_ind in axes(dimages, 2)
-        @timeit "subproblem setup" begin
+    for c_ind in axes(dimages, 2)
         # these involve more copying than is really necessary
         @views diffs .= dimages[:, c_ind, :]
-            @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
-            @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
+        @views read_var .= readVarMat[:, c_ind]
+        @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
         d .= (diffs .* diffs2use)
 
         # this is done in a loop to be nonallocating
