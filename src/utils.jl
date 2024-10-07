@@ -51,12 +51,12 @@ nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
 function grow_msk2d(msk; rad=1)
     (sx, sy) = size(msk)
-    msknew = zeros(Bool,(sx,sy))
-    for i=1:sx
-        for j=1:sy
-            srngx = maximum([1,i-rad]):minimum([sx,i+rad])
-            srngy = maximum([1,j-rad]):minimum([sy,j+rad])
-            msknew[i,j] = any(msk[srngx,srngy])
+    msknew = zeros(Bool, (sx, sy))
+    for i in 1:sx
+        for j in 1:sy
+            srngx = maximum([1, i - rad]):minimum([sx, i + rad])
+            srngy = maximum([1, j - rad]):minimum([sy, j + rad])
+            msknew[i, j] = any(msk[srngx, srngy])
         end
     end
     return msknew
