@@ -90,8 +90,8 @@ flat_im = zeros(nx, ny)
 model_im = zeros(nx, ny)
 
 ## this is dumb, Andy Casey will replace with a working 2d FINUFFT
-x = range(0, stop=π, length=nx)
-y = range(0, stop=π, length=ny)
+x = range(0, stop = π, length = nx)
+y = range(0, stop = π, length = ny)
 X, Y = [x[i] for i in 1:nx, j in 1:ny], [y[j] for i in 1:nx, j in 1:ny];
 
 design_matrix = gen_design_mat(nx,ny,fx,fy,X,Y)
