@@ -89,10 +89,10 @@ function sutr_tb(
 
     # assumes all images are sequential (ie separated by one read time)
 
-    @timeit "compute diffs" for i in (firstind + 1):size(datacube, 3)
-        @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
+    @timeit "compute diffs" for i in size(datacube, 3):-1:(firstind + 1)
+        datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
     end
-    @timeit "dimages view" dimages=view(datacube, :, :, (firstind + 1):size(datacube, 3))
+    dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
     if isnothing(good_diffs)
         good_diffs = ones(Bool, size(dimages))
