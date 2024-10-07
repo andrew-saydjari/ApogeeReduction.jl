@@ -121,8 +121,8 @@ bad_pix_dark = (dark_pix_bitmask[5:2044,5:2044] .& bad_dark_pix_bits .!= 0);
     temp_im = floc["dimage"]
     close(floc)
 
-    bmat = temp_im[5:2044,5:2044]
-    b = bmat[:];
+    bmat = temp_im[5:2044, 5:2044]
+    b = bmat[:]
     ref_med = nanzeromedian(b)
 
     bad_pix = copy(bad_pix_dark)
