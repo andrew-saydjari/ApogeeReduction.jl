@@ -146,14 +146,19 @@ git_branch, git_commit = initalize_git(src_dir);
         @timeit "1/f" begin
             ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
             if cor1fnoise
-                @timeit "copy in_data" in_data=Float64.(tdat[1:2048, :, :])
+                @timeit "in_data" in_data=Float64.(tdat[1:2048, :, :])
+                # sirsub! modifies in_data, but make a copy so that it's faster the second time.
+                # better not to need to do this at all
+                @timeit "copy for later" copied_in_data=copy(in_data)
                 outdat = zeros(
                     Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
                 @timeit "sirsub!" sirssub!(sirs4amps, in_data, f_max = 95.0)
                 outdat[1:2048, :, :] .= in_data
 
                 # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-                @timeit "copy_in" in_data=Float64.(tdat[1:2048, :, :])
+                # TODO necessary to get again?
+                #@timeit "in_data" in_data=Float64.(tdat[1:2048, :, :])
+                in_data = copied_in_data
                 in_data[513:1024, :, :] .= tdat[2049:end, :, :]
                 @timeit "sirsub!" sirssub!(sirsrefas2, in_data, f_max = 95.0)
                 outdat[2049:end, :, :] .= in_data[513:1024, :, :]
