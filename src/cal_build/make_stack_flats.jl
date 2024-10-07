@@ -109,7 +109,8 @@ design_matrix = gen_design_mat(nx, ny, fx, fy, X, Y)
 # im_lst = []
 
 #terrible hard code that needs to be replaced by cal look up system
-f = jldopen("$(parg["dark_path"])"*"darkRate_$(parg["tele"])_$(chip)_$(parg["dark-mjd-start"])_$(parg["dark-mjd-end"]).jld2")
+f = jldopen("$(parg["dark_path"])" *
+            "darkRate_$(parg["tele"])_$(chip)_$(parg["dark-mjd-start"])_$(parg["dark-mjd-end"]).jld2")
 dark_pix_bitmask = f["dark_pix_bitmask"]
 close(f)
 bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
