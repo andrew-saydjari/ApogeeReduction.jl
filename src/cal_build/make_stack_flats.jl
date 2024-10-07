@@ -112,7 +112,7 @@ design_matrix = gen_design_mat(nx, ny, fx, fy, X, Y)
 f = jldopen("$(parg["dark_path"])"*"darkRate_$(parg["tele"])_$(chip)_$(parg["dark-mjd-start"])_$(parg["dark-mjd-end"]).jld2")
 dark_pix_bitmask = f["dark_pix_bitmask"]
 close(f)
-bad_pix_dark = (dark_pix_bitmask[5:2044,5:2044] .& bad_dark_pix_bits .!= 0);
+bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
 
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
