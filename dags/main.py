@@ -12,7 +12,7 @@ from slurm_utils import SlurmJobStatusSensor
 
 SLURM_CLUSTER = nk, *_ = "notchpeak"
 REPO_DIR = "$MWM_SANDBOX/ApogeeReduction.jl"
-REPO_BRANCH = "main"
+REPO_BRANCH = "airflow"
 
 OUTPUT_DIR_TEMPLATE = (
     "$MWM_SANDBOX/"
