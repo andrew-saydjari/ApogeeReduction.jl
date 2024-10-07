@@ -49,7 +49,7 @@ nanzeroiqr(x) =
     end
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
-function grow_msk2d(msk; rad=1)
+function grow_msk2d(msk; rad = 1)
     (sx, sy) = size(msk)
     msknew = zeros(Bool, (sx, sy))
     for i in 1:sx
