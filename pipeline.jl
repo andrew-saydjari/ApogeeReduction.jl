@@ -1,5 +1,7 @@
 ## This is a reduction pipeline for APOGEE
 
+using TimerOutputs
+
 import Pkg;
 using Dates;
 t0 = now();
@@ -112,60 +114,65 @@ git_branch, git_commit = initalize_git(src_dir);
     # firstind overriden for APO dome flats
     function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
             cor1fnoise = true, extractMethod = "sutr_tb")
-        dirName = outdir * "/apred/$(mjd)/"
-        if !ispath(dirName)
-            mkpath(dirName)
+        @timeit "setup" begin
+            dirName = outdir * "/apred/$(mjd)/"
+            if !ispath(dirName)
+                mkpath(dirName)
+            end
+
+            f = h5open(outdir * "almanac/$(runname).h5")
+            df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+            close(f)
+
+            # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
+            rawpath = build_raw_path(
+                df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
+            # decompress and convert apz data format to a standard 3D cube of reads
+            cubedat, hdr = apz2cube(rawpath)
+
+            # ADD? reset anomaly fix (currently just drop first ind as our "fix")
+            # REMOVES FIRST READ (as a view)
+            # might need to adjust for the few read cases (2,3,4,5)
+            firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
+                               (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+                2
+            else
+                firstind
+            end
+
+            tdat = @view cubedat[:, :, firstind_loc:end]
         end
 
-        f = h5open(outdir * "almanac/$(runname).h5")
-        df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-        close(f)
+        @timeit "1/f" begin
+            ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
+            if cor1fnoise
+                @timeit "copy in_data" in_data=Float64.(tdat[1:2048, :, :])
+                outdat = zeros(
+                    Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
+                @timeit "sirsub!" sirssub!(sirs4amps, in_data, f_max = 95.0)
+                outdat[1:2048, :, :] .= in_data
 
-        # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
-        rawpath = build_raw_path(
-            df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
-        # decompress and convert apz data format to a standard 3D cube of reads
-        cubedat, hdr = apz2cube(rawpath)
-
-        # ADD? reset anomaly fix (currently just drop first ind as our "fix")
-        # REMOVES FIRST READ (as a view)
-        # might need to adjust for the few read cases (2,3,4,5)
-        firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
-                           (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
-            2
-        else
-            firstind
-        end
-
-        tdat = @view cubedat[:, :, firstind_loc:end]
-
-        ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
-        if cor1fnoise
-            in_data = Float64.(tdat[1:2048, :, :])
-            outdat = zeros(Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
-            sirssub!(sirs4amps, in_data, f_max = 95.0)
-            outdat[1:2048, :, :] .= in_data
-
-            # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-            in_data = Float64.(tdat[1:2048, :, :])
-            in_data[513:1024, :, :] .= tdat[2049:end, :, :]
-            sirssub!(sirsrefas2, in_data, f_max = 95.0)
-            outdat[2049:end, :, :] .= in_data[513:1024, :, :]
-        else
-            outdat = Float64.(tdat)
+                # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
+                @timeit "copy_in" in_data=Float64.(tdat[1:2048, :, :])
+                in_data[513:1024, :, :] .= tdat[2049:end, :, :]
+                @timeit "sirsub!" sirssub!(sirsrefas2, in_data, f_max = 95.0)
+                outdat[2049:end, :, :] .= in_data[513:1024, :, :]
+            else
+                outdat = Float64.(tdat)
+            end
         end
 
         ## should this be done on the difference cube, or is this enough?
         # vert_ref_edge_corr!(outdat)
-        refarray_zpt!(outdat)
-        vert_ref_edge_corr_amp!(outdat)
+        @timeit "refarray_zpt!" refarray_zpt!(outdat)
+        @timeit "vert_ref_edge_corr_amp!" vert_ref_edge_corr_amp!(outdat)
 
         # ADD? reference array-based masking/correction
 
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage, chisqimage = if extractMethod == "dcs"
+        @timeit "sutr" dimage, ivarimage, chisqimage=if extractMethod == "dcs"
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
             sutr_tb(outdat, gainMat, readVarMat)
@@ -173,14 +180,16 @@ git_branch, git_commit = initalize_git(src_dir);
             error("Extraction method not recognized")
         end
 
-        # need to clean up exptype to account for FPI versus ARCLAMP
-        outfname = join(
-            ["ap2D", df.observatory[expid], df.mjd[expid],
-                chip, df.exposure[expid], df.exptype[expid]],
-            "_")
-        # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        jldsave(
-            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
+        @timeit "post-3D" begin
+            # need to clean up exptype to account for FPI versus ARCLAMP
+            outfname = join(
+                ["ap2D", df.observatory[expid], df.mjd[expid],
+                    chip, df.exposure[expid], df.exptype[expid]],
+                "_")
+            # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
+            jldsave(
+                outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
+        end
     end
 end
 t_now = now();
@@ -203,7 +212,7 @@ flush(stdout);
 @everywhere sirsrefas2 = SIRS.restore(caldir * "sirs_test_ref2_d12_r60_n15.jld");
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
-try
+@timeit "3D" try
     if parg["runlist"] != ""
         subDic = load(parg["runlist"])
         subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
@@ -211,9 +220,11 @@ try
             parg["outdir"], caldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
         @showprogress pmap(process_3D_partial, subiter)
     else
-        process_3D(parg["outdir"], caldir, parg["runname"],
+        @timeit "process_3D" process_3D(parg["outdir"], caldir, parg["runname"],
             parg["mjd"], parg["expid"], parg["chip"])
     end
 finally
     rmprocs(workers())
 end
+
+print_timer(sortby = :allocations)
