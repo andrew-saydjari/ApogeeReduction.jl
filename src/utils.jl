@@ -70,7 +70,7 @@ function gen_design_mat(nx, ny, fx, fy, X, Y)
     col = 1
     for kx in 0:fx
         for ky in 0:fy
-            if !((kx==0) & (ky==0))
+            if !((kx == 0) & (ky == 0))
                 # Sine basis functions
                 design_matrix[:, col] = vec(sin.(kx .* X + ky .* Y))
                 col += 1
