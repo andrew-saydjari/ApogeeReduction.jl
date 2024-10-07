@@ -46,10 +46,16 @@ module load sdssdb/main almanac sdsstools postgresql ffmpeg
 # expid=49
 # outdir="../outdir/"
 
-runname="lcointernalflattest"
-tele="lco"
-mjd=59236
-expid=14
+# runname="lcointernalflattest"
+# tele="lco"
+# mjd=59236
+# expid=14
+# outdir="../outdir/"
+
+runname="apointernalflattest"
+tele="apo"
+mjd=59550
+expid=22
 outdir="../outdir/"
 
 

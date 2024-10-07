@@ -66,6 +66,7 @@ thread = SlackThread();
 thread("Thread for flat stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
 bad_dark_pix_bits = 2^2 + 2^4 + 2^5;
+bad_flat_pix_bits = 2^6;
 flat_frac_cut = 0.2
 pcut_flat = 0.2
 fx, fy = 10, 10    # Number of frequencies in x and y
@@ -77,6 +78,8 @@ end
 
 cmap_g = PythonPlot.get_cmap("cet_gouldian")
 cmap_g.set_bad("r")
+cmap_w = PythonPlot.get_cmap("cet_bkr")
+cmap_w.set_bad("w")
 
 # Load in the exact set of exposures
 mjd = load(parg["runlist"], "mjd")
@@ -96,18 +99,8 @@ X, Y = [x[i] for i in 1:nx, j in 1:ny], [y[j] for i in 1:nx, j in 1:ny];
 
 design_matrix = gen_design_mat(nx, ny, fx, fy, X, Y)
 
-# fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-# ax = fig.add_subplot(1, 1, 1)
-
-# divider = mpltk.make_axes_locatable(ax)
-# cax = divider.append_axes("right", size = "5%", pad = 0.05)
-# cbar = plt.colorbar(
-#     mplcm.ScalarMappable(
-#         norm = mplcolors.Normalize(vmin = -0.2, vmax = 0.2), cmap = "cet_bkr"),
-#     cax = cax,
-#     orientation = "vertical")
-# im_lst = []
-
+#this is not going to be scalable, but current the backslash solver is too slow
+flat_im_mat = zeros(2040, 2040, length(flist))
 #terrible hard code that needs to be replaced by cal look up system
 f = jldopen("$(parg["dark_path"])" *
             "darkRate_$(parg["tele"])_$(chip)_$(parg["dark-mjd-start"])_$(parg["dark-mjd-end"]).jld2")
@@ -133,31 +126,10 @@ bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
     cvec = design_matrix[good_pix, :] \ b[good_pix]
     modImage = reshape(design_matrix * cvec, nx, ny)
 
-    flat_im .+= bmat ./ modImage
+    flat_im_mat[:, :, indx] = bmat ./ modImage
+    flat_im .+= flat_im_mat[:, :, indx]
     model_im .+= modImage
-
-    # img = ax.imshow(temp_im',
-    #     vmin = -0.2,
-    #     vmax = 0.2,
-    #     interpolation = "none",
-    #     cmap = "cet_bkr",
-    #     origin = "lower",
-    #     aspect = "auto"
-    # )
-
-    # ttl = plt.text(
-    #     0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
-    #     ha = "center", va = "bottom", transform = ax.transAxes)
-
-    # push!(im_lst, [img, ttl])
 end
-# PythonPlot.plotclose(fig)
-# ani = mplani.ArtistAnimation(
-#     fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
-# vidPath = dirNamePlots *
-#           "darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-# ani.save(vidPath)
-# ani = nothing
 
 flat_im ./= length(flist)
 model_im ./= length(flist)
@@ -204,103 +176,132 @@ thread("Flat stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(pa
 PythonPlot.plotclose(fig)
 thread("Here is the final flat image", flatPath)
 
-# dark_im[pix_bit_mask .& 2^3 .== 0] .= 0;
-# dark_im[pix_bit_mask .& bad_pix_bits .!= 0] .= NaN;
+flat_im_msk = copy(flat_im)
+flat_im_msk[pix_bit_mask .& bad_flat_pix_bits .!= 0] .= NaN;
 
-# totNum = length(pix_bit_mask[1:2048, 1:2048])
-# badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .!= 0
-# corrVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .!= 0) .& .!badVec
-# notCorVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .== 0)
+totNum = length(pix_bit_mask)
+badVec = pix_bit_mask .& bad_flat_pix_bits .!= 0
+fracBad = count(badVec) / totNum
 
-# fracBad = count(badVec) / totNum
-# fracCorr = count(corrVec) / totNum
-# fracNotCorr = count(notCorVec) / totNum
+fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
+ax = fig.add_subplot(1, 1, 1)
+img = ax.imshow(flat_im_msk',
+    vmin = 0.95,
+    vmax = 1.05,
+    interpolation = "none",
+    cmap = cmap_g,
+    origin = "lower",
+    aspect = "auto"
+)
 
-# fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-# ax = fig.add_subplot(1, 1, 1)
-# img = ax.imshow(dark_im',
-#     vmin = -0.2,
-#     vmax = 0.2,
-#     interpolation = "none",
-#     cmap = cmap_w,
-#     origin = "lower",
-#     aspect = "auto"
-# )
+plt.text(0.5,
+    1.01,
+    "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Bad: $(round(100*fracBad,digits=2))%",
+    ha = "center",
+    va = "bottom",
+    transform = ax.transAxes
+)
 
-# plt.text(0.5,
-#     1.01,
-#     "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Bad: $(round(100*fracBad,digits=2))% Corrected: $(round(100*fracCorr,digits=2))% NoCorrection: $(round(100*fracNotCorr,digits=2))%",
-#     ha = "center",
-#     va = "bottom",
-#     transform = ax.transAxes
-# )
+divider = mpltk.make_axes_locatable(ax)
+cax = divider.append_axes("right", size = "5%", pad = 0.05)
+cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
+maskPath = dirNamePlots *
+           "darkRateMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+fig.savefig(maskPath, bbox_inches = "tight", pad_inches = 0.1)
+thread("Here is the final flat mask image", maskPath)
+PythonPlot.plotclose(fig)
 
-# divider = mpltk.make_axes_locatable(ax)
-# cax = divider.append_axes("right", size = "5%", pad = 0.05)
-# cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
-# maskPath = dirNamePlots *
-#            "darkRateMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
-# fig.savefig(maskPath, bbox_inches = "tight", pad_inches = 0.1)
-# thread("Here is the final dark mask image", maskPath)
-# PythonPlot.plotclose(fig)
+fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
+ax = fig.add_subplot(1, 1, 1)
 
-# len_vid = stat(vidPath).size
-# # if the length is bigger than 1 gigabyte, we need to upload the link to slack
-# if len_vid > 1e9 # 1 GB
-#     vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-#     thread("Here is the video of all of the frames included in the stack: $vidSasPath")
-# else
-#     thread("Here is the video of all of the frames included in the stack", vidPath)
-# end
+divider = mpltk.make_axes_locatable(ax)
+cax = divider.append_axes("right", size = "5%", pad = 0.05)
+cbar = plt.colorbar(
+    mplcm.ScalarMappable(
+        norm = mplcolors.Normalize(vmin = 0.95, vmax = 1.05), cmap = cmap_g),
+    cax = cax,
+    orientation = "vertical")
+im_lst = []
+@showprogress for (indx, fname) in enumerate(flist)
+    sname = split(fname, "_")
+    teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
 
-# fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-# ax = fig.add_subplot(1, 1, 1)
+    img = ax.imshow(flat_im_mat[:, :, indx]',
+        vmin = 0.95,
+        vmax = 1.05,
+        interpolation = "none",
+        cmap = cmap_g,
+        origin = "lower",
+        aspect = "auto"
+    )
 
-# divider = mpltk.make_axes_locatable(ax)
-# cax = divider.append_axes("right", size = "5%", pad = 0.05)
-# cbar = plt.colorbar(
-#     mplcm.ScalarMappable(
-#         norm = mplcolors.Normalize(vmin = -0.2, vmax = 0.2), cmap = "cet_bkr"),
-#     cax = cax,
-#     orientation = "vertical")
-# im_lst = []
-# @showprogress for (indx, fname) in enumerate(flist)
-#     sname = split(fname, "_")
-#     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
-#     f = jldopen(fname)
-#     temp_im = f["dimage"]
-#     close(f)
-#     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
-#     temp_im[1:2048, 1:2048] .-= ref_val_vec[indx] .-dark_im
+    ttl = plt.text(
+        0.5, 1.01, "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+        ha = "center", va = "bottom", transform = ax.transAxes)
 
-#     img = ax.imshow(temp_im[1:2048, 1:2048]',
-#         vmin = -0.2,
-#         vmax = 0.2,
-#         interpolation = "none",
-#         cmap = "cet_bkr",
-#         origin = "lower",
-#         aspect = "auto"
-#     )
+    push!(im_lst, [img, ttl])
+end
+PythonPlot.plotclose(fig)
+ani = mplani.ArtistAnimation(
+    fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
+vidPath = dirNamePlots *
+          "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+ani.save(vidPath)
+ani = nothing
 
-#     ttl = plt.text(
-#         0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
-#         ha = "center", va = "bottom", transform = ax.transAxes)
+len_vid = stat(vidPath).size
+# if the length is bigger than 1 gigabyte, we need to upload the link to slack
+if len_vid > 1e9 # 1 GB
+    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+    thread("Here is the video of all of the frames included in the stack: $vidSasPath")
+else
+    thread("Here is the video of all of the frames included in the stack", vidPath)
+end
 
-#     push!(im_lst, [img, ttl])
-# end
-# PythonPlot.plotclose(fig)
-# ani = mplani.ArtistAnimation(
-#     fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
-# vidPath = dirNamePlots *
-#           "darkStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-# ani.save(vidPath)
-# ani = nothing
+## Video of residuals to stacked calibration 
+fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
+ax = fig.add_subplot(1, 1, 1)
 
-# len_vid = stat(vidPath).size
-# # if the length is bigger than 1 gigabyte, we need to upload the link to slack
-# if len_vid > 1e9 # 1 GB
-#     vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-#     thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
-# else
-#     thread("Here is the video of all of the residuals for frames included in the stack", vidPath)
-# end
+divider = mpltk.make_axes_locatable(ax)
+cax = divider.append_axes("right", size = "5%", pad = 0.05)
+cbar = plt.colorbar(
+    mplcm.ScalarMappable(
+        norm = mplcolors.Normalize(vmin = -0.05, vmax = 0.05), cmap = cmap_w),
+    cax = cax,
+    orientation = "vertical")
+im_lst = []
+@showprogress for (indx, fname) in enumerate(flist)
+    sname = split(fname, "_")
+    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+
+    img = ax.imshow((flat_im_mat[:, :, indx].-flat_im)',
+        vmin = -0.02,
+        vmax = 0.02,
+        interpolation = "none",
+        cmap = cmap_w,
+        origin = "lower",
+        aspect = "auto"
+    )
+
+    ttl = plt.text(
+        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
+        ha = "center", va = "bottom", transform = ax.transAxes)
+
+    push!(im_lst, [img, ttl])
+end
+PythonPlot.plotclose(fig)
+ani = mplani.ArtistAnimation(
+    fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
+vidPath = dirNamePlots *
+          "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+ani.save(vidPath)
+ani = nothing
+
+len_vid = stat(vidPath).size
+# if the length is bigger than 1 gigabyte, we need to upload the link to slack
+if len_vid > 1e9 # 1 GB
+    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+    thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
+else
+    thread("Here is the video of all of the residuals for frames included in the stack", vidPath)
+end

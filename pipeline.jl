@@ -59,6 +59,16 @@ function parse_commandline()
         help = "name of the run (specifically almanac file)"
         arg_type = String
         default = "test"
+        "--caldir_darks"
+        required = false
+        help = "outdir where to look for the dark cals"
+        arg_type = String
+        default = "../outdir/"
+        "--caldir_flats"
+        required = false
+        help = "outdir where to look for the flat cals"
+        arg_type = String
+        default = "../outdir/"
     end
     return parse_args(s)
 end
@@ -89,6 +99,7 @@ flush(stdout);
 
     src_dir = "./"
     include(src_dir * "src/ap3D.jl")
+    include(src_dir * "src/ap2Dcal.jl")
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
 end
@@ -104,7 +115,7 @@ git_branch, git_commit = initalize_git(src_dir);
 ##### 3D stage
 @everywhere begin
     # firstind overriden for APO dome flats
-    function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
+    function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
             cor1fnoise = true, extractMethod = "sutr_tb")
         dirName = outdir * "/apred/$(mjd)/"
         if !ispath(dirName)
@@ -121,7 +132,7 @@ git_branch, git_commit = initalize_git(src_dir);
         # decompress and convert apz data format to a standard 3D cube of reads
         cubedat, hdr = apz2cube(rawpath)
 
-        # ADD? reset anomaly fix (currently just drop first ind as our "fix")
+        # ADD? reset anomaly fix (currently just drop first ind or two as our "fix")
         # REMOVES FIRST READ (as a view)
         # might need to adjust for the few read cases (2,3,4,5)
         firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
@@ -132,6 +143,7 @@ git_branch, git_commit = initalize_git(src_dir);
         end
 
         tdat = @view cubedat[:, :, firstind_loc:end]
+        nread_used = size(tdat, 3) - 1  
 
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
@@ -174,7 +186,40 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage)
+            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, nread_used, git_branch, git_commit)
+    end
+
+    function process_2Dcal(fname)
+        sname = split(fname, "_")
+        tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+
+        dimage = load(fname, "dimage")
+        ivarimage = load(fname, "ivarimage")
+        nread_used = load(fname, "nread_used")
+
+        ### dark current subtraction
+        darkRateflst = sort(glob("*/darkRate_$(tele)_*_$(chip)_*", outdir * "/cal/$(mjd)/"))
+        if length(darkRateflst) != 1
+            error("I didn't just find one darkRate file for mjd $mjd, I found $length(darkRateflst)")
+        end
+        darkRate = load(darkRateflst[1],"darkRate");
+        pix_bitmask = load(darkRateflst[1],"dark_pix_bitmask");
+        dimage .-= darkRate*nread_used
+        # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
+
+        ### flat fielding
+        flatFractionflst = sort(glob("*/flatFraction_$(tele)_*_$(chip)_*", outdir * "/apred/$(mjd)/"))
+        if length(flatFractionflst) != 1
+            error("I didn't just find one flatFraction file for mjd $mjd, I found $length(flatFractionflst)")
+        end
+        flat_im = load(flatFractionflst[1],"flat_im");
+        flat_pix_bitmask = load(flatFractionflst[1],"flat_pix_bitmask");
+        dimage[5:2044,5:2044] ./= flat_im
+        ivarimage[5:2044,5:2044] .*= flat_im.^2
+        pix_bitmask[5:2044,5:2044] .|= flat_pix_bitmask
+
+        outfname = replace(fname,"ap2D"=>"ap2Dcal")
+        jldsave(outfname; dimage, ivarimage, pix_bitmask, nread_used, git_branch, git_commit)
     end
 end
 t_now = now();
@@ -184,7 +229,7 @@ t_then = t_now;
 flush(stdout);
 
 @passobj 1 workers() parg
-@everywhere caldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
+@everywhere sirscaldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
 
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
@@ -193,21 +238,50 @@ flush(stdout);
 @everywhere readVarMat = 25 * ones(Float32, 2560, 2048)
 # ADD load the dark currrent map
 # load SIRS.jl models
-@everywhere sirs4amps = SIRS.restore(caldir * "sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
-@everywhere sirsrefas2 = SIRS.restore(caldir * "sirs_test_ref2_d12_r60_n15.jld");
+@everywhere sirs4amps = SIRS.restore(sirscaldir * "sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
+@everywhere sirsrefas2 = SIRS.restore(sirscaldir * "sirs_test_ref2_d12_r60_n15.jld");
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
-try
-    if parg["runlist"] != ""
-        subDic = load(parg["runlist"])
-        subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
-        @everywhere process_3D_partial((mjd, expid)) = process_3D(
-            parg["outdir"], caldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
-        @showprogress pmap(process_3D_partial, subiter)
-    else
-        process_3D(parg["outdir"], caldir, parg["runname"],
-            parg["mjd"], parg["expid"], parg["chip"])
-    end
-finally
-    rmprocs(workers())
+# clean up this statement to have less replication
+if parg["runlist"] != ""
+    subDic = load(parg["runlist"])
+    subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
+    @everywhere process_3D_partial((mjd, expid)) = process_3D(
+        parg["outdir"], sirscaldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
+    @showprogress pmap(process_3D_partial, subiter)
+else
+    process_3D(parg["outdir"], sirscaldir, parg["runname"],
+        parg["mjd"], parg["expid"], parg["chip"])
 end
+
+# Find the 2D calibration files for the relevant MJDs
+unique_mjds = if parg["runlist"] != ""
+    subDic = load(parg["runlist"])
+    unique(subDic["mjd"])
+else
+    [parg["mjd"]]
+end
+
+# probably need to capture that calFlag somehow, write a meta cal file?
+for mjd in unique_mjds
+    cal_dir = "../2024_09_21/outdir/"
+    darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+    df = cal2df(darkflist)
+    calPath, calFlag = get_cal_path(df,tele,mjd,chip)
+    linkPath = outdir * "/apred/$(mjd)/" * basename(calPath)
+    if !isfile(linkPath)
+        symlink(calPath, linkPath)
+    end
+
+    flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
+    df = cal2df(flatFlist)
+    calPath, calFlag = get_cal_path(df,tele,mjd,chip)
+    linkPath = outdir * "/apred/$(mjd)/" * basename(calPath)
+    if !isfile(linkPath)
+        symlink(calPath, linkPath)
+    end
+end
+
+# we could probably scope that to not do a glob and be based on the runlist
+all2D2cal = sort(glob("*/ap2D*", parg["outdir"] * "/apred/"))
+@showprogress pmap(process_2Dcal,all2D2cal)

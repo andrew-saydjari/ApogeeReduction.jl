@@ -11,7 +11,7 @@ mjd_start=$2
 mjd_end=$3
 
 runname="flat_cal_${mjd_start}_${mjd_end}"
-outdir="../outdir/"
+outdir="../../2024_10_03/outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.jld2
