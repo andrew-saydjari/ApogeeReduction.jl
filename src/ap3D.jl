@@ -131,13 +131,14 @@ function sutr_tb(
     #slice the datacube to analyze each row sequentially to keep runtime down
     @timeit "outer loop" for c_ind in axes(dimages, 2)
         @timeit "subproblem setup" begin
+            # these involve more copying than is really necessary
             @views diffs .= dimages[:, c_ind, :]
             @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
             @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
             d .= (diffs .* diffs2use) #TODO make non-adjoint
 
             # initial guess
-            @timeit "initial guess" rates[:, c_ind]=sum(diffs .* diffs2use, dims = 2) ./
+            @timeit "initial guess" rates[:, c_ind]=sum(d, dims = 2) ./
                                                     sum(diffs2use, dims = 2)
         end
 
