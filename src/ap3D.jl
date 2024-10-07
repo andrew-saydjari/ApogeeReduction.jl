@@ -54,11 +54,11 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     dimage = gainMat .* (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./ (2 .* readVarMat .+ abs.(dimage))
-    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb
+    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb!
 end
 
 """
-    sutr_tb(datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
+    sutr_tb!(datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
 
 # Arguments
 - `datacube` has shape (npix_x,npix_y,n_reads)
@@ -79,7 +79,7 @@ end
 Created by Kevin McKinnon and sped up by Adam Wheeler. 
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
-function sutr_tb(
+function sutr_tb!(
         datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
     # First version by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)

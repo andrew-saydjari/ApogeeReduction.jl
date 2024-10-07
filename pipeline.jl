@@ -114,68 +114,64 @@ git_branch, git_commit = initalize_git(src_dir);
     # firstind overriden for APO dome flats
     function process_3D(outdir, caldir, runname, mjd, expid, chip; firstind = 3,
             cor1fnoise = true, extractMethod = "sutr_tb")
-        @timeit "setup" begin
-            dirName = outdir * "/apred/$(mjd)/"
-            if !ispath(dirName)
-                mkpath(dirName)
-            end
-
-            @timeit "df" df=h5open(outdir * "almanac/$(runname).h5") do f
-                df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-            end
-
-            # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
-            rawpath = build_raw_path(
-                df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
-            # decompress and convert apz data format to a standard 3D cube of reads
-            @timeit "apz2cube" cubedat, hdr=apz2cube(rawpath)
-
-            # ADD? reset anomaly fix (currently just drop first ind as our "fix")
-            # REMOVES FIRST READ (as a view)
-            # might need to adjust for the few read cases (2,3,4,5)
-            firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
-                               (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
-                2
-            else
-                firstind
-            end
-
-            tdat = @view cubedat[:, :, firstind_loc:end]
+        dirName = outdir * "/apred/$(mjd)/"
+        if !ispath(dirName)
+            mkpath(dirName)
         end
 
-        @timeit "SIRS" begin
-            ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
-            if cor1fnoise
-                @timeit "in_data" in_data=Float64.(tdat[1:2048, :, :])
-                # sirsub! modifies in_data, but make a copy so that it's faster the second time.
-                # better not to need to do this at all
-                @timeit "copy for later" copied_in_data=copy(in_data)
-                outdat = zeros(
-                    Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
-                @timeit "sirsub!" sirssub!(sirs4amps, in_data, f_max = 95.0)
-                outdat[1:2048, :, :] .= in_data
+        df = h5open(outdir * "almanac/$(runname).h5") do f
+            df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+        end
 
-                # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-                in_data = copied_in_data
-                in_data[513:1024, :, :] .= tdat[2049:end, :, :]
-                @timeit "sirsub!" sirssub!(sirsrefas2, in_data, f_max = 95.0)
-                outdat[2049:end, :, :] .= in_data[513:1024, :, :]
-            else
-                outdat = Float64.(tdat)
-            end
+        # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
+        rawpath = build_raw_path(
+            df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
+        # decompress and convert apz data format to a standard 3D cube of reads
+        cubedat, hdr = apz2cube(rawpath)
+
+        # ADD? reset anomaly fix (currently just drop first ind as our "fix")
+        # REMOVES FIRST READ (as a view)
+        # might need to adjust for the few read cases (2,3,4,5)
+        firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
+                           (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+            2
+        else
+            firstind
+        end
+
+        tdat = @view cubedat[:, :, firstind_loc:end]
+
+        ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
+        if cor1fnoise
+            in_data = Float64.(tdat[1:2048, :, :])
+            # sirsub! modifies in_data, but make a copy so that it's faster the second time.
+            # better not to need to do this at all
+            copied_in_data = copy(in_data)
+            outdat = zeros(
+                Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
+            sirssub!(sirs4amps, in_data, f_max = 95.0)
+            outdat[1:2048, :, :] .= in_data
+
+            # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
+            in_data = copied_in_data
+            in_data[513:1024, :, :] .= tdat[2049:end, :, :]
+            sirssub!(sirsrefas2, in_data, f_max = 95.0)
+            outdat[2049:end, :, :] .= in_data[513:1024, :, :]
+        else
+            outdat = Float64.(tdat)
         end
 
         ## should this be done on the difference cube, or is this enough?
         # vert_ref_edge_corr!(outdat)
-        @timeit "refarray_zpt!" refarray_zpt!(outdat)
-        @timeit "vert_ref_edge_corr_amp!" vert_ref_edge_corr_amp!(outdat)
+        refarray_zpt!(outdat)
+        vert_ref_edge_corr_amp!(outdat)
 
         # ADD? reference array-based masking/correction
 
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        @timeit "sutr" dimage, ivarimage, chisqimage=if extractMethod == "dcs"
+        dimage, ivarimage, chisqimage = if extractMethod == "dcs"
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
             # n.b. this will mutate outdat
@@ -214,7 +210,7 @@ flush(stdout);
 @everywhere sirsrefas2 = SIRS.restore(caldir * "sirs_test_ref2_d12_r60_n15.jld");
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
-@timeit "3D" try
+try
     if parg["runlist"] != ""
         subDic = load(parg["runlist"])
         subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
@@ -222,7 +218,7 @@ flush(stdout);
             parg["outdir"], caldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
         @showprogress pmap(process_3D_partial, subiter)
     else
-        @timeit "process_3D" process_3D(parg["outdir"], caldir, parg["runname"],
+        process_3D(parg["outdir"], caldir, parg["runname"],
             parg["mjd"], parg["expid"], parg["chip"])
     end
 finally
