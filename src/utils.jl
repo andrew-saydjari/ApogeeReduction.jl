@@ -81,7 +81,7 @@ function gen_design_mat(nx, ny, fx, fy, X, Y)
             end
         end
     end
-    design_matrix[:,col].=1
+    design_matrix[:, col] .= 1
     col += 1
     design_matrix[:, col] .= vec(X ./ maximum(X))
     col += 1
