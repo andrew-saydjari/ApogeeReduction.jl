@@ -6,13 +6,19 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
-# Pkg.activate("./") # just call with is the environment already activated
-Pkg.add(url = "https://github.com/nasa/SIRS.git")
-Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git")
-Pkg.instantiate();
-Pkg.precompile();
 
-using Distributed, ArgParse
+# Pkg.activate("./") # just call with is the environment already activated
+# Pkg seems to default to the nonexistant "master" branch for these packages and throw an error
+# if I don't specify main
+
+# When this (https://github.com/JuliaLang/Pkg.jl/pull/3783) is in stable Julia Pkg,
+# these won't be required.
+#Pkg.add(url = "https://github.com/nasa/SIRS.gite#main")
+#Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git#main")
+Pkg.instantiate()
+Pkg.precompile()
+
+@timeit "imports" using Distributed, ArgParse
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Package activation took $dt");
