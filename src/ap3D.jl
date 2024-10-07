@@ -1,6 +1,7 @@
 # Handling the 3D data cube
 using LinearAlgebra: SymTridiagonal, Diagonal
 using Statistics: mean
+using TimerOutputs
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -85,12 +86,11 @@ function sutr_tb(
     # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
 
     # assumes all images are sequential (ie separated by one read time)
-    dimages = gainMat .*
-              (datacube[:, :, (firstind + 1):end] - datacube[:, :, firstind:(end - 1)])
+    @timeit "dimages" @views dimages = gainMat .*
+                                       (datacube[:, :, (firstind + 1):end] .-
+                                        datacube[:, :, firstind:(end - 1)])
 
-    if isnothing(good_diffs)
-        good_diffs = ones(Bool, size(dimages))
-    end
+    good_diffs = ones(Bool, size(dimages))
 
     rates = zeros(Float64, size(datacube, 1), size(datacube, 2))
     final_vars = zeros(Float64, size(datacube, 1), size(datacube, 2))
@@ -123,7 +123,7 @@ function sutr_tb(
     sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
-    for c_ind in axes(dimages, 2)
+    @timeit "hot loop" for c_ind in axes(dimages, 2)
         @views diffs .= dimages[:, c_ind, :]
         @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
         @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
