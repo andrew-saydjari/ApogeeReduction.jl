@@ -129,8 +129,8 @@ bad_pix_dark = (dark_pix_bitmask[5:2044,5:2044] .& bad_dark_pix_bits .!= 0);
     bad_pix .|= (bmat./ref_med.<pcut_flat)
     good_pix = .!grow_msk2d(bad_pix; rad=3)[:]
 
-    cvec = design_matrix[good_pix,:] \ b[good_pix]
-    modImage = reshape(design_matrix*cvec,nx,ny);
+    cvec = design_matrix[good_pix, :] \ b[good_pix]
+    modImage = reshape(design_matrix * cvec, nx, ny)
 
     flat_im .+= bmat ./ modImage
     model_im .+= modImage
