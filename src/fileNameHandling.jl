@@ -25,3 +25,9 @@ function build_raw_path(obs, mjd, chip, expid)
     end
     return join([base, obs, mjd, fname], "/")
 end
+
+function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype)
+    expid_adj = string(mjd - 55562) * lpad(expid, 4, "0") # what a fun forced hard code!
+    return parent_dir *
+           "apred/$(mjd)/ap2D_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).jld2"
+end
