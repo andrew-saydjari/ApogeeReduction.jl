@@ -4,3 +4,4 @@ file_schema/Manifest.toml
 *.h5
 *.jld2
 .CondaPkg
+.vscode

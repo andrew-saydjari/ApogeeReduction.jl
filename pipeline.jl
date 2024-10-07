@@ -1,16 +1,24 @@
 ## This is a reduction pipeline for APOGEE
 
+using TimerOutputs
+
 import Pkg;
 using Dates;
 t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
+
 # Pkg.activate("./") # just call with is the environment already activated
-Pkg.add(url = "https://github.com/nasa/SIRS.git")
-Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git")
-Pkg.instantiate();
-Pkg.precompile();
+# Pkg seems to default to the nonexistant "master" branch for these packages and throw an error
+# if I don't specify main
+
+# When this (https://github.com/JuliaLang/Pkg.jl/pull/3783) is in stable Julia Pkg,
+# these won't be required.
+#Pkg.add(url = "https://github.com/nasa/SIRS.gite#main")
+#Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git#main")
+Pkg.instantiate()
+Pkg.precompile()
 
 using Distributed, ArgParse
 t_now = now();
@@ -111,9 +119,9 @@ git_branch, git_commit = initalize_git(src_dir);
             mkpath(dirName)
         end
 
-        f = h5open(outdir * "almanac/$(runname).h5")
-        df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-        close(f)
+        df = h5open(outdir * "almanac/$(runname).h5") do f
+            df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+        end
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
@@ -136,12 +144,16 @@ git_branch, git_commit = initalize_git(src_dir);
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
             in_data = Float64.(tdat[1:2048, :, :])
-            outdat = zeros(Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
+            # sirsub! modifies in_data, but make a copy so that it's faster the second time.
+            # better not to need to do this at all
+            copied_in_data = copy(in_data)
+            outdat = zeros(
+                Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
             sirssub!(sirs4amps, in_data, f_max = 95.0)
             outdat[1:2048, :, :] .= in_data
 
             # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-            in_data = Float64.(tdat[1:2048, :, :])
+            in_data = copied_in_data
             in_data[513:1024, :, :] .= tdat[2049:end, :, :]
             sirssub!(sirsrefas2, in_data, f_max = 95.0)
             outdat[2049:end, :, :] .= in_data[513:1024, :, :]
@@ -162,6 +174,7 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage, ivarimage, chisqimage = if extractMethod == "dcs"
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
+            # n.b. this will mutate outdat
             sutr_tb(outdat, gainMat, readVarMat)
         else
             error("Extraction method not recognized")
@@ -211,3 +224,5 @@ try
 finally
     rmprocs(workers())
 end
+
+print_timer(sortby = :allocations)
