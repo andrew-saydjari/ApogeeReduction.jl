@@ -94,7 +94,7 @@ x = range(0, stop = π, length = nx)
 y = range(0, stop = π, length = ny)
 X, Y = [x[i] for i in 1:nx, j in 1:ny], [y[j] for i in 1:nx, j in 1:ny];
 
-design_matrix = gen_design_mat(nx,ny,fx,fy,X,Y)
+design_matrix = gen_design_mat(nx, ny, fx, fy, X, Y)
 
 # fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
 # ax = fig.add_subplot(1, 1, 1)
