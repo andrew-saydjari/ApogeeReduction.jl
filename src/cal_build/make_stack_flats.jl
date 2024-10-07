@@ -173,7 +173,7 @@ jldsave(
     model_im = model_im)
 
 # Figures for QA
-vmin, vmax = percentile(model_im[:],[2,98])
+vmin, vmax = percentile(model_im[:], [2, 98])
 
 fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
 ax = fig.add_subplot(1, 1, 1)
