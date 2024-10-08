@@ -40,6 +40,7 @@ PythonCall = "0.9"
 PythonPlot = "1"
 Statistics = "1"
 StatsBase = "0.34"
+TimerOutputs = "0.5"
 julia = "1.8"
 
 [extras]
