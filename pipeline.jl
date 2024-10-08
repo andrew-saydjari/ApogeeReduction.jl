@@ -47,11 +47,11 @@ function parse_commandline()
         help = "exposure number to be run"
         arg_type = Int
         default = 1
-        "--chip"
-        required = true
-        help = "chip to run, usually a, b, or c"
+        "--chips"
+        required = false
+        help = "chip(s) to run, usually a, b, or c"
         arg_type = String
-        default = "a"
+        default = "abc"
         "--runlist"
         required = false
         help = "path name to hdf5 file with keys specifying list of exposures to run"
@@ -213,13 +213,14 @@ flush(stdout);
 try
     if parg["runlist"] != ""
         subDic = load(parg["runlist"])
-        subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
-        @everywhere process_3D_partial((mjd, expid)) = process_3D(
-            parg["outdir"], caldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
+        subiter = Iterators.zip(subDic["mjd"], subDic["expid"], parg["chips"])
+        @everywhere process_3D_partial((mjd, expid, chip)) = process_3D(
+            parg["outdir"], caldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
         @showprogress pmap(process_3D_partial, subiter)
     else
-        process_3D(parg["outdir"], caldir, parg["runname"],
-            parg["mjd"], parg["expid"], parg["chip"])
+        @everywhere process_3D_partial((chip, )) = process_3D(
+            parg["outdir"], caldir, parg["runname"], parg["mjd"], parg["expid"], chip)         
+        @showprogress pmap(process_3D_partial, parg["chips"])
     end
 finally
     rmprocs(workers())
