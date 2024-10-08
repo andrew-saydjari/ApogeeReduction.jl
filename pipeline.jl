@@ -218,8 +218,8 @@ try
             parg["outdir"], caldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
         @showprogress pmap(process_3D_partial, subiter)
     else
-        @everywhere process_3D_partial((chip, )) = process_3D(
-            parg["outdir"], caldir, parg["runname"], parg["mjd"], parg["expid"], chip)         
+        @everywhere process_3D_partial((chip,)) = process_3D(
+            parg["outdir"], caldir, parg["runname"], parg["mjd"], parg["expid"], chip)
         @showprogress pmap(process_3D_partial, parg["chips"])
     end
 finally
