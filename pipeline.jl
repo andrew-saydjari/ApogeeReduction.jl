@@ -175,7 +175,7 @@ git_branch, git_commit = initalize_git(src_dir);
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
             # n.b. this will mutate outdat
-            sutr_tb(outdat, gainMat, readVarMat)
+            sutr_tb!(outdat, gainMat, readVarMat)
         else
             error("Extraction method not recognized")
         end
