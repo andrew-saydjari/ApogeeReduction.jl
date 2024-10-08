@@ -240,7 +240,7 @@ im_lst = []
     close(f)
     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
 
-    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx] 
+    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
     temp_im .-= dark_im
     
     img = ax.imshow(temp_im',
