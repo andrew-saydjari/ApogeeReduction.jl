@@ -40,9 +40,7 @@ runlist=${outdir}almanac/runlist_dark_cal_${runname}.jld2
 julia +1.10.0 --project="./" src/cal_build/make_runlist_darks.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "a"
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "b"
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "c"
+julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname 
 
 # make the stacked darks
 julia +1.10.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --dark_dir $doutdir
@@ -53,9 +51,9 @@ runlist=${outdir}almanac/runlist_flat_cal_${runname}.jld2
 julia +1.10.0 --project="./" src/cal_build/make_runlist_internal_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "a"
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "b"
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "c"
+julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
+#julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "b"
+#julia +1.10.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chip "c"
 
 julia +1.10.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --flat_dir $doutdir --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
 julia +1.10.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --flat_dir $doutdir --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
