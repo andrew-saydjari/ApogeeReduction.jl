@@ -242,7 +242,6 @@ im_lst = []
 
     temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
     temp_im .-= dark_im
-    
     img = ax.imshow(temp_im',
         vmin = -0.2,
         vmax = 0.2,
