@@ -203,7 +203,7 @@ im_lst = []
     close(f)
     temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
 
-    img = ax.imshow(temp_im',
+    imgloc = ax.imshow(temp_im',
         vmin = -0.2,
         vmax = 0.2,
         interpolation = "none",
@@ -216,7 +216,7 @@ im_lst = []
         0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
         ha = "center", va = "bottom", transform = ax.transAxes)
 
-    push!(im_lst, [img, ttl])
+    push!(im_lst, [imgloc, ttl])
 end
 PythonPlot.plotclose(fig)
 ani = mplani.ArtistAnimation(
@@ -253,9 +253,10 @@ im_lst = []
     temp_im = f["dimage"]
     close(f)
     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
-    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx] .-dark_im
+    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx] 
+    temp_im .-= dark_im
 
-    img = ax.imshow(temp_im[1:2048, 1:2048]',
+    imgloc = ax.imshow(temp_im',
         vmin = -0.2,
         vmax = 0.2,
         interpolation = "none",
@@ -268,7 +269,7 @@ im_lst = []
         0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
         ha = "center", va = "bottom", transform = ax.transAxes)
 
-    push!(im_lst, [img, ttl])
+    push!(im_lst, [imgloc, ttl])
 end
 PythonPlot.plotclose(fig)
 ani = mplani.ArtistAnimation(

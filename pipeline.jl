@@ -93,7 +93,7 @@ flush(stdout);
 @everywhere begin
     using LinearAlgebra
     BLAS.set_num_threads(1)
-    using FITSIO, HDF5, FileIO, JLD2
+    using FITSIO, HDF5, FileIO, JLD2, Glob
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, SIRS, ProgressMeter
 
@@ -190,6 +190,7 @@ git_branch, git_commit = initalize_git(src_dir);
     end
 
     function process_2Dcal(fname)
+        println(fname)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
 
@@ -198,9 +199,10 @@ git_branch, git_commit = initalize_git(src_dir);
         nread_used = load(fname, "nread_used")
 
         ### dark current subtraction
-        darkRateflst = sort(glob("*/darkRate_$(tele)_*_$(chip)_*", outdir * "/cal/$(mjd)/"))
+        darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
+        println(darkRateflst)
         if length(darkRateflst) != 1
-            error("I didn't just find one darkRate file for mjd $mjd, I found $length(darkRateflst)")
+            error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
         darkRate = load(darkRateflst[1],"darkRate");
         pix_bitmask = load(darkRateflst[1],"dark_pix_bitmask");
@@ -208,9 +210,9 @@ git_branch, git_commit = initalize_git(src_dir);
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding
-        flatFractionflst = sort(glob("*/flatFraction_$(tele)_*_$(chip)_*", outdir * "/apred/$(mjd)/"))
+        flatFractionflst = sort(glob("flatFraction_$(tele)_$(chip)_*", dirname(fname)))
         if length(flatFractionflst) != 1
-            error("I didn't just find one flatFraction file for mjd $mjd, I found $length(flatFractionflst)")
+            error("I didn't just find one flatFraction file for mjd $mjd, I found $(length(flatFractionflst))")
         end
         flat_im = load(flatFractionflst[1],"flat_im");
         flat_pix_bitmask = load(flatFractionflst[1],"flat_pix_bitmask");
@@ -243,16 +245,16 @@ flush(stdout);
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
 # clean up this statement to have less replication
-if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
-    @everywhere process_3D_partial((mjd, expid)) = process_3D(
-        parg["outdir"], sirscaldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
-    @showprogress pmap(process_3D_partial, subiter)
-else
-    process_3D(parg["outdir"], sirscaldir, parg["runname"],
-        parg["mjd"], parg["expid"], parg["chip"])
-end
+# if parg["runlist"] != ""
+#     subDic = load(parg["runlist"])
+#     subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
+#     @everywhere process_3D_partial((mjd, expid)) = process_3D(
+#         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
+#     @showprogress pmap(process_3D_partial, subiter)
+# else
+#     process_3D(parg["outdir"], sirscaldir, parg["runname"],
+#         parg["mjd"], parg["expid"], parg["chip"])
+# end
 
 # Find the 2D calibration files for the relevant MJDs
 unique_mjds = if parg["runlist"] != ""
@@ -266,22 +268,22 @@ end
 for mjd in unique_mjds
     cal_dir = "../2024_09_21/outdir/"
     darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
-    df = cal2df(darkflist)
-    calPath, calFlag = get_cal_path(df,tele,mjd,chip)
-    linkPath = outdir * "/apred/$(mjd)/" * basename(calPath)
+    df = cal2df(darkFlist)
+    calPath, calFlag = get_cal_path(df,parg["tele"],mjd,parg["chip"])
+    linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
     if !isfile(linkPath)
         symlink(calPath, linkPath)
     end
 
     flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
     df = cal2df(flatFlist)
-    calPath, calFlag = get_cal_path(df,tele,mjd,chip)
-    linkPath = outdir * "/apred/$(mjd)/" * basename(calPath)
+    calPath, calFlag = get_cal_path(df,parg["tele"],mjd,parg["chip"])
+    linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
     if !isfile(linkPath)
         symlink(calPath, linkPath)
     end
 end
 
 # we could probably scope that to not do a glob and be based on the runlist
-all2D2cal = sort(glob("*/ap2D*", parg["outdir"] * "/apred/"))
+all2D2cal = sort(glob("*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "/apred/"))
 @showprogress pmap(process_2Dcal,all2D2cal)

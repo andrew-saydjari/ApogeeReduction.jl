@@ -23,6 +23,7 @@ PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 PythonPlot = "274fc56d-3b97-40fa-a1cd-1b4a50311bf9"
 SIRS = "40ae95f3-0455-409b-a0fb-071cca222575"
 SlackThreads = "a271ce43-5be6-465b-b549-2328063b090f"
+SlurmClusterManager = "c82cd089-7bf7-41d7-976b-6b5d413cbe0a"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
