@@ -9,8 +9,7 @@ versioninfo();
 # Pkg.activate("./") # just call with is the environment already activated
 Pkg.add(url = "https://github.com/nasa/SIRS.git")
 Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git")
-Pkg.instantiate();
-Pkg.precompile();
+Pkg.instantiate(); Pkg.precompile();
 
 using Distributed, ArgParse
 t_now = now();
@@ -190,7 +189,6 @@ git_branch, git_commit = initalize_git(src_dir);
     end
 
     function process_2Dcal(fname)
-        println(fname)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
 
@@ -200,11 +198,10 @@ git_branch, git_commit = initalize_git(src_dir);
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
-        println(darkRateflst)
         if length(darkRateflst) != 1
             error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
-        darkRate = load(darkRateflst[1],"darkRate");
+        darkRate = load(darkRateflst[1],"dark_rate");
         pix_bitmask = load(darkRateflst[1],"dark_pix_bitmask");
         dimage .-= darkRate*nread_used
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
