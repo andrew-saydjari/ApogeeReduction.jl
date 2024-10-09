@@ -256,6 +256,8 @@ flush(stdout);
 #         parg["mjd"], parg["expid"], parg["chip"])
 # end
 
+
+## Should we put an if statement so as not to immediately break Andy's airflow?
 # Find the 2D calibration files for the relevant MJDs
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
@@ -285,5 +287,5 @@ for mjd in unique_mjds
 end
 
 # we could probably scope that to not do a glob and be based on the runlist
-all2D2cal = sort(glob("*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "/apred/"))
+all2D2cal = sort(glob("*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "apred/"))
 @showprogress pmap(process_2Dcal,all2D2cal)
