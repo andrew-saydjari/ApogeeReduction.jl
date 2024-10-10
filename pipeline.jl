@@ -276,7 +276,7 @@ for mjd in unique_mjds
     cal_dir = "../2024_09_21/outdir/"
     darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
     df = cal2df(darkFlist)
-    calPath, calFlag = get_cal_path(df,parg["tele"],mjd,parg["chip"])
+    calPath, calFlag = get_cal_path(df, parg["tele"], mjd, parg["chip"])
     linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
     if !isfile(linkPath)
         symlink(calPath, linkPath)
