@@ -16,8 +16,8 @@ function cal2df(flist)
     return df
 end
 
-function get_cal_path(df,tele,mjd,chip)
-    mskTeleChip = (df.telescope .== tele) .& (df.chip .== chip) 
+function get_cal_path(df, tele, mjd, chip)
+    mskTeleChip = (df.telescope .== tele) .& (df.chip .== chip)
     msk0 = mskTeleChip .& (df.mjdstart .<= mjd .<= df.mjdend)
     msk1 = mskTeleChip .& (mjd .<= df.mjdstart)
     msk2 = mskTeleChip .& (df.mjdend .<= mjd)
