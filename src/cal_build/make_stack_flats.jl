@@ -274,7 +274,7 @@ im_lst = []
     sname = split(fname, "_")
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
 
-    img = ax.imshow((flat_im_mat[:, :, indx].-flat_im)',
+    img = ax.imshow((flat_im_mat[:, :, indx] .- flat_im)',
         vmin = -0.02,
         vmax = 0.02,
         interpolation = "none",
