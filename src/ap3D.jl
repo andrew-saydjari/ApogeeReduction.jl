@@ -1,6 +1,7 @@
 # Handling the 3D data cube
 using LinearAlgebra: SymTridiagonal, Diagonal
 using Statistics: mean
+using TimerOutputs
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -53,11 +54,11 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     dimage = gainMat .* (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./ (2 .* readVarMat .+ abs.(dimage))
-    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb
+    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb!
 end
 
 """
-    sutr_tb(datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
+    sutr_tb!(datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
 
 # Arguments
 - `datacube` has shape (npix_x,npix_y,n_reads)
@@ -68,7 +69,9 @@ end
 - firstind 
 - good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
   not provided, all diffs will be used.
-- 
+
+!!! warning
+    This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
 
 !!! note
     This assumes that all images are sequential (ie separated by the same read time).
@@ -76,17 +79,22 @@ end
 Created by Kevin McKinnon and sped up by Adam Wheeler. 
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
-function sutr_tb(
+function sutr_tb!(
         datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
-    # Last editted by Kevin McKinnon on Aug 20, 2024 
+    # First version by Kevin McKinnon on Aug 20, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
     # datacube has shape (npix_x,npix_y,n_reads)
     # read_var_mat has shape (npix_x,npix_y)
     # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
 
     # assumes all images are sequential (ie separated by one read time)
-    dimages = gainMat .*
-              (datacube[:, :, (firstind + 1):end] - datacube[:, :, firstind:(end - 1)])
+
+    # construct the differences images in place, overwriting datacube
+    for i in size(datacube, 3):-1:(firstind + 1)
+        @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
+    end
+    # this view is to minimize indexing headaches
+    dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
     if isnothing(good_diffs)
         good_diffs = ones(Bool, size(dimages))
@@ -98,7 +106,6 @@ function sutr_tb(
 
     npix, ndiffs = size(dimages)[[1, 3]]
 
-    #TODO rename some of these?
     diffs = zeros(Float64, npix, ndiffs)
     read_var = zeros(Float64, npix)
     diffs2use = zeros(Bool, npix, ndiffs)
@@ -123,14 +130,18 @@ function sutr_tb(
     sgn[:, 1:2:end] .= -1
 
     #slice the datacube to analyze each row sequentially to keep runtime down
+    # THIS LOOP IS ENTIRELY NONALLOCATING SO EDIT WITH CARE
     for c_ind in axes(dimages, 2)
+        # these involve more copying than is really necessary
         @views diffs .= dimages[:, c_ind, :]
-        @views read_var .= readVarMat[:, c_ind] # TODO make not row vector
+        @views read_var .= readVarMat[:, c_ind]
         @views diffs2use .= good_diffs[:, c_ind, :] # shape = (ndiffs, npix)
-        d .= (diffs .* diffs2use) #TODO make non-adjoint
+        d .= (diffs .* diffs2use)
 
-        # initial guess
-        rates[:, c_ind] = sum(diffs .* diffs2use, dims = 2) ./ sum(diffs2use, dims = 2)
+        # this is done in a loop to be nonallocating
+        for i in axes(rates, 1)
+            @views rates[i, c_ind] = sum(d[i, :]) / sum(diffs2use[i, :])
+        end
 
         for _ in 1:n_repeat
             # scale is the same at alpha in the paper, but we divide it out each Elements

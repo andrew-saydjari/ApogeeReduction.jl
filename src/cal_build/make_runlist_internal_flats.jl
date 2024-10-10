@@ -34,7 +34,7 @@ mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
     df = DataFrame(read(f[parg["tele"] * "/$(tstmjd)/exposures"]))
     df.nreadInt = parse.(Int, df.nread)
-    expindx_list = findall((df.imagetyp .== "InternalFlat"))
+    expindx_list = findall((df.imagetyp .== "InternalFlat") .& (df.nreadInt .> 3))
     for expindx in expindx_list
         push!(darks_mjd, parse(Int, tstmjd))
         push!(darks_expid, expindx)

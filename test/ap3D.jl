@@ -19,7 +19,7 @@
     outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5)
     outdat ./= gainMat
 
-    @time dimage, ivarimage, chisqimage = ApogeeReduction.sutr_tb(
+    @time dimage, ivarimage, chisqimage = ApogeeReduction.sutr_tb!(
         outdat, gainMat, readVarMat)
 
     flux_diffs = (dimage .- true_im)
@@ -33,7 +33,7 @@
     flux_diff_mean = mean(flux_diffs, dims = 2)
     flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
 
-    #expected outputs when n_reads=20, seed=101, extract_method=sutr_tb
+    #expected outputs when n_reads=20, seed=101
     @test isapprox(full_mean_z, -0.05, atol = 0.001)
     @test isapprox(full_std_z, 1.0427, atol = 0.001)
     @test isapprox(flux_mean_z[begin], -0.1298, atol = 0.06)

@@ -1,5 +1,7 @@
 ## This is a reduction pipeline for APOGEE
 
+using TimerOutputs
+
 import Pkg;
 using Dates;
 t0 = now();
@@ -35,11 +37,11 @@ function parse_commandline()
         help = "exposure number to be run"
         arg_type = Int
         default = 1
-        "--chip"
-        required = true
-        help = "chip to run, usually a, b, or c"
+        "--chips"
+        required = false
+        help = "chip(s) to run, usually a, b, or c"
         arg_type = String
-        default = "a"
+        default = "abc"
         "--runlist"
         required = false
         help = "path name to hdf5 file with keys specifying list of exposures to run"
@@ -118,9 +120,9 @@ git_branch, git_commit = initalize_git(src_dir);
             mkpath(dirName)
         end
 
-        f = h5open(outdir * "almanac/$(runname).h5")
-        df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-        close(f)
+        df = h5open(outdir * "almanac/$(runname).h5") do f
+            df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+        end
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
@@ -144,12 +146,16 @@ git_branch, git_commit = initalize_git(src_dir);
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
             in_data = Float64.(tdat[1:2048, :, :])
-            outdat = zeros(Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
+            # sirsub! modifies in_data, but make a copy so that it's faster the second time.
+            # better not to need to do this at all
+            copied_in_data = copy(in_data)
+            outdat = zeros(
+                Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
             sirssub!(sirs4amps, in_data, f_max = 95.0)
             outdat[1:2048, :, :] .= in_data
 
             # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-            in_data = Float64.(tdat[1:2048, :, :])
+            in_data = copied_in_data
             in_data[513:1024, :, :] .= tdat[2049:end, :, :]
             sirssub!(sirsrefas2, in_data, f_max = 95.0)
             outdat[2049:end, :, :] .= in_data[513:1024, :, :]
@@ -170,7 +176,8 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage, ivarimage, chisqimage = if extractMethod == "dcs"
             dcs(outdat, gainMat, readVarMat)
         elseif extractMethod == "sutr_tb"
-            sutr_tb(outdat, gainMat, readVarMat)
+            # n.b. this will mutate outdat
+            sutr_tb!(outdat, gainMat, readVarMat)
         else
             error("Extraction method not recognized")
         end
@@ -239,19 +246,21 @@ flush(stdout);
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
 # clean up this statement to have less replication
-# if parg["runlist"] != ""
-#     subDic = load(parg["runlist"])
-#     subiter = Iterators.zip(subDic["mjd"], subDic["expid"])
-#     @everywhere process_3D_partial((mjd, expid)) = process_3D(
-#         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, parg["chip"]) # does Julia LRU cache this?
-#     @showprogress pmap(process_3D_partial, subiter)
-# else
-#     process_3D(parg["outdir"], sirscaldir, parg["runname"],
-#         parg["mjd"], parg["expid"], parg["chip"])
-# end
+if parg["runlist"] != ""
+    subDic = load(parg["runlist"])
+    subiter = Iterators.product(
+        Iterators.zip(subDic["mjd"], subDic["expid"]),
+        parg["chips"]
+    )
+    @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
+        parg["outdir"], caldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
+    @showprogress pmap(process_3D_partial, subiter)
+else
+    @everywhere process_3D_partial((chip,)) = process_3D(
+        parg["outdir"], caldir, parg["runname"], parg["mjd"], parg["expid"], chip)
+    @showprogress pmap(process_3D_partial, parg["chips"])
+end
 
-
-## Should we put an if statement so as not to immediately break Andy's airflow?
 # Find the 2D calibration files for the relevant MJDs
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])

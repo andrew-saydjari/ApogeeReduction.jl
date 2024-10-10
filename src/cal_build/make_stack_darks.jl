@@ -253,10 +253,9 @@ im_lst = []
     temp_im = f["dimage"]
     close(f)
     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
-    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx] 
+    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
     temp_im .-= dark_im
-
-    imgloc = ax.imshow(temp_im',
+    img = ax.imshow(temp_im',
         vmin = -0.2,
         vmax = 0.2,
         interpolation = "none",
@@ -264,7 +263,6 @@ im_lst = []
         origin = "lower",
         aspect = "auto"
     )
-
     ttl = plt.text(
         0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
         ha = "center", va = "bottom", transform = ax.transAxes)
