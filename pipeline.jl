@@ -190,7 +190,9 @@ git_branch, git_commit = initalize_git(src_dir);
 
     function process_2Dcal(fname)
         sname = split(fname, "_")
+        println("Processing $fname")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+        println("tele: $tele, mjd: $mjd, chip: $chip, expid: $expid")
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
@@ -198,6 +200,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
+        println(darkRateflst)
         if length(darkRateflst) != 1
             error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
@@ -283,6 +286,7 @@ for mjd in unique_mjds
     end
 end
 
-# we could probably scope that to not do a glob and be based on the runlist
+# we could probably scope that to not do a glob and be based on the runlist (this caused problem in an apred with different runlists)
 all2D2cal = sort(glob("*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "apred/"))
-@showprogress pmap(process_2Dcal,all2D2cal)
+process_2Dcal(all2D2cal[1])
+# @showprogress pmap(process_2Dcal,all2D2cal)

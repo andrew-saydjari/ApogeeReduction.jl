@@ -63,7 +63,7 @@ chip = parg["chip"] # Python plotting issues prevented this from looping, so jus
 
 # make summary plots and gifs and send to slack in outer loop
 thread = SlackThread();
-thread("Thread for flat stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
+thread("FLAT stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
 bad_dark_pix_bits = 2^2 + 2^4 + 2^5;
 bad_flat_pix_bits = 2^6;
