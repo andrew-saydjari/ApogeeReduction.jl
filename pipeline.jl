@@ -291,5 +291,6 @@ for mjd in unique_mjds
 end
 
 # we could probably scope that to not do a glob and be based on the runlist (this caused problem in an apred with different runlists)
-all2D2cal = sort(glob("*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "apred/"))
-@showprogress pmap(process_2Dcal,all2D2cal)
+all2D2cal = sort(glob(
+    "*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "apred/"))
+@showprogress pmap(process_2Dcal, all2D2cal)
