@@ -4,6 +4,7 @@
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
 module load sdssdb/main almanac sdsstools postgresql ffmpeg
+juliaup add 1.11.0
 
 # hardcode the mjd and expid for now
 # runname="arctest"
@@ -46,10 +47,16 @@ module load sdssdb/main almanac sdsstools postgresql ffmpeg
 # expid=49
 # outdir="../outdir/"
 
-runname="lcointernalflattest"
-tele="lco"
-mjd=59236
-expid=14
+# runname="lcointernalflattest"
+# tele="lco"
+# mjd=59236
+# expid=14
+# outdir="../outdir/"
+
+runname="apointernalflattest"
+tele="apo"
+mjd=59550
+expid=22
 outdir="../outdir/"
 
 
@@ -60,9 +67,9 @@ mkdir -p ${outdir}almanac
 almanac --mjd $mjd --${tele} --output ${outdir}almanac/${runname}.h5
 
 # run the reduction pipeline
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "a"
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "b"
-julia +1.10.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "c"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "a"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "b"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "c"
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

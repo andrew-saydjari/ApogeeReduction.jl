@@ -32,6 +32,11 @@ function parse_commandline()
         help = "directory where 2D extractions of darks are stored"
         arg_type = String
         default = ""
+        "--runlist"
+        required = true
+        help = "path name to hdf5 file with keys specifying list of exposures to run"
+        arg_type = String
+        default = ""
     end
     return parse_args(s)
 end
@@ -42,7 +47,7 @@ chip = parg["chip"] # Python plotting issues prevented this from looping, so jus
 
 # make summary plots and gifs and send to slack in outer loop
 thread = SlackThread();
-thread("Thread for dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
+thread("DARK stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
 bad_pix_bits = 2^2 + 2^4 + 2^5;
 sig_measure = 0
@@ -57,28 +62,16 @@ end
 cmap_w = PythonPlot.get_cmap("cet_bkr")
 cmap_w.set_bad("w")
 
-# This is too permissive. We want to reduce even the darks we do not want to use... the lgoic in make_runlist_darks is ignored here/assumed to be the only darks run.
-flist_all = sort(glob(
-    "*/ap2D_$(parg["tele"])*_$(chip)_*DARK.jld2", parg["dark_dir"] * "apred/"))
-mjd_flist = map(x -> parse(Int, split(x, "_")[end - 3]), flist_all)
-mskMJD = parg["mjd-start"] .<= mjd_flist .<= parg["mjd-end"]
-flist = flist_all[mskMJD]
+# Load in the exact set of exposures
+mjd = load(parg["runlist"], "mjd")
+expid = load(parg["runlist"], "expid");
+flist = get_cal_file.(
+    Ref(parg["dark_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("DARK"))
 
 # this is dumb and should probably be replaced by ivar weighting
 ref_val_vec = zeros(length(flist))
 dark_im = zeros(2560, 2048)
 
-fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-ax = fig.add_subplot(1, 1, 1)
-
-divider = mpltk.make_axes_locatable(ax)
-cax = divider.append_axes("right", size = "5%", pad = 0.05)
-cbar = plt.colorbar(
-    mplcm.ScalarMappable(
-        norm = mplcolors.Normalize(vmin = -0.2, vmax = 0.2), cmap = "cet_bkr"),
-    cax = cax,
-    orientation = "vertical")
-im_lst = []
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
@@ -88,29 +81,7 @@ im_lst = []
     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
     temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
     dark_im .+= temp_im
-
-    img = ax.imshow(temp_im',
-        vmin = -0.2,
-        vmax = 0.2,
-        interpolation = "none",
-        cmap = "cet_bkr",
-        origin = "lower",
-        aspect = "auto"
-    )
-
-    ttl = plt.text(
-        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
-        ha = "center", va = "bottom", transform = ax.transAxes)
-
-    push!(im_lst, [img, ttl])
 end
-PythonPlot.plotclose(fig)
-ani = mplani.ArtistAnimation(
-    fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
-vidPath = dirNamePlots *
-          "darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-ani.save(vidPath)
-ani = nothing
 
 dark_im ./= length(flist)
 cen_dark = nanzeromedian(dark_im)
@@ -172,8 +143,9 @@ thread("Dark stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(pa
 PythonPlot.plotclose(fig)
 thread("Here is the final dark rate image", ratePath)
 
-dark_im[pix_bit_mask .& 2^3 .== 0] .= 0;
-dark_im[pix_bit_mask .& bad_pix_bits .!= 0] .= NaN;
+dark_im_msk = copy(dark_im)
+dark_im_msk[pix_bit_mask .& 2^3 .== 0] .= 0;
+dark_im_msk[pix_bit_mask .& bad_pix_bits .!= 0] .= NaN;
 
 totNum = length(pix_bit_mask[1:2048, 1:2048])
 badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .!= 0
@@ -186,7 +158,7 @@ fracNotCorr = count(notCorVec) / totNum
 
 fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
 ax = fig.add_subplot(1, 1, 1)
-img = ax.imshow(dark_im',
+img = ax.imshow(dark_im_msk',
     vmin = -0.2,
     vmax = 0.2,
     interpolation = "none",
@@ -211,6 +183,48 @@ maskPath = dirNamePlots *
 fig.savefig(maskPath, bbox_inches = "tight", pad_inches = 0.1)
 thread("Here is the final dark mask image", maskPath)
 PythonPlot.plotclose(fig)
+
+fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
+ax = fig.add_subplot(1, 1, 1)
+
+divider = mpltk.make_axes_locatable(ax)
+cax = divider.append_axes("right", size = "5%", pad = 0.05)
+cbar = plt.colorbar(
+    mplcm.ScalarMappable(
+        norm = mplcolors.Normalize(vmin = -0.2, vmax = 0.2), cmap = "cet_bkr"),
+    cax = cax,
+    orientation = "vertical")
+im_lst = []
+@showprogress for (indx, fname) in enumerate(flist)
+    sname = split(fname, "_")
+    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    f = jldopen(fname)
+    temp_im = f["dimage"]
+    close(f)
+    temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
+
+    imgloc = ax.imshow(temp_im',
+        vmin = -0.2,
+        vmax = 0.2,
+        interpolation = "none",
+        cmap = "cet_bkr",
+        origin = "lower",
+        aspect = "auto"
+    )
+
+    ttl = plt.text(
+        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
+        ha = "center", va = "bottom", transform = ax.transAxes)
+
+    push!(im_lst, [imgloc, ttl])
+end
+PythonPlot.plotclose(fig)
+ani = mplani.ArtistAnimation(
+    fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
+vidPath = dirNamePlots *
+          "darkStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+ani.save(vidPath)
+ani = nothing
 
 len_vid = stat(vidPath).size
 # if the length is bigger than 1 gigabyte, we need to upload the link to slack
@@ -239,7 +253,6 @@ im_lst = []
     temp_im = f["dimage"]
     close(f)
     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
-
     temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
     temp_im .-= dark_im
     img = ax.imshow(temp_im',
@@ -254,7 +267,7 @@ im_lst = []
         0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
         ha = "center", va = "bottom", transform = ax.transAxes)
 
-    push!(im_lst, [img, ttl])
+    push!(im_lst, [imgloc, ttl])
 end
 PythonPlot.plotclose(fig)
 ani = mplani.ArtistAnimation(

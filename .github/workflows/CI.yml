@@ -23,8 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.10'
-          - '1.8' # regress from 1.6 to support better ranges that are more readable
+          - '1.11' # could do back to 1.8, after all of our deps are registered
           - 'nightly'
         os:
           - ubuntu-latest
