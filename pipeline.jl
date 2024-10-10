@@ -6,10 +6,7 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
-# Pkg.activate("./") # just call with is the environment already activated
-Pkg.add(url = "https://github.com/nasa/SIRS.git")
-Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git")
-Pkg.instantiate(); Pkg.precompile();
+Pkg.instantiate(); Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
 
 using Distributed, ArgParse
 t_now = now();
@@ -190,9 +187,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
     function process_2Dcal(fname)
         sname = split(fname, "_")
-        println("Processing $fname")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
-        println("tele: $tele, mjd: $mjd, chip: $chip, expid: $expid")
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
@@ -200,7 +195,6 @@ git_branch, git_commit = initalize_git(src_dir);
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
-        println(darkRateflst)
         if length(darkRateflst) != 1
             error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
@@ -288,5 +282,4 @@ end
 
 # we could probably scope that to not do a glob and be based on the runlist (this caused problem in an apred with different runlists)
 all2D2cal = sort(glob("*/ap2D_$(parg["tele"])_*_$(parg["chip"])_*", parg["outdir"] * "apred/"))
-process_2Dcal(all2D2cal[1])
-# @showprogress pmap(process_2Dcal,all2D2cal)
+@showprogress pmap(process_2Dcal,all2D2cal)
