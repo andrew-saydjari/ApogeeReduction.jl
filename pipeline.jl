@@ -272,19 +272,21 @@ else
 end
 
 # probably need to capture that calFlag somehow, write a meta cal file?
+darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+df_dark = cal2df(darkFlist)
+
+flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
+df_flat = cal2df(flatFlist)
+
 for mjd in unique_mjds
-    cal_dir = "../2024_09_21/outdir/"
-    darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
-    df = cal2df(darkFlist)
-    calPath, calFlag = get_cal_path(df, parg["tele"], mjd, parg["chip"])
+    for chip in parg["chips"]
+    calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, chip)
     linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
     if !isfile(linkPath)
         symlink(calPath, linkPath)
     end
 
-    flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
-    df = cal2df(flatFlist)
-    calPath, calFlag = get_cal_path(df, parg["tele"], mjd, parg["chip"])
+    calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, chip)
     linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
     if !isfile(linkPath)
         symlink(calPath, linkPath)
