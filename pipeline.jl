@@ -142,7 +142,7 @@ git_branch, git_commit = initalize_git(src_dir);
         end
 
         tdat = @view cubedat[:, :, firstind_loc:end]
-        nread_used = size(tdat, 3) - 1  
+        nread_used = size(tdat, 3) - 1
 
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
