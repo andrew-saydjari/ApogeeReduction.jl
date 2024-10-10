@@ -8,7 +8,8 @@ t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
-Pkg.instantiate(); Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
+Pkg.instantiate();
+Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
 
 using Distributed, ArgParse
 t_now = now();
