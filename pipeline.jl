@@ -284,7 +284,7 @@ for mjd in unique_mjds
 
     flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
     df = cal2df(flatFlist)
-    calPath, calFlag = get_cal_path(df,parg["tele"],mjd,parg["chip"])
+    calPath, calFlag = get_cal_path(df, parg["tele"], mjd, parg["chip"])
     linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
     if !isfile(linkPath)
         symlink(calPath, linkPath)
