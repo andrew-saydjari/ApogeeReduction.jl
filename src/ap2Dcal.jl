@@ -8,7 +8,8 @@ function calStrip(fname)
 end
 
 function cal2df(flist)
-    df = DataFrame(path = String[], calType = String[], telescope = String[], chip = String[], mjdstart = Int[], mjdend = Int[])
+    df = DataFrame(path = String[], calType = String[], telescope = String[],
+        chip = String[], mjdstart = Int[], mjdend = Int[])
     for row in calStrip.(flist)
         push!(df, row)
     end
