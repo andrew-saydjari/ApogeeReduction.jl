@@ -1,17 +1,13 @@
 ## This is a reduction pipeline for APOGEE
-
-using TimerOutputs
-
 import Pkg;
 using Dates;
 t0 = now();
 t_then = t0;
 using InteractiveUtils;
 versioninfo();
-Pkg.instantiate();
-Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
+Pkg.instantiate(); Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
 
-using Distributed, ArgParse
+using Distributed, ArgParse, TimerOutputs
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Package activation took $dt");
@@ -255,12 +251,12 @@ if parg["runlist"] != ""
         parg["chips"]
     )
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-        parg["outdir"], caldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
+        parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     @showprogress pmap(process_3D_partial, subiter)
 else
     @everywhere process_3D_partial((chip,)) = process_3D(
-        parg["outdir"], caldir, parg["runname"], parg["mjd"], parg["expid"], chip)
-    @showprogress pmap(process_3D_partial, parg["chips"])
+        parg["outdir"], sirscaldir, parg["runname"], parg["mjd"], parg["expid"], chip)
+    @showprogress pmap(process_3D_partial, collect(parg["chips"]))
 end
 
 # Find the 2D calibration files for the relevant MJDs
