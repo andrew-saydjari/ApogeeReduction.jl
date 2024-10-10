@@ -206,9 +206,9 @@ git_branch, git_commit = initalize_git(src_dir);
         if length(darkRateflst) != 1
             error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
-        darkRate = load(darkRateflst[1],"dark_rate");
-        pix_bitmask = load(darkRateflst[1],"dark_pix_bitmask");
-        dimage .-= darkRate*nread_used
+        darkRate = load(darkRateflst[1], "dark_rate")
+        pix_bitmask = load(darkRateflst[1], "dark_pix_bitmask")
+        dimage .-= darkRate * nread_used
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding
