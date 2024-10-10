@@ -25,7 +25,8 @@ function get_cal_path(df,tele,mjd,chip)
         return df.path[findlast(msk0)], 0
     elseif count(msk1) > 0
         return df.path[findlast(msk1)], 2^1 # flag for using cal from after exposure
-    else count(msk2) > 0
+    else
+        count(msk2) > 0
         return df.path[findfirst(msk2)], 2^2 # flag for using cal from before exposure
     end
 end
