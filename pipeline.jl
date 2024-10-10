@@ -216,14 +216,15 @@ git_branch, git_commit = initalize_git(src_dir);
         if length(flatFractionflst) != 1
             error("I didn't just find one flatFraction file for mjd $mjd, I found $(length(flatFractionflst))")
         end
-        flat_im = load(flatFractionflst[1],"flat_im");
-        flat_pix_bitmask = load(flatFractionflst[1],"flat_pix_bitmask");
-        dimage[5:2044,5:2044] ./= flat_im
-        ivarimage[5:2044,5:2044] .*= flat_im.^2
-        pix_bitmask[5:2044,5:2044] .|= flat_pix_bitmask
+        flat_im = load(flatFractionflst[1], "flat_im")
+        flat_pix_bitmask = load(flatFractionflst[1], "flat_pix_bitmask")
+        dimage[5:2044, 5:2044] ./= flat_im
+        ivarimage[5:2044, 5:2044] .*= flat_im .^ 2
+        pix_bitmask[5:2044, 5:2044] .|= flat_pix_bitmask
 
-        outfname = replace(fname,"ap2D"=>"ap2Dcal")
-        jldsave(outfname; dimage, ivarimage, pix_bitmask, nread_used, git_branch, git_commit)
+        outfname = replace(fname, "ap2D" => "ap2Dcal")
+        jldsave(
+            outfname; dimage, ivarimage, pix_bitmask, nread_used, git_branch, git_commit)
     end
 end
 t_now = now();
