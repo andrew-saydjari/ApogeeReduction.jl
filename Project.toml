@@ -29,8 +29,8 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [sources]
-SlackThreads = {url = "https://github.com/andrew-saydjari/SlackThreads.jl.git", rev = "main"}
-SIRS = {url = "https://github.com/nasa/SIRS.git", rev = "main"}
+SlackThreads = {url = "git@github.com:andrew-saydjari/SlackThreads.jl.git", rev = "main"}
+SIRS = {url = "git@github.com:nasa/SIRS.git", rev = "main"}
 
 [compat]
 ArgParse = "1"
