@@ -280,13 +280,13 @@ df_flat = cal2df(flatFlist)
 
 for mjd in unique_mjds
     for chip in parg["chips"]
-        calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, chip)
+        calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, string(chip))
         linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
         if !isfile(linkPath)
             symlink(calPath, linkPath)
         end
 
-        calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, chip)
+        calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, string(chip))
         linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
         if !isfile(linkPath)
             symlink(calPath, linkPath)
