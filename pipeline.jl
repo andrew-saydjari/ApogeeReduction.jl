@@ -255,11 +255,11 @@ if parg["runlist"] != ""
         parg["chips"]
     )
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-        parg["outdir"], caldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
+        parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     @showprogress pmap(process_3D_partial, subiter)
 else
     @everywhere process_3D_partial((chip,)) = process_3D(
-        parg["outdir"], caldir, parg["runname"], parg["mjd"], parg["expid"], chip)
+        parg["outdir"], sirscaldir, parg["runname"], parg["mjd"], parg["expid"], chip)
     @showprogress pmap(process_3D_partial, parg["chips"])
 end
 
@@ -280,16 +280,17 @@ df_flat = cal2df(flatFlist)
 
 for mjd in unique_mjds
     for chip in parg["chips"]
-    calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, chip)
-    linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
-    if !isfile(linkPath)
-        symlink(calPath, linkPath)
-    end
+        calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, chip)
+        linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
+        if !isfile(linkPath)
+            symlink(calPath, linkPath)
+        end
 
-    calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, chip)
-    linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
-    if !isfile(linkPath)
-        symlink(calPath, linkPath)
+        calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, chip)
+        linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
+        if !isfile(linkPath)
+            symlink(calPath, linkPath)
+        end
     end
 end
 
