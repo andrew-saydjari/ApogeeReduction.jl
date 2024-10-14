@@ -1,7 +1,4 @@
 ## This is a reduction pipeline for APOGEE
-
-using TimerOutputs
-
 import Pkg;
 using Dates;
 t0 = now();
@@ -11,7 +8,7 @@ versioninfo();
 Pkg.instantiate();
 Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
 
-using Distributed, ArgParse
+using Distributed, ArgParse, TimerOutputs
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Package activation took $dt");
@@ -78,7 +75,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
-        addprocs(32)
+        addprocs(16)
     end
 end
 t_now = now();
