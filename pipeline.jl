@@ -78,7 +78,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
-        addprocs(16)
+        addprocs(32)
     end
 end
 t_now = now();
