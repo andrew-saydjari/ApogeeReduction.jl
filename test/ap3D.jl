@@ -13,7 +13,7 @@
               flux_per_reads
 
     # pepper with cosmic rays. These diffs should be excluded
-    cr_count = 1e5
+    cr_count = 1e6
     dcounts[rand(eachindex(dcounts), 100)] .= cr_count
 
     true_im = ones(Float32, detector_dims) .* flux_per_reads
