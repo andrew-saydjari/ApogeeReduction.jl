@@ -16,7 +16,8 @@ tele="apo"
 mkdir -p ${outdir}almanac
 
 # Extract MJD min and max values using Julia
-mjd_values=$(julia --project="./" -e "
+mjd_values=$(julia +1.11.0 --project="./" -e "
+    import Pkg; Pkg.instantiate();
     using JLD2
     file = jldopen(\"$runlist\", \"r\")
     mjd_data = read(file, \"mjd\")
