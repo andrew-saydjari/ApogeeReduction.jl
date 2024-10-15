@@ -4,6 +4,7 @@ src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/plotutils.jl")
+include(src_dir * "/ap2Dcal.jl")
 
 ## Parse command line arguments
 function parse_commandline()
@@ -38,21 +39,11 @@ function parse_commandline()
         help = "path name to hdf5 file with keys specifying list of exposures to run"
         arg_type = String
         default = ""
-        "--dark_path"
+        "--caldir_darks"
         required = true
-        help = "directory where 2D extractions of flats are stored"
+        help = "outdir where to look for the dark cals"
         arg_type = String
         default = ""
-        "--dark-mjd-start"
-        required = true
-        help = "start mjd"
-        arg_type = Int
-        default = 0
-        "--dark-mjd-end"
-        required = true
-        help = "end mjd"
-        arg_type = Int
-        default = 0
     end
     return parse_args(s)
 end
@@ -101,9 +92,13 @@ design_matrix = gen_design_mat(nx, ny, fx, fy, X, Y)
 
 #this is not going to be scalable, but current the backslash solver is too slow
 flat_im_mat = zeros(2040, 2040, length(flist))
-#terrible hard code that needs to be replaced by cal look up system
-f = jldopen("$(parg["dark_path"])" *
-            "darkRate_$(parg["tele"])_$(chip)_$(parg["dark-mjd-start"])_$(parg["dark-mjd-end"]).jld2")
+# this is using the mjd of the first exposure, which works if we are processing an ultra dark run
+# but we might want to reconsider moving this inside the loop if we decide to use nightly flats moving forward
+darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+df_dark = cal2df(darkFlist)
+calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd[1], chip)
+
+f = jldopen(calPath)
 dark_pix_bitmask = f["dark_pix_bitmask"]
 close(f)
 bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
@@ -226,7 +221,7 @@ im_lst = []
     sname = split(fname, "_")
     teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
 
-    img = ax.imshow(flat_im_mat[:, :, indx]',
+    local img = ax.imshow(flat_im_mat[:, :, indx]',
         vmin = 0.95,
         vmax = 1.05,
         interpolation = "none",
@@ -272,9 +267,9 @@ cbar = plt.colorbar(
 im_lst = []
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
-    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    tele, mjdloc, chiploc, expid = sname[(end - 4):(end - 1)]
 
-    img = ax.imshow((flat_im_mat[:, :, indx] .- flat_im)',
+    local img = ax.imshow((flat_im_mat[:, :, indx] .- flat_im)',
         vmin = -0.02,
         vmax = 0.02,
         interpolation = "none",
@@ -284,7 +279,7 @@ im_lst = []
     )
 
     ttl = plt.text(
-        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
+        0.5, 1.01, "Tele: $(tele), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expid)",
         ha = "center", va = "bottom", transform = ax.transAxes)
 
     push!(im_lst, [img, ttl])

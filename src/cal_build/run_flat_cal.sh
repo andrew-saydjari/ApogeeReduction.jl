@@ -12,7 +12,7 @@ mjd_start=$2
 mjd_end=$3
 
 runname="flat_cal_${mjd_start}_${mjd_end}"
-outdir="../../2024_10_03/outdir/"
+outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.jld2
@@ -27,13 +27,13 @@ almanac -v -p 12 --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $a
 julia +1.11.0 --project="./" src/cal_build/make_runlist_internal_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/" --doCal2d false
 
 # make the stacked flats
 mkdir -p ${outdir}flats
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --flat_dir ${doutdir} --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --flat_dir ${doutdir} --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --flat_dir ${doutdir} --runlist $runlist --dark_path "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_19/outdir/darks/" --dark-mjd-start 59548 --dark-mjd-end 59549
+julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
+julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
+julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
