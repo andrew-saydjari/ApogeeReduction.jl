@@ -65,6 +65,11 @@ function parse_commandline()
         help = "outdir where to look for the flat cals"
         arg_type = String
         default = "../outdir/"
+        "--doCal2d"
+        required = false
+        help = "run the 2D calibration step"
+        arg_type = Bool
+        default = true
     end
     return parse_args(s)
 end
@@ -75,7 +80,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
-        addprocs(16)
+        addprocs(32)
     end
 end
 t_now = now();
@@ -188,6 +193,7 @@ git_branch, git_commit = initalize_git(src_dir);
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
             outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, nread_used, git_branch, git_commit)
+        return outdir * "/apred/$(mjd)/" * outfname * ".jld2"
     end
 
     function process_2Dcal(fname)
@@ -253,11 +259,12 @@ if parg["runlist"] != ""
     )
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
-    @showprogress pmap(process_3D_partial, subiter)
+    ap2dnamelist = @showprogress pmap(process_3D_partial, subiter)
 else
-    @everywhere process_3D_partial((chip,)) = process_3D(
+    subiter = string.(collect(parg["chips"]))
+    @everywhere process_3D_partial(chip) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], parg["mjd"], parg["expid"], chip)
-    @showprogress pmap(process_3D_partial, parg["chips"])
+    ap2dnamelist = @showprogress pmap(process_3D_partial, subiter)
 end
 
 # Find the 2D calibration files for the relevant MJDs
@@ -269,29 +276,29 @@ else
 end
 
 # probably need to capture that calFlag somehow, write a meta cal file?
-darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
-df_dark = cal2df(darkFlist)
+if parg["doCal2d"]
+    darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+    df_dark = cal2df(darkFlist)
 
-flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
-df_flat = cal2df(flatFlist)
+    flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
+    df_flat = cal2df(flatFlist)
 
-for mjd in unique_mjds
-    for chip in parg["chips"]
-        calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, string(chip))
-        linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
-        if !isfile(linkPath)
-            symlink(calPath, linkPath)
-        end
+    for mjd in unique_mjds
+        for chip in parg["chips"]
+            calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, string(chip))
+            linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
+            if !isfile(linkPath)
+                symlink(calPath, linkPath)
+            end
 
-        calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, string(chip))
-        linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
-        if !isfile(linkPath)
-            symlink(calPath, linkPath)
+            calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, string(chip))
+            linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
+            if !isfile(linkPath)
+                symlink(calPath, linkPath)
+            end
         end
     end
-end
 
-# we could probably scope that to not do a glob and be based on the runlist (this caused problem in an apred with different runlists)
-all2D2cal = sort(glob(
-    "*/ap2D_$(parg["tele"])_*_*_*", parg["outdir"] * "apred/"))
-@showprogress pmap(process_2Dcal, all2D2cal)
+    all2D2cal = vcat(ap2dnamelist...)
+    @showprogress pmap(process_2Dcal, all2D2cal)
+end
