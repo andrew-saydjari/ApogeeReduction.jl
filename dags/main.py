@@ -71,11 +71,11 @@ def observatories_with_data(almanac_path, **kwargs):
 with DAG(
     "ApogeeReduction-main", 
     #start_date=datetime(2014, 7, 18), 
-    start_date=datetime(2023, 9, 1),
-    schedule="0 9 * * *",
+    start_date=datetime(2024, 10, 10),
+    schedule="0 10 * * *", # 6 am Eastern
     max_active_runs=1,
     default_args=dict(retries=2),
-    catchup=True,
+    catchup=False,
     on_failure_callback=[
         send_slack_notification_partial(
             text=f"ApogeeReduction-main DAG failed on {{{{ ds }}}}: {DAG_URL}",
