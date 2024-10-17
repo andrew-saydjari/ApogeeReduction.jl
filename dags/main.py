@@ -72,7 +72,7 @@ with DAG(
     "ApogeeReduction-main", 
     #start_date=datetime(2014, 7, 18), 
     start_date=datetime(2024, 10, 10),
-    schedule="0 10 * * *", # 6 am Eastern
+    schedule="0 15 * * *", # 11 am ET
     max_active_runs=1,
     default_args=dict(retries=2),
     catchup=False,
@@ -112,7 +112,7 @@ with DAG(
         )
         PythonOperator(
             task_id="mjd",
-            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd)
+            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
         ) >> (
             BashOperator(
                 task_id="mkdirs",
@@ -142,7 +142,7 @@ with DAG(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}) is incomplete. Please investigate.",
                     )
                 ],
-                timeout=60*60*6, # 6 hours
+                timeout=60*60*9, # 9 hours: ~8pm ET
             )
             almanac = (
                 BashOperator(
