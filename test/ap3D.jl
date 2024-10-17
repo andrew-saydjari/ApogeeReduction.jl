@@ -12,6 +12,10 @@
     dcounts = (randn(rng, (detector_dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+
               flux_per_reads
 
+    # pepper with cosmic rays. These diffs should be excluded
+    cr_count = 1e6
+    dcounts[rand(eachindex(dcounts), 100)] .= cr_count
+
     true_im = ones(Float32, detector_dims) .* flux_per_reads
 
     outdat = zeros(Float32, (detector_dims..., n_reads))
