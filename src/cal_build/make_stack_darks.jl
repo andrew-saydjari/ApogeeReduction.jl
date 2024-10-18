@@ -75,7 +75,6 @@ dark_im = zeros(2560, 2048)
 
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
-    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
     f = jldopen(fname)
     temp_im = f["dimage"]
     close(f)
@@ -198,7 +197,7 @@ cbar = plt.colorbar(
 im_lst = []
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
-    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
     f = jldopen(fname)
     temp_im = f["dimage"]
     close(f)
@@ -214,7 +213,7 @@ im_lst = []
     )
 
     ttl = plt.text(
-        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
+        0.5, 1.01, "Tele: $(tele), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
         ha = "center", va = "bottom", transform = ax.transAxes)
 
     push!(im_lst, [imgloc, ttl])
@@ -249,7 +248,7 @@ cbar = plt.colorbar(
 im_lst = []
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
-    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
     f = jldopen(fname)
     temp_im = f["dimage"]
     close(f)
@@ -265,7 +264,7 @@ im_lst = []
         aspect = "auto"
     )
     ttl = plt.text(
-        0.5, 1.01, "Tele: $(tele), MJD: $(mjd), Chip: $(chiploc) Expid: $(expid)",
+        0.5, 1.01, "Tele: $(tele), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
         ha = "center", va = "bottom", transform = ax.transAxes)
 
     push!(im_lst, [imgloc, ttl])
@@ -284,6 +283,5 @@ if len_vid > 1e9 # 1 GB
     vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
     thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
 else
-    thread("Here is the video of all of the residuals for frames included in the stack",
-        vidPath)
+    thread("Here is the video of all of the residuals for frames included in the stack",vidPath)
 end

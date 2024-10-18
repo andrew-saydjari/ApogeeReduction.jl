@@ -268,7 +268,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     # this view is to minimize indexing headaches
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
-    rates = mean(dimages; dims = 3)
+    rates = dropdims(mean(dimages; dims = 3), dims=3)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
 
