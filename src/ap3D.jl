@@ -71,6 +71,7 @@ end
   not provided, all diffs will be used.
 
 !!! warning
+    Andrew Saydjari reports a bug in this code's error bars and chi2 values 2024_10_17.
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
 
 !!! note
@@ -230,4 +231,77 @@ function sutr_tb!(
     end
 
     return rates, final_vars .^ (-1), final_chisqs
+end
+
+"""
+    sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
+
+# Arguments
+- `datacube` has shape (npix_x,npix_y,n_reads)
+- `gainMat`: The gain for each pixel (npix_x,npix_y)
+- `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
+
+# Keyword Arguments
+- firstind 
+- n_repeat: number of iterations to run, default is 2
+
+!!! warning
+    This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
+
+!!! note
+    This assumes that all images are sequential (ie separated by the same read time).
+
+Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler. 
+Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
+"""
+function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
+    # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024 
+    # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
+    # datacube has shape (npix_x,npix_y,n_reads)
+    # read_var_mat has shape (npix_x,npix_y)
+    # assumes all images are sequential (ie separated by one read time)
+
+    # construct the differences images in place, overwriting datacube
+    for i in size(datacube, 3):-1:(firstind + 1)
+        @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
+    end
+    # this view is to minimize indexing headaches
+    dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
+
+    rates = mean(dimages; dims = 3)
+    ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
+    chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
+
+    npix, ndiffs = size(dimages)[[1, 3]]
+    # working arrays
+    ones_vec = ones(ndiffs)
+    KinvQones = zeros(ndiffs)
+    KinvQdata = zeros(ndiffs)
+    Kinv = zeros(ndiffs)
+
+    Q = @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
+    Q .*= sqrt(2 / (ndiffs + 1))
+    Qones = Q * ones_vec
+    D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
+
+    for pixel_ind in CartesianIndices(dimages[:, :, 1])
+        n = readVarMat[pixel_ind]
+        @views Qdata = Q * dimages[pixel_ind, :]
+        @views d1 = sum(dimages[pixel_ind, :])
+        @views d2 = sum(abs2, dimages[pixel_ind, :])
+        for _ in 1:n_repeat
+            a = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
+            x = (a + 1.5n)
+            y = 2 * x / n
+            Kinv .= D ./ (D .+ y)
+            # is sum(.*) faster that xTx? if so, switch
+            KinvQones .= Kinv .* Qones
+            KinvQdata .= Kinv .* Qdata
+            ivars[pixel_ind] = (ndiffs - Qones' * KinvQones) / x
+            rates[pixel_ind] = (d1 - Qones' * KinvQdata) / x / ivars[pixel_ind]
+            chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
+                               rates[pixel_ind]^2 * ivars[pixel_ind]
+        end
+    end
+    return rates, ivars, chi2s
 end
