@@ -25,6 +25,7 @@ OUTPUT_DIR_TEMPLATE = (
 )
 
 ALMANAC_PATH = f"{OUTPUT_DIR_TEMPLATE}/almanac/all_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.h5"
+
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
 
@@ -35,7 +36,6 @@ sbatch_kwargs = re.sub(r"\s+", " ",
     -vvv
     --account=sdss-{nk}p 
     --partition=sdss-{nk}p
-    --clusters={SLURM_CLUSTER}
     --nodes=2
     --exclusive
     --mem=0
@@ -44,36 +44,42 @@ sbatch_kwargs = re.sub(r"\s+", " ",
     -e {OUTPUT_DIR_TEMPLATE}/logs/vmstat_{{{{ ds }}}}_{{{{ ti.run_id }}}}.err
     """.replace("\n", " ")
 )
+#    --clusters={SLURM_CLUSTER}
 #    --ntasks=128
 
+# TODO: Generate this based on our choice of slurm cluster instead of hard-coding it in.
+slurm_env = (
+    f'SLURM_TASKS_PER_NODE="64(x2)"; '
+    f'SLURM_CLUSTERS="notchpeak"; '
+    f'SLURM_CLUSTER="notchpeak.peaks"; '
+    f'SLURM_NNODES="2"; '
+    f'SLURM_NPROCS="128"; '
+    f'SLURM_JOB_NUM_NODES="2"; '
+    f'SLURM_JOB_QOS="sdss-{nk}p"; '
+    f'SLURM_JOB_ACCOUNT="sdss-{nk}p"; '
+    f'SLURM_STEP_NUM_TASKS=128; '
+    f'SLURM_STEP_NUM_NODES=2; '
+    f'SLURM_NTASKS=127; '
+    f'SLURM_JOB_NODELIST=$SLURM_NODELIST;'
+)
 
 srun_prefix = re.sub(r"\s+", " ", f"""
+    {slurm_env}
+    set -eo pipefail; 
     srun 
     -v
     --external-launcher
     --ntasks=1
     -M {SLURM_CLUSTER}
     -D {REPO_DIR}
-    --export=ALL,SLURM_TASKS_PER_NODE=64\(x2\),SLURM_JOB_QOS=sdss-{nk}p,SLURM_JOB_ACCOUNT=sdss-{nk}k,SLURM_NPROCS=128,SLURM_STEP_NUM_TASKS=128,SLURM_NTASKS=32,SLURM_NNODES=2,SLURM_JOB_NUM_NODES=2,SLURM_STEP_NUM_NODES=2,SLURM_CLUSTERS={SLURM_CLUSTER},SLURM_CLUSTER={SLURM_CLUSTER}.peaks
 """) 
 #    --ntasks-per-node=64
 
-
-def observatories_with_data(almanac_path, **kwargs):
-    import h5py as h5
-    with h5.File(os.path.expandvars(almanac_path)) as fp:
-        if len(fp.keys()) == 0:
-            raise AirflowSkipException(f"No data in {almanac_path}")
-        return list(fp.keys())
-
-
-
 with DAG(
     "ApogeeReduction-main", 
-    #start_date=datetime(2014, 7, 18), 
-    start_date=datetime(2024, 10, 10),
+    start_date=datetime(2024, 10, 10), # datetime(2014, 7, 18), 
     schedule="0 12 * * *", # 8 am ET
-    max_active_runs=1,
+    max_active_runs=2,
     default_args=dict(retries=2),
     catchup=False,
     on_failure_callback=[
@@ -107,7 +113,13 @@ with DAG(
             bash_command=(
                 f'cd {REPO_DIR}; '
                 'juliaup add +1.11.0; '
-                'julia +1.11.0 --project="./" -e \'using Pkg; Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); Pkg.add(url = "https://github.com/nasa/SIRS.git"); Pkg.resolve(); Pkg.instantiate()\''
+                'julia +1.11.0 --project="./" -e \''
+                    'using Pkg; '
+                    'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
+                    'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
+                    'Pkg.resolve(); '
+                    'Pkg.instantiate(); '
+                '\''
             )
         )
         PythonOperator(
@@ -143,6 +155,8 @@ with DAG(
                     )
                 ],
                 timeout=60*60*12, # 12 hours: ~8pm ET
+                poke_interval=600, # 10 minutes
+                mode="poke",
             )
             almanac = (
                 BashOperator(
@@ -171,27 +185,37 @@ with DAG(
                     )
                 )
 
-            pipeline = BashOperator(
-                task_id="pipeline",
-                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/airflow_run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
-                on_success_callback=[
-                    send_slack_notification_partial(
-                        text=f"{observatory.upper()} reductions complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}).",
-                    )
-                ],
-                on_failure_callback=[
-                    send_slack_notification_partial(
-                        text=f"{observatory.upper()} reductions failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}). Please investigate: {DAG_URL}/",
-                    )
-                ]                    
+            darks = BashOperator(
+                task_id="darks",
+                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
             )
 
+            flats = BashOperator(
+                task_id="flats",
+                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
+            )
+
+            science = BashOperator(
+                task_id="science",
+                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/run_objects.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
+                on_success_callback=[
+                    send_slack_notification_partial(
+                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}).",
+                    )
+                ],        
+                on_failure_callback=[
+                    send_slack_notification_partial(
+                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}). :picard_facepalm:",
+                    )
+                ]               
+            )
             scancel = BashOperator(
                 task_id="teardown",
                 bash_command=f"scancel -M {SLURM_CLUSTER} {{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}}",
                 trigger_rule="all_done",
+         
             )            
-            transfer >> almanac >> group_slurm >> pipeline >> scancel
+            transfer >> almanac >> group_slurm >> darks >> flats >> science >> scancel
         
         observatory_groups.append(group)
             
