@@ -233,6 +233,7 @@ function sutr_tb!(
     return rates, final_vars .^ (-1), final_chisqs
 end
 
+using LinearAlgebra: mul!
 """
     sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
 
@@ -257,13 +258,11 @@ Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024 
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
-    # datacube has shape (npix_x,npix_y,n_reads)
-    # read_var_mat has shape (npix_x,npix_y)
-    # assumes all images are sequential (ie separated by one read time)
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
-        @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
+        @views datacube[:, :, i] .= gainMat .*
+                                    (datacube[:, :, i] .- datacube[:, :, i - 1])
     end
     # this view is to minimize indexing headaches
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
@@ -283,12 +282,18 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     Q .*= sqrt(2 / (ndiffs + 1))
     Qones = Q * ones_vec
     D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
+    Qdata = similar(Qones)
+    d1s = sum(dimages, dims = 3)
+    d2s = sum(abs2, dimages, dims = 3)
 
-    for pixel_ind in CartesianIndices(dimages[:, :, 1])
+    # this loop is non-allocating. Edit with care.
+    for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
         n = readVarMat[pixel_ind]
-        @views Qdata = Q * dimages[pixel_ind, :]
-        @views d1 = sum(dimages[pixel_ind, :])
-        @views d2 = sum(abs2, dimages[pixel_ind, :])
+        # this is the allocating line
+        mul!(Qdata, Q, view(dimages, pixel_ind, :))
+        d1 = d1s[pixel_ind]
+        d2 = d2s[pixel_ind]
+
         for _ in 1:n_repeat
             a = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
             x = (a + 1.5n)
