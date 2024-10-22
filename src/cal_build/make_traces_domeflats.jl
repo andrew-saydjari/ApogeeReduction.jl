@@ -106,4 +106,6 @@ end
     fig.savefig(tracePlotPath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Trace extraction for $(parg["tele"]) $(chiploc) $(mjdloc) $(expidloc) done.")
     PythonPlot.plotclose(fig)
-    thr
+    thread("Here is the median flux per fiber", tracePlotPath)
+end
+thread("DomeFlat traces done.")
