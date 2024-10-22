@@ -67,43 +67,43 @@ elseif (parg["tele"] == "lco")
     82, 213
 end
 
-end = length(flist[1]) + 1
-
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
     teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
     f = jldopen(fname)
-    image_data = f["dimage"][1:2048,1:2048]
-    ivar_image = f["ivarimage"][1:2048,1:2048]
+    image_data = f["dimage"][1:2048, 1:2048]
+    ivar_image = f["ivarimage"][1:2048, 1:2048]
     close(f)
 
-    trace_params = trace_extract(image_data,ivar_image,teleloc,mjdloc,chiploc,expidloc;image_mask=nothing)
-    jldsave(parg["trace_dir"] * "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).jld2";trace_params = trace_params)
+    trace_params = trace_extract(
+        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; image_mask = nothing)
+    jldsave(
+        parg["trace_dir"] *
+        "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).jld2";
+        trace_params = trace_params)
 
     cut = 750
     fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
     ax = fig.add_subplot(1, 1, 1)
-    y = dropdims(nanzeromedian(trace_params[:,:,1],1),dims=1)
-    ax.scatter(301 .- (1:300),y)
-    ax.scatter(fpifib1,y[301-fpifib1],color="red")
-    ax.scatter(fpifib2,y[301-fpifib2],color="red")
-    ax.axhline(cut,linestyle="--")
+    y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
+    ax.scatter(301 .- (1:300), y)
+    ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
+    ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
+    ax.axhline(cut, linestyle = "--")
 
     ax.set_xlabel("FIBERID")
     ax.set_ylabel("Fit Height")
-    
+
     plt.text(0.5,
-    1.01,
-    "Dome Flat Fit, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
-    ha = "center",
-    va = "bottom",
-    transform = ax.transAxes)
+        1.01,
+        "Dome Flat Fit, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
+        ha = "center",
+        va = "bottom",
+        transform = ax.transAxes)
 
     tracePlotPath = dirNamePlots *
-            "domeTrace_$(parg["tele"])_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+                    "domeTrace_$(parg["tele"])_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
     fig.savefig(tracePlotPath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Trace extraction for $(parg["tele"]) $(chiploc) $(mjdloc) $(expidloc) done.")
     PythonPlot.plotclose(fig)
-    thread("Here is the median flux per fiber", tracePlotPath)
-end
-thread("DomeFlat traces done.")
+    thr
