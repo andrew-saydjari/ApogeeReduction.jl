@@ -41,6 +41,15 @@ nanzeromedian(x) =
     end
 nanzeromedian(x, y) = mapslices(nanzeromedian, x, dims = y)
 
+#@Kevin can we remove?
+nanmedian(x) =
+    if all(isnan, x)
+        NaN
+    else
+        median(filter(!isnan, x))
+    end
+nanmedian(x, y) = mapslices(nanmedian, x, dims = y)
+
 nanzeroiqr(x) =
     if all(isnanorzero, x)
         NaN
