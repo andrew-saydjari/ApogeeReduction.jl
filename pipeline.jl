@@ -136,11 +136,11 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? reset anomaly fix (currently just drop first ind or two as our "fix")
         # REMOVES FIRST READ (as a view)
         # might need to adjust for the few read cases (2,3,4,5)
-        firstind_loc = if ((df.exptype[expid] == "DOMEFLAT") &
-                           (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
-            2
+        firstind_loc, extractMethod_loc = if ((df.exptype[expid] == "DOMEFLAT") &
+                                              (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+            2, "dcs"
         else
-            firstind
+            firstind, extractMethod
         end
 
         tdat = @view cubedat[:, :, firstind_loc:end]
@@ -176,9 +176,9 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage, chisqimage = if extractMethod == "dcs"
+        dimage, ivarimage, chisqimage = if extractMethod_loc == "dcs"
             dcs(outdat, gainMat, readVarMat)
-        elseif extractMethod == "sutr_tb"
+        elseif extractMethod_loc == "sutr_tb"
             # n.b. this will mutate outdat
             sutr_tb!(outdat, gainMat, readVarMat)
         else
