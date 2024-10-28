@@ -53,10 +53,10 @@ juliaup add 1.11.0
 # expid=14
 # outdir="../outdir/"
 
-runname="apointernalflattest"
+runname="singleCalTest"
 tele="apo"
-mjd=59550
-expid=22
+mjd=60606
+expid=16
 outdir="../outdir/"
 
 
