@@ -57,6 +57,20 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb!
 end
 
+function outlier_mask(dimages; clip_threshold = 20)
+    mask = ones(Bool, size(dimages))
+    for i in axes(dimages, 1), j in axes(dimages, 2)
+        μ = mean(dimages[i, j, :])
+        σ = nanzeroiqr(dimages[i, j, :])
+        @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
+    end
+
+    n_masked_pix = sum(sum(.!mask .> 0, dims = 1))
+    n_masked_reads = sum(.!mask)
+    @info "Masked $n_masked_reads reads ($n_masked_pix pixels)"
+    mask
+end
+
 """
     sutr_tb!(datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
 
@@ -68,7 +82,7 @@ end
 # Keyword Arguments
 - firstind 
 - good_diffs, if provided, should contain booleans and have shape (npix_x, npix_y, n_reads-1). If
-  not provided, all diffs will be used.
+  not provided, very simple outlier rejection will be done. (See [`outlier_mask`](@ref))
 
 !!! warning
     Andrew Saydjari reports a bug in this code's error bars and chi2 values 2024_10_17.
@@ -82,14 +96,6 @@ Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
 function sutr_tb!(
         datacube, gainMat, readVarMat; firstind = 1, good_diffs = nothing, n_repeat = 2)
-    # First version by Kevin McKinnon on Aug 20, 2024 
-    # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
-    # datacube has shape (npix_x,npix_y,n_reads)
-    # read_var_mat has shape (npix_x,npix_y)
-    # good_diffs is boolean and has shape (npix_x,npix_y,n_reads-1)
-
-    # assumes all images are sequential (ie separated by one read time)
-
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
         @views datacube[:, :, i] .= gainMat .* (datacube[:, :, i] .- datacube[:, :, i - 1])
@@ -98,7 +104,7 @@ function sutr_tb!(
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
     if isnothing(good_diffs)
-        good_diffs = ones(Bool, size(dimages))
+        good_diffs = outlier_mask(dimages)
     end
 
     rates = zeros(Float64, size(datacube, 1), size(datacube, 2))
