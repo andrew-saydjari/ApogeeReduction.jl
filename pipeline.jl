@@ -76,12 +76,12 @@ end
 
 parg = parse_commandline()
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
-    # if "SLURM_JOB_ID" in keys(ENV)
-    #     using SlurmClusterManager
-    #     addprocs(SlurmManager(), exeflags = ["--project=./"])
-    # else
+    if "SLURM_JOB_ID" in keys(ENV)
+        using SlurmClusterManager
+        addprocs(SlurmManager(), exeflags = ["--project=./"])
+    else
         addprocs(32)
-    # end
+    end
 end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));

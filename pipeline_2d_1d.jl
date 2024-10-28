@@ -61,12 +61,12 @@ end
 
 parg = parse_commandline()
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
-    # if "SLURM_JOB_ID" in keys(ENV)
-    #     using SlurmClusterManager
-    #     addprocs(SlurmManager(), exeflags = ["--project=./"])
-    # else
+    if "SLURM_JOB_ID" in keys(ENV)
+        using SlurmClusterManager
+        addprocs(SlurmManager(), exeflags = ["--project=./"])
+    else
         addprocs(32)
-    # end
+    end
 end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
@@ -109,11 +109,12 @@ git_branch, git_commit = initalize_git(src_dir);
         # pix_bitmask = load(fname, "pix_bitmask")
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
-        traceList = sort(glob("domeTraceMain_$(tele)_$(mjd)_*_$(chip).jld2", parg["outdir"] * "apred/$(mjd)/"))
-        trace_params = load(traceList[1],"trace_params")
+        traceList = sort(glob("domeTraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
+            parg["outdir"] * "apred/$(mjd)/"))
+        trace_params = load(traceList[1], "trace_params")
 
         # extract 1D spectrum
-        extract_boxcar!(flux_1d, dimage, trace_params; widy=2)
+        extract_boxcar!(flux_1d, dimage, trace_params; widy = 2)
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         outfname = replace(fname, "ap2D" => "ap1D")
@@ -149,7 +150,10 @@ for mjd in unique_mjds
     df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
         df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
-    get_2d_name_partial(expid) = parg["outdir"] * "/apred/$(mjd)/" * replace(get_1d_name(expid,df),"ap1D" => "ap2D") * ".jld2"
+    function get_2d_name_partial(expid)
+        parg["outdir"] * "/apred/$(mjd)/" *
+        replace(get_1d_name(expid, df), "ap1D" => "ap2D") * ".jld2"
+    end
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
 end
@@ -161,9 +165,11 @@ all2D = vcat(list2Dexp...)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
     for chip in parg["chips"]
-        traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2", parg["outdir"] * "dome_flats/"))
+        traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
+            parg["outdir"] * "dome_flats/"))
         calPath = traceList[1]
-        linkPath = parg["outdir"] * "apred/$(mjd)/" * replace(basename(calPath), "domeTrace" => "domeTraceMain")
+        linkPath = parg["outdir"] * "apred/$(mjd)/" *
+                   replace(basename(calPath), "domeTrace" => "domeTraceMain")
         if !isfile(linkPath)
             # come back to why this symlink does not work
             cp(calPath, linkPath)

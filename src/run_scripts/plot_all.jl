@@ -80,7 +80,9 @@ for mjd in unique_mjds
     df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
         df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
-    get_1d_name_partial(expid) = parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid,df) * ".jld2"
+    function get_1d_name_partial(expid)
+        parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df) * ".jld2"
+    end
 
     file_list = get_1d_name_partial.(expid_list)
     push!(list1Dfiles, file_list)
@@ -89,26 +91,26 @@ all1D = vcat(list1Dfiles...)
 
 # we should customize this to the exposures we want to see and types of stars we want
 # for example, we want to be looking at the tellurics and pure sky
-nsamp = minimum([length(all1D),5])
-sample_exposures = sample(rng, all1D, nsamp, replace=false)
+nsamp = minimum([length(all1D), 5])
+sample_exposures = sample(rng, all1D, nsamp, replace = false)
 for exp_fname in sample_exposures
     sname = split(exp_fname, "_")
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
-    flux_1d = load(exp_fname,"flux_1d")
+    flux_1d = load(exp_fname, "flux_1d")
 
-    sample_fibers = sample(rng,1:300, 5, replace=false)
+    sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
-        dat = flux_1d[:,fib]
+        dat = flux_1d[:, fib]
         fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
         ax = fig.add_subplot(2, 1, 1)
-        ax.plot(1:2048,dat,color="dodgerblue")
-        ax.set_xlim(0,2049)
+        ax.plot(1:2048, dat, color = "dodgerblue")
+        ax.set_xlim(0, 2049)
         ax.set_ylabel("ADU")
-        
+
         ax = fig.add_subplot(2, 1, 2)
-        ax.plot(1:2048,dat,color="dodgerblue")
-        ax.set_ylim(0,2*median(dat))
-        ax.set_xlim(0,2049)
+        ax.plot(1:2048, dat, color = "dodgerblue")
+        ax.set_ylim(0, 2 * median(dat))
+        ax.set_xlim(0, 2049)
         ax.set_xlabel("Pixel Index")
         ax.set_ylabel("ADU")
         savePath = dirNamePlots * "ap1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib).png"
