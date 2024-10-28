@@ -53,10 +53,10 @@ juliaup add 1.11.0
 # expid=14
 # outdir="../outdir/"
 
-runname="apointernalflattest"
+runname="singleCalTest"
 tele="apo"
-mjd=59550
-expid=22
+mjd=60606
+expid=19
 outdir="../outdir/"
 
 
@@ -67,9 +67,12 @@ mkdir -p ${outdir}almanac
 almanac --mjd $mjd --${tele} --output ${outdir}almanac/${runname}.h5
 
 # run the reduction pipeline
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "a" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "b" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "c" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+
+# this part only works if you have the traces extracted, which takes like 10 min per chip per domeflat exposure... (removed b and c for this reason in my tests)
+# julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "a"
+
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --chip "a" --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

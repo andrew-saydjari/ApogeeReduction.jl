@@ -211,7 +211,8 @@ git_branch, git_commit = initalize_git(src_dir);
         end
         darkRate = load(darkRateflst[1], "dark_rate")
         pix_bitmask = load(darkRateflst[1], "dark_pix_bitmask")
-        dimage .-= darkRate * nread_used
+        # comment out dark subtract for now
+        # dimage .-= darkRate * nread_used
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding
@@ -276,6 +277,7 @@ else
 end
 
 # probably need to capture that calFlag somehow, write a meta cal file?
+all2D = vcat(ap2dnamelist...)
 if parg["doCal2d"]
     darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
     df_dark = cal2df(darkFlist)
@@ -299,6 +301,6 @@ if parg["doCal2d"]
         end
     end
 
-    all2D2cal = vcat(ap2dnamelist...)
-    @showprogress pmap(process_2Dcal, all2D2cal)
+    # process the 2D calibration for all exposures
+    @showprogress pmap(process_2Dcal, all2D)
 end
