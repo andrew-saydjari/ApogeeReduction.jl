@@ -1,5 +1,5 @@
 # Handling the 3D data cube
-using LinearAlgebra: SymTridiagonal, Diagonal
+using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean
 using TimerOutputs
 
@@ -233,9 +233,17 @@ function sutr_tb!(
     return rates, final_vars .^ (-1), final_chisqs
 end
 
-using LinearAlgebra: mul!
 """
     sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
+
+Fit the counts for each read to compute the count rate and variance for each pixel.
+This assumes that all images are sequential (ie separated by the same read time).
+
+In principle, this function is merely taking the weighted-average of the rate diffs for each pixel, 
+under the assumption that their uncertainties are described by a covariance matrix with diagonal 
+elements given by (2*read_variance + photon_noise) and off-diagonal elements given by -photon_noise.
+In practice solving against this covariance matrix is a bit tricky.  This function uses the Woodbury
+matrix identity to solve the system of equations.
 
 # Arguments
 - `datacube` has shape (npix_x,npix_y,n_reads)
@@ -243,14 +251,17 @@ using LinearAlgebra: mul!
 - `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
 
 # Keyword Arguments
-- firstind 
+- firstind: the index of the first read that should be used. 
 - n_repeat: number of iterations to run, default is 2
+
+# Returns
+A tuple of `(rates, ivars, chi2s)` where:
+- `rates` is the best-fit count rate for each pixel
+- `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
+- `chi2s` is the chi squared value for each pixel
 
 !!! warning
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
-
-!!! note
-    This assumes that all images are sequential (ie separated by the same read time).
 
 Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler. 
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
@@ -271,16 +282,18 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
 
-    npix, ndiffs = size(dimages)[[1, 3]]
+    ndiffs = size(dimages, 3)
     # working arrays
     ones_vec = ones(ndiffs)
     KinvQones = zeros(ndiffs)
     KinvQdata = zeros(ndiffs)
     Kinv = zeros(ndiffs)
 
+    # eigenvectors of a matrix with 1 on the diagonal, and -2 on the off-diagonals
     Q = @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
     Q .*= sqrt(2 / (ndiffs + 1))
     Qones = Q * ones_vec
+    # eigenvalues of that matrix
     D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
     Qdata = similar(Qones)
     d1s = sum(dimages, dims = 3)
@@ -299,7 +312,6 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             x = (a + 1.5n)
             y = 2 * x / n
             Kinv .= D ./ (D .+ y)
-            # is sum(.*) faster that xTx? if so, switch
             KinvQones .= Kinv .* Qones
             KinvQdata .= Kinv .* Qdata
             ivars[pixel_ind] = (ndiffs - Qones' * KinvQones) / x
