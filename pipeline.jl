@@ -230,23 +230,6 @@ git_branch, git_commit = initalize_git(src_dir);
         jldsave(
             outfname; dimage, ivarimage, pix_bitmask, nread_used, git_branch, git_commit)
     end
-
-    flux_1d = zeros(Float64, 2048, 300) # preallocate for 1D extraction (need to make Float64/32 decision point)
-    function process_1D(fname)
-        sname = split(fname, "_")
-        tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
-
-        dimage = load(fname, "dimage")
-        # ivarimage = load(fname, "ivarimage")
-        # pix_bitmask = load(fname, "pix_bitmask")
-
-        # extract 1D spectrum
-        extract_boxcar!(flux_1d, dimage, trace_params; widy=2)
-
-        # we probably want to append info from the fiber dictionary from alamanac into the file name
-        outfname = replace(fname, "ap2D" => "ap1D")
-        jldsave(outfname; extract_out, git_branch, git_commit) #ivarimage, pix_bitmask come back and put analogies of these in
-    end
 end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
@@ -318,8 +301,6 @@ if parg["doCal2d"]
         end
     end
 
+    # process the 2D calibration for all exposures
     @showprogress pmap(process_2Dcal, all2D)
 end
-
-# extract the 2D to 1D, ideally the calibrated files
-@showprogress pmap(process_1D, all2D)
