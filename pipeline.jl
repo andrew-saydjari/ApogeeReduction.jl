@@ -318,7 +318,7 @@ if parg["doCal2d"]
         end
     end
 
-    @showprogress pmap(process_2Dcal, all2D2cal)
+    @showprogress pmap(process_2Dcal, all2D)
 end
 
 # extract the 2D to 1D, ideally the calibrated files
