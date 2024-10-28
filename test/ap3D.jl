@@ -1,7 +1,7 @@
 @testset "ap3D" begin
     rng = MersenneTwister(101) #should we switch to stableRNG for my peace of mind?
 
-    detector_dims = (2560, 2048) #TODO name better
+    detector_dims = (2560, 2048)
     gainMat = 1.9 * ones(Float32, detector_dims)
     readVarMat = 25 * ones(Float32, detector_dims)
 
@@ -14,7 +14,10 @@
 
     # pepper with cosmic rays. These diffs should be excluded
     cr_count = 1e6
-    dcounts[rand(eachindex(dcounts), 100)] .= cr_count
+    crs = zeros(size(dcounts))
+    crs[rand(eachindex(dcounts), 100)] .= cr_count
+    dcounts .+= crs
+    cr_mask = sum(crs .> 0, dims = 3) .> 0
 
     true_im = ones(Float32, detector_dims) .* flux_per_reads
 
@@ -35,6 +38,10 @@
     @test isapprox(mean(zscores[(end - 500):end, :]), 0.0, atol = 0.003)
     # std(zscore) should be 1
     @test isapprox(std(zscores), 1, atol = 0.001)
+
+    # were CRs handled well?
+    @test isapprox(mean(zscores[cr_mask]), 0.0, atol = 0.05)
+    @test isapprox(std(zscores[cr_mask]), 1, atol = 0.001)
 
     # these are specific to this implementation and random seed
     flux_mean_z = mean(zscores, dims = 2)
