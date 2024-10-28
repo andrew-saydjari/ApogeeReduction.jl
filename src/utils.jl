@@ -1,3 +1,5 @@
+using StatsBase: iqr
+
 ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P"
 
 function initalize_git(git_dir)
@@ -50,6 +52,7 @@ nanmedian(x) =
     end
 nanmedian(x, y) = mapslices(nanmedian, x, dims = y)
 
+"Returns 1 for unit normal"
 nanzeroiqr(x) =
     if all(isnanorzero, x)
         NaN
