@@ -25,23 +25,22 @@
     flux_diffs = (dimage .- true_im)
     zscores = flux_diffs .* sqrt.(ivarimage)
 
-    full_mean_z = mean(zscores)
-    full_std_z = std(zscores)
-    flux_mean_z = mean(zscores, dims = 2)
-    flux_std_z = std(zscores, dims = 2)
-    flux_mean = mean(dimage, dims = 2)
-    flux_diff_mean = mean(flux_diffs, dims = 2)
-    flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
+    # mean zscore should be 0, but it's biased at low fluxes
+    @test isapprox(mean(zscores), 0.0, atol = 0.05)
+    # at higher fluxes, the mean zscore should be unbiased
+    @test isapprox(mean(zscores[(end - 500):end, :]), 0.0, atol = 0.003)
+    # std(zscore) should be 1
+    @test isapprox(std(zscores), 1, atol = 0.001)
 
-    #expected outputs when n_reads=20, seed=101
-    @test isapprox(full_mean_z, -0.05, atol = 0.001)
-    @test isapprox(full_std_z, 1.0427, atol = 0.001)
-    @test isapprox(flux_mean_z[begin], -0.1298, atol = 0.06)
+    # these are specific to this implementation and random seed
+    flux_mean_z = mean(zscores, dims = 2)
     @test isapprox(flux_mean_z[end], -0.04463, atol = 0.08)
-    @test isapprox(flux_std_z[begin], 1.0104, atol = 0.01)
+    flux_std_z = std(zscores, dims = 2)
     @test isapprox(flux_std_z[end], 1.03251, atol = 0.06)
+    flux_mean = mean(dimage, dims = 2)
     @test isapprox(flux_mean[begin], -0.002658, atol = 0.01)
     @test isapprox(flux_mean[end], 9998.98, atol = 3)
+    flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
     @test isapprox(flux_err_mean[begin], 0.20749, atol = 0.003)
-    @test isapprox(flux_err_mean[end], 23.57064, atol = 0.003)
+    @test isapprox(flux_err_mean[end], 22.9450, atol = 0.003)
 end
