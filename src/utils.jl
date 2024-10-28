@@ -43,7 +43,16 @@ nanzeromedian(x) =
     end
 nanzeromedian(x, y) = mapslices(nanzeromedian, x, dims = y)
 
-"Returns 1 for unit normal"
+#@Kevin can we remove?
+nanmedian(x) =
+    if all(isnan, x)
+        NaN
+    else
+        median(filter(!isnan, x))
+    end
+nanmedian(x, y) = mapslices(nanmedian, x, dims = y)
+
+"Estimated std via iqr. Returns 1 for unit normal"
 nanzeroiqr(x) =
     if all(isnanorzero, x)
         NaN
