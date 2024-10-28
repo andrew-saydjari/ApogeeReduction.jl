@@ -1,5 +1,5 @@
 # Handling the 3D data cube
-using LinearAlgebra: SymTridiagonal, Diagonal
+using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean
 using TimerOutputs
 
@@ -71,6 +71,7 @@ end
   not provided, all diffs will be used.
 
 !!! warning
+    Andrew Saydjari reports a bug in this code's error bars and chi2 values 2024_10_17.
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
 
 !!! note
@@ -230,4 +231,94 @@ function sutr_tb!(
     end
 
     return rates, final_vars .^ (-1), final_chisqs
+end
+
+"""
+    sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
+
+Fit the counts for each read to compute the count rate and variance for each pixel.
+This assumes that all images are sequential (ie separated by the same read time).
+
+In principle, this function is merely taking the weighted-average of the rate diffs for each pixel, 
+under the assumption that their uncertainties are described by a covariance matrix with diagonal 
+elements given by (2*read_variance + photon_noise) and off-diagonal elements given by -photon_noise.
+In practice solving against this covariance matrix is a bit tricky.  This function uses the Woodbury
+matrix identity to solve the system of equations.
+
+# Arguments
+- `datacube` has shape (npix_x,npix_y,n_reads)
+- `gainMat`: The gain for each pixel (npix_x,npix_y)
+- `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
+
+# Keyword Arguments
+- firstind: the index of the first read that should be used. 
+- n_repeat: number of iterations to run, default is 2
+
+# Returns
+A tuple of `(rates, ivars, chi2s)` where:
+- `rates` is the best-fit count rate for each pixel
+- `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
+- `chi2s` is the chi squared value for each pixel
+
+!!! warning
+    This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
+
+Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler. 
+Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
+"""
+function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
+    # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024 
+    # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
+
+    # construct the differences images in place, overwriting datacube
+    for i in size(datacube, 3):-1:(firstind + 1)
+        @views datacube[:, :, i] .= gainMat .*
+                                    (datacube[:, :, i] .- datacube[:, :, i - 1])
+    end
+    # this view is to minimize indexing headaches
+    dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
+
+    rates = dropdims(mean(dimages; dims = 3), dims = 3)
+    ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
+    chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
+
+    ndiffs = size(dimages, 3)
+    # working arrays
+    ones_vec = ones(ndiffs)
+    KinvQones = zeros(ndiffs)
+    KinvQdata = zeros(ndiffs)
+    Kinv = zeros(ndiffs)
+
+    # eigenvectors of a matrix with 1 on the diagonal, and -2 on the off-diagonals
+    Q = @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
+    Q .*= sqrt(2 / (ndiffs + 1))
+    Qones = Q * ones_vec
+    # eigenvalues of that matrix
+    D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
+    Qdata = similar(Qones)
+    d1s = sum(dimages, dims = 3)
+    d2s = sum(abs2, dimages, dims = 3)
+
+    # this loop is non-allocating. Edit with care.
+    for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
+        n = readVarMat[pixel_ind]
+        # this is the allocating line
+        mul!(Qdata, Q, view(dimages, pixel_ind, :))
+        d1 = d1s[pixel_ind]
+        d2 = d2s[pixel_ind]
+
+        for _ in 1:n_repeat
+            a = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
+            x = (a + 1.5n)
+            y = 2 * x / n
+            Kinv .= D ./ (D .+ y)
+            KinvQones .= Kinv .* Qones
+            KinvQdata .= Kinv .* Qdata
+            ivars[pixel_ind] = (ndiffs - Qones' * KinvQones) / x
+            rates[pixel_ind] = (d1 - Qones' * KinvQdata) / x / ivars[pixel_ind]
+            chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
+                               rates[pixel_ind]^2 * ivars[pixel_ind]
+        end
+    end
+    return rates, ivars, chi2s
 end

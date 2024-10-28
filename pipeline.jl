@@ -80,7 +80,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
-        addprocs(32)
+        addprocs(16)
     end
 end
 t_now = now();
@@ -117,7 +117,7 @@ git_branch, git_commit = initalize_git(src_dir);
 @everywhere begin
     # firstind overriden for APO dome flats
     function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = true, extractMethod = "sutr_tb")
+            cor1fnoise = true, extractMethod = "sutr_wood")
         dirName = outdir * "/apred/$(mjd)/"
         if !ispath(dirName)
             mkpath(dirName)
@@ -178,9 +178,9 @@ git_branch, git_commit = initalize_git(src_dir);
         # extraction 3D -> 2D
         dimage, ivarimage, chisqimage = if extractMethod_loc == "dcs"
             dcs(outdat, gainMat, readVarMat)
-        elseif extractMethod_loc == "sutr_tb"
+        elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
-            sutr_tb!(outdat, gainMat, readVarMat)
+            sutr_wood!(outdat, gainMat, readVarMat)
         else
             error("Extraction method not recognized")
         end
