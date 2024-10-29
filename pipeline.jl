@@ -176,8 +176,8 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage, chisqimage = if extractMethod_loc == "dcs"
-            dcs(outdat, gainMat, readVarMat)
+        dimage, ivarimage, chisqimage, CRimage = if extractMethod_loc == "dcs"
+            dcs(outdat, gainMat, readVarMat) # TODO
         elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
             sutr_wood!(outdat, gainMat, readVarMat)

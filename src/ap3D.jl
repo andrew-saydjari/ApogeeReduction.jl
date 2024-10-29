@@ -65,9 +65,6 @@ function outlier_mask(dimages; clip_threshold = 20)
         @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
     end
 
-    n_masked_pix = sum(sum(.!mask .> 0, dims = 1))
-    n_masked_reads = sum(.!mask)
-    @info "Masked $n_masked_reads reads ($n_masked_pix pixels)"
     mask
 end
 
@@ -284,6 +281,9 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     # this view is to minimize indexing headaches
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
+    all_good_diffs = outlier_mask(dimages)
+    CRimage = sum(.!all_good_diffs, dims = 3)[:, :, 1]
+
     rates = dropdims(mean(dimages; dims = 3), dims = 3)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
@@ -302,29 +302,40 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     # eigenvalues of that matrix
     D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
     Qdata = similar(Qones)
+    #TODO delete
     d1s = sum(dimages, dims = 3)
     d2s = sum(abs2, dimages, dims = 3)
 
     # this loop is non-allocating. Edit with care.
     for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
-        n = readVarMat[pixel_ind]
-        # this is the allocating line
-        mul!(Qdata, Q, view(dimages, pixel_ind, :))
-        d1 = d1s[pixel_ind]
-        d2 = d2s[pixel_ind]
+        good_diffs = all_good_diffs[pixel_ind, :]
+
+        read_var = readVarMat[pixel_ind]
+        #@views mul!(Qdata[good_diffs], Q[good_diffs, good_diffs],
+        #    view(dimages, pixel_ind, good_diffs))
+        Qdata[good_diffs] .= Q[good_diffs, good_diffs] * dimages[pixel_ind, good_diffs]
+        d1 = sum(dimages[pixel_ind, good_diffs])
+        d2 = sum(abs2, dimages[pixel_ind, good_diffs])
+
+        Qones = Q[good_diffs, good_diffs] * ones_vec[good_diffs]
 
         for _ in 1:n_repeat
-            a = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
-            x = (a + 1.5n)
-            y = 2 * x / n
+            rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
+            x = (rate_guess + 1.5read_var)
+            y = 2 * x / read_var
+
+            # TODO don't bother to mask bad pixels here
             Kinv .= D ./ (D .+ y)
-            KinvQones .= Kinv .* Qones
-            KinvQdata .= Kinv .* Qdata
-            ivars[pixel_ind] = (ndiffs - Qones' * KinvQones) / x
-            rates[pixel_ind] = (d1 - Qones' * KinvQdata) / x / ivars[pixel_ind]
-            chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
+            KinvQones[good_diffs] .= Kinv[good_diffs] .* Qones
+            KinvQdata[good_diffs] .= Kinv[good_diffs] .* Qdata[good_diffs]
+
+            #TODO try sums instead of inner products
+            #TODO Qones is masked already, Qdiffs is not
+            ivars[pixel_ind] = (sum(good_diffs) - Qones' * KinvQones[good_diffs]) / x
+            rates[pixel_ind] = (d1 - Qones' * KinvQdata[good_diffs]) / x / ivars[pixel_ind]
+            chi2s[pixel_ind] = (d2 - Qdata[good_diffs]' * KinvQdata[good_diffs]) / x -
                                rates[pixel_ind]^2 * ivars[pixel_ind]
         end
     end
-    return rates, ivars, chi2s
+    return rates, ivars, chi2s, CRimage
 end
