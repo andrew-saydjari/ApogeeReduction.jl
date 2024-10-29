@@ -10,7 +10,7 @@ include(src_dir * "/plotutils.jl")
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--chip"
+        "--chips"
         required = false
         help = "chip name (a, b, c)"
         arg_type = String
@@ -20,7 +20,7 @@ function parse_commandline()
         arg_type = String
         default = ""
         "--mjd"
-        required = true
+        required = false
         help = "mjd"
         arg_type = Int
         default = 0
@@ -49,17 +49,11 @@ function parse_commandline()
 end
 
 parg = parse_commandline()
-chip = parg["chip"]
-
-thread = SlackThread();
-thread("Here are some example spectra from $(parg["tele"]) $(chip) for $(parg["mjd"])")
 
 dirNamePlots = parg["outdir"] * "plots/"
 if !ispath(dirNamePlots)
     mkpath(dirNamePlots)
 end
-
-rng = MersenneTwister(351)
 
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
@@ -87,7 +81,23 @@ for mjd in unique_mjds
     file_list = get_1d_name_partial.(expid_list)
     push!(list1Dfiles, file_list)
 end
-all1D = vcat(list1Dfiles...)
+all1Da = vcat(list1Dfiles...)
+
+all1Dperchip = []
+for chip in string.(collect(parg["chips"]))
+    all1Dchip = replace.(all1Da, "_a_" => "_$(chip)_")
+    push!(all1Dperchip, all1Dchip)
+end
+all1D = vcat(all1Dperchip...)
+
+thread = SlackThread();
+if length(unique_mjds) > 1
+    min_mjd, max_mjd = extrema(unique_mjds)
+    thread("Here are some example spectra from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
+else
+    thread("Here are some example spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
+end
+rng = MersenneTwister(351 + unique_mjds[1])
 
 # we should customize this to the exposures we want to see and types of stars we want
 # for example, we want to be looking at the tellurics and pure sky

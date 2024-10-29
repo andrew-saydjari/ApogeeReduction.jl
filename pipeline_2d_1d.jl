@@ -157,7 +157,14 @@ for mjd in unique_mjds
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
 end
-all2D = vcat(list2Dexp...)
+all2Da = vcat(list2Dexp...)
+
+all2Dperchip = []
+for chip in string.(collect(parg["chips"]))
+    all2Dchip = replace.(all2Da, "_a_" => "_$(chip)_")
+    push!(all2Dperchip, all2Dchip)
+end
+all2D = vcat(all2Dperchip...)
 
 # we should do somthing smart to assemble the traces from a night into a single file 
 # that gives us the trace of a fiber as a funciton of time or something
