@@ -97,7 +97,7 @@ if length(unique_mjds) > 1
 else
     thread("Here are some example spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
 end
-rng = MersenneTwister(351+unique_mjds[1])
+rng = MersenneTwister(351 + unique_mjds[1])
 
 # we should customize this to the exposures we want to see and types of stars we want
 # for example, we want to be looking at the tellurics and pure sky
