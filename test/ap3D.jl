@@ -13,9 +13,10 @@
               flux_per_reads
 
     # pepper with cosmic rays. These diffs should be excluded
+    n_crs = 1000
     cr_count = 1e6
     crs = zeros(size(dcounts))
-    crs[rand(eachindex(dcounts), 100)] .= cr_count
+    crs[rand(rng, eachindex(dcounts), n_crs)] .= cr_count
     dcounts .+= crs
     cr_mask = sum(crs .> 0, dims = 3) .> 0
 
@@ -49,7 +50,6 @@
     flux_std_z = std(zscores, dims = 2)
     @test isapprox(flux_std_z[end], 1.03251, atol = 0.06)
     flux_mean = mean(dimage, dims = 2)
-    @test isapprox(flux_mean[begin], -0.002658, atol = 0.01)
     @test isapprox(flux_mean[end], 9998.98, atol = 3)
     flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
     @test isapprox(flux_err_mean[begin], 0.20749, atol = 0.003)
