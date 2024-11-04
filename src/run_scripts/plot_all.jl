@@ -107,19 +107,27 @@ for exp_fname in sample_exposures
     sname = split(exp_fname, "_")
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
     flux_1d = load(exp_fname, "flux_1d")
+    mask_1d = load(exp_fname, "mask_1d")
+    msk_loc = (mask_1d .& bad_pix_bits .== 0);
 
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
         dat = flux_1d[:, fib]
+        mskt = msk_loc[:, fib]
+        dat = nanify(flux_1d[mskt, fib],mskt)
+        datbad = nanify(flux_1d[.!mskt, fib],.!mskt)
+
         fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
         ax = fig.add_subplot(2, 1, 1)
         ax.plot(1:2048, dat, color = "dodgerblue")
+        ax.scatter(1:2048, datbad, color = "red", s = 2)
         ax.set_xlim(0, 2049)
         ax.set_ylabel("ADU")
 
         ax = fig.add_subplot(2, 1, 2)
         ax.plot(1:2048, dat, color = "dodgerblue")
-        ax.set_ylim(0, 2 * median(dat))
+        ax.scatter(1:2048, datbad, color = "red", s = 2)
+        ax.set_ylim(0, 2 * nanzeromedian(dat))
         ax.set_xlim(0, 2049)
         ax.set_xlabel("Pixel Index")
         ax.set_ylabel("ADU")

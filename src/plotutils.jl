@@ -15,3 +15,10 @@ mplani = pyimport("matplotlib.animation");
 PythonPlot.matplotlib.rcParams["figure.max_open_warning"] = 40
 
 sas_prefix = "https://data.sdss5.org/sas/sdsswork/users/"
+
+function nanify(x,msk)
+    out = zeros(eltype(x),length(msk))
+    out[msk] .= x
+    out[.!msk] .= NaN
+    return out
+end
