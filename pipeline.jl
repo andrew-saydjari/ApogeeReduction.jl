@@ -177,7 +177,8 @@ git_branch, git_commit = initalize_git(src_dir);
 
         # extraction 3D -> 2D
         dimage, ivarimage, chisqimage, CRimage = if extractMethod_loc == "dcs"
-            dcs(outdat, gainMat, readVarMat) # TODO
+            images = dcs(outdat, gainMat, readVarMat)
+            images..., zeros(Int, size(images[1]))
         elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
             sutr_wood!(outdat, gainMat, readVarMat)
@@ -192,7 +193,7 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, nread_used, git_branch, git_commit)
+            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, CRimage, nread_used, git_branch, git_commit)
         return outdir * "/apred/$(mjd)/" * outfname * ".jld2"
     end
 
