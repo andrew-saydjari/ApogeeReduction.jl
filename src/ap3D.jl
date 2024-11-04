@@ -60,9 +60,9 @@ end
 function outlier_mask(dimages; clip_threshold = 20)
     mask = ones(Bool, size(dimages))
     for i in axes(dimages, 1), j in axes(dimages, 2)
-        μ = mean(dimages[i, j, :])
-        σ = nanzeroiqr(dimages[i, j, :])
-        @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
+        @views μ = mean(dimages[i, j, :])
+        @views σ = nanzeroiqr(dimages[i, j, :])
+        @views @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
     end
     mask
 end
