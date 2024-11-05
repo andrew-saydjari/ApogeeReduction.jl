@@ -76,7 +76,7 @@ end
 
 parg = parse_commandline()
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
-    if "SLURM_JOB_ID" in keys(ENV)
+    if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=./"])
     else
@@ -197,7 +197,8 @@ git_branch, git_commit = initalize_git(src_dir);
         return outdir * "/apred/$(mjd)/" * outfname * ".jld2"
     end
 
-    function process_2Dcal(fname)
+    # come back to tuning the chi2perdofcut once more rigorously establish noise model
+    function process_2Dcal(fname; chi2perdofcut = 100)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
 
@@ -205,6 +206,7 @@ git_branch, git_commit = initalize_git(src_dir);
         ivarimage = load(fname, "ivarimage")
         nread_used = load(fname, "nread_used")
         CRimage = load(fname, "CRimage")
+        chisqimage = load(fname, "chisqimage")
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
@@ -213,7 +215,8 @@ git_branch, git_commit = initalize_git(src_dir);
         end
         darkRate = load(darkRateflst[1], "dark_rate")
         pix_bitmask = load(darkRateflst[1], "dark_pix_bitmask")
-        dimage .-= darkRate * nread_used
+        # comment out dark subtract for now
+        # dimage .-= darkRate * nread_used
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding
@@ -229,6 +232,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         pix_bitmask .|= (CRimage .== 1) * 2^7
         pix_bitmask .|= (CRimage .> 1) * 2^8
+        pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
 
         outfname = replace(fname, "ap2D" => "ap2Dcal")
         jldsave(
@@ -281,6 +285,7 @@ else
 end
 
 # probably need to capture that calFlag somehow, write a meta cal file?
+all2D = vcat(ap2dnamelist...)
 if parg["doCal2d"]
     darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
     df_dark = cal2df(darkFlist)
@@ -304,6 +309,6 @@ if parg["doCal2d"]
         end
     end
 
-    all2D2cal = vcat(ap2dnamelist...)
-    @showprogress pmap(process_2Dcal, all2D2cal)
+    # process the 2D calibration for all exposures
+    @showprogress pmap(process_2Dcal, all2D)
 end

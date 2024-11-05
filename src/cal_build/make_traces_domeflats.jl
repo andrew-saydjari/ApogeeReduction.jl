@@ -43,6 +43,9 @@ function parse_commandline()
     return parse_args(s)
 end
 
+# I am really in a pickle now. These are really really nightly things, not something
+# for a range of MJD. I will need to change the way I am doing this.
+
 parg = parse_commandline()
 chip = parg["chip"]
 

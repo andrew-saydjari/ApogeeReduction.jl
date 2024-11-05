@@ -31,3 +31,10 @@ function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype)
     return parent_dir *
            "apred/$(mjd)/ap2D_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).jld2"
 end
+
+function get_1d_name(expid, df)
+    return join(
+        ["ap1D", df.observatory[expid], df.mjd[expid],
+            df.chip[expid], df.exposure[expid], df.exptype[expid]],
+        "_")
+end
