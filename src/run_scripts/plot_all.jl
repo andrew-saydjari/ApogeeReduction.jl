@@ -108,14 +108,14 @@ for exp_fname in sample_exposures
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
     flux_1d = load(exp_fname, "flux_1d")
     mask_1d = load(exp_fname, "mask_1d")
-    msk_loc = (mask_1d .& bad_pix_bits .== 0);
+    msk_loc = (mask_1d .& bad_pix_bits .== 0)
 
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
         dat = flux_1d[:, fib]
         mskt = msk_loc[:, fib]
-        dat = nanify(flux_1d[mskt, fib],mskt)
-        datbad = nanify(flux_1d[.!mskt, fib],.!mskt)
+        dat = nanify(flux_1d[mskt, fib], mskt)
+        datbad = nanify(flux_1d[.!mskt, fib], .!mskt)
 
         fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
         ax = fig.add_subplot(2, 1, 1)

@@ -197,14 +197,14 @@ git_branch, git_commit = initalize_git(src_dir);
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
-    function process_2Dcal(fname; chi2perdofcut=100)
+    function process_2Dcal(fname; chi2perdofcut = 100)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
         nread_used = load(fname, "nread_used")
-        chisqimage = load(fname, "chisqimage");
+        chisqimage = load(fname, "chisqimage")
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
@@ -228,7 +228,7 @@ git_branch, git_commit = initalize_git(src_dir);
         ivarimage[5:2044, 5:2044] .*= flat_im .^ 2
         pix_bitmask[5:2044, 5:2044] .|= flat_pix_bitmask
 
-        pix_bitmask .|= ((chisqimage./nread_used) .> chi2perdofcut) * 2^9
+        pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
 
         outfname = replace(fname, "ap2D" => "ap2Dcal")
         jldsave(

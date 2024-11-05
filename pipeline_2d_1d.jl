@@ -110,7 +110,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
-        pix_bitmask = load(replace(fname,"ap2D"=>"ap2Dcal"), "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
+        pix_bitmask = load(replace(fname, "ap2D" => "ap2Dcal"), "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
         traceList = sort(glob("domeTraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
@@ -119,8 +119,8 @@ git_branch, git_commit = initalize_git(src_dir);
 
         # extract 1D spectrum (flux, variance, mask)
         extract_boxcar!(flux_1d, dimage, trace_params; widy = 2)
-        extract_boxcar!(var_1d, 1 ./ivarimage, trace_params; widy = 2)
-        ivar_1d ./= var_1d; # inplace version?
+        extract_boxcar!(var_1d, 1 ./ ivarimage, trace_params; widy = 2)
+        ivar_1d ./= var_1d # inplace version?
         extract_boxcar_bitmask!(mask_1d, pix_bitmask, trace_params; widy = 2)
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name

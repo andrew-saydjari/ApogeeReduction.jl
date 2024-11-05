@@ -18,7 +18,7 @@ function extract_boxcar_bitmask!(extract_out, dimage_in, trace_params; widy = 2)
         for fib in 1:300
             flux, ypixf, sig = trace_params[xpix, fib, :]
             ypix = round(Int, ypixf)
-            extract_out[xpix, fib] = reduce(|,dimage_in[xpix, (ypix - widy):(ypix + widy)])
+            extract_out[xpix, fib] = reduce(|, dimage_in[xpix, (ypix - widy):(ypix + widy)])
         end
     end
 end

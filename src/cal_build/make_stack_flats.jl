@@ -121,10 +121,10 @@ bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
         bad_pix = copy(bad_pix_dark)
         bad_pix .|= (bmat ./ ref_med .< pcut_flat)
         good_pix = .!grow_msk2d(bad_pix; rad = 3)[:]
-    
+
         cvec = design_matrix[good_pix, :] \ b[good_pix]
         modImage = reshape(design_matrix * cvec, nx, ny)
-    
+
         flat_im_mat[:, :, indx] = bmat ./ modImage
         flat_im .+= flat_im_mat[:, :, indx]
         model_im .+= modImage
@@ -175,14 +175,14 @@ else
     cax = divider.append_axes("right", size = "5%", pad = 0.05)
     cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
     flatPath = dirNamePlots *
-            "flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+               "flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
     fig.savefig(flatPath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Flat stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
     PythonPlot.plotclose(fig)
     thread("Here is the final flat image", flatPath)
 
     flat_im_msk = copy(flat_im)
-    flat_im_msk[pix_bit_mask .& bad_flat_pix_bits .!= 0] .= NaN;
+    flat_im_msk[pix_bit_mask .& bad_flat_pix_bits .!= 0] .= NaN
 
     totNum = length(pix_bit_mask)
     badVec = pix_bit_mask .& bad_flat_pix_bits .!= 0
@@ -211,7 +211,7 @@ else
     cax = divider.append_axes("right", size = "5%", pad = 0.05)
     cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
     maskPath = dirNamePlots *
-            "flatMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+               "flatMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
     fig.savefig(maskPath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Here is the final flat mask image", maskPath)
     PythonPlot.plotclose(fig)
@@ -250,7 +250,7 @@ else
     ani = mplani.ArtistAnimation(
         fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
     vidPath = dirNamePlots *
-            "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+              "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
     ani.save(vidPath)
     ani = nothing
 
@@ -298,7 +298,7 @@ else
     ani = mplani.ArtistAnimation(
         fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
     vidPath = dirNamePlots *
-            "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+              "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
     ani.save(vidPath)
     ani = nothing
 
@@ -308,7 +308,8 @@ else
         vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
         thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
     else
-        thread("Here is the video of all of the residuals for frames included in the stack",
+        thread(
+            "Here is the video of all of the residuals for frames included in the stack",
             vidPath)
     end
 end
