@@ -99,26 +99,34 @@ git_branch, git_commit = initalize_git(src_dir);
 
 ##### 1D stage
 @everywhere begin
-    flux_1d = zeros(Float64, 2048, 300) # preallocate for 1D extraction (need to make Float64/32 decision point)
+    flux_1d = zeros(Float64, 2048, 300)
+    var_1d = zeros(Float64, 2048, 300)
+    ivar_1d = ones(Float64, 2048, 300)
+    mask_1d = zeros(Int64, 2048, 300)
     function process_1D(fname)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+        fill!(ivar_1d, 1)
 
         dimage = load(fname, "dimage")
-        # ivarimage = load(fname, "ivarimage")
-        # pix_bitmask = load(fname, "pix_bitmask")
+        ivarimage = load(fname, "ivarimage")
+        pix_bitmask = load(replace(fname, "ap2D" => "ap2Dcal"), "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
         traceList = sort(glob("domeTraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
-        # extract 1D spectrum
+        # extract 1D spectrum (flux, variance, mask)
         extract_boxcar!(flux_1d, dimage, trace_params; widy = 2)
+        extract_boxcar!(var_1d, 1 ./ ivarimage, trace_params; widy = 2)
+        ivar_1d ./= var_1d # inplace version?
+        extract_boxcar_bitmask!(mask_1d, pix_bitmask, trace_params; widy = 2)
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
+        # outfname = replace(fname, "ap2Dcal" => "ap1D")
         outfname = replace(fname, "ap2D" => "ap1D")
-        jldsave(outfname; flux_1d, git_branch, git_commit) #ivarimage, pix_bitmask come back and put analogies of these in
+        jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit) #ivarimage, pix_bitmask come back and put analogies of these in
     end
 end
 t_now = now();
@@ -152,6 +160,7 @@ for mjd in unique_mjds
     end
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
+        # replace(get_1d_name(expid, df), "ap1D" => "ap2Dcal") * ".jld2"
         replace(get_1d_name(expid, df), "ap1D" => "ap2D") * ".jld2"
     end
     local2D = get_2d_name_partial.(expid_list)

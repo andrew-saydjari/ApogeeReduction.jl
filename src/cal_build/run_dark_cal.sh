@@ -11,7 +11,7 @@ tele=$1
 mjd_start=$2
 mjd_end=$3
 
-runname="dark_cal_${mjd_start}_${mjd_end}"
+runname="dark_cal_${tele}_${mjd_start}_${mjd_end}"
 outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
