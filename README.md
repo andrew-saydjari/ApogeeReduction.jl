@@ -6,7 +6,7 @@ To enable the Slack Messaging functionality, you need the OAuth token for the bo
 
 ## Current Flag Bits
 
-During ingestion, some of the exposure files may have issues that cause the spectrum to come through apMADGICS.jl as a vector of only NaNs. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
+Certain pixels are entirely masked or have data of questionable quality. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
 
 | Value         | Bit         | Meaning     |
 | ----------- | ----------- | ----------- |
