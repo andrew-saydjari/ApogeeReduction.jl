@@ -176,8 +176,9 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage, chisqimage = if extractMethod_loc == "dcs"
-            dcs(outdat, gainMat, readVarMat)
+        dimage, ivarimage, chisqimage, CRimage = if extractMethod_loc == "dcs"
+            images = dcs(outdat, gainMat, readVarMat)
+            images..., zeros(Int, size(images[1]))
         elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
             sutr_wood!(outdat, gainMat, readVarMat)
@@ -192,7 +193,7 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, nread_used, git_branch, git_commit)
+            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, CRimage, nread_used, git_branch, git_commit)
         return outdir * "/apred/$(mjd)/" * outfname * ".jld2"
     end
 
@@ -204,6 +205,7 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
         nread_used = load(fname, "nread_used")
+        CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
 
         ### dark current subtraction
@@ -228,6 +230,8 @@ git_branch, git_commit = initalize_git(src_dir);
         ivarimage[5:2044, 5:2044] .*= flat_im .^ 2
         pix_bitmask[5:2044, 5:2044] .|= flat_pix_bitmask
 
+        pix_bitmask .|= (CRimage .== 1) * 2^7
+        pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
 
         outfname = replace(fname, "ap2D" => "ap2Dcal")

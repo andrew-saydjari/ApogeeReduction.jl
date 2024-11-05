@@ -1,3 +1,5 @@
+using StatsBase: iqr
+
 ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P"
 
 bad_dark_pix_bits = 2^2 + 2^4 + 2^5;
@@ -57,6 +59,7 @@ nanmedian(x) =
     end
 nanmedian(x, y) = mapslices(nanmedian, x, dims = y)
 
+"Returns 1 for unit normal"
 nanzeroiqr(x) =
     if all(isnanorzero, x)
         NaN
