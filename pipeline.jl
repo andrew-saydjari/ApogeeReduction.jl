@@ -227,7 +227,8 @@ git_branch, git_commit = initalize_git(src_dir);
         ivarimage[5:2044, 5:2044] .*= flat_im .^ 2
         pix_bitmask[5:2044, 5:2044] .|= flat_pix_bitmask
 
-        # TODO add CRmask bit
+        pix_bitmask .|= (CRimage .== 1) * 2^7
+        pix_bitmask .|= (CRimage .> 1) * 2^8
 
         outfname = replace(fname, "ap2D" => "ap2Dcal")
         jldsave(
