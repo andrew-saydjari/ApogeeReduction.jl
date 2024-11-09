@@ -96,7 +96,10 @@ with DAG(
                 bash_command=(
                     f"cd {REPO_DIR}; "
                     f"git checkout {REPO_BRANCH}; "
-                    "git pull"
+                    "git add -A; "  # Stage all changes, including deletions
+                    "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
+                    "git push; "  # Push local changes
+                    "git pull"  # Pull latest changes
                 ),
             )
         ) >> (
