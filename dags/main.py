@@ -39,7 +39,7 @@ sbatch_kwargs = re.sub(r"\s+", " ",
     --nodes=2
     --exclusive
     --mem=0
-    --time=01:00:00
+    --time=04:00:00
     -o {OUTPUT_DIR_TEMPLATE}/logs/vmstat_{{{{ ds }}}}_{{{{ ti.run_id }}}}.out
     -e {OUTPUT_DIR_TEMPLATE}/logs/vmstat_{{{{ ds }}}}_{{{{ ti.run_id }}}}.err
     """.replace("\n", " ")
@@ -247,4 +247,4 @@ with DAG(
     group_git >> group_setup >> observatory_groups
     
 
-    
+
