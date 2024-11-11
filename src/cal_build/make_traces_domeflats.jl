@@ -31,7 +31,7 @@ function parse_commandline()
         default = 0
         "--trace_dir"
         required = true
-        help = "directory where 2D extractions of darks are stored"
+        help = "directory where 2D extractions of traces are stored"
         arg_type = String
         default = ""
         "--runlist"
@@ -64,15 +64,12 @@ expid = load(parg["runlist"], "expid");
 flist = get_cal_file.(
     Ref(parg["trace_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("DOMEFLAT"))
 
-fpifib1, fpifib2 = if (parg["tele"] == "apo")
-    75, 225
-elseif (parg["tele"] == "lco")
-    82, 213
-end
+fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 
 @showprogress for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
     teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+    mjdfps2plate = get_fps_plate_divide(teleloc)
     f = jldopen(fname)
     image_data = f["dimage"][1:2048, 1:2048]
     ivar_image = f["ivarimage"][1:2048, 1:2048]
@@ -90,8 +87,10 @@ end
     ax = fig.add_subplot(1, 1, 1)
     y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
     ax.scatter(301 .- (1:300), y)
-    ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
-    ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
+    if mjdloc > mjdfps2plate
+        ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
+        ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
+    end
     ax.axhline(cut, linestyle = "--")
 
     ax.set_xlabel("FIBERID")

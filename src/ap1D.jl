@@ -22,3 +22,30 @@ function extract_boxcar_bitmask!(extract_out, dimage_in, trace_params; widy = 2)
         end
     end
 end
+
+function get_fibTargDict(f, tele, mjd, expid)
+    # worry about the read-in overhead per expid?
+    df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
+    mjdfps2plate = get_fps_plate_divide(tele)
+    configName = (mjd > mjdfps2plate) ? "fps" : "plates"
+    configIDname = (mjd > mjdfps2plate) ? "configid" : "plateid"
+    configNumStr = df_exp[expid, Symbol(configIDname)]
+
+    fibtargDict = if (df_exp.exptype[expid] == "OBJECT")
+        try
+            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configNumStr)"]))
+            Dict(parse.(Int, df_fib[!, "fiber_id"]) .=> df_fib[!, "target_type"])
+        catch
+            Dict(1:300 .=> "fiberTypeFail")
+        end
+    else
+        Dict(1:300 .=> "cal")
+    end
+
+    if mjd > mjdfps2plate
+        fpifib1, fpifib2 = get_fpi_guide_fiberID(tele)
+        fibtargDict[fpifib1] = "fpiguide"
+        fibtargDict[fpifib2] = "fpiguide"
+    end
+    return fibtargDict
+end

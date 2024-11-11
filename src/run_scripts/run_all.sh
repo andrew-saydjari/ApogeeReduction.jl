@@ -11,6 +11,7 @@ tele=$1
 mjd=$2
 
 runname="objects_${mjd}"
+# outdir="../../2024_10_29/outdir/"
 outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
@@ -20,7 +21,7 @@ runlist=${outdir}almanac/runlist_${runname}.jld2
 mkdir -p ${outdir}almanac
 
 # get the data summary file for the MJD
-almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file
+almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file --fibers
 
 # # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
 julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
@@ -35,7 +36,7 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdi
 julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
 
 # End of night plotting script
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a" 
+julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
 julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b" 
 julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c" 
 

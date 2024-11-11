@@ -38,3 +38,35 @@ function get_1d_name(expid, df)
             df.chip[expid], df.exposure[expid], df.exptype[expid]],
         "_")
 end
+
+function fiberIndx2fiberID(fibindx)
+    return 301 - fibindx
+end
+
+function fiberID2fiberIndx(fiberID)
+    return 301 - fiberID
+end
+
+function adjFiberIndx(teleind, fibindx)
+    return (teleind - 1) * 300 + fibindx
+end
+
+function adjFiberIndx2FiberIndx(adjfibindx)
+    return mod1(adjfibindx, 300)
+end
+
+function get_fpi_guide_fiberID(tele)
+    if (tele == "apo")
+        return 75, 225
+    elseif (tele == "lco")
+        return 82, 213
+    end
+end
+
+function get_fps_plate_divide(tele)
+    if (tele == "apo")
+        return 59423
+    elseif (tele == "lco")
+        return 59810 # still need to confirm this 
+    end
+end
