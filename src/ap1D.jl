@@ -1,5 +1,5 @@
 using FastRunningMedian: running_median
-using Distrubtions: cdf, Normal
+using Distributions: cdf, Normal
 
 # this file contains the code needed to extract a 1D spectrum from a 2D images.
 # trace_params is of size (n_x_pix, n_fibers, 3)
@@ -35,9 +35,9 @@ Could be denoised further by fitting a low-order polynomial or similar.
 """
 function regularize_trace(trace_params; window_size = 101)
     @assert isodd(window_size) # otherwise the length of the regularized array is incorrect
-
+    n_xpix, n_fibers = size(trace_params)[1:2]
     regularized_trace = similar(trace_params)
-    for fiber in 1:300, param in 1:3
+    for fiber in 1:n_fibers, param in 1:3
         regularized_trace[:, fiber, param] = running_median(
             trace_params[:, fiber, param], window_size, :asym_trunc; nan = :ignore)
     end
@@ -69,8 +69,7 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
         ypixels = floor(Int, y_peak - window_half_size):ceil(
             Int, y_peak + window_half_size)
         ypix_boundaries = [ypixels .- 0.5; ypixels[end] + 0.5]
-        unnormalized_weights = diff(cdf.(Normal(y_peak, y_sigma), ypix_boundaries))
-        weights = unnormalized_weights ./ sum(unnormalized_weights)
+        weights = diff(cdf.(Normal(y_peak, y_sigma), ypix_boundaries))
 
         flux_1d[xpix, fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
                              sum(weights .^ 2 * ivarimage[xpix, ypixels])
