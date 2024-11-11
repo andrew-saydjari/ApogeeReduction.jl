@@ -3,3 +3,4 @@
 # see https://domluna.github.io/JuliaFormatter.jl/stable/style/ for more info
 
 style = "sciml"
+margin = 100 # max line length
