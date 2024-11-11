@@ -9,25 +9,23 @@ using Distrubtions: cdf, Normal
 # add a condition that we should drop any x pixel where a bad bit in any of the pixels being summed is bad
 function extract_boxcar!(extract_out, dimage_in, trace_params; boxcar_halfwidth = 2)
     fill!(extract_out, 0)
-    for xpix in 1:N_XPIX
-        for fib in 1:N_FIBERS
-            _, ypixf, _ = trace_params[xpix, fib, :]
-            ypix = round(Int, ypixf)
-            extract_out[xpix, fib] = sum(dimage_in[
-                xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
-        end
+    n_xpix, n_fibers = size(trace_params)[1:2]
+    for xpix in 1:n_xpix, fib in 1:n_fibers
+        _, ypixf, _ = trace_params[xpix, fib, :]
+        ypix = round(Int, ypixf)
+        extract_out[xpix, fib] = sum(dimage_in[
+            xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
     end
 end
 
 function extract_boxcar_bitmask!(extract_out, dimage_in, trace_params; boxcar_halfwidth = 2)
     fill!(extract_out, 0)
-    for xpix in 1:N_XPIX
-        for fib in 1:N_FIBERS
-            _, ypixf, _ = trace_params[xpix, fib, :]
-            ypix = round(Int, ypixf)
-            extract_out[xpix, fib] = reduce(
-                |, dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
-        end
+    n_xpix, n_fibers = size(trace_params)[1:2]
+    for xpix in 1:n_xpix, fib in 1:n_fibers
+        _, ypixf, _ = trace_params[xpix, fib, :]
+        ypix = round(Int, ypixf)
+        extract_out[xpix, fib] = reduce(
+            |, dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
     end
 end
 
