@@ -39,7 +39,7 @@ sbatch_kwargs = re.sub(r"\s+", " ",
     --nodes=2
     --exclusive
     --mem=0
-    --time=04:00:00
+    --time=06:00:00
     -o {OUTPUT_DIR_TEMPLATE}/logs/vmstat_{{{{ ds }}}}_{{{{ ti.run_id }}}}.out
     -e {OUTPUT_DIR_TEMPLATE}/logs/vmstat_{{{{ ds }}}}_{{{{ ti.run_id }}}}.err
     """.replace("\n", " ")
@@ -59,7 +59,7 @@ slurm_env = (
     f'SLURM_JOB_ACCOUNT="sdss-{nk}p"; '
     f'SLURM_STEP_NUM_TASKS=128; '
     f'SLURM_STEP_NUM_NODES=2; '
-    f'SLURM_NTASKS=127; '
+    f'SLURM_NTASKS=64; '
     f'SLURM_JOB_NODELIST=$SLURM_NODELIST;'
 )
 
