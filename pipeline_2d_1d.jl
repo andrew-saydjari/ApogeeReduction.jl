@@ -142,7 +142,7 @@ git_branch, git_commit = initalize_git(src_dir);
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         # outfname = replace(fname, "ap2Dcal" => "ap1D")
         outfname = replace(fname, "ap2D" => "ap1D")
-        jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit) # ivarimage, pix_bitmask come back and put analogies of these in
+        jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
     end
 end
 t_now = now();
