@@ -55,13 +55,11 @@ Spacing between traces is ~ 2000 / 300 = 6.67 pixels.
 function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_half_size = 4)
     n_xpix = size(trace_params, 1)
     n_fibers = size(trace_params, 2)
-    @assert size(dimage, 1) == n_xpix
-    @assert size(ivarimage, 1) == n_xpix
 
     # return values to be filled
-    flux_1d = Vector{Float64}(undef, n_xpix, n_fibers)
-    var_1d = Vector{Float64}(undef, n_xpix, n_fibers)
-    mask_1d = Vector{Int64}(undef, n_xpix, n_fibers)
+    flux_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
+    var_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
+    mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
 
     for xpix in 1:n_xpix, fib in 1:n_fibers
         _, y_peak, y_sigma = trace_params[xpix, fib, :]
@@ -72,8 +70,8 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
         weights = diff(cdf.(Normal(y_peak, y_sigma), ypix_boundaries))
 
         flux_1d[xpix, fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
-                             sum(weights .^ 2 * ivarimage[xpix, ypixels])
-        var_1d[xpix, fib] = 1 / sum(weights .^ 2 * ivarimage[xpix, ypixels])
+                             sum(weights .^ 2 .* ivarimage[xpix, ypixels])
+        var_1d[xpix, fib] = 1 / sum(weights .^ 2 .* ivarimage[xpix, ypixels])
 
         # bitmask
         mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
