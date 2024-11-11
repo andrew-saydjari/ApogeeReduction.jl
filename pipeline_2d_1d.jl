@@ -55,6 +55,11 @@ function parse_commandline()
         help = "name of the run (specifically almanac file)"
         arg_type = String
         default = "test"
+        "--extraction"
+        required = false
+        help = "extraction method (boxcar or gaussian)"
+        arg_type = String
+        default = "gaussian"
     end
     return parse_args(s)
 end
@@ -117,11 +122,19 @@ git_branch, git_commit = initalize_git(src_dir);
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
-        # extract 1D spectrum (flux, variance, mask)
-        extract_boxcar!(flux_1d, dimage, trace_params; widy = 2)
-        extract_boxcar!(var_1d, 1 ./ ivarimage, trace_params; widy = 2)
-        ivar_1d ./= var_1d # inplace version?
-        extract_boxcar_bitmask!(mask_1d, pix_bitmask, trace_params; widy = 2)
+        # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of 
+        # everything to some degree
+        regularized_trace_params = regularize_trace(trace_params)
+
+        if parg["extraction"] == "boxcar"
+            # extract 1D spectrum (flux, variance, mask)
+            extract_boxcar!(flux_1d, dimage, regularized_trace_params; widy = 2)
+            extract_boxcar!(var_1d, 1 ./ ivarimage, regularized_trace_params; widy = 2)
+            ivar_1d ./= var_1d # inplace version?
+            extract_boxcar_bitmask!(
+                mask_1d, pix_bitmask, regularized_trace_params; widy = 2)
+        else
+        end
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         # outfname = replace(fname, "ap2Dcal" => "ap1D")

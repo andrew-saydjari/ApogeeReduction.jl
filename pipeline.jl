@@ -177,6 +177,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         # extraction 3D -> 2D
         dimage, ivarimage, chisqimage, CRimage = if extractMethod_loc == "dcs"
+            # TODO some kind of outlier rejection, this just keeps all diffs
             images = dcs(outdat, gainMat, readVarMat)
             images..., zeros(Int, size(images[1]))
         elseif extractMethod_loc == "sutr_wood"
