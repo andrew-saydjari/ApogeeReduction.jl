@@ -5,3 +5,6 @@ file_schema/Manifest.toml
 *.jld2
 .CondaPkg
 .vscode
+
+stash/
+.gitignore

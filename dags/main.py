@@ -53,13 +53,13 @@ slurm_env = (
     f'SLURM_CLUSTERS="notchpeak"; '
     f'SLURM_CLUSTER="notchpeak.peaks"; '
     f'SLURM_NNODES="2"; '
-    f'SLURM_NPROCS="128"; '
+    f'SLURM_NPROCS="64"; '
     f'SLURM_JOB_NUM_NODES="2"; '
     f'SLURM_JOB_QOS="sdss-{nk}p"; '
     f'SLURM_JOB_ACCOUNT="sdss-{nk}p"; '
     f'SLURM_STEP_NUM_TASKS=128; '
     f'SLURM_STEP_NUM_NODES=2; '
-    f'SLURM_NTASKS=64; '
+    f'SLURM_NTASKS=128; '
     f'SLURM_JOB_NODELIST=$SLURM_NODELIST;'
 )
 
