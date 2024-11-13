@@ -87,7 +87,7 @@ fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
     ax = fig.add_subplot(1, 1, 1)
     y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
     ax.scatter(301 .- (1:300), y)
-    if mjdloc > mjdfps2plate
+    if parse(Int, mjdloc) > mjdfps2plate
         ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
         ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
     end

@@ -108,11 +108,13 @@ f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
 for exp_fname in sample_exposures
     sname = split(exp_fname, "_")
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    expid_num = parse(Int, last(expid, 4))
     flux_1d = load(exp_fname, "flux_1d")
     mask_1d = load(exp_fname, "mask_1d")
     msk_loc = (mask_1d .& bad_pix_bits .== 0)
 
-    fibtargDict = get_fibTargDict(f, tele, mjd, expid)
+
+    fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
         fibID = fiberIndx2fiberID(fib)
