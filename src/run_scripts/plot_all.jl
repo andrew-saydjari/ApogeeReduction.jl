@@ -113,7 +113,6 @@ for exp_fname in sample_exposures
     mask_1d = load(exp_fname, "mask_1d")
     msk_loc = (mask_1d .& bad_pix_bits .== 0)
 
-
     fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
