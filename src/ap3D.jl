@@ -54,7 +54,7 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     dimage = gainMat .* (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./ (2 .* readVarMat .+ abs.(dimage))
-    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, nothing # no chisq, just mirroring sutr_tb!
+    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage)
 end
 
 function outlier_mask(dimages; clip_threshold = 20)

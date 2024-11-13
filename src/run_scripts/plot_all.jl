@@ -5,6 +5,7 @@ src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/plotutils.jl")
+include(src_dir * "/ap1D.jl")
 
 ## Parse command line arguments
 function parse_commandline()
@@ -103,15 +104,20 @@ rng = MersenneTwister(351 + unique_mjds[1])
 # for example, we want to be looking at the tellurics and pure sky
 nsamp = minimum([length(all1D), 5])
 sample_exposures = sample(rng, all1D, nsamp, replace = false)
+f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
 for exp_fname in sample_exposures
     sname = split(exp_fname, "_")
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    expid_num = parse(Int, last(expid, 4))
     flux_1d = load(exp_fname, "flux_1d")
     mask_1d = load(exp_fname, "mask_1d")
     msk_loc = (mask_1d .& bad_pix_bits .== 0)
 
+    fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
+        fibID = fiberIndx2fiberID(fib)
+        fibType = fibtargDict[fibID]
         dat = flux_1d[:, fib]
         mskt = msk_loc[:, fib]
         dat = nanify(flux_1d[mskt, fib], mskt)
@@ -131,9 +137,10 @@ for exp_fname in sample_exposures
         ax.set_xlim(0, 2049)
         ax.set_xlabel("Pixel Index")
         ax.set_ylabel("ADU")
-        savePath = dirNamePlots * "ap1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib).png"
+        savePath = dirNamePlots *
+                   "ap1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
         fig.savefig(savePath, bbox_inches = "tight", pad_inches = 0.1)
         PythonPlot.plotclose(fig)
-        thread("Fiberindex: $(fib), $(exp_fname)", savePath)
+        thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
     end
 end
