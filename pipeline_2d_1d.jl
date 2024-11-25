@@ -190,6 +190,11 @@ for mjd in unique_mjds
     for chip in parg["chips"]
         traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
             parg["outdir"] * "dome_flats/"))
+        if length(traceList) > 1
+            @warn "Multiple dome trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
+        elseif length(traceList) == 0
+            @error "No dome trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "dome_flats/")."
+        end
         calPath = traceList[1]
         linkPath = parg["outdir"] * "apred/$(mjd)/" *
                    replace(basename(calPath), "domeTrace" => "domeTraceMain")
