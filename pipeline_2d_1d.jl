@@ -107,7 +107,6 @@ git_branch, git_commit = initalize_git(src_dir);
     function process_1D(fname)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
-        fill!(ivar_1d, 1) # adam: why?
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
