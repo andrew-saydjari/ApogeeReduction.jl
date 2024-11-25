@@ -8,9 +8,22 @@ using Distributions: cdf, Normal
 # hold off on prop ivar through until we switch to sutr_wood, also could implement a chi2 cut here
 # add a condition that we should drop any x pixel where a bad bit in any of the pixels being summed is bad
 
-function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_halfwidth = 2)
-    # TODO use pix_bitmask
+"""
+Regularize the trace by applying a running median filter to each param in each fiber.
+Could be denoised further by fitting a low-order polynomial or similar.
+"""
+function regularize_trace(trace_params; window_size = 101)
+    @assert isodd(window_size) # otherwise the length of the regularized array is incorrect
+    n_xpix, n_fibers = size(trace_params)[1:2]
+    regularized_trace = similar(trace_params)
+    for fiber in 1:n_fibers, param in 1:3
+        regularized_trace[:, fiber, param] = running_median(
+            trace_params[:, fiber, param], window_size, :asym_trunc; nan = :ignore)
+    end
+    regularized_trace
+end
 
+function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_halfwidth = 2)
     flux_1d = extract_boxcar_core(dimage, trace_params)
     var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params)
     ivar_1d = 1.0 ./ var_1d
@@ -44,21 +57,6 @@ function extract_boxcar_bitmask(dimage_in, trace_params; boxcar_halfwidth = 2)
             |, dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
     end
     mask
-end
-
-"""
-Regularize the trace by applying a running median filter to each param in each fiber.
-Could be denoised further by fitting a low-order polynomial or similar.
-"""
-function regularize_trace(trace_params; window_size = 101)
-    @assert isodd(window_size) # otherwise the length of the regularized array is incorrect
-    n_xpix, n_fibers = size(trace_params)[1:2]
-    regularized_trace = similar(trace_params)
-    for fiber in 1:n_fibers, param in 1:3
-        regularized_trace[:, fiber, param] = running_median(
-            trace_params[:, fiber, param], window_size, :asym_trunc; nan = :ignore)
-    end
-    regularized_trace
 end
 
 """
