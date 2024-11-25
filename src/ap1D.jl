@@ -24,10 +24,10 @@ function regularize_trace(trace_params; window_size = 101)
 end
 
 function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_halfwidth = 2)
-    flux_1d = extract_boxcar_core(dimage, trace_params)
-    var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params)
+    flux_1d = extract_boxcar_core(dimage, trace_params, boxcar_halfwidth)
+    var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params, boxcar_halfwidth)
     ivar_1d = 1.0 ./ var_1d
-    mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params)
+    mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params, boxcar_halfwidth)
 
     flux_1d, ivar_1d, mask_1d
 end
@@ -36,7 +36,7 @@ end
 Extract a 1D spectrum using a boxcar kernel with width from trace_params. This is used twice. 
 Once for the flux and once for the variance.
 """
-function extract_boxcar_core(dimage_in, trace_params; boxcar_halfwidth = 2)
+function extract_boxcar_core(dimage_in, trace_params, boxcar_halfwidth)
     out = zeros(Float64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
@@ -47,7 +47,7 @@ function extract_boxcar_core(dimage_in, trace_params; boxcar_halfwidth = 2)
     out
 end
 
-function extract_boxcar_bitmask(dimage_in, trace_params; boxcar_halfwidth = 2)
+function extract_boxcar_bitmask(dimage_in, trace_params, boxcar_halfwidth)
     mask = zeros(Int64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
