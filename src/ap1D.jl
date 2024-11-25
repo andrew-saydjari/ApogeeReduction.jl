@@ -7,26 +7,43 @@ using Distributions: cdf, Normal
 
 # hold off on prop ivar through until we switch to sutr_wood, also could implement a chi2 cut here
 # add a condition that we should drop any x pixel where a bad bit in any of the pixels being summed is bad
-function extract_boxcar!(extract_out, dimage_in, trace_params; boxcar_halfwidth = 2)
-    fill!(extract_out, 0)
-    n_xpix, n_fibers = size(trace_params)[1:2]
-    for xpix in 1:n_xpix, fib in 1:n_fibers
-        _, ypixf, _ = trace_params[xpix, fib, :]
-        ypix = round(Int, ypixf)
-        extract_out[xpix, fib] = sum(dimage_in[
-            xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
-    end
+
+function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_halfwidth = 2)
+    # TODO use pix_bitmask
+
+    flux_1d = extract_boxcar_core(dimage, trace_params)
+    var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params)
+    ivar_1d = 1.0 ./ var_1d
+    mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params)
+
+    flux_1d, ivar_1d, mask_1d
 end
 
-function extract_boxcar_bitmask!(extract_out, dimage_in, trace_params; boxcar_halfwidth = 2)
-    fill!(extract_out, 0)
+"""
+Extract a 1D spectrum using a boxcar kernel with width from trace_params. This is used twice. 
+Once for the flux and once for the variance.
+"""
+function extract_boxcar_core(dimage_in, trace_params; boxcar_halfwidth = 2)
+    out = zeros(Float64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
         _, ypixf, _ = trace_params[xpix, fib, :]
         ypix = round(Int, ypixf)
-        extract_out[xpix, fib] = reduce(
+        out[xpix, fib] = sum(dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
+    end
+    out
+end
+
+function extract_boxcar_bitmask(dimage_in, trace_params; boxcar_halfwidth = 2)
+    mask = zeros(Int64, N_XPIX, N_FIBERS)
+    n_xpix, n_fibers = size(trace_params)[1:2]
+    for xpix in 1:n_xpix, fib in 1:n_fibers
+        _, ypixf, _ = trace_params[xpix, fib, :]
+        ypix = round(Int, ypixf)
+        mask[xpix, fib] = reduce(
             |, dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
     end
+    mask
 end
 
 """
@@ -58,7 +75,7 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
 
     # return values to be filled
     flux_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
-    var_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
+    ivar_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
 
     for xpix in 1:n_xpix, fib in 1:n_fibers
@@ -71,10 +88,10 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
 
         flux_1d[xpix, fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
                              sum(weights .^ 2 .* ivarimage[xpix, ypixels])
-        var_1d[xpix, fib] = 1 / sum(weights .^ 2 .* ivarimage[xpix, ypixels])
+        ivar_1d[xpix, fib] = sum(weights .^ 2 .* ivarimage[xpix, ypixels])
 
         # bitmask
         mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
     end
-    flux_1d, var_1d, mask_1d
+    flux_1d, ivar_1d, mask_1d
 end

@@ -104,12 +104,6 @@ git_branch, git_commit = initalize_git(src_dir);
 
 ##### 1D stage
 @everywhere begin
-    # TODO allocate where used or make const (currently global, slow)
-    flux_1d = zeros(Float64, 2048, 300)
-    var_1d = zeros(Float64, 2048, 300)
-    ivar_1d = ones(Float64, 2048, 300)
-    mask_1d = zeros(Int64, 2048, 300)
-
     function process_1D(fname)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
@@ -128,15 +122,12 @@ git_branch, git_commit = initalize_git(src_dir);
         # everything to some degree
         regularized_trace_params = regularize_trace(trace_params)
 
-        if parg["extraction"] == "boxcar"
-            # extract 1D spectrum (flux, variance, mask)
-            extract_boxcar!(flux_1d, dimage, regularized_trace_params)
-            extract_boxcar!(var_1d, 1 ./ ivarimage, regularized_trace_params)
-            ivar_1d ./= var_1d # inplace version?
-            extract_boxcar_bitmask!(mask_1d, pix_bitmask, regularized_trace_params)
-        else # "optimal"
-            flux_1d, ivar_1d, mask_1d = extract_optimal(
-                dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        flux_1d, ivar_1d, mask_1d = if parg["extraction"] == "boxcar"
+            extract_boxcar(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        elseif parg["extraction"] == "optimal"
+            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        else
+            error("Extraction method $(parg["extraction"]) not recognized")
         end
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
