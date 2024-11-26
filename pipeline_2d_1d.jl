@@ -55,6 +55,11 @@ function parse_commandline()
         help = "name of the run (specifically almanac file)"
         arg_type = String
         default = "test"
+        "--extraction"
+        required = false
+        help = "extraction method (boxcar or optimal)"
+        arg_type = String
+        default = "optimal"
     end
     return parse_args(s)
 end
@@ -99,14 +104,9 @@ git_branch, git_commit = initalize_git(src_dir);
 
 ##### 1D stage
 @everywhere begin
-    flux_1d = zeros(Float64, 2048, 300)
-    var_1d = zeros(Float64, 2048, 300)
-    ivar_1d = ones(Float64, 2048, 300)
-    mask_1d = zeros(Int64, 2048, 300)
     function process_1D(fname)
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
-        fill!(ivar_1d, 1)
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
@@ -117,16 +117,22 @@ git_branch, git_commit = initalize_git(src_dir);
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
-        # extract 1D spectrum (flux, variance, mask)
-        extract_boxcar!(flux_1d, dimage, trace_params; widy = 2)
-        extract_boxcar!(var_1d, 1 ./ ivarimage, trace_params; widy = 2)
-        ivar_1d ./= var_1d # inplace version?
-        extract_boxcar_bitmask!(mask_1d, pix_bitmask, trace_params; widy = 2)
+        # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of 
+        # everything to some degree
+        regularized_trace_params = regularize_trace(trace_params)
+
+        flux_1d, ivar_1d, mask_1d = if parg["extraction"] == "boxcar"
+            extract_boxcar(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        elseif parg["extraction"] == "optimal"
+            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        else
+            error("Extraction method $(parg["extraction"]) not recognized")
+        end
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         # outfname = replace(fname, "ap2Dcal" => "ap1D")
         outfname = replace(fname, "ap2D" => "ap1D")
-        jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit) #ivarimage, pix_bitmask come back and put analogies of these in
+        jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
     end
 end
 t_now = now();
@@ -183,6 +189,11 @@ for mjd in unique_mjds
     for chip in parg["chips"]
         traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
             parg["outdir"] * "dome_flats/"))
+        if length(traceList) > 1
+            @warn "Multiple dome trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
+        elseif length(traceList) == 0
+            @error "No dome trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "dome_flats/")."
+        end
         calPath = traceList[1]
         linkPath = parg["outdir"] * "apred/$(mjd)/" *
                    replace(basename(calPath), "domeTrace" => "domeTraceMain")
