@@ -1,6 +1,6 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
-src_dir = "../"
+src_dir = "./src"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/plotutils.jl")

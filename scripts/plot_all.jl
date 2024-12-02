@@ -1,7 +1,7 @@
 # This is a script that makes the plots for a nightly processing and posts them to the slack channel.
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Random, HDF5, DataFrames
 
-src_dir = "../"
+src_dir = "./src"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/plotutils.jl")

@@ -69,7 +69,7 @@ runname="ap1DTest"
 tele="apo"
 mjd=60606
 expid=19
-outdir="../../2024_10_27/outdir/"
+outdir="../2024_10_27/outdir/"
 
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}almanac
