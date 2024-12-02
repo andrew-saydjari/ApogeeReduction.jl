@@ -190,17 +190,17 @@ with DAG(
 
             darks = BashOperator(
                 task_id="darks",
-                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
+                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} cal_build_scripts/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
             )
 
             flats = BashOperator(
                 task_id="flats",
-                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
+                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} cal_build_scripts/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
             )
             
             science = BashOperator(
                 task_id="science",
-                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
+                bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}).",
@@ -215,7 +215,7 @@ with DAG(
 
             # science = BashOperator(
             #     task_id="science",
-            #     bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} src/cal_build/run_objects.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
+            #     bash_command=f"{srun_prefix} --jobid={{{{ ti.xcom_pull(task_ids='{observatory}.slurm.submit') }}}} cal_build_scripts/run_objects.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}",
             #     on_success_callback=[
             #         send_slack_notification_partial(
             #             text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}).",

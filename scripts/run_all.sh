@@ -30,15 +30,15 @@ julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --
 julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/" 
 
 # Extract traces from dome flats
-./src/cal_build/run_trace_cal.sh $tele $mjd $mjd
+./cal_build_scripts/run_trace_cal.sh $tele $mjd $mjd
 
 # Run pipeline 1D only
 julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
 
 # End of night plotting script
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b" 
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c" 
+julia +1.11.0 --project="./" scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
+julia +1.11.0 --project="./" scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b" 
+julia +1.11.0 --project="./" scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c" 
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

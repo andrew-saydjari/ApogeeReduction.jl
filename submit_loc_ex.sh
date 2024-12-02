@@ -83,7 +83,7 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --mjd $mjd --expid $expid 
 # this part only works if you have the traces extracted, which takes like 10 min per chip per domeflat exposure... (removed b and c for this reason in my tests)
 julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname --chip "a"
 
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --chip "a" --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname
+julia +1.11.0 --project="./" scripts/plot_all.jl --chip "a" --tele $tele --mjd $mjd --expid $expid --outdir $outdir --runname $runname
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
