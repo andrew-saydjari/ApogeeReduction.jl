@@ -4,7 +4,7 @@ using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Random, HDF5
 src_dir = "./src"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
-include(src_dir * "/plotutils.jl")
+include(src_dir * "/../plotutils.jl")
 include(src_dir * "/ap1D.jl")
 
 ## Parse command line arguments

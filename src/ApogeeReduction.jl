@@ -10,5 +10,4 @@ include("utils.jl")            # general utilities
 include("ap3D.jl")             # 3D -> 2D
 include("ap2Dcal.jl")          # calibration file stuff (???)
 include("ap1D.jl")             # 2D -> 1D
-include("plotutils.jl")        # setup for automatic plots on slack
 end

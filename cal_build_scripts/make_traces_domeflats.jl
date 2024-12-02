@@ -3,7 +3,7 @@ using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Einsum
 src_dir = "./src"
 include(src_dir * "/utils.jl")
 include(src_dir * "/fileNameHandling.jl")
-include(src_dir * "/plotutils.jl")
+include(src_dir * "/../plotutils.jl")
 include(src_dir * "/cal_build/traceExtract.jl")
 
 ## Parse command line arguments

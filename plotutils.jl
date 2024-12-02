@@ -1,3 +1,5 @@
+# set up for automatic plots on slack
+
 ENV["JULIA_CONDAPKG_BACKEND"] = "MicroMamba";
 using CondaPkg;
 using PythonCall;
