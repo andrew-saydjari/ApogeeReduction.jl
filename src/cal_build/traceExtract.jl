@@ -750,6 +750,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
     all_rel_ivars_mat = 1 ./ (all_rel_errs_mat .^ 2)
     all_rel_ivars_mat[.!all_rel_masks_mat] .= 0
     all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= 1e-5
+    all_rel_errs_mat = all_rel_ivars_mat .^ -0.5
 
     @showprogress for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
@@ -782,9 +783,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
 	first_guess_params[:,1] .= best_fit_ave_params[:,1] .* nanmedian(first_guess_params[:,1] ./ best_fit_ave_params[:,1])
 
         all_rel_fluxes = all_rel_fluxes_mat[x_ind, :]
-        all_rel_errs = all_rel_ivars_mat[x_ind, :]
+        all_rel_errs = all_rel_errs_mat[x_ind, :]
         all_rel_ivars = all_rel_ivars_mat[x_ind, :]
-        all_rel_masks = all_rel_errs_mat[x_ind, :]
+        all_rel_masks = all_rel_masks_mat[x_ind, :]
 
         # first guess parameters
         fit_inds = floor.(Int, round.(first_guess_params[:, 2])) .+ offset_inds'
