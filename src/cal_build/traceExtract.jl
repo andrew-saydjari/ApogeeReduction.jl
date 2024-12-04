@@ -601,20 +601,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
         new_params[:, 1] .= max.(new_params[:, 1], 0.01)
         new_params[:, 2] .= clamp.(
             clamp.(new_params[:, 2], first_guess_params[:, 2] .- 3, first_guess_params[:, 2] .+ 3), 11, 2048 - 11)
-        new_params[:, 3] .= clamp.(new_params[:, 3], 0.8 .* first_guess_params[:, 3], 1.2 .* first_guess_params[:, 2])
+        new_params[:, 3] .= clamp.(new_params[:, 3], 0.8 .* first_guess_params[:, 3], 1.2 .* first_guess_params[:, 3])
 
         curr_guess .= new_params
-	println(size(v_hat_cov),v_hat_cov[1,:,:])
-	println(flux_diffs[1,:])
-	println(v_hat[1,:])
-	println(M_T_dot_V_inv_dot_y[1,:])
     end
 
     new_params = curr_guess
-    println("new_params 1",new_params[:,1])
-    println("new_params 2",new_params[:,2])
-    println("new_params 3",new_params[:,3])
-    aksjhskjh
 
     #save the middle-of-detector best fit parameters for first guess
     best_fit_ave_params = copy(new_params)
@@ -647,8 +639,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
     smoothed_widths = nansum(new_params[all_smooth_inds,3]' .* smooth_weights, 1)'
     smoothed_heights = nansum(new_params[all_smooth_inds,1]' .* smooth_weights, 1)'
     smoothed_width_locs = copy(new_params[:,2])
-    println("width",smoothed_widths)
-    println("height",smoothed_heights)
 
     keep_widths = ones(Bool, size(new_params, 1))
     keep_heights = ones(Bool, size(new_params, 1))
@@ -677,9 +667,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
 	smoothed_heights .= nansum(((new_params[:,1] .* keep_heights)[all_smooth_inds])' .* smooth_weights,1)'
 	smoothed_heights ./= nansum(keep_heights[all_smooth_inds]' .* smooth_weights,1)'
     end
-
-    println("width",smoothed_widths)
-    println("height",smoothed_heights)
 
     #remove the edge possible peaks if they have no throughput, because they likely don't exist
     good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.1
@@ -764,7 +751,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
     all_rel_ivars_mat[.!all_rel_masks_mat] .= 0
     all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= 1e-5
 
-    n_use = 200
     @showprogress for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
 	
@@ -783,17 +769,17 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
         elseif x_ind > 1025
             first_guess_params = nanmedian(param_outputs[(x_ind - (n_use + 1)):(x_ind - 1), :, :], 1)[
                 1, :, :]
-	    param_slopes = nanmedian(diff(param_outputs[(x_ind - (n_use + 1)):(x_ind - 1), :, :],1),1)
+	    param_slopes = nanmedian(diff(param_outputs[(x_ind - (n_use + 1)):(x_ind - 1), :, :], dims = 1),1)[1,:,:]
 	    first_guess_params .+= 0.5 * n_use .* param_slopes
         elseif x_ind < 1025
             first_guess_params = nanmedian(param_outputs[(x_ind + 1):(x_ind + (n_use + 1)), :, :], 1)[
                 1, :, :]
-	    param_slopes = nanmedian(diff(param_outputs[(x_ind + 1):(x_ind + (n_use + 1)), :, :], 1), 1)
+	    param_slopes = nanmedian(diff(param_outputs[(x_ind + 1):(x_ind + (n_use + 1)), :, :], dims = 1), 1)[1,:,:]
 	    first_guess_params .+= -0.5 * n_use .* param_slopes
         end
 
-	first_guess_params[:,3] = best_fit_ave_params[:,3]*nanmedian(first_guess_params[:,3]/best_fit_ave_params[:,3])
-	first_guess_params[:,1] = best_fit_ave_params[:,1]*nanmedian(first_guess_params[:,1]/best_fit_ave_params[:,1])
+	first_guess_params[:,3] .= best_fit_ave_params[:,3] .* nanmedian(first_guess_params[:,3] ./ best_fit_ave_params[:,3])
+	first_guess_params[:,1] .= best_fit_ave_params[:,1] .* nanmedian(first_guess_params[:,1] ./ best_fit_ave_params[:,1])
 
         all_rel_fluxes = all_rel_fluxes_mat[x_ind, :]
         all_rel_errs = all_rel_ivars_mat[x_ind, :]
@@ -875,6 +861,10 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
                 @einsum v_hat[n, i] := v_hat_cov[n, i, j] * M_T_dot_V_inv_dot_y[n, j]
        	        first_guess_params[:,1] .= max.(0.01,first_guess_params[:,1] .+ v_hat[:,1])
      	        curr_guess = copy(first_guess_params)
+#    	         println("v_hat",v_hat)
+#                println("first 1",first_guess_params[:,1])
+#                println("first 2",first_guess_params[:,2])
+#                println("first 3",first_guess_params[:,3])
             end
 
             model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height)
@@ -981,21 +971,27 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid; image_mas
             curr_guess .= new_params
             param_outputs[x_ind, :, :] .= new_params
             param_output_covs[x_ind, :, :, :] .= v_hat_cov
+#     	    println(size(v_hat_cov),v_hat_cov[1,:,:])
+#	    println(flux_diffs[1,:])
+#  	    println(v_hat[1,:])
+#	    println(M_T_dot_V_inv_dot_y[1,:])
         end
+#        println("new_params 1",curr_guess[:,1])
+#        println("new_params 2",curr_guess[:,2])
+#        println("new_params 3",curr_guess[:,3])
     end
 
-    final_param_outputs[:,good_throughput_fibers] .= param_outputs
-    final_param_output_covs[:,good_throughput_fibers] .= param_output_covs 
+    final_param_outputs[:,good_throughput_fibers,:] .= param_outputs[:,:,:]
+    final_param_output_covs[:,good_throughput_fibers,:,:] .= param_output_covs[:,:,:,:] 
 	    
     #extrapolate from nearby good fibers for low throughput ones
     good_throughput_fibers = findall(good_throughput_fibers)
     final_param_outputs[:,low_throughput_fibers,1] .= 0
-    for j in 1:size(low_throughput_fibers)
-        nearest_inds = argsort(abs.(low_throughput_fibers[j] .- good_throughput_fibers))[[1,2]]
+    for j in 1:size(low_throughput_fibers,1)
+        nearest_inds = sortperm(abs.(low_throughput_fibers[j] .- good_throughput_fibers))[[1,2]]
         nearest_inds = good_throughput_fibers[nearest_inds]
-        param_slopes = (diff(final_param_outputs[:,nearest_inds],2)[:,1]) ./ (nearest_inds[2] - nearest_inds[1])
-        final_param_outputs[:,low_throughput_fibers[j],[2,3]] .= final_param_outputs[:,nearest_inds[1],[2,3]] \
-                                                                 .+ param_slopes[:,[2,3]] .* (low_throughput_fibers[j]-nearest_inds[1])
+        param_slopes = (diff(final_param_outputs[:,nearest_inds,:],dims = 2)[:,1,:]) ./ (nearest_inds[2] - nearest_inds[1])
+        final_param_outputs[:,low_throughput_fibers[j],[2,3]] .= (final_param_outputs[:,nearest_inds[1],[2,3]] .+ param_slopes[:,[2,3]] .* (low_throughput_fibers[j]-nearest_inds[1]))
     end
 
     param_outputs = final_param_outputs
