@@ -1,3 +1,6 @@
+# this has the plotting setup used for plotting with PythonPlot
+# it should be eliminated once we switch to Makie
+
 ENV["JULIA_CONDAPKG_BACKEND"] = "MicroMamba";
 using CondaPkg;
 using PythonCall;
