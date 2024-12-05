@@ -75,7 +75,7 @@ fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
     ivar_image = f["ivarimage"][1:2048, 1:2048]
     close(f)
 
-    trace_params,trace_param_covs = trace_extract(
+    trace_params, trace_param_covs = trace_extract(
         image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; image_mask = nothing)
     jldsave(
         parg["trace_dir"] *
