@@ -31,3 +31,6 @@ To test the pipeline, run the `run_all.sh` script with the desired tele and MJD.
 ```
 
 This is good practice before asserting a PR with substantial changes is ready for a merge (in the absence of a CI pipeline, which is still in progress).
+
+# Developer notes
+[Quick tips on Julia for Python programmers](https://docs.julialang.org/en/v1/manual/noteworthy-differences/#Noteworthy-differences-from-Python)
