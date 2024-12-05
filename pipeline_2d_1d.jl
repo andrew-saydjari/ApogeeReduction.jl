@@ -16,6 +16,7 @@ t_then = t_now;
 flush(stdout);
 
 ## Parse command line arguments
+# we have forced this one to run over all chips for the sake of the wavelength solution
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
@@ -35,11 +36,6 @@ function parse_commandline()
         help = "exposure number to be run"
         arg_type = Int
         default = 1
-        "--chips"
-        required = false
-        help = "chip(s) to run, usually a, b, or c"
-        arg_type = String
-        default = "abc"
         "--runlist"
         required = false
         help = "path name to hdf5 file with keys specifying list of exposures to run"
@@ -106,11 +102,17 @@ git_branch, git_commit = initalize_git(src_dir);
 @everywhere begin
     function process_1D(fname)
         sname = split(fname, "_")
-        tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+        fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
+
+        fnamecal = if (fnameType == "ap2D")
+            replace(fname, "ap2D" => "ap2Dcal")
+        else
+            fname
+        end
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
-        pix_bitmask = load(replace(fname, "ap2D" => "ap2Dcal"), "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
+        pix_bitmask = load(fnamecal, "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
         traceList = sort(glob("domeTraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
@@ -130,7 +132,6 @@ git_branch, git_commit = initalize_git(src_dir);
         end
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
-        # outfname = replace(fname, "ap2Dcal" => "ap1D")
         outfname = replace(fname, "ap2D" => "ap1D")
         jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
     end
@@ -161,12 +162,11 @@ end
 
 list2Dexp = []
 for mjd in unique_mjds
-    df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
-        df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    end
+    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+    close(f)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
-        # replace(get_1d_name(expid, df), "ap1D" => "ap2Dcal") * ".jld2"
         replace(get_1d_name(expid, df), "ap1D" => "ap2D") * ".jld2"
     end
     local2D = get_2d_name_partial.(expid_list)
@@ -175,7 +175,7 @@ end
 all2Da = vcat(list2Dexp...)
 
 all2Dperchip = []
-for chip in string.(collect(parg["chips"]))
+for chip in ["a","b","c"]
     all2Dchip = replace.(all2Da, "_a_" => "_$(chip)_")
     push!(all2Dperchip, all2Dchip)
 end
@@ -186,7 +186,7 @@ all2D = vcat(all2Dperchip...)
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
-    for chip in parg["chips"]
+    for chip in ["a","b","c"]
         traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
             parg["outdir"] * "dome_flats/"))
         if length(traceList) > 1
@@ -206,4 +206,48 @@ end
 
 # extract the 2D to 1D, ideally the calibrated files
 # need to think hard about batching daily versus all data for cal load in
+println("Extracting 2D to 1D:")
 @showprogress pmap(process_1D, all2D)
+println("Extracting 2Dcal to 1Dcal:")
+all2Dcal = replace.(all2D, "ap2D" => "ap2Dcal")
+@showprogress pmap(process_1D, all2Dcal)
+
+## get all OBJECT files (happy to add any other types that see sky?)
+list1DexpObject = []
+for mjd in unique_mjds
+    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+    close(f)
+    function get_1d_name_partial(expid)
+        if df.imagetyp[expid] == "Object"
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df) * ".jld2"
+        else
+            return []
+        end
+    end
+    local1D = get_1d_name_partial.(expid_list)
+    push!(list1DexpObject, local1D)
+end
+all1DObjecta = vcat(list1DexpObject...)
+
+all1DObjectperchip = []
+for chip in ["a","b","c"]
+    all1DObjectchip = replace.(all1DObjecta, "_a_" => "_$(chip)_")
+    push!(all1DObjectperchip, all1DObjectchip)
+end
+all1DObject = vcat(all1DObjectperchip...)
+hos
+## load rough wave dict and sky lines list
+
+## get sky line peaks
+println("Fitting sky line peaks:")
+get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
+@showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
+
+## get wavecal from sky line peaks
+println("Solving skyline wavelength solution:")
+@showprogress pmap(get_and_save_sky_wavecal, all1DObjecta)
+
+## add a plot to plot all to just show the chips together
+## I should probably add some slack plots from the wavecal skylines
+## then do a dither combination (on Fri)

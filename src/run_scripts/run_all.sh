@@ -33,7 +33,7 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdi
 ./src/cal_build/run_trace_cal.sh $tele $mjd $mjd
 
 # Run pipeline 1D only
-julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
+julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname
 
 # End of night plotting script
 julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"

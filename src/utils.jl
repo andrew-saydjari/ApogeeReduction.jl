@@ -1,4 +1,5 @@
 using StatsBase: iqr
+using Jackknife
 
 ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P"
 
@@ -107,4 +108,40 @@ function gen_design_mat(nx, ny, fx, fy, X, Y)
     design_matrix[:, col] .= vec(Y ./ maximum(Y))
     col += 1
     return design_matrix
+end
+
+function getChipIndx(chip)
+    if chip == "a"
+        return 1
+    elseif chip == "b"
+        return 2
+    elseif chip=="c"
+        return 3
+    end
+end
+
+function convert_to_int(x)
+    if isnan(x)
+        return 0
+    else
+        return convert(Int,x)
+    end
+end
+
+function get_last_ind(x)
+    if isnothing(x)
+        return []
+    else
+        return x[end,:]
+    end
+end
+
+function jack_std(x)
+    y = filter(!isnanorzero,x)
+    ly = length(y)
+    if ly>2
+        return Jackknife.estimate(std, y)
+    else
+        return Inf
+    end
 end
