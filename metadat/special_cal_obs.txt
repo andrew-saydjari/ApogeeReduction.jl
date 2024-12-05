@@ -1,0 +1,6 @@
+### MJDs and ExpIDs of special calibration observations ###
+#tele  date     expid_range          description
+apo    60356    47940110-47940123    "back-to-back flat exposures"
+lco    60425    48630077-48630084    "back-to-back flat exposures"
+
+
