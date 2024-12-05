@@ -52,7 +52,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
 end
 
 @everywhere begin
-    using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Einsum, ParallelDataTransfer
+    using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     src_dir = "../"
     include(src_dir * "/makie_plotutils.jl")
     include(src_dir * "/utils.jl")
