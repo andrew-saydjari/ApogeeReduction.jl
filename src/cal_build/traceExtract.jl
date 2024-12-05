@@ -45,8 +45,6 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     M_vects = zeros(Float64,
         (size(fit_fluxes, 1), size(first_guess_params, 2), curr_n_peaks))
 
-    n_iter = 10
-
     comb_model_fluxes = zeros(size(all_rel_fluxes))
     param_offsets = zeros(Float64, size(curr_guess))
 
@@ -63,12 +61,12 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
             #then fit only for the heights using the first guesses on centers and widths
             if !use_first_guess_heights
                 #don't use the first guess heights to define a best model
-                #just use the first guess mean and widths to get the best 
+                #just use the first guess mean and widths to get the best
                 #guess for height
                 flux_diffs = copy(fit_fluxes)
             else
-                #use the initial provided heights to define best models to 
-                #subtract off, then get height updates                
+                #use the initial provided heights to define best models to
+                #subtract off, then get height updates
                 model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height)
 
                 best_model_fluxes_unit_height = gaussian_int_pdf(
@@ -183,7 +181,7 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
 end
 
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
-        image_mask = nothing, mid = 1025, n_center_cols = 100)
+        image_mask = nothing, mid = 1025, n_center_cols = 100, verbose = false)
     noise_image = 1 ./ sqrt.(ivar_image)
     if isnothing(image_mask)
         image_mask = ones(Bool, size(image_data))
@@ -461,7 +459,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
 
     #use more pixels around each peak, otherwise large-width peak fitting fails
     #(see weird discontinuities in height and width vs X)
-    #This ONLY works because we are fitting all the peaks simultaneously 
+    #This ONLY works because we are fitting all the peaks simultaneously
     #and removing contamination from neighbouring fibers
     offset_inds = range(-7, 7, step = 1)
 
@@ -578,7 +576,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
                 end
                 j += 1
             end
-            # println("Left Cut Integer ",curr_cut_int)
             left_cut_ind = curr_cut_int + 1
         else
             left_cut_ind = 1
@@ -596,7 +593,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
                 end
                 j -= 1
             end
-            # println("Right Cut Integer ",curr_cut_int)
             right_cut_ind = curr_cut_int - 1
         else
             right_cut_ind = size(new_params, 1)
@@ -619,7 +615,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
 
     best_fit_ave_params = best_fit_ave_params[good_throughput_fibers, :]
 
-    println("Final number of peaks:", size(best_fit_ave_params))
+    verbose && println("Final number of peaks:", size(best_fit_ave_params))
 
     curr_best_widths = zeros(Float64, size(best_fit_ave_params, 1))
     for j in 1:size(curr_best_widths, 1)
@@ -628,7 +624,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
     end
     best_fit_ave_params[:, 3] .= curr_best_widths
 
-    #work from the center outward to use constraints from previous analysis 
+    #work from the center outward to use constraints from previous analysis
     sorted_x_inds = x_inds[sortperm(abs.(x_inds .- mid))]
 
     param_outputs = zeros((
@@ -653,7 +649,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
     best_model_fit_inds = floor.(Int, round.(first_guess_params[:, 2])) .+
                           best_model_offset_inds'
 
-    @showprogress for (ind, x_ind) in enumerate(sorted_x_inds)
+    @showprogress enabled=verbose desc="Fitting traces" for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
 
         if abs(x_ind - mid) < n_center_cols
@@ -706,7 +702,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
             all_rel_errs_mat[x_ind, :],
             first_guess_params,
             fit_inds, best_model_fit_inds, offset_inds,
-            n_iter = 10, dmu = 0.001, dsig = 0.001, return_cov = true,
+            n_iter = n_iter, dmu = 0.001, dsig = 0.001, return_cov = true,
             use_first_guess_heights = true, max_center_move = 1,
             min_widths = 0.5 .* first_guess_params[:, 3],
             max_widths = 2.0 .* first_guess_params[:, 3])

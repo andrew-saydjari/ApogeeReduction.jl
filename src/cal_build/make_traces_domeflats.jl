@@ -1,10 +1,4 @@
-using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Einsum
-
-src_dir = "../"
-include(src_dir * "/utils.jl")
-include(src_dir * "/fileNameHandling.jl")
-include(src_dir * "/plotutils.jl")
-include(src_dir * "/cal_build/traceExtract.jl")
+using ArgParse, Distributed, SlurmClusterManager, SlackThreads
 
 ## Parse command line arguments
 function parse_commandline()
@@ -42,31 +36,53 @@ function parse_commandline()
     end
     return parse_args(s)
 end
-
 # I am really in a pickle now. These are really really nightly things, not something
 # for a range of MJD. I will need to change the way I am doing this.
 
 parg = parse_commandline()
-chip = parg["chip"]
 
-# make summary plots and gifs and send to slack in outer loop
-thread = SlackThread();
-thread("DOMEFLAT TRACES for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
-
-dirNamePlots = parg["trace_dir"] * "plots/"
-if !ispath(dirNamePlots)
-    mkpath(dirNamePlots)
+# memory usage is under 3GB per worker in testing
+if parg["runlist"] != "" # only multiprocess if we have a list of exposures
+    if "SLURM_NTASKS" in keys(ENV)
+        using SlurmClusterManager
+        addprocs(SlurmManager(), exeflags = ["--project=./"])
+    else
+        addprocs(16)
+    end
 end
 
-# Load in the exact set of exposures
-mjd = load(parg["runlist"], "mjd")
-expid = load(parg["runlist"], "expid");
-flist = get_cal_file.(
-    Ref(parg["trace_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("DOMEFLAT"))
+@everywhere begin
+    using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Einsum, ParallelDataTransfer
+    src_dir = "../"
+    include(src_dir * "/makie_plotutils.jl")
+    include(src_dir * "/utils.jl")
+    include(src_dir * "/fileNameHandling.jl")
+    include(src_dir * "/cal_build/traceExtract.jl")
+end
 
-fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
+@passobj 1 workers() parg # make it available to all workers
 
-@showprogress for (indx, fname) in enumerate(flist)
+@everywhere begin
+    chip = parg["chip"]
+
+    # make summary plots and gifs and send to slack in outer loop
+
+    dirNamePlots = parg["trace_dir"] * "plots/"
+    if !ispath(dirNamePlots)
+        mkpath(dirNamePlots)
+    end
+
+    # Load in the exact set of exposures
+    mjd = load(parg["runlist"], "mjd")
+    expid = load(parg["runlist"], "expid")
+    flist = get_cal_file.(
+        Ref(parg["trace_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("DOMEFLAT"))
+
+    fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
+end
+
+desc = "trace extract for $(parg["tele"]) $(chip)"
+plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
     sname = split(fname, "_")
     teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
     mjdfps2plate = get_fps_plate_divide(teleloc)
@@ -77,63 +93,63 @@ fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 
     trace_params, trace_param_covs = trace_extract(
         image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; image_mask = nothing)
+
     jldsave(
         parg["trace_dir"] *
         "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).jld2";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
     cut = 750
-    fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
-    ax = fig.add_subplot(1, 1, 1)
+    fig = Figure(size = (800, 800))
+    ax = Axis(fig[1, 1],
+        xlabel = "FIBERID",
+        ylabel = "Fit Height",
+        title = "Dome Flat Fit Median Height\nTele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
+
     y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
-    ax.scatter(301 .- (1:300), y)
+    scatter!(ax, 301 .- (1:300), y)
+
     if parse(Int, mjdloc) > mjdfps2plate
-        ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
-        ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
+        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
+        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
     end
-    ax.axhline(cut, linestyle = "--")
 
-    ax.set_xlabel("FIBERID")
-    ax.set_ylabel("Fit Height")
+    hlines!(ax, cut, linestyle = :dash)
 
-    plt.text(0.5,
-        1.01,
-        "Dome Flat Fit Median Height, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
-        ha = "center",
-        va = "bottom",
-        transform = ax.transAxes)
+    tracePlot_heights_Path = dirNamePlots *
+                             "domeTrace_med_heights_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+    save(tracePlot_heights_Path, fig)
 
-    tracePlotPath = dirNamePlots *
-                    "domeTrace_med_heights_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
-    fig.savefig(tracePlotPath, bbox_inches = "tight", pad_inches = 0.1)
-    thread("Trace extraction for $(parg["tele"]) $(chiploc) $(mjdloc) $(expidloc) done.")
-    PythonPlot.plotclose(fig)
-    thread("Here is the median flux per fiber", tracePlotPath)
+    fig = Figure(size = (800, 800))
+    ax = Axis(fig[1, 1],
+        xlabel = "FIBERID",
+        ylabel = "Fit Width",
+        title = "Dome Flat Fit Median Width\nTele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
 
-    fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
-    ax = fig.add_subplot(1, 1, 1)
     y = dropdims(nanzeromedian(trace_params[:, :, 3], 1), dims = 1)
-    ax.scatter(301 .- (1:300), y)
+    scatter!(ax, 301 .- (1:300), y)
+
     if parse(Int, mjdloc) > mjdfps2plate
-        ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
-        ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
+        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
+        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
     end
+
     med_val = nanzeromedian(y)
-    ax.axhline(med_val, linestyle = "--")
+    hlines!(ax, med_val, linestyle = :dash)
 
-    ax.set_xlabel("FIBERID")
-    ax.set_ylabel("Fit Width")
+    tracePlot_widths_Path = dirNamePlots *
+                            "domeTrace_med_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+    save(tracePlot_widths_Path, fig)
 
-    plt.text(0.5,
-        1.01,
-        "Dome Flat Fit Median Width, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
-        ha = "center",
-        va = "bottom",
-        transform = ax.transAxes)
-
-    tracePlotPath = dirNamePlots *
-                    "domeTrace_med_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
-    fig.savefig(tracePlotPath, bbox_inches = "tight", pad_inches = 0.1)
-    PythonPlot.plotclose(fig)
+    tracePlot_heights_Path, tracePlot_widths_Path
 end
+
+thread = SlackThread()
+thread("DOMEFLAT TRACES for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
+for (filename, (heights_path, widths_path)) in zip(flist, plot_paths)
+    thread("Trace extraction for $(filename) done.")
+    thread("Here is the median flux per fiber", heights_path)
+    thread("Here is the median width per fiber", widths_path)
+end
+
 thread("DomeFlat traces done.")
