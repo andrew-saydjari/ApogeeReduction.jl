@@ -22,5 +22,15 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 256   | 8     | reads dropped for CR rejection > 1 |
 | 512   | 9     | bad linear SUTR chi2 |
 
+## Testing
+
+To test the pipeline, run the `run_all.sh` script with the desired tele and MJD. For example:
+
+```bash
+./src/run_scripts/run_all.sh apo 60639
+```
+
+This is good practice before asserting a PR with substantial changes is ready for a merge (in the absence of a CI pipeline, which is still in progress).
+
 # Developer notes
 [Quick tips on Julia for Python programmers](https://docs.julialang.org/en/v1/manual/noteworthy-differences/#Noteworthy-differences-from-Python)

@@ -11,7 +11,7 @@ tele=$1
 mjd=$2
 
 runname="objects_${mjd}"
-# outdir="../../2024_10_29/outdir/"
+# outdir="../../2024_12_05/outdir/"
 outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
