@@ -236,8 +236,11 @@ for chip in ["a","b","c"]
     push!(all1DObjectperchip, all1DObjectchip)
 end
 all1DObject = vcat(all1DObjectperchip...)
-hos
+
 ## load rough wave dict and sky lines list
+roughwave_dict = load(src_dir * "data/roughwave_dict.jld2","roughwave_dict")
+df_sky_lines = CSV.read(src_dir * "data/df_sky_lines/APOGEE_lines.csv", DataFrame);
+df_sky_lines.linindx = 1:size(df_sky_lines,1);
 
 ## get sky line peaks
 println("Fitting sky line peaks:")
@@ -246,7 +249,7 @@ get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(fname,roughwave_d
 
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:")
-@showprogress pmap(get_and_save_sky_wavecal, all1DObjecta)
+@showprogress pmap(get_and_save_sky_wavecal, all1DObjecta) is 
 
 ## add a plot to plot all to just show the chips together
 ## I should probably add some slack plots from the wavecal skylines

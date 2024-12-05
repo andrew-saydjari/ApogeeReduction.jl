@@ -59,11 +59,26 @@ end
 
 
 # Sky line wavecal
-function get_and_save_sky_wavecal(fname)
+function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     outname = replace(replace(fname,"skyLine_peaks"=>"wavecal_skyline"),"_a_"=>"_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
-    linParams, nlParams, resid_vec = get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt; cporder = 1, wporder = 2)
-    jldsave(outname; linParams = linParams, nlParams = nlParams, resid_vec = resid_vec)
+    linParams, nlParams, resid_vec = get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt; cporder = cporder, wporder = wporder)
+
+    chipWaveSoln = zeros(Float64,2048,300,3);
+    x = 1:2048
+    ximport = (x.-1024)./2048
+    for chip in ["a","b","c"]
+        chipIndx = getChipIndx(chip)
+        for fibIndx in 1:300
+            params2ChipPolyParams!(chipPolyParams,nlParams[fibIndx,:],cporder)
+            xt = transform_x_chips(ximport,chipPolyParams[chipIndx,:])
+            Ax = positional_poly_mat(xt,porder=2)
+            yt = Ax*linParams[fibIndx,:]
+            chipWaveSoln[:,fibIndx,chipIndx] .= yt
+        end
+    end
+
+    jldsave(outname; linParams = linParams, nlParams = nlParams, resid_vec = resid_vec, chipWaveSoln = chipWaveSoln)
 end
 
 function get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt; cporder = 1, wporder = 2)
