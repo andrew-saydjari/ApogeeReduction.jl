@@ -75,12 +75,12 @@ fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
     ivar_image = f["ivarimage"][1:2048, 1:2048]
     close(f)
 
-    trace_params = trace_extract(
+    trace_params,trace_param_covs = trace_extract(
         image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; image_mask = nothing)
     jldsave(
         parg["trace_dir"] *
         "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).jld2";
-        trace_params = trace_params)
+        trace_params = trace_params, trace_param_covs = trace_param_covs)
 
     cut = 750
     fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
@@ -98,16 +98,42 @@ fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 
     plt.text(0.5,
         1.01,
-        "Dome Flat Fit, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
+        "Dome Flat Fit Median Height, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
         ha = "center",
         va = "bottom",
         transform = ax.transAxes)
 
     tracePlotPath = dirNamePlots *
-                    "domeTrace_$(parg["tele"])_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+                    "domeTrace_med_heights_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
     fig.savefig(tracePlotPath, bbox_inches = "tight", pad_inches = 0.1)
     thread("Trace extraction for $(parg["tele"]) $(chiploc) $(mjdloc) $(expidloc) done.")
     PythonPlot.plotclose(fig)
     thread("Here is the median flux per fiber", tracePlotPath)
+
+    fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
+    ax = fig.add_subplot(1, 1, 1)
+    y = dropdims(nanzeromedian(trace_params[:, :, 3], 1), dims = 1)
+    ax.scatter(301 .- (1:300), y)
+    if parse(Int, mjdloc) > mjdfps2plate
+        ax.scatter(fpifib1, y[301 - fpifib1], color = "red")
+        ax.scatter(fpifib2, y[301 - fpifib2], color = "red")
+    end
+    med_val = nanzeromedian(y)
+    ax.axhline(med_val, linestyle = "--")
+
+    ax.set_xlabel("FIBERID")
+    ax.set_ylabel("Fit Width")
+
+    plt.text(0.5,
+        1.01,
+        "Dome Flat Fit Median Width, Tele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)",
+        ha = "center",
+        va = "bottom",
+        transform = ax.transAxes)
+
+    tracePlotPath = dirNamePlots *
+                    "domeTrace_med_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+    fig.savefig(tracePlotPath, bbox_inches = "tight", pad_inches = 0.1)
+    PythonPlot.plotclose(fig)
 end
 thread("DomeFlat traces done.")
