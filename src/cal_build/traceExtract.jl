@@ -140,9 +140,9 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
 
         dmodel_dheight = model_fluxes_unit_height
         dmodel_dmu = (curr_guess[:, 1] .* (model_fluxes_unit_height_above_mu .-
-                       model_fluxes_unit_height_below_mu)) ./ dmu
+                       model_fluxes_unit_height_below_mu)) ./ (2 * dmu)
         dmodel_dsig = (curr_guess[:, 1] .* (model_fluxes_unit_height_above_sig .-
-                        model_fluxes_unit_height_below_sig)) ./ dsig
+                        model_fluxes_unit_height_below_sig)) ./ (2 * dsig)
 
         flux_diffs = fit_fluxes .- model_fluxes'
 
