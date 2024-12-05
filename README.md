@@ -21,3 +21,6 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 128   | 7     | reads dropped for CR rejection = 1 |
 | 256   | 8     | reads dropped for CR rejection > 1 |
 | 512   | 9     | bad linear SUTR chi2 |
+
+# Developer notes
+[Quick tips on Julia for Python programmers](https://docs.julialang.org/en/v1/manual/noteworthy-differences/#Noteworthy-differences-from-Python)
