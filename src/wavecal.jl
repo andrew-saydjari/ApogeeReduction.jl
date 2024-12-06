@@ -1,10 +1,4 @@
 
-# initial guess for the (low-order)chip polynomial parameters
-chipPolyParams0 = [
-    -1.070 1
-    0 1
-    1.076 1]
-
 function linear_loss_fit(x, y; wporder=2, returnL2only=false)
     A = positional_poly_mat(x,porder=wporder)
     linparam = A\y
@@ -57,12 +51,16 @@ function ChipPolyParams2Params(chipPolyParams)
     return vcat(chipPolyParams[1,:],chipPolyParams[3,:])
 end
 
-
 # Sky line wavecal
 function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
+    # initial guess for the (low-order)chip polynomial parameters
+    chipPolyParams0 = [
+        -1.070 1
+        0 1
+        1.076 1]
     outname = replace(replace(fname,"skyLine_peaks"=>"wavecal_skyline"),"_a_"=>"_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
-    linParams, nlParams, resid_vec = get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt; cporder = cporder, wporder = wporder)
+    linParams, nlParams, resid_vec = get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = cporder, wporder = wporder)
 
     chipWaveSoln = zeros(Float64,2048,300,3);
     x = 1:2048
@@ -70,8 +68,8 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     for chip in ["a","b","c"]
         chipIndx = getChipIndx(chip)
         for fibIndx in 1:300
-            params2ChipPolyParams!(chipPolyParams,nlParams[fibIndx,:],cporder)
-            xt = transform_x_chips(ximport,chipPolyParams[chipIndx,:])
+            params2ChipPolyParams!(chipPolyParams0,nlParams[fibIndx,:],cporder)
+            xt = transform_x_chips(ximport,chipPolyParams0[chipIndx,:])
             Ax = positional_poly_mat(xt,porder=2)
             yt = Ax*linParams[fibIndx,:]
             chipWaveSoln[:,fibIndx,chipIndx] .= yt
@@ -81,7 +79,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     jldsave(outname; linParams = linParams, nlParams = nlParams, resid_vec = resid_vec, chipWaveSoln = chipWaveSoln)
 end
 
-function get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt; cporder = 1, wporder = 2)
+function get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2)
     linParams = zeros(Float64,300,wporder+1)
     nlParams = zeros(Float64,300,2*(cporder+1))
     resid_vec = zeros(Float64,300,size(sky_line_uxlst,1))
@@ -107,7 +105,12 @@ end
 function ingest_skyLines_file(fileName)
     # Read in sky line peaks data
     f = h5open(fileName, "r+")
-    sky_line_mat_clean = read(f["sky_line_mat_clean"]) 
+    sky_line_mat_clean = try
+        read(f["sky_line_mat_clean"])
+    catch
+        println(fileName)
+        read(f["sky_line_mat_clean"])
+    end
     close(f)
     sky_line_xlst = (sky_line_mat_clean[:,1,:] .- 1024)./2048
     sky_line_wlst = sky_line_mat_clean[:,2,:]
@@ -124,9 +127,9 @@ function ingest_skyLines_exp(fname)
         if isfile(fnameloc)
             sky_line_xlst, sky_line_wlst = ingest_skyLines_file(fnameloc)
             chipIndx = getChipIndx(chip)
-            push!(sky_line_uxlst,sky_line_xlst[chipIndx])
-            push!(sky_line_fwlst,sky_line_wlst[chipIndx])
-            push!(sky_line_chipInt,chipIndx*ones(Int,size(sky_line_wlst[chipIndx])))
+            push!(sky_line_uxlst,sky_line_xlst)
+            push!(sky_line_fwlst,sky_line_wlst)
+            push!(sky_line_chipInt,chipIndx*ones(Int,size(sky_line_wlst)))
         else
             push!(sky_line_uxlst,[])
             push!(sky_line_fwlst,[])

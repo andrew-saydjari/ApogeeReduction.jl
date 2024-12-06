@@ -253,8 +253,9 @@ println("Fitting sky line peaks:")
 
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:")
-@showprogress pmap(get_and_save_sky_wavecal, all1DObjecta)
+all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
+@showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## add a plot to plot all to just show the chips together
-## I should probably add some slack plots from the wavecal skylines
+## I should probably add some slack plots from the wavecal skylines 
 ## then do a dither combination (on Fri)
