@@ -28,12 +28,11 @@ echo "Getting runlist..."
 julia +1.11.0 --project="./" src/cal_build/make_runlist_dome_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+echo "Running 3D->2D..."
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
 
 mkdir -p ${outdir}dome_flats
-julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --trace_dir ${doutdir} --runlist $runlist
-julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --trace_dir ${doutdir} --runlist $runlist
-julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --trace_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
