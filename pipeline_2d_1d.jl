@@ -224,11 +224,11 @@ for mjd in unique_mjds
         if df.imagetyp[expid] == "Object"
             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df) * ".jld2"
         else
-            return String[]
+            return nothing
         end
     end
     local1D = get_1d_name_partial.(expid_list)
-    push!(list1DexpObject, local1D)
+    push!(list1DexpObject, filter(!isnothing, local1D))
 end
 all1DObjecta = vcat(list1DexpObject...)
 
