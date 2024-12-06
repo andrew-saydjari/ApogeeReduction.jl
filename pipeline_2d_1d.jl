@@ -249,7 +249,6 @@ end
 ## get sky line peaks
 println("Fitting sky line peaks:")
 @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
-println(all1DObject)
 @showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
 
 ## get wavecal from sky line peaks

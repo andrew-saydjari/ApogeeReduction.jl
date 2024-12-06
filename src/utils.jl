@@ -145,3 +145,5 @@ function jack_std(x)
         return Inf
     end
 end
+
+normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ

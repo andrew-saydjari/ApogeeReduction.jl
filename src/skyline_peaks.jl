@@ -1,7 +1,8 @@
 import FastRunningMedian: running_median
+using Optim
 
 function get_sky_peaks(flux_vec,tele,chip,roughwave_dict,df_sky_lines)
-    try
+    # try
         # Find indices where flux is above 99th percentile
         thresh = percentile(flux_vec, 97.5)
         above_thresh = findall(x -> x > thresh, flux_vec)
@@ -210,9 +211,9 @@ function get_sky_peaks(flux_vec,tele,chip,roughwave_dict,df_sky_lines)
         th_norm_flux ./= maximum(th_norm_flux)
         mskFlux = ones(Bool,length(cen_pixs)) #.& (abs.(obs_norm_flux[msk2use] .- th_norm_flux) .<= 0.15) # chip b needs this, but chip a/c hates it
         return pmat[:,mskFlux], best_offset, count(mskFlux)
-    catch
-        return nothing, nothing, nothing
-    end
+    # catch
+    #     return nothing, nothing, nothing
+    # end
 end
 
 function get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
@@ -222,7 +223,7 @@ function get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
     flux_1d = f["flux_1d"]
     close(f)
     get_sky_peaks_partial(flux_1d) = get_sky_peaks(flux_1d,tele,chip,roughwave_dict,df_sky_lines)
-    pout = @showprogress map(get_sky_peaks_partial,eachcol(flux_1d));
+    pout = map(get_sky_peaks_partial,eachcol(flux_1d));
     boff = map(x->replace_data_1(x[2]), pout);
 
     unique_skyline_inds = sort(unique(vcat(map(x->get_last_ind(x[1]), pout)...)))
