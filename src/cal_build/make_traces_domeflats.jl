@@ -147,9 +147,8 @@ end
 thread = SlackThread()
 thread("DOMEFLAT TRACES for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 for (filename, (heights_path, widths_path)) in zip(flist, plot_paths)
-    thread("Trace extraction for $(filename) done.")
-    thread("Here is the median flux per fiber", heights_path)
-    thread("Here is the median width per fiber", widths_path)
+    thread("Here is the median flux per fiber for $(filename)", heights_path)
+    thread("Here is the median width per fiber for $(filename)", widths_path)
 end
 
 thread("DomeFlat traces done.")
