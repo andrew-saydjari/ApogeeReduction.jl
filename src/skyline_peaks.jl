@@ -170,9 +170,9 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
             split(replace(bright_lines[ref_indx, :subline_I][2:(end - 1)], " " => ","), ","))
         subLine_ratio = subLine_weight[2] / subLine_weight[1]
 
-        plot_range = collect(Int(floor(cpix - 10)):Int(floor(cpix + 10)))
-        x = plot_range
-        y = flux_vec[plot_range]
+        peak_range = collect(Int(floor(cpix - 10)):Int(floor(cpix + 10)))
+        x = peak_range
+        y = flux_vec[peak_range]
         yamp = abs(maximum(y)) / sqrt(2 * pi)
 
         function gfit(p; exclude_idx = nothing)
