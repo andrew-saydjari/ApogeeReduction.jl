@@ -80,7 +80,7 @@ flush(stdout);
 @everywhere begin
     using LinearAlgebra
     BLAS.set_num_threads(1)
-    using FITSIO, HDF5, FileIO, JLD2, Glob
+    using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, SIRS, ProgressMeter
 
@@ -88,6 +88,8 @@ flush(stdout);
     include(src_dir * "src/ap1D.jl")
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
+    include(src_dir * "src/skyline_peaks.jl")
+    include(src_dir * "src/wavecal.jl")
 end
 
 println(BLAS.get_config());
@@ -101,7 +103,7 @@ git_branch, git_commit = initalize_git(src_dir);
 ##### 1D stage
 @everywhere begin
     function process_1D(fname)
-        sname = split(fname, "_")
+        sname = split(split(fname, "/")[end], "_")
         fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
 
         fnamecal = if (fnameType == "ap2D")
@@ -222,13 +224,13 @@ for mjd in unique_mjds
         if df.imagetyp[expid] == "Object"
             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df) * ".jld2"
         else
-            return []
+            return String[]
         end
     end
     local1D = get_1d_name_partial.(expid_list)
     push!(list1DexpObject, local1D)
 end
-all1DObjecta = vcat(list1DexpObject...)
+all1DObjecta = convert(Vector{String}, vcat(list1DexpObject...))
 
 all1DObjectperchip = []
 for chip in ["a","b","c"]
@@ -238,18 +240,21 @@ end
 all1DObject = vcat(all1DObjectperchip...)
 
 ## load rough wave dict and sky lines list
-roughwave_dict = load(src_dir * "data/roughwave_dict.jld2","roughwave_dict")
-df_sky_lines = CSV.read(src_dir * "data/df_sky_lines/APOGEE_lines.csv", DataFrame);
-df_sky_lines.linindx = 1:size(df_sky_lines,1);
+@everywhere begin
+    roughwave_dict = load(src_dir * "data/roughwave_dict.jld2","roughwave_dict")
+    df_sky_lines = CSV.read(src_dir * "data/APOGEE_lines.csv", DataFrame);
+    df_sky_lines.linindx = 1:size(df_sky_lines,1);
+end
 
 ## get sky line peaks
 println("Fitting sky line peaks:")
-get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
+@everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
+println(all1DObject)
 @showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
 
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:")
-@showprogress pmap(get_and_save_sky_wavecal, all1DObjecta) is 
+@showprogress pmap(get_and_save_sky_wavecal, all1DObjecta)
 
 ## add a plot to plot all to just show the chips together
 ## I should probably add some slack plots from the wavecal skylines
