@@ -177,7 +177,7 @@ end
 all2Da = vcat(list2Dexp...)
 
 all2Dperchip = []
-for chip in ["a","b","c"]
+for chip in ["a", "b", "c"]
     all2Dchip = replace.(all2Da, "_a_" => "_$(chip)_")
     push!(all2Dperchip, all2Dchip)
 end
@@ -188,7 +188,7 @@ all2D = vcat(all2Dperchip...)
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
-    for chip in ["a","b","c"]
+    for chip in ["a", "b", "c"]
         traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
             parg["outdir"] * "dome_flats/"))
         if length(traceList) > 1
@@ -233,7 +233,7 @@ end
 all1DObjecta = vcat(list1DexpObject...)
 
 all1DObjectperchip = []
-for chip in ["a","b","c"]
+for chip in ["a", "b", "c"]
     all1DObjectchip = replace.(all1DObjecta, "_a_" => "_$(chip)_")
     push!(all1DObjectperchip, all1DObjectchip)
 end
@@ -241,14 +241,15 @@ all1DObject = vcat(all1DObjectperchip...)
 
 ## load rough wave dict and sky lines list
 @everywhere begin
-    roughwave_dict = load(src_dir * "data/roughwave_dict.jld2","roughwave_dict")
-    df_sky_lines = CSV.read(src_dir * "data/APOGEE_lines.csv", DataFrame);
-    df_sky_lines.linindx = 1:size(df_sky_lines,1);
+    roughwave_dict = load(src_dir * "data/roughwave_dict.jld2", "roughwave_dict")
+    df_sky_lines = CSV.read(src_dir * "data/APOGEE_lines.csv", DataFrame)
+    df_sky_lines.linindx = 1:size(df_sky_lines, 1)
 end
 
 ## get sky line peaks
 println("Fitting sky line peaks:")
-@everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(fname,roughwave_dict,df_sky_lines)
+@everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+    fname, roughwave_dict, df_sky_lines)
 @showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
 
 ## get wavecal from sky line peaks

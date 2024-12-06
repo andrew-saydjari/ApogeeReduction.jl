@@ -115,7 +115,7 @@ function getChipIndx(chip)
         return 1
     elseif chip == "b"
         return 2
-    elseif chip=="c"
+    elseif chip == "c"
         return 3
     end
 end
@@ -124,7 +124,7 @@ function convert_to_int(x)
     if isnan(x)
         return 0
     else
-        return convert(Int,x)
+        return convert(Int, x)
     end
 end
 
@@ -132,14 +132,14 @@ function get_last_ind(x)
     if isnothing(x)
         return []
     else
-        return x[end,:]
+        return x[end, :]
     end
 end
 
 function jack_std(x)
-    y = filter(!isnanorzero,x)
+    y = filter(!isnanorzero, x)
     ly = length(y)
-    if ly>2
+    if ly > 2
         return Jackknife.estimate(std, y)
     else
         return Inf

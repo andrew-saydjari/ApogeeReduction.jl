@@ -175,7 +175,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
                     good_diffs, good_diffs]
 
                 @views ivars[pixel_ind] = ones_vec[1:n_good_diffs]' * (C \
-                                           ones_vec[1:n_good_diffs])
+                                                                       ones_vec[1:n_good_diffs])
                 @views rates[pixel_ind] = (ones_vec[1:n_good_diffs]' * (C \
                                             dimages[pixel_ind, good_diffs])) /
                                           ivars[pixel_ind]
