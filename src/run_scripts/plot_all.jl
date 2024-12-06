@@ -4,7 +4,7 @@ using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Random, HDF5
 src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
-include(src_dir * "/plotutils.jl")
+include(src_dir * "/makie_plotutils.jl")
 include(src_dir * "/ap1D.jl")
 
 ## Parse command line arguments
@@ -52,9 +52,7 @@ end
 parg = parse_commandline()
 
 dirNamePlots = parg["outdir"] * "plots/"
-if !ispath(dirNamePlots)
-    mkpath(dirNamePlots)
-end
+mkpath(dirNamePlots) # will work even if it already exists
 
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
@@ -70,7 +68,7 @@ else
     [parg["expid"]]
 end
 
-list1Dfiles = []
+all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
     df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
         df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
@@ -80,9 +78,8 @@ for mjd in unique_mjds
     end
 
     file_list = get_1d_name_partial.(expid_list)
-    push!(list1Dfiles, file_list)
+    append!(all1Da, file_list)
 end
-all1Da = vcat(list1Dfiles...)
 
 all1Dperchip = []
 for chip in string.(collect(parg["chips"]))
@@ -100,6 +97,7 @@ else
 end
 rng = MersenneTwister(351 + unique_mjds[1])
 
+# TODO parallelize plotting
 # we should customize this to the exposures we want to see and types of stars we want
 # for example, we want to be looking at the tellurics and pure sky
 nsamp = minimum([length(all1D), 5])
@@ -123,24 +121,25 @@ for exp_fname in sample_exposures
         dat = nanify(flux_1d[mskt, fib], mskt)
         datbad = nanify(flux_1d[.!mskt, fib], .!mskt)
 
-        fig = PythonPlot.figure(figsize = (8, 8), dpi = 150)
-        ax = fig.add_subplot(2, 1, 1)
-        ax.plot(1:2048, dat, color = "dodgerblue")
-        ax.scatter(1:2048, datbad, color = "red", s = 2)
-        ax.set_xlim(0, 2049)
-        ax.set_ylabel("ADU")
+        fig = Figure(size = (800, 800))
+        ax1 = Axis(fig[1, 1])
+        lines!(ax1, 1:2048, dat, color = :dodgerblue)
+        scatter!(ax1, 1:2048, datbad, color = :red, markersize = 2)
+        xlims!(ax1, 0, 2049)
+        ax1.ylabel = "ADU"
 
-        ax = fig.add_subplot(2, 1, 2)
-        ax.plot(1:2048, dat, color = "dodgerblue")
-        ax.scatter(1:2048, datbad, color = "red", s = 2)
-        ax.set_ylim(0, 2 * nanzeromedian(dat))
-        ax.set_xlim(0, 2049)
-        ax.set_xlabel("Pixel Index")
-        ax.set_ylabel("ADU")
+        ax2 = Axis(fig[2, 1])
+        lines!(ax2, 1:2048, dat, color = :dodgerblue)
+        scatter!(ax2, 1:2048, datbad, color = :red, markersize = 2)
+        ylims!(ax2, 0, 2 * nanzeromedian(dat))
+        xlims!(ax2, 0, 2049)
+        ax2.xlabel = "Pixel Index"
+        ax2.ylabel = "ADU"
+
         savePath = dirNamePlots *
                    "ap1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
-        fig.savefig(savePath, bbox_inches = "tight", pad_inches = 0.1)
-        PythonPlot.plotclose(fig)
+        save(savePath, fig)
+
         thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
     end
 end

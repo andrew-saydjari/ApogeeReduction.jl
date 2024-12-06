@@ -71,7 +71,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
 end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Worker allocation took $dt");
+println("Allocating $(nworkers()) workers took $dt");
 t_then = t_now;
 flush(stdout);
 println("Running Main on ", gethostname());
@@ -121,7 +121,7 @@ git_branch, git_commit = initalize_git(src_dir);
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
-        # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of 
+        # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of
         # everything to some degree
         regularized_trace_params = regularize_trace(trace_params)
 
@@ -183,7 +183,7 @@ for chip in ["a", "b", "c"]
 end
 all2D = vcat(all2Dperchip...)
 
-# we should do somthing smart to assemble the traces from a night into a single file 
+# we should do somthing smart to assemble the traces from a night into a single file
 # that gives us the trace of a fiber as a funciton of time or something
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
@@ -258,5 +258,5 @@ all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## add a plot to plot all to just show the chips together
-## I should probably add some slack plots from the wavecal skylines 
+## I should probably add some slack plots from the wavecal skylines
 ## then do a dither combination (on Fri)
