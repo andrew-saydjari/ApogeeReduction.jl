@@ -261,6 +261,7 @@ flush(stdout);
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
 # clean up this statement to have less replication
+desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 if parg["runlist"] != ""
     subDic = load(parg["runlist"])
     subiter = Iterators.product(
@@ -269,12 +270,12 @@ if parg["runlist"] != ""
     )
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
-    ap2dnamelist = @showprogress pmap(process_3D_partial, subiter)
+    ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else
     subiter = string.(collect(parg["chips"]))
     @everywhere process_3D_partial(chip) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], parg["mjd"], parg["expid"], chip)
-    ap2dnamelist = @showprogress pmap(process_3D_partial, subiter)
+    ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 end
 
 # Find the 2D calibration files for the relevant MJDs
@@ -311,5 +312,5 @@ if parg["doCal2d"]
     end
 
     # process the 2D calibration for all exposures
-    @showprogress pmap(process_2Dcal, all2D)
+    @showprogress desc="2D Calibration" pmap(process_2Dcal, all2D)
 end
