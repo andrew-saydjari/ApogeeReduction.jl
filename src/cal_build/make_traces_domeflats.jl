@@ -4,9 +4,10 @@ using ArgParse, Distributed, SlurmClusterManager, SlackThreads
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--chip"
+        "--chips"
         required = false
-        help = "chip name (a, b, c)"
+        help = "chip names, i.e. abc"
+        default = "abc"
         arg_type = String
         "--tele"
         required = true
@@ -63,7 +64,7 @@ end
 @passobj 1 workers() parg # make it available to all workers
 
 @everywhere begin
-    chip = parg["chip"]
+    chips = collect(String, split(parg["chips"], ""))
 
     # make summary plots and gifs and send to slack in outer loop
 
@@ -75,13 +76,13 @@ end
     # Load in the exact set of exposures
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
-    flist = get_cal_file.(
-        Ref(parg["trace_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("DOMEFLAT"))
+    flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i], expid[i], chip, "DOMEFLAT")
+             for chip in chips, i in eachindex(mjd)]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end
 
-desc = "trace extract for $(parg["tele"]) $(chip)"
+desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
     sname = split(fname, "_")
     teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
@@ -145,7 +146,7 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
 end
 
 thread = SlackThread()
-thread("DOMEFLAT TRACES for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
+thread("DOMEFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 for (filename, (heights_path, widths_path)) in zip(flist, plot_paths)
     thread("Here is the median flux per fiber for $(filename)", heights_path)
     thread("Here is the median width per fiber for $(filename)", widths_path)
