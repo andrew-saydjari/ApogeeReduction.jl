@@ -230,7 +230,7 @@ for mjd in unique_mjds
     local1D = get_1d_name_partial.(expid_list)
     push!(list1DexpObject, local1D)
 end
-all1DObjecta = convert(Vector{String}, vcat(list1DexpObject...))
+all1DObjecta = vcat(list1DexpObject...)
 
 all1DObjectperchip = []
 for chip in ["a","b","c"]
