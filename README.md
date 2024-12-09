@@ -11,7 +11,7 @@ There are four main types of files in this repository:
 - pipeline_*.sh: how functions combine to process the data
 - src/*.jl: core functions of the repository
 
-### File Structure
+## File Structure
 
 |-- src/ : core functions of the repository
 |   |-- run_scripts/ : scripts general users will interact with to run the pipeline
@@ -23,7 +23,7 @@ There are four main types of files in this repository:
 |-- pipeline.jl : main pipeline function (3D -> 2D)
 |--pipeline_2d_1d.jl : 2D pipeline function (2D -> 1D)
 
-### Call Structure
+## Call Structure
 
 Nightly Runs:
 
