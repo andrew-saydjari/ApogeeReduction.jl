@@ -15,30 +15,30 @@ There are four main types of files in this repository:
 ```
 ├── src/ : core functions of the repository
 │   └── run_scripts/ : scripts general users will interact with to run the pipeline
-|   |-- cal_build/ : scripts to build the calibrations files
-|-- test/ : test files for the repository (name matched to the src/ files they test)
-|-- metadata/ : metadata files for the repository (mostly dates for instrument changes/special calibrations runs)
-|-- data/ : input data (e.g. sky line lists from HITRAN)
-|-- dags/ : dags to run the pipeline through Airflow automations
-|-- pipeline.jl : main pipeline function (3D -> 2D)
-|--pipeline_2d_1d.jl : 2D pipeline function (2D -> 1D)
+│   └── cal_build/ : scripts to build the calibrations files
+├── test/ : test files for the repository (name matched to the src/ files they test)
+├── metadata/ : metadata files for the repository (mostly dates for instrument changes/special calibrations runs)
+├── data/ : input data (e.g. sky line lists from HITRAN)
+├── dags/ : dags to run the pipeline through Airflow automations
+├── pipeline.jl : main pipeline function (3D → 2D)
+└── pipeline_2d_1d.jl : 2D pipeline function (2D → 1D)
 ```
 
 ## Call Structure
 
 Nightly Runs:
 ```
-|-- run_all.sh : run all the data for a given night
-    |-- almanac: queries database containing targeting information and data transfer status
-    |-- make_runlist_all.sh: convert almanac output into a runlist interpreted by the pipeline
-    |-- pipeline.sh: reduces data from raw type (3D compressed) to 2D calibrated data
-    |-- run_trace_cal.sh: extracts the traces from domeflats to define 1D extraction profiles
-        |-- almanac: queries database containing targeting information and data transfer status
-        |-- make_runlist_dome_flats.sh: scrape almanac outputs for dome flats
-        |-- pipeline.sh
-        |-- make_traces_domeflats.jl: extracts/saves traces from dome flats via gaussian fits to the "y" direction
-    |-- pipeline_2d_1d.sh: extracts and calibrates 1D spectra from 2D calibrated data
-    |-- plot_all.sh: makes end of night plots for validation/QA and posts them to Slack
+└── run_all.sh : run all the data for a given night
+    ├── almanac: queries database containing targeting information and data transfer status
+    ├── make_runlist_all.sh: convert almanac output into a runlist interpreted by the pipeline
+    ├── pipeline.sh: reduces data from raw type (3D compressed) to 2D calibrated data
+    ├── run_trace_cal.sh: extracts the traces from domeflats to define 1D extraction profiles
+    │   ├── almanac
+    │   ├── make_runlist_dome_flats.sh: scrape almanac outputs for dome flats
+    │   ├── pipeline.sh
+    │   └── make_traces_domeflats.jl: extracts/saves traces from dome flats via gaussian fits to the "y" direction
+    ├── pipeline_2d_1d.sh: extracts and calibrates 1D spectra from 2D calibrated data
+    └── plot_all.sh: makes end of night plots for validation/QA and posts them to Slack
 ```
 
 Bulk reprocessing workflow is still TBD, but the massive parallelization we have designed even for nightly runs means it should be similar, with possible interruptions to build higher signal to noise calibrations based on combining many calibration exposures.
