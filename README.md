@@ -27,6 +27,7 @@ There are four main types of files in this repository:
 
 Nightly Runs:
 |-- run_all.sh : run all the data for a given night
+
     |-- almanac: queries database containing targeting information and data transfer status
     |-- make_runlist_all.sh: convert almanac output into a runlist interpreted by the pipeline
     |-- pipeline.sh: reduces data from raw type (3D compressed) to 2D calibrated data
