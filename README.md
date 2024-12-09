@@ -27,17 +27,17 @@ There are four main types of files in this repository:
 
 Nightly Runs:
 
-├── run_all.sh : run all the data for a given night
-    └── almanac: queries database containing targeting information and data transfer status
-    └── make_runlist_all.sh: convert almanac output into a runlist interpreted by the pipeline
-    └── pipeline.sh: reduces data from raw type (3D compressed) to 2D calibrated data
-    └── run_trace_cal.sh: extracts the traces from domeflats to define 1D extraction profiles
-        └── almanac: queries database containing targeting information and data transfer status
-        └── make_runlist_dome_flats.sh: scrape almanac outputs for dome flats
-        └── pipeline.sh
-        └── make_traces_domeflats.jl: extracts/saves traces from dome flats via gaussian fits to the "y" direction
-    └── pipeline_2d_1d.sh: extracts and calibrates 1D spectra from 2D calibrated data
-    └── plot_all.sh: makes end of night plots for validation/QA and posts them to Slack
+|-- run_all.sh : run all the data for a given night
+    |-- almanac: queries database containing targeting information and data transfer status
+    |-- make_runlist_all.sh: convert almanac output into a runlist interpreted by the pipeline
+    |-- pipeline.sh: reduces data from raw type (3D compressed) to 2D calibrated data
+    |-- run_trace_cal.sh: extracts the traces from domeflats to define 1D extraction profiles
+        |-- almanac: queries database containing targeting information and data transfer status
+        |-- make_runlist_dome_flats.sh: scrape almanac outputs for dome flats
+        |-- pipeline.sh
+        |-- make_traces_domeflats.jl: extracts/saves traces from dome flats via gaussian fits to the "y" direction
+    |-- pipeline_2d_1d.sh: extracts and calibrates 1D spectra from 2D calibrated data
+    |-- plot_all.sh: makes end of night plots for validation/QA and posts them to Slack
 
 Bulk reprocessing workflow is still TBD, but the massive parallelization we have designed even for nightly runs means it should be similar, with possible interruptions to build higher signal to noise calibrations based on combining many calibration exposures.
 
