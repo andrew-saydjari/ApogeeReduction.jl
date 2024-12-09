@@ -3,7 +3,7 @@ using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
-include(src_dir * "/plotutils.jl")
+include(src_dir * "/makie_plotutils.jl")
 include(src_dir * "/ap2Dcal.jl")
 
 ## Parse command line arguments
@@ -50,7 +50,7 @@ end
 
 parg = parse_commandline()
 
-chip = parg["chip"] # Python plotting issues prevented this from looping, so just do with three calls
+chip = parg["chip"]
 
 # make summary plots and gifs and send to slack in outer loop
 thread = SlackThread();
@@ -66,11 +66,6 @@ dirNamePlots = parg["flat_dir"] * "plots/"
 if !ispath(dirNamePlots)
     mkpath(dirNamePlots)
 end
-
-cmap_g = PythonPlot.get_cmap("cet_gouldian")
-cmap_g.set_bad("r")
-cmap_w = PythonPlot.get_cmap("cet_bkr")
-cmap_w.set_bad("w")
 
 # Load in the exact set of exposures
 mjd = load(parg["runlist"], "mjd")
@@ -103,7 +98,8 @@ dark_pix_bitmask = f["dark_pix_bitmask"]
 close(f)
 bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
 
-@showprogress for (indx, fname) in enumerate(flist)
+desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])"
+@showprogress desc=desc for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
     tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
     floc = jldopen(fname)
@@ -153,163 +149,212 @@ if nflats == 0
 else
     vmin, vmax = percentile(model_im[:], [2, 98])
 
-    fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-    ax = fig.add_subplot(1, 1, 1)
-    img = ax.imshow(flat_im',
-        vmin = 0.95,
-        vmax = 1.05,
-        interpolation = "none",
-        cmap = cmap_g,
-        origin = "lower",
-        aspect = "auto"
-    )
-
-    plt.text(0.5,
-        1.01,
-        "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)",
-        ha = "center",
-        va = "bottom",
-        transform = ax.transAxes)
-
-    divider = mpltk.make_axes_locatable(ax)
-    cax = divider.append_axes("right", size = "5%", pad = 0.05)
-    cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
-    flatPath = dirNamePlots *
-               "flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
-    fig.savefig(flatPath, bbox_inches = "tight", pad_inches = 0.1)
-    thread("Flat stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
-    PythonPlot.plotclose(fig)
-    thread("Here is the final flat image", flatPath)
-
-    flat_im_msk = copy(flat_im)
-    flat_im_msk[pix_bit_mask .& bad_flat_pix_bits .!= 0] .= NaN
-
-    totNum = length(pix_bit_mask)
-    badVec = pix_bit_mask .& bad_flat_pix_bits .!= 0
-    fracBad = count(badVec) / totNum
-
-    fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-    ax = fig.add_subplot(1, 1, 1)
-    img = ax.imshow(flat_im_msk',
-        vmin = 0.95,
-        vmax = 1.05,
-        interpolation = "none",
-        cmap = cmap_g,
-        origin = "lower",
-        aspect = "auto"
-    )
-
-    plt.text(0.5,
-        1.01,
-        "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\n Bad: $(round(100*fracBad,digits=2))%",
-        ha = "center",
-        va = "bottom",
-        transform = ax.transAxes
-    )
-
-    divider = mpltk.make_axes_locatable(ax)
-    cax = divider.append_axes("right", size = "5%", pad = 0.05)
-    cbar = plt.colorbar(img, cax = cax, orientation = "vertical")
-    maskPath = dirNamePlots *
-               "flatMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
-    fig.savefig(maskPath, bbox_inches = "tight", pad_inches = 0.1)
-    thread("Here is the final flat mask image", maskPath)
-    PythonPlot.plotclose(fig)
-
-    fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-    ax = fig.add_subplot(1, 1, 1)
-
-    divider = mpltk.make_axes_locatable(ax)
-    cax = divider.append_axes("right", size = "5%", pad = 0.05)
-    cbar = plt.colorbar(
-        mplcm.ScalarMappable(
-            norm = mplcolors.Normalize(vmin = 0.95, vmax = 1.05), cmap = cmap_g),
-        cax = cax,
-        orientation = "vertical")
-    im_lst = []
-    @showprogress for (indx, fname) in enumerate(flist)
-        sname = split(fname, "_")
-        teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
-
-        local img = ax.imshow(flat_im_mat[:, :, indx]',
-            vmin = 0.95,
-            vmax = 1.05,
-            interpolation = "none",
-            cmap = cmap_g,
-            origin = "lower",
-            aspect = "auto"
+    let # flat image
+        fig = Figure(size = (800, 800), fontsize = 24)
+        ax = Axis(fig[1, 1], aspect = DataAspect())
+        hm = heatmap!(ax, flat_im',
+            colormap = :grayC,
+            colorrange = (0.95, 1.05),
+            interpolate = false
         )
 
-        ttl = plt.text(
-            0.5, 1.01, "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
-            ha = "center", va = "bottom", transform = ax.transAxes)
-
-        push!(im_lst, [img, ttl])
-    end
-    PythonPlot.plotclose(fig)
-    ani = mplani.ArtistAnimation(
-        fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
-    vidPath = dirNamePlots *
-              "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-    ani.save(vidPath)
-    ani = nothing
-
-    len_vid = stat(vidPath).size
-    # if the length is bigger than 1 gigabyte, we need to upload the link to slack
-    if len_vid > 1e9 # 1 GB
-        vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-        thread("Here is the video of all of the frames included in the stack: $vidSasPath")
-    else
-        thread("Here is the video of all of the frames included in the stack", vidPath)
-    end
-
-    ## Video of residuals to stacked calibration 
-    fig = PythonPlot.figure(figsize = (8, 8), dpi = 300)
-    ax = fig.add_subplot(1, 1, 1)
-
-    divider = mpltk.make_axes_locatable(ax)
-    cax = divider.append_axes("right", size = "5%", pad = 0.05)
-    cbar = plt.colorbar(
-        mplcm.ScalarMappable(
-            norm = mplcolors.Normalize(vmin = -0.05, vmax = 0.05), cmap = cmap_w),
-        cax = cax,
-        orientation = "vertical")
-    im_lst = []
-    @showprogress for (indx, fname) in enumerate(flist)
-        sname = split(fname, "_")
-        tele, mjdloc, chiploc, expid = sname[(end - 4):(end - 1)]
-
-        local img = ax.imshow((flat_im_mat[:, :, indx] .- flat_im)',
-            vmin = -0.02,
-            vmax = 0.02,
-            interpolation = "none",
-            cmap = cmap_w,
-            origin = "lower",
-            aspect = "auto"
+        text!(ax,
+            0.5, 1.05,
+            text = "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)",
+            align = (:center, :bottom),
+            space = :relative
         )
 
-        ttl = plt.text(
-            0.5, 1.01, "Tele: $(tele), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expid)",
-            ha = "center", va = "bottom", transform = ax.transAxes)
+        Colorbar(fig[1, 2], hm, width = 15)
 
-        push!(im_lst, [img, ttl])
+        flatPath = dirNamePlots *
+                   "flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+        save(flatPath, fig, px_per_unit = 3)
+        thread("Flat stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"]) done.")
+        thread("Here is the final flat image", flatPath)
     end
-    PythonPlot.plotclose(fig)
-    ani = mplani.ArtistAnimation(
-        fig, im_lst, interval = 300, repeat_delay = 300, blit = false)
-    vidPath = dirNamePlots *
-              "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-    ani.save(vidPath)
-    ani = nothing
 
-    len_vid = stat(vidPath).size
-    # if the length is bigger than 1 gigabyte, we need to upload the link to slack
-    if len_vid > 1e9 # 1 GB
-        vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-        thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
-    else
-        thread(
-            "Here is the video of all of the residuals for frames included in the stack",
-            vidPath)
+    let # flat image with bad pixels masked
+        flat_im_msk = copy(flat_im)
+        flat_im_msk[pix_bit_mask .& bad_flat_pix_bits .!= 0] .= NaN
+
+        totNum = length(pix_bit_mask)
+        badVec = pix_bit_mask .& bad_flat_pix_bits .!= 0
+        fracBad = count(badVec) / totNum
+
+        fig = Figure(size = (800, 800), fontsize = 24)
+        ax = Axis(fig[1, 1], aspect = DataAspect())
+        hm = heatmap!(ax, flat_im_msk',
+            colormap = :grayC,
+            colorrange = (0.95, 1.05),
+            interpolate = false
+        )
+
+        text!(ax,
+            0.5, 1.05,
+            text = "Tele: $(parg["tele"]), MJD Range: $(parg["mjd-start"])-$(parg["mjd-end"]), Chip: $(chip)\nBad: $(round(100*fracBad,digits=2))%",
+            align = (:center, :bottom),
+            space = :relative
+        )
+
+        Colorbar(fig[1, 2], hm, width = 15)
+
+        maskPath = dirNamePlots *
+                   "flatMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+        save(maskPath, fig, px_per_unit = 3)
+        thread("Here is the final flat mask image", maskPath)
+    end
+
+    let # video of each frame
+        if length(flist) < 5 # if there are less than 5 frames, don't make a video
+            # Post each frame individually since there are few frames
+            for (i, fname) in enumerate(flist)
+                sname = split(fname, "_")
+                teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+
+                fig = Figure(size = (800, 800), fontsize = 24)
+                ax = Axis(fig[1, 1], aspect = DataAspect())
+                hm = heatmap!(ax, flat_im_mat[:, :, i]',
+                    colormap = :grayC,
+                    colorrange = (0.95, 1.05),
+                    interpolate = false
+                )
+
+                text!(ax,
+                    0.5, 1.05,
+                    text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                    align = (:center, :bottom),
+                    space = :relative
+                )
+
+                Colorbar(fig[1, 2], hm, width = 15)
+
+                framePath = dirNamePlots *
+                            "flatFrame$(i)_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+                save(framePath, fig, px_per_unit = 3)
+                thread("Frame $i of flat stack", framePath)
+            end
+        else
+            #fig = Figure(size = (800, 800), fontsize = 24)
+            #ax = Axis(fig[1, 1], aspect = DataAspect())
+            #hm = heatmap!(ax, flat_im_mat[:, :, 1]',
+            #    colormap = :grayC,
+            #    colorrange = (0.95, 1.05),
+            #    interpolate = false
+            #)
+            #@show hm
+            #Colorbar(fig[1, 2], hm, width = 15)
+
+            ## Create animation
+            #framerate = 3
+            #timestamps = eachindex(flist)
+            #record(fig,
+            #    dirNamePlots *
+            #    "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4",
+            #    timestamps;
+            #    framerate = framerate) do t
+            #    f = Int(round(t))
+            #    sname = split(flist[f], "_")
+            #    teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+
+            #    hm[3] = flat_im_mat[:, :, f]'
+
+            #    text!(ax,
+            #        0.5, 1.05,
+            #        text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+            #        align = (:center, :bottom),
+            #        space = :relative
+            #    )
+            #end
+
+            #vidPath = dirNamePlots *
+            #          "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+
+            #len_vid = stat(vidPath).size
+            ## if the length is bigger than 1 gigabyte, we need to upload the link to slack
+            #if len_vid > 1e9 # 1 GB
+            #    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+            #    thread("Here is the video of all of the frames included in the stack: $vidSasPath")
+            #else
+            #    thread("Here is the video of all of the frames included in the stack", vidPath)
+            #end
+        end
+    end
+
+    let
+        if length(flist) < 5
+            for i in eachindex(flist)
+                fig = Figure(size = (800, 800), fontsize = 24)
+                ax = Axis(fig[1, 1], aspect = DataAspect())
+                hm = heatmap!(ax, (flat_im_mat[:, :, i] .- flat_im)',
+                    colormap = :balance,
+                    colorrange = (-0.02, 0.02),
+                    interpolate = false
+                )
+                Colorbar(fig[1, 2], hm, width = 15)
+
+                sname = split(flist[i], "_")
+                teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+
+                text!(ax,
+                    0.5, 1.05,
+                    text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                    align = (:center, :bottom),
+                    space = :relative
+                )
+
+                framePath = dirNamePlots *
+                            "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"])_frame$i.png"
+                save(framePath, fig, px_per_unit = 3)
+                thread("Frame $i residual", framePath)
+            end
+        else
+            #    fig = Figure(size = (800, 800), fontsize = 24)
+            #    ax = Axis(fig[1, 1], aspect = DataAspect())
+            #    hm = heatmap!(ax, (flat_im_mat[:, :, 1] .- flat_im)',
+            #        colormap = :balance,
+            #        colorrange = (-0.02, 0.02),
+            #        interpolate = false
+            #    )
+            #    Colorbar(fig[1, 2], hm, width = 15)
+
+            #    frames = Observable(1)
+            #    on(frames) do f
+            #        sname = split(flist[f], "_")
+            #        teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+
+            #        hm[3] = (flat_im_mat[:, :, f] .- flat_im)'
+
+            #        text!(ax,
+            #            0.5, 1.05,
+            #            text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+            #            align = (:center, :bottom),
+            #            space = :relative
+            #        )
+            #    end
+
+            #    # Create animation
+            #    framerate = 3
+            #    timestamps = eachindex(flist)
+            #    record(fig,
+            #        dirNamePlots *
+            #        "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4",
+            #        timestamps;
+            #        framerate = framerate) do t
+            #        frames[] = Int(round(t))
+            #    end
+
+            #    vidPath = dirNamePlots * "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
+            #    len_vid = stat(vidPath).size
+            #    # if the length is bigger than 1 gigabyte, we need to upload the link to slack
+            #    if len_vid > 1e9 # 1 GB
+            #        vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
+            #        thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
+            #    else
+            #        thread(
+            #            "Here is the video of all of the residuals for frames included in the stack",
+            #            vidPath)
+            #    end
+        end
     end
 end
