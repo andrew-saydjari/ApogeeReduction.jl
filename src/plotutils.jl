@@ -25,3 +25,8 @@ function nanify(x, msk)
     out[.!msk] .= NaN
     return out
 end
+
+function nanify(x)
+    msk = isnanorzero.(x)
+    return nanify(x, msk)
+end
