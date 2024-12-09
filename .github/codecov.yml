@@ -1,0 +1,16 @@
+# codecov.yml
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+# remove for wave once we integrate and start using it
+# verify_drp and src/prior builds are one offs, but we could support them someday
+ignore:
+  - "src/cal_build"
+  - "src/run_scripts"
