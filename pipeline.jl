@@ -15,7 +15,6 @@ println("Package activation took $dt");
 t_then = t_now;
 flush(stdout);
 
-
 ## Parse command line arguments
 function parse_commandline()
     s = ArgParseSettings()
