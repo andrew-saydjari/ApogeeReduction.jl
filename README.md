@@ -13,8 +13,8 @@ There are four main types of files in this repository:
 
 ## File Structure
 ```
-|-- src/ : core functions of the repository
-|   |-- run_scripts/ : scripts general users will interact with to run the pipeline
+├── src/ : core functions of the repository
+│   └── run_scripts/ : scripts general users will interact with to run the pipeline
 |   |-- cal_build/ : scripts to build the calibrations files
 |-- test/ : test files for the repository (name matched to the src/ files they test)
 |-- metadata/ : metadata files for the repository (mostly dates for instrument changes/special calibrations runs)
