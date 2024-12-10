@@ -732,7 +732,5 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
     param_outputs = final_param_outputs
     param_output_covs = final_param_output_covs
 
-    # serialize(dirNamePlots * "param_outputs_$(tele)_$(mjd)_$(expid)_$(chip).jld2", param_outputs)
     return param_outputs, param_output_covs
-    #    return param_outputs
 end

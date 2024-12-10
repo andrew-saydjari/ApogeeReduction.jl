@@ -85,7 +85,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
 end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Worker allocation took $dt");
+println("Allocating $(nworkers()) workers took $dt")
 t_then = t_now;
 flush(stdout);
 println("Running Main on ", gethostname());
