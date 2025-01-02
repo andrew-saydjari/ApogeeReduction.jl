@@ -1,9 +1,28 @@
 #!/bin/bash
-## This is a local test script, but would be replaced by a SLURM script for a cluster
+#SBATCH --account=sdss-np
+#SBATCH --partition=sdss-shared-np
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=64
+
+#SBATCH --mem=0 #requesting all of the memory on the node
+
+#SBATCH --time=96:00:00
+#SBATCH --job-name=ApogeeReduction
+#SBATCH --output=%x_%j.out
+#SBATCH --err=%x_%j.err
+
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=7155301634@vtext.com
+# ------------------------------------------------------------------------------
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
 module load sdssdb/main almanac sdsstools postgresql ffmpeg
+if [ -n "$SLURM_JOB_NODELIST" ]; then
+    echo $SLURM_JOB_NODELIST
+else
+    hostname
+fi
 juliaup add 1.11.0
 
 # hardcode the mjd and expid for now

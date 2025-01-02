@@ -150,10 +150,10 @@ else
     vmin, vmax = percentile(model_im[:], [2, 98])
 
     let # flat image
-        fig = Figure(size = (800, 800), fontsize = 24)
-        ax = Axis(fig[1, 1], aspect = DataAspect())
+        fig = Figure(size = (1200, 800), fontsize = 24)
+        ax = Axis(fig[1, 1])
         hm = heatmap!(ax, flat_im',
-            colormap = :grayC,
+            colormap = :linear_kbgyw_5_98_c62_n256,
             colorrange = (0.95, 1.05),
             interpolate = false
         )
@@ -165,7 +165,11 @@ else
             space = :relative
         )
 
-        Colorbar(fig[1, 2], hm, width = 15)
+        Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+        colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+        data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+        colsize!(fig.layout, 1, Aspect(1, data_aspect))
+        resize_to_layout!(fig)
 
         flatPath = dirNamePlots *
                    "flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
@@ -182,12 +186,13 @@ else
         badVec = pix_bit_mask .& bad_flat_pix_bits .!= 0
         fracBad = count(badVec) / totNum
 
-        fig = Figure(size = (800, 800), fontsize = 24)
-        ax = Axis(fig[1, 1], aspect = DataAspect())
+        fig = Figure(size = (1200, 800), fontsize = 24)
+        ax = Axis(fig[1, 1])
         hm = heatmap!(ax, flat_im_msk',
-            colormap = :grayC,
+            colormap = :linear_kbgyw_5_98_c62_n256,
             colorrange = (0.95, 1.05),
-            interpolate = false
+            interpolate = false,
+            nan_color = :red
         )
 
         text!(ax,
@@ -197,7 +202,11 @@ else
             space = :relative
         )
 
-        Colorbar(fig[1, 2], hm, width = 15)
+        Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+        colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+        data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+        colsize!(fig.layout, 1, Aspect(1, data_aspect))
+        resize_to_layout!(fig)
 
         maskPath = dirNamePlots *
                    "flatMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
@@ -212,10 +221,10 @@ else
                 sname = split(fname, "_")
                 teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
 
-                fig = Figure(size = (800, 800), fontsize = 24)
-                ax = Axis(fig[1, 1], aspect = DataAspect())
+                fig = Figure(size = (1200, 800), fontsize = 24)
+                ax = Axis(fig[1, 1])
                 hm = heatmap!(ax, flat_im_mat[:, :, i]',
-                    colormap = :grayC,
+                    colormap = :linear_kbgyw_5_98_c62_n256,
                     colorrange = (0.95, 1.05),
                     interpolate = false
                 )
@@ -227,7 +236,11 @@ else
                     space = :relative
                 )
 
-                Colorbar(fig[1, 2], hm, width = 15)
+                Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+                colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+                data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+                colsize!(fig.layout, 1, Aspect(1, data_aspect))
+                resize_to_layout!(fig)
 
                 framePath = dirNamePlots *
                             "flatFrame$(i)_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
@@ -235,63 +248,26 @@ else
                 thread("Frame $i of flat stack", framePath)
             end
         else
-            #fig = Figure(size = (800, 800), fontsize = 24)
-            #ax = Axis(fig[1, 1], aspect = DataAspect())
-            #hm = heatmap!(ax, flat_im_mat[:, :, 1]',
-            #    colormap = :grayC,
-            #    colorrange = (0.95, 1.05),
-            #    interpolate = false
-            #)
-            #@show hm
-            #Colorbar(fig[1, 2], hm, width = 15)
-
-            ## Create animation
-            #framerate = 3
-            #timestamps = eachindex(flist)
-            #record(fig,
-            #    dirNamePlots *
-            #    "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4",
-            #    timestamps;
-            #    framerate = framerate) do t
-            #    f = Int(round(t))
-            #    sname = split(flist[f], "_")
-            #    teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
-
-            #    hm[3] = flat_im_mat[:, :, f]'
-
-            #    text!(ax,
-            #        0.5, 1.05,
-            #        text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
-            #        align = (:center, :bottom),
-            #        space = :relative
-            #    )
-            #end
-
-            #vidPath = dirNamePlots *
-            #          "flatStack_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-
-            #len_vid = stat(vidPath).size
-            ## if the length is bigger than 1 gigabyte, we need to upload the link to slack
-            #if len_vid > 1e9 # 1 GB
-            #    vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-            #    thread("Here is the video of all of the frames included in the stack: $vidSasPath")
-            #else
-            #    thread("Here is the video of all of the frames included in the stack", vidPath)
-            #end
+            # video not implemented
         end
     end
 
     let
         if length(flist) < 5
             for i in eachindex(flist)
-                fig = Figure(size = (800, 800), fontsize = 24)
-                ax = Axis(fig[1, 1], aspect = DataAspect())
+                fig = Figure(size = (1200, 800), fontsize = 24)
+                ax = Axis(fig[1, 1])
                 hm = heatmap!(ax, (flat_im_mat[:, :, i] .- flat_im)',
-                    colormap = :balance,
+                    colormap = :diverging_bkr_55_10_c35_n256,
                     colorrange = (-0.02, 0.02),
                     interpolate = false
                 )
-                Colorbar(fig[1, 2], hm, width = 15)
+
+                Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+                colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+                data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+                colsize!(fig.layout, 1, Aspect(1, data_aspect))
+                resize_to_layout!(fig)
 
                 sname = split(flist[i], "_")
                 teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
@@ -309,52 +285,7 @@ else
                 thread("Frame $i residual", framePath)
             end
         else
-            #    fig = Figure(size = (800, 800), fontsize = 24)
-            #    ax = Axis(fig[1, 1], aspect = DataAspect())
-            #    hm = heatmap!(ax, (flat_im_mat[:, :, 1] .- flat_im)',
-            #        colormap = :balance,
-            #        colorrange = (-0.02, 0.02),
-            #        interpolate = false
-            #    )
-            #    Colorbar(fig[1, 2], hm, width = 15)
-
-            #    frames = Observable(1)
-            #    on(frames) do f
-            #        sname = split(flist[f], "_")
-            #        teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
-
-            #        hm[3] = (flat_im_mat[:, :, f] .- flat_im)'
-
-            #        text!(ax,
-            #            0.5, 1.05,
-            #            text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
-            #            align = (:center, :bottom),
-            #            space = :relative
-            #        )
-            #    end
-
-            #    # Create animation
-            #    framerate = 3
-            #    timestamps = eachindex(flist)
-            #    record(fig,
-            #        dirNamePlots *
-            #        "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4",
-            #        timestamps;
-            #        framerate = framerate) do t
-            #        frames[] = Int(round(t))
-            #    end
-
-            #    vidPath = dirNamePlots * "flatStackRes_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).mp4"
-            #    len_vid = stat(vidPath).size
-            #    # if the length is bigger than 1 gigabyte, we need to upload the link to slack
-            #    if len_vid > 1e9 # 1 GB
-            #        vidSasPath = replace(abspath(vidPath), r".*users" => sas_prefix)
-            #        thread("Here is the video of all of the residuals for frames included in the stack: $vidSasPath")
-            #    else
-            #        thread(
-            #            "Here is the video of all of the residuals for frames included in the stack",
-            #            vidPath)
-            #    end
+            # video not implemented
         end
     end
 end

@@ -113,10 +113,10 @@ jldsave(
 
 # Figures for QA
 let
-    fig = Figure(size = (800, 800), fontsize = 24)
-    ax = Axis(fig[1, 1], aspect = DataAspect())
+    fig = Figure(size = (1200, 800), fontsize = 24)
+    ax = Axis(fig[1, 1])
     hm = heatmap!(ax, dark_im,
-        colormap = :balance,
+        colormap = :diverging_bkr_55_10_c35_n256,
         colorrange = (-0.2, 0.2),
         interpolate = false
     )
@@ -128,7 +128,11 @@ let
         space = :relative
     )
 
-    Colorbar(fig[1, 2], hm, width = 15)
+    Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+    colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+    data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+    colsize!(fig.layout, 1, Aspect(1, data_aspect))
+    resize_to_layout!(fig)
 
     ratePath = dirNamePlots *
                "darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
@@ -151,12 +155,13 @@ fracCorr = count(corrVec) / totNum
 fracNotCorr = count(notCorVec) / totNum
 
 let
-    fig = Figure(size = (800, 800), fontsize = 24)
-    ax = Axis(fig[1, 1], aspect = DataAspect())
+    fig = Figure(size = (1200, 800), fontsize = 24)
+    ax = Axis(fig[1, 1])
     hm = heatmap!(ax, dark_im_msk,
-        colormap = :balance,
+        colormap = :diverging_bkr_55_10_c35_n256,
         colorrange = (-0.2, 0.2),
-        interpolate = false
+        interpolate = false,
+        nan_color = :white
     )
 
     text!(ax,
@@ -166,7 +171,11 @@ let
         space = :relative
     )
 
-    Colorbar(fig[1, 2], hm, width = 15)
+    Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+    colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+    data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+    colsize!(fig.layout, 1, Aspect(1, data_aspect))
+    resize_to_layout!(fig)
 
     maskPath = dirNamePlots *
                "darkRateMask_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
@@ -184,10 +193,10 @@ let #each frame
             close(f)
             temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
 
-            fig = Figure(size = (800, 800), fontsize = 24)
-            ax = Axis(fig[1, 1], aspect = DataAspect())
+            fig = Figure(size = (1200, 800), fontsize = 24)
+            ax = Axis(fig[1, 1])
             hm = heatmap!(ax, temp_im,
-                colormap = :balance,
+                colormap = :diverging_bkr_55_10_c35_n256,
                 colorrange = (-0.2, 0.2),
                 interpolate = false
             )
@@ -199,7 +208,11 @@ let #each frame
                 space = :relative
             )
 
-            Colorbar(fig[1, 2], hm, width = 15)
+            Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+            colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+            data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+            colsize!(fig.layout, 1, Aspect(1, data_aspect))
+            resize_to_layout!(fig)
 
             framePath = dirNamePlots *
                         "darkFrame$(indx)_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
@@ -220,10 +233,10 @@ let # each frame residuals
             close(f)
             temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
 
-            fig = Figure(size = (800, 800), fontsize = 24)
-            ax = Axis(fig[1, 1], aspect = DataAspect())
+            fig = Figure(size = (1200, 800), fontsize = 24)
+            ax = Axis(fig[1, 1])
             hm = heatmap!(ax, temp_im - dark_im,
-                colormap = :balance,
+                colormap = :diverging_bkr_55_10_c35_n256,
                 colorrange = (-0.2, 0.2),
                 interpolate = false
             )
@@ -235,12 +248,16 @@ let # each frame residuals
                 space = :relative
             )
 
-            Colorbar(fig[1, 2], hm, width = 15)
+            Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+            colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+            data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+            colsize!(fig.layout, 1, Aspect(1, data_aspect))
+            resize_to_layout!(fig)
 
             framePath = dirNamePlots *
-                        "darkFrame$(indx)_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
+                        "darkFrameResiduals$(indx)_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).png"
             save(framePath, fig, px_per_unit = 3)
-            thread("Frame $indx of dark stack", framePath)
+            thread("Frame $indx of dark stack residuals", framePath)
         end
     else #make a video (unimplemented)
     end
