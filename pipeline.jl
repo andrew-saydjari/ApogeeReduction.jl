@@ -84,10 +84,10 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         nnodes = ntasks ÷ 64  # Each node has 64 cores
         total_workers = nnodes * workers_per_node
         workers_to_keep = []
-        for node in 0:(nnodes-1)
+        for node in 0:(nnodes - 1)
             node_start = 1 + node * 64
             spacing = 64 ÷ workers_per_node
-            append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node-1)])
+            append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
         end
         rmprocs(setdiff(1:ntasks, workers_to_keep))
     else

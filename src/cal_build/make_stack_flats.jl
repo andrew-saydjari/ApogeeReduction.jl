@@ -165,7 +165,7 @@ else
             space = :relative
         )
 
-        Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+        Colorbar(fig[1, 2], hm, width = 20, height = Relative(1.0))
         colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
         data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
         colsize!(fig.layout, 1, Aspect(1, data_aspect))
@@ -202,7 +202,7 @@ else
             space = :relative
         )
 
-        Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+        Colorbar(fig[1, 2], hm, width = 20, height = Relative(1.0))
         colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
         data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
         colsize!(fig.layout, 1, Aspect(1, data_aspect))
@@ -236,7 +236,7 @@ else
                     space = :relative
                 )
 
-                Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+                Colorbar(fig[1, 2], hm, width = 20, height = Relative(1.0))
                 colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
                 data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
                 colsize!(fig.layout, 1, Aspect(1, data_aspect))
@@ -263,7 +263,7 @@ else
                     interpolate = false
                 )
 
-                Colorbar(fig[1, 2], hm, width=20, height=Relative(1.0))
+                Colorbar(fig[1, 2], hm, width = 20, height = Relative(1.0))
                 colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
                 data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
                 colsize!(fig.layout, 1, Aspect(1, data_aspect))
