@@ -35,14 +35,18 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
-[sources]
-SIRS = {rev = "main", url = "https://github.com/nasa/SIRS.git"}
-SlackThreads = {rev = "main", url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"}
+[sources.SIRS]
+rev = "main"
+url = "https://github.com/nasa/SIRS.git"
+
+[sources.SlackThreads]
+rev = "main"
+url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"
 
 [compat]
 ArgParse = "1"
 CSV = "0.10.15"
-CairoMakie = "0.12.16"
+CairoMakie = "0.12.16, 0.13"
 ColorSchemes = "3.27.1"
 DataFrames = "1"
 Distributions = "0.25.113"
