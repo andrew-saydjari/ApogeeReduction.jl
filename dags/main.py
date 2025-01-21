@@ -12,7 +12,7 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 
 SLURM_CLUSTER = nk, *_ = "notchpeak"
 REPO_DIR = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_01_21/ApogeeReduction.jl"
-REPO_BRANCH = "2025_01_21"
+REPO_BRANCH = "airflow"
 
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
