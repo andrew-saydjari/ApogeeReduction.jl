@@ -8,8 +8,8 @@
 
 #SBATCH --time=96:00:00
 #SBATCH --job-name=ApogeeReduction
-#SBATCH --output=%x_%j.out
-#SBATCH --err=%x_%j.err
+#SBATCH --output=slurm_logs/%x_%j.out
+#SBATCH --err=slurm_logs/%x_%j.err
 
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=7155301634@vtext.com

@@ -9,4 +9,6 @@ slurm_logs/*
 *.out
 
 stash/
+slurm_logs/*.err
+slurm_logs/*.out
 .gitignore
