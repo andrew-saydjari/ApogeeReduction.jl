@@ -24,7 +24,6 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
     -vvv
     -D {REPO_DIR}
 """) 
-
 # text=f"ApogeeReduction-main DAG failed on {{{{ ds }}}}: {DAG_URL}",
 with DAG(
     "ApogeeReduction-main", 
