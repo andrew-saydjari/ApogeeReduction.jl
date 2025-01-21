@@ -1,5 +1,7 @@
 import os
 import re
+import subprocess
+import time
 from datetime import datetime, timedelta
 from astropy.time import Time
 from airflow import DAG
@@ -16,6 +18,21 @@ REPO_BRANCH = "airflow"
 
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
+
+# Add this function to check SLURM job status
+def wait_for_slurm(job_id):
+    while True:
+        result = subprocess.run(['squeue', '-j', str(job_id)], capture_output=True, text=True)
+        if "Invalid job id specified" in result.stderr or result.stdout.count('\n') <= 1:
+            return  # Job is done
+        time.sleep(60)  # Check every minute
+
+# Modify your BashOperator to capture and wait for the job ID
+def submit_and_wait(**context):
+    bash_command = context['task'].bash_command
+    result = subprocess.run(bash_command.split(), capture_output=True, text=True)
+    job_id = result.stdout.strip().split()[-1]  # Get job ID from "Submitted batch job XXXXX"
+    wait_for_slurm(job_id)
 
 observatories = ("apo", "lco")
 
@@ -101,20 +118,25 @@ with DAG(
                 mode="poke",
             )
             
-            # Darks and Flats and Science are not taking in directories and almanac paths as arguments {OUTPUT_DIR_TEMPLATE} {ALMANAC_PATH}
-            darks = BashOperator(
+            # Could set this up to take in directories for cleaner airflow running
+            darks = PythonOperator(
                 task_id="darks",
-                bash_command=f"{sbatch_prefix} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}",
+                python_callable=submit_and_wait,
+                op_kwargs={'bash_command': f"{sbatch_prefix} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
             )
 
-            flats = BashOperator(
+            flats = PythonOperator(
                 task_id="flats",
-                bash_command=f"{sbatch_prefix} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}",
+                python_callable=submit_and_wait,
+                op_kwargs={'bash_command': f"{sbatch_prefix} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
             )
             
-            science = BashOperator(
+            science = PythonOperator(
                 task_id="science",
-                bash_command=f"{sbatch_prefix} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}",
+                python_callable=submit_and_wait,
+                op_kwargs={
+                    'bash_command': f"{sbatch_prefix} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"
+                },
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}).",
@@ -125,7 +147,7 @@ with DAG(
                         text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}). :picard_facepalm:",
                     )
                 ]               
-            )        
+            )   
             transfer >> darks >> flats >> science
         
         observatory_groups.append(group)
