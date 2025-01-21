@@ -28,9 +28,9 @@ def wait_for_slurm(job_id):
         time.sleep(60)  # Check every minute
 
 # Modify your BashOperator to capture and wait for the job ID
-def submit_and_wait(**context):
-    # Get bash_command from op_kwargs instead of task
-    bash_command = context['op_kwargs']['bash_command']
+def submit_and_wait(bash_command, **context):
+    # Now bash_command comes directly from the arguments
+    print(f"Submitting command: {bash_command}")
     result = subprocess.run(bash_command.split(), capture_output=True, text=True)
     
     if result.returncode != 0:
