@@ -4,7 +4,8 @@ file_schema/Manifest.toml
 *.h5
 .CondaPkg
 .vscode
-slurm_logs/*
+slurm_logs/*.err
+slurm_logs/*.out
 *.err
 *.out
 
