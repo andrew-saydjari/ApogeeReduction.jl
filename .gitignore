@@ -10,3 +10,4 @@ slurm_logs/*
 
 stash/
 .gitignore
+dags/__pycache__/main.cpython-39.pyc
