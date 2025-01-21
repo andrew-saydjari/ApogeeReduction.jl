@@ -29,10 +29,18 @@ def wait_for_slurm(job_id):
 
 # Modify your BashOperator to capture and wait for the job ID
 def submit_and_wait(**context):
-    bash_command = context['task'].bash_command
+    # Get bash_command from op_kwargs instead of task
+    bash_command = context['op_kwargs']['bash_command']
     result = subprocess.run(bash_command.split(), capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        raise Exception(f"SLURM submission failed: {result.stderr}")
+        
     job_id = result.stdout.strip().split()[-1]  # Get job ID from "Submitted batch job XXXXX"
+    print(f"Submitted SLURM job {job_id}")
+    
     wait_for_slurm(job_id)
+    return job_id
 
 observatories = ("apo", "lco")
 
