@@ -113,7 +113,7 @@ with DAG(
             bash_command=(
                 f'cd {REPO_DIR}; '
                 'juliaup add 1.11.0; '
-                'julia +1.11.0 --project="./" -e \''
+                'julia 1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
                     'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
