@@ -12,8 +12,7 @@ from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.slack.notifications.slack import send_slack_notification
 
-SLURM_CLUSTER = nk, *_ = "notchpeak"
-REPO_DIR = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_01_21/ApogeeReduction.jl"
+REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
 
 def send_slack_notification_partial(text):
@@ -25,7 +24,7 @@ def wait_for_slurm(job_id):
         result = subprocess.run(['squeue', '-j', str(job_id)], capture_output=True, text=True)
         if "Invalid job id specified" in result.stderr or result.stdout.count('\n') <= 1:
             return  # Job is done
-        time.sleep(60)  # Check every minute
+        time.sleep(5)  # Check every minute
 
 # Modify your BashOperator to capture and wait for the job ID
 def submit_and_wait(bash_command, **context):
@@ -53,8 +52,8 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
 with DAG(
     "ApogeeReduction-main", 
     start_date=datetime(2024, 10, 10), # datetime(2014, 7, 18), 
-    schedule="0 8 * * *", # 8 am ET
-    max_active_runs=1,
+    schedule="0 5 * * *", # 8 am ET
+    max_active_runs=2,
     default_args=dict(retries=0),
     catchup=False,
     on_failure_callback=[
@@ -73,8 +72,10 @@ with DAG(
                     f"git checkout {REPO_BRANCH}; "
                     "git add -A; "  # Stage all changes, including deletions
                     "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
-                    "git push; "  # Push local changes
-                    "git pull"  # Pull latest changes
+                    "git push origin {REPO_BRANCH}; "  # Push local changes
+                    "git fetch origin main; "  # Get latest main
+                    f"git merge origin/main --no-edit; "  # Merge main into current branch
+                    "git pull origin {REPO_BRANCH}"  # Pull latest changes
                 ),
             )
         ) >> (
@@ -113,12 +114,14 @@ with DAG(
                 filepath=f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done",
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}). Starting reduction pipeline.",
+                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}})."
+                             f"Transfer file last modified at {{{{ macros.datetime.fromtimestamp(os.path.getmtime(filepath)).astimezone(macros.pendulum.timezone('America/New_York')).strftime('%Y-%m-%d %I:%M %p %Z') }}}}."
+                             f"Starting reduction pipeline.",
                     )
                 ],
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}) is incomplete. Please investigate.",
+                        text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
                     )
                 ],
                 timeout=60*60*12, # 12 hours: ~8pm ET
@@ -147,20 +150,30 @@ with DAG(
                 },
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}).",
+                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}).",
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} ({{{{ ds }}}}). :picard_facepalm:",
+                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}). :picard_facepalm:",
                     )
                 ]               
             )   
             transfer >> darks >> flats >> science
         
         observatory_groups.append(group)
-            
-    group_git >> group_setup >> observatory_groups
+
+        # Add final notification task
+    
+    final_notification = PythonOperator(
+        task_id="completion_notification",
+        python_callable=lambda **context: send_slack_notification_partial(
+            text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}). Both observatories processed."
+        )(**context),
+        dag=dag
+    )
+
+    group_git >> group_setup >> observatory_groups >> final_notification
     
 
 

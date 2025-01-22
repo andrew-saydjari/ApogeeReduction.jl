@@ -11,4 +11,5 @@ slurm_logs/*.out
 
 stash/
 .gitignore
-dags/__pycache__/main.cpython-39.pyc
+**/__pycache__/
+
