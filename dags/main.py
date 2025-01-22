@@ -5,11 +5,14 @@ import time
 from datetime import datetime, timedelta
 from astropy.time import Time
 from airflow import DAG
+from airflow.models import Connection
+from airflow.settings import Session
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
+from airflow.exceptions import AirflowNotFoundException
 from airflow.providers.slack.notifications.slack import send_slack_notification
 
 REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
@@ -32,7 +35,7 @@ def ensure_slack_connection():
             password=slack_token,  # Token goes in password field
         )
         
-        session = settings.Session()
+        session = Session()
         session.add(conn)
         session.commit()
         session.close()
@@ -65,25 +68,6 @@ def submit_and_wait(bash_command, **context):
     wait_for_slurm(job_id)
     return job_id
 
-def get_transfer_info(observatory, filepath, **context):
-    """Get transfer file info and send to slack"""
-    # Add os to the context
-    context.update({'os': os})
-    
-    mod_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-    mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Get values directly from context instead of using Jinja templates
-    mjd = context['ti'].xcom_pull(task_ids='setup.mjd')
-    prev_date = context['prev_ds']
-    
-    message = (
-        f"{observatory.upper()} data transfer complete for SJD {mjd} "
-        f"(night of {prev_date}). Transfer completed at {mod_time_str}. "
-        "Starting reduction pipeline."
-    )
-    send_slack_notification_partial(text=message)(**context)
-
 observatories = ("apo", "lco")
 
 sbatch_prefix = re.sub(r"\s+", " ", f"""
@@ -112,6 +96,7 @@ with DAG(
                 task_id="repo",
                 bash_command=(
                     f"cd {REPO_DIR}\n"
+                    "set -e\n"  # Add error checking at start of script instead
                     "git add -A\n"
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
@@ -128,7 +113,6 @@ with DAG(
                     "git merge origin/main --no-edit\n"
                     f"git pull origin {REPO_BRANCH}"
                 ),
-                bash_command_opts="-e",
             )
         ) >> (
             BashOperator(
@@ -165,7 +149,12 @@ with DAG(
             transfer = FileSensor(
                 task_id="transfer",
                 filepath=filepath,
-                on_success_callback=[get_transfer_info(observatory, filepath)],
+                on_success_callback=[
+                    send_slack_notification_partial(
+                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} "
+                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}). Starting reduction pipeline."
+                    )
+                ],
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. "
