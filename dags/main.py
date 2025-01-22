@@ -73,7 +73,7 @@ with DAG(
                     f"cd {REPO_DIR}\n"
                     "set -e\n"
                     "git add -A\n"
-                    # Check if there are changes to commit
+                    # Check if there are changes to commit, if there are PR and merge
                     'if [[ -n "$(git status --porcelain)" ]]; then\n'
                     "    git commit -m 'Auto-commit local changes'\n"
                     f"    git push origin {REPO_BRANCH}\n"
