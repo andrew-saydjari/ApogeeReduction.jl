@@ -15,6 +15,30 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
 
+# Add this function at the top of your DAG file
+def ensure_slack_connection():
+    """Ensure Slack connection exists, create it if it doesn't"""
+    conn_id = "slack_api_default"
+    try:
+        Connection.get_connection_from_secrets(conn_id)
+    except AirflowNotFoundException:
+        slack_token = os.getenv('SLACK_TOKEN')
+        if not slack_token:
+            raise ValueError("SLACK_TOKEN environment variable not found")
+        
+        conn = Connection(
+            conn_id=conn_id,
+            conn_type="slack",
+            password=slack_token,  # Token goes in password field
+        )
+        
+        session = settings.Session()
+        session.add(conn)
+        session.commit()
+        session.close()
+
+ensure_slack_connection()
+
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
 
@@ -87,24 +111,24 @@ with DAG(
             BashOperator(
                 task_id="repo",
                 bash_command=(
-                    # assumes you have run 'git checkout airflow' to be on the airflow branch
-                    f"cd {REPO_DIR}; "
-                    "git add -A; "  # Stage all changes, including deletions
-                    "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
-                    f"git push origin {REPO_BRANCH}; "  # Push local changes
-                    # create a PR against main with these local changes ('|| true' prevents failure if PR already exists)
-                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true); "
-                    "sleep 5; "
-                    # auto-merge the PR
-                    "gh pr merge $PR_NUM --admin --merge --delete-branch=false; "
-                    "sleep 5; "
+                    f"cd {REPO_DIR}\n"
+                    "git add -A\n"
+                    "git commit -m 'Auto-commit local changes'\n"
+                    f"git push origin {REPO_BRANCH}\n"
+                    # Create PR and capture PR number
+                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --force || true)\n"
+                    "echo 'Created PR #'$PR_NUM\n"
+                    "sleep 5\n"
+                    # Try to merge the PR
+                    "gh pr merge $PR_NUM --admin --merge --delete-branch=false\n"
+                    "echo 'Merged PR #'$PR_NUM\n"
+                    "sleep 5\n"
                     # get main and use it to merge into current branch
-                    "git fetch origin main; "  # Get latest main
-                    "git merge origin/main --no-edit; "  # Merge main into current branch
-                    f"git pull origin {REPO_BRANCH}"  # Pull latest changes
+                    "git fetch origin main\n"
+                    "git merge origin/main --no-edit\n"
+                    f"git pull origin {REPO_BRANCH}"
                 ),
-                # Add error handling for git commands
-                bash_command_opts="-e",  # Exit on error
+                bash_command_opts="-e",
             )
         ) >> (
             BashOperator(
