@@ -87,8 +87,10 @@ with DAG(
                     f"git push origin {REPO_BRANCH}; "  # Push local changes
                     # create a PR against main with these local changes ('|| true' prevents failure if PR already exists)
                     f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true); "
+                    "sleep 5; "
                     # auto-merge the PR
                     "gh pr merge $PR_NUM --admin --merge --delete-branch=false; "
+                    "sleep 5; "
                     # get main and use it to merge into current branch
                     "git fetch origin main; "  # Get latest main
                     "git merge origin/main --no-edit; "  # Merge main into current branch
@@ -110,7 +112,7 @@ with DAG(
             task_id="julia",
             bash_command=(
                 f'cd {REPO_DIR}; '
-                'juliaup add +1.11.0; '
+                'juliaup add 1.11.0; '
                 'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
