@@ -12,7 +12,8 @@ from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.slack.notifications.slack import send_slack_notification
 
-REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
+# REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
+REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_01_21/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
 
 def send_slack_notification_partial(text):
@@ -100,6 +101,7 @@ with DAG(
             task_id="julia",
             bash_command=(
                 f'cd {REPO_DIR}; '
+                # I don't know why it is erroring on this.
                 'juliaup add 1.11.0; '
                 'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
@@ -118,25 +120,26 @@ with DAG(
     observatory_groups = []
     for observatory in observatories:
         with TaskGroup(group_id=observatory) as group:
+            filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.done"
             transfer = FileSensor(
-                filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done"
                 task_id="transfer",
                 filepath=filepath,
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}). Starting reduction pipeline."
+                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                             f"(night of {{{{ prev_ds }}}}). Starting reduction pipeline."
                     )
                 ],
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. "
-                             f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
+                        text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                             f"(night of {{{{ prev_ds }}}}) is incomplete. "
+                             f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
-                timeout=60*60*12, # 12 hours: ~8pm ET
-                poke_interval=600, # 10 minutes
-                mode="poke",
+                timeout=60*60*12,
+                poke_interval=600,
+                mode="poke"
             )
             
             # Could set this up to take in directories for cleaner airflow running
