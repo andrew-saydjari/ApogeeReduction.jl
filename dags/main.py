@@ -41,6 +41,18 @@ def submit_and_wait(bash_command, **context):
     wait_for_slurm(job_id)
     return job_id
 
+def get_transfer_info(observatory, filepath, **context):
+    """Get transfer file info and send to slack"""
+    mod_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+    mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S')
+    
+    message = (
+        f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} "
+        f"(night of {{{{ prev_ds }}}}). Transfer completed at {mod_time_str}. "
+        "Starting reduction pipeline."
+    )
+    send_slack_notification_partial(text=message)(**context)
+
 observatories = ("apo", "lco")
 
 sbatch_prefix = re.sub(r"\s+", " ", f"""
@@ -74,9 +86,9 @@ with DAG(
                     "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
                     f"git push origin {REPO_BRANCH}; "  # Push local changes
                     # create a PR against main with these local changes ('|| true' prevents failure if PR already exists)
-                    f"gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true; "
+                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true); "
                     # auto-merge the PR
-                    "gh pr merge --auto --merge --delete-branch=false; "
+                    "gh pr merge $PR_NUM --admin --merge --delete-branch=false; "
                     # get main and use it to merge into current branch
                     "git fetch origin main; "  # Get latest main
                     "git merge origin/main --no-edit; "  # Merge main into current branch
@@ -116,19 +128,15 @@ with DAG(
     observatory_groups = []
     for observatory in observatories:
         with TaskGroup(group_id=observatory) as group:
+            filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done"
             transfer = FileSensor(
                 task_id="transfer",
-                filepath=f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done",
-                on_success_callback=[
-                    send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}})."
-                             f"Transfer file last modified at {{{{ macros.datetime.fromtimestamp(os.path.getmtime(filepath)).astimezone(macros.pendulum.timezone('America/New_York')).strftime('%Y-%m-%d %I:%M %p %Z') }}}}."
-                             f"Starting reduction pipeline.",
-                    )
-                ],
+                filepath=filepath,
+                on_success_callback=[get_transfer_info(observatory, filepath)],
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
+                        text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. "
+                             f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
                     )
                 ],
                 timeout=60*60*12, # 12 hours: ~8pm ET
