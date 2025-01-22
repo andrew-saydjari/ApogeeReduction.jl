@@ -15,30 +15,6 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
 
-# Add this function at the top of your DAG file
-def ensure_slack_connection():
-    """Ensure Slack connection exists, create it if it doesn't"""
-    conn_id = "slack_api_default"
-    try:
-        Connection.get_connection_from_secrets(conn_id)
-    except AirflowNotFoundException:
-        slack_token = os.getenv('SLACK_TOKEN')
-        if not slack_token:
-            raise ValueError("SLACK_TOKEN environment variable not found")
-        
-        conn = Connection(
-            conn_id=conn_id,
-            conn_type="slack",
-            password=slack_token,  # Token goes in password field
-        )
-        
-        session = settings.Session()
-        session.add(conn)
-        session.commit()
-        session.close()
-
-ensure_slack_connection()
-
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
 
@@ -64,25 +40,6 @@ def submit_and_wait(bash_command, **context):
     
     wait_for_slurm(job_id)
     return job_id
-
-def get_transfer_info(observatory, filepath, **context):
-    """Get transfer file info and send to slack"""
-    # Add os to the context
-    context.update({'os': os})
-    
-    mod_time = datetime.fromtimestamp(os.path.getmtime(filepath))
-    mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Get values directly from context instead of using Jinja templates
-    mjd = context['ti'].xcom_pull(task_ids='setup.mjd')
-    prev_date = context['prev_ds']
-    
-    message = (
-        f"{observatory.upper()} data transfer complete for SJD {mjd} "
-        f"(night of {prev_date}). Transfer completed at {mod_time_str}. "
-        "Starting reduction pipeline."
-    )
-    send_slack_notification_partial(text=message)(**context)
 
 observatories = ("apo", "lco")
 
@@ -112,11 +69,12 @@ with DAG(
                 task_id="repo",
                 bash_command=(
                     f"cd {REPO_DIR}\n"
+                    "set -e\n"  # Add error checking at start of script instead
                     "git add -A\n"
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
                     # Create PR and capture PR number
-                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --force || true)\n"
+                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true)\n"
                     "echo 'Created PR #'$PR_NUM\n"
                     "sleep 5\n"
                     # Try to merge the PR
@@ -128,7 +86,6 @@ with DAG(
                     "git merge origin/main --no-edit\n"
                     f"git pull origin {REPO_BRANCH}"
                 ),
-                bash_command_opts="-e",
             )
         ) >> (
             BashOperator(
@@ -144,7 +101,7 @@ with DAG(
             bash_command=(
                 f'cd {REPO_DIR}; '
                 'juliaup add 1.11.0; '
-                'julia 1.11.0 --project="./" -e \''
+                'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
                     'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
@@ -161,11 +118,16 @@ with DAG(
     observatory_groups = []
     for observatory in observatories:
         with TaskGroup(group_id=observatory) as group:
-            filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done"
             transfer = FileSensor(
+                filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done"
                 task_id="transfer",
                 filepath=filepath,
-                on_success_callback=[get_transfer_info(observatory, filepath)],
+                on_success_callback=[
+                    send_slack_notification_partial(
+                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} "
+                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}). Starting reduction pipeline."
+                    )
+                ],
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. "
