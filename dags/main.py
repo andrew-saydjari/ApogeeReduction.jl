@@ -145,8 +145,8 @@ with DAG(
     observatory_groups = []
     for observatory in observatories:
         with TaskGroup(group_id=observatory) as group:
-            filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done"
             transfer = FileSensor(
+                filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}.done"
                 task_id="transfer",
                 filepath=filepath,
                 on_success_callback=[
