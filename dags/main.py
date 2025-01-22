@@ -12,7 +12,8 @@ from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.slack.notifications.slack import send_slack_notification
 
-REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
+# REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
+REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_01_21/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
 
 def send_slack_notification_partial(text):
