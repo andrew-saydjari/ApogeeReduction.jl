@@ -54,7 +54,7 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
 with DAG(
     "ApogeeReduction-main", 
     start_date=datetime(2024, 10, 10), # datetime(2014, 7, 18), 
-    schedule="0 5 * * *", # 8 am ET
+    schedule="0 6 * * *", # 5 am ET
     max_active_runs=2,
     default_args=dict(retries=0),
     catchup=False,
@@ -137,7 +137,7 @@ with DAG(
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
-                timeout=60*60*12, # 12 hours: ~8pm ET
+                timeout=60*60*19, # 18 hours: midnight ET
                 poke_interval=600, # 10 minutes
                 mode="poke",
             )
