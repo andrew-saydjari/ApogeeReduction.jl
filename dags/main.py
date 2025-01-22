@@ -71,21 +71,19 @@ with DAG(
                 task_id="repo",
                 bash_command=(
                     f"cd {REPO_DIR}\n"
-                    "set -e\n"  # Add error checking at start of script instead
+                    "set -e\n"
                     "git add -A\n"
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
-                    # Create PR and capture PR number
-                    f"PR_OUT=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH}')\n"
-                    "PR_URL=$(echo "$PR_OUT" | grep -o 'https://github.com/[^ ]*/pull/[0-9]*' | head -n 1)\n"
-                    "PR_NUM=$(echo "$PR_URL" | sed 's/.*pull\/\([0-9]*\)/\1/')\n"
-                    "echo 'Created PR #'$PR_NUMBER\n"
-                    "sleep 5\n"
-                    # Try to merge the PR
-                    "gh pr merge $PR_NUM --admin --merge --delete-branch=false\n"
-                    "echo 'Merged PR #'$PR_NUM\n"
-                    "sleep 5\n"
-                    # get main and use it to merge into current branch
+                    # Use single quotes for the outer string and escape the inner single quotes
+                    'PR_OUT=$(gh pr create --title \'Automated updates from airflow pipeline\' --body \'This PR was automatically created by the airflow pipeline.\' --base main --head ' + REPO_BRANCH + ')\n'
+                    'PR_URL=$(echo "$PR_OUT" | grep -o \'https://github.com/[^ ]*/pull/[0-9]*\' | head -n 1)\n'
+                    'PR_NUM=$(echo "$PR_URL" | sed \'s/.*pull\\/\\([0-9]*\\)/\\1/\')\n'
+                    'echo "Created PR #$PR_NUM"\n'
+                    'sleep 5\n'
+                    'gh pr merge "$PR_NUM" --admin --merge --delete-branch=false\n'
+                    'echo "Merged PR #$PR_NUM"\n'
+                    'sleep 5\n'
                     "git fetch origin main\n"
                     "git merge origin/main --no-edit\n"
                     f"git pull origin {REPO_BRANCH}"
