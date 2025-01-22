@@ -75,15 +75,13 @@ with DAG(
                     "git add -A\n"
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
-                    # Use single quotes for the outer string and escape the inner single quotes
-                    'PR_OUT=$(gh pr create --title \'Automated updates from airflow pipeline\' --body \'This PR was automatically created by the airflow pipeline.\' --base main --head ' + REPO_BRANCH + ')\n'
+                    f'gh pr create --title "Automated updates" --body "Auto-created by airflow" --base main --head {REPO_BRANCH}\n'
+                    # should move to using the PR number, but need to go to bed
                     # 'PR_URL=$(echo "$PR_OUT" | grep -o \'https://github.com/[^ ]*/pull/[0-9]*\' | head -n 1)\n'
                     # 'PR_NUM=$(echo "$PR_URL" | sed \'s/.*pull\\/\\([0-9]*\\)/\\1/\')\n'
                     # 'echo "Created PR #$PR_NUM"\n'
-                    # 'sleep 5\n'
                     'gh pr merge "$PR_NUM" --admin --merge --delete-branch=false\n'
                     'echo "Merged PR #$PR_NUM"\n'
-                    'sleep 5\n'
                     "git fetch origin main\n"
                     "git merge origin/main --no-edit\n"
                     f"git pull origin {REPO_BRANCH}"
