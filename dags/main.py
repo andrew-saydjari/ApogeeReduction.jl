@@ -54,7 +54,7 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
 with DAG(
     "ApogeeReduction-main", 
     start_date=datetime(2024, 10, 10), # datetime(2014, 7, 18), 
-    schedule="0 6 * * *", # 5 am ET
+    schedule="0 6 * * *", # 6 am ET
     max_active_runs=2,
     default_args=dict(retries=0),
     catchup=False,
@@ -137,7 +137,7 @@ with DAG(
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
-                timeout=60*60*19, # 18 hours: midnight ET
+                timeout=60*60*18, # 18 hours: midnight ET
                 poke_interval=600, # 10 minutes
                 mode="poke",
             )
@@ -180,9 +180,12 @@ with DAG(
     
     final_notification = PythonOperator(
         task_id="completion_notification",
-        python_callable=lambda **context: send_slack_notification_partial(
-            text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}). Both observatories processed."
-        )(**context),
+        python_callable=lambda **_: None,  # dummy function that does nothing
+        on_success_callback=[
+            send_slack_notification_partial(
+                text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}). Both observatories processed."
+            )
+        ],
         dag=dag
     )
 
