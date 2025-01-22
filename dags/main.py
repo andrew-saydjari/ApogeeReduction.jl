@@ -54,7 +54,7 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
 with DAG(
     "ApogeeReduction-main", 
     start_date=datetime(2024, 10, 10), # datetime(2014, 7, 18), 
-    schedule="0 5 * * *", # 8 am ET
+    schedule="0 6 * * *", # 5 am ET
     max_active_runs=2,
     default_args=dict(retries=0),
     catchup=False,
@@ -127,17 +127,17 @@ with DAG(
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}). Starting reduction pipeline."
+                             f"(night of {{{{ ds }}}}). Starting reduction pipeline."
                     )
                 ],
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. "
+                             f"(night of {{{{ ds }}}}) is incomplete. "
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
-                timeout=60*60*12, # 12 hours: ~8pm ET
+                timeout=60*60*19, # 18 hours: midnight ET
                 poke_interval=600, # 10 minutes
                 mode="poke",
             )
@@ -163,12 +163,12 @@ with DAG(
                 },
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}).",
+                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}).",
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}). :picard_facepalm:",
+                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}). :picard_facepalm:",
                     )
                 ]               
             )   
@@ -181,7 +181,7 @@ with DAG(
     final_notification = PythonOperator(
         task_id="completion_notification",
         python_callable=lambda **context: send_slack_notification_partial(
-            text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ macros.ds_add(ds, -1) }}}}). Both observatories processed."
+            text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}). Both observatories processed."
         )(**context),
         dag=dag
     )
