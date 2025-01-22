@@ -43,12 +43,19 @@ def submit_and_wait(bash_command, **context):
 
 def get_transfer_info(observatory, filepath, **context):
     """Get transfer file info and send to slack"""
+    # Add os to the context
+    context.update({'os': os})
+    
     mod_time = datetime.fromtimestamp(os.path.getmtime(filepath))
     mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S')
     
+    # Get values directly from context instead of using Jinja templates
+    mjd = context['ti'].xcom_pull(task_ids='setup.mjd')
+    prev_date = context['prev_ds']
+    
     message = (
-        f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} "
-        f"(night of {{{{ prev_ds }}}}). Transfer completed at {mod_time_str}. "
+        f"{observatory.upper()} data transfer complete for SJD {mjd} "
+        f"(night of {prev_date}). Transfer completed at {mod_time_str}. "
         "Starting reduction pipeline."
     )
     send_slack_notification_partial(text=message)(**context)
