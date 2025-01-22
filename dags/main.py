@@ -43,12 +43,19 @@ def submit_and_wait(bash_command, **context):
 
 def get_transfer_info(observatory, filepath, **context):
     """Get transfer file info and send to slack"""
+    # Add os to the context
+    context.update({'os': os})
+    
     mod_time = datetime.fromtimestamp(os.path.getmtime(filepath))
     mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S')
     
+    # Get values directly from context instead of using Jinja templates
+    mjd = context['ti'].xcom_pull(task_ids='setup.mjd')
+    prev_date = context['prev_ds']
+    
     message = (
-        f"{observatory.upper()} data transfer complete for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} "
-        f"(night of {{{{ prev_ds }}}}). Transfer completed at {mod_time_str}. "
+        f"{observatory.upper()} data transfer complete for SJD {mjd} "
+        f"(night of {prev_date}). Transfer completed at {mod_time_str}. "
         "Starting reduction pipeline."
     )
     send_slack_notification_partial(text=message)(**context)
@@ -87,8 +94,10 @@ with DAG(
                     f"git push origin {REPO_BRANCH}; "  # Push local changes
                     # create a PR against main with these local changes ('|| true' prevents failure if PR already exists)
                     f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true); "
+                    "sleep 5; "
                     # auto-merge the PR
                     "gh pr merge $PR_NUM --admin --merge --delete-branch=false; "
+                    "sleep 5; "
                     # get main and use it to merge into current branch
                     "git fetch origin main; "  # Get latest main
                     "git merge origin/main --no-edit; "  # Merge main into current branch
@@ -110,8 +119,8 @@ with DAG(
             task_id="julia",
             bash_command=(
                 f'cd {REPO_DIR}; '
-                'juliaup add +1.11.0; '
-                'julia +1.11.0 --project="./" -e \''
+                'juliaup add 1.11.0; '
+                'julia 1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
                     'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
