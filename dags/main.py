@@ -74,7 +74,7 @@ with DAG(
                     "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
                     f"git push origin {REPO_BRANCH}; "  # Push local changes
                     # create a PR against main with these local changes ('|| true' prevents failure if PR already exists)
-                    f"gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --label automated || true"
+                    f"gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true"
                     # auto-merge the PR
                     "gh pr merge --auto --merge --delete-branch=false; "
                     # get main and use it to merge into current branch
