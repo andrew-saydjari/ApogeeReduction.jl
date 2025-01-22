@@ -101,7 +101,7 @@ with DAG(
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
                     # Create PR and capture PR number
-                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --force || true)\n"
+                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true)\n"
                     "echo 'Created PR #'$PR_NUM\n"
                     "sleep 5\n"
                     # Try to merge the PR
@@ -128,7 +128,7 @@ with DAG(
             bash_command=(
                 f'cd {REPO_DIR}; '
                 'juliaup add 1.11.0; '
-                'julia 1.11.0 --project="./" -e \''
+                'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
                     'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
