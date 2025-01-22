@@ -87,24 +87,24 @@ with DAG(
             BashOperator(
                 task_id="repo",
                 bash_command=(
-                    # assumes you have run 'git checkout airflow' to be on the airflow branch
-                    f"cd {REPO_DIR}; "
-                    "git add -A; "  # Stage all changes, including deletions
-                    "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
-                    f"git push origin {REPO_BRANCH}; "  # Push local changes
-                    # create a PR against main with these local changes ('|| true' prevents failure if PR already exists)
-                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true); "
-                    "sleep 5; "
-                    # auto-merge the PR
-                    "gh pr merge $PR_NUM --merge --admin --delete-branch=false; "
-                    "sleep 5; "
+                    f"cd {REPO_DIR}\n"
+                    "git add -A\n"
+                    "git commit -m 'Auto-commit local changes'\n"
+                    f"git push origin {REPO_BRANCH}\n"
+                    # Create PR and capture PR number
+                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --force || true)\n"
+                    "echo 'Created PR #'$PR_NUM\n"
+                    "sleep 5\n"
+                    # Try to merge the PR
+                    "gh pr merge $PR_NUM --admin --merge --delete-branch=false\n"
+                    "echo 'Merged PR #'$PR_NUM\n"
+                    "sleep 5\n"
                     # get main and use it to merge into current branch
-                    "git fetch origin main; "  # Get latest main
-                    "git merge origin/main --no-edit; "  # Merge main into current branch
-                    f"git pull origin {REPO_BRANCH}"  # Pull latest changes
+                    "git fetch origin main\n"
+                    "git merge origin/main --no-edit\n"
+                    f"git pull origin {REPO_BRANCH}"
                 ),
-                # Add error handling for git commands
-                bash_command_opts="-e",  # Exit on error
+                bash_command_opts="-e",
             )
         ) >> (
             BashOperator(
