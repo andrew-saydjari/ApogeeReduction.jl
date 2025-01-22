@@ -77,10 +77,10 @@ with DAG(
                     f"git push origin {REPO_BRANCH}\n"
                     # Use single quotes for the outer string and escape the inner single quotes
                     'PR_OUT=$(gh pr create --title \'Automated updates from airflow pipeline\' --body \'This PR was automatically created by the airflow pipeline.\' --base main --head ' + REPO_BRANCH + ')\n'
-                    'PR_URL=$(echo "$PR_OUT" | grep -o \'https://github.com/[^ ]*/pull/[0-9]*\' | head -n 1)\n'
-                    'PR_NUM=$(echo "$PR_URL" | sed \'s/.*pull\\/\\([0-9]*\\)/\\1/\')\n'
-                    'echo "Created PR #$PR_NUM"\n'
-                    'sleep 5\n'
+                    # 'PR_URL=$(echo "$PR_OUT" | grep -o \'https://github.com/[^ ]*/pull/[0-9]*\' | head -n 1)\n'
+                    # 'PR_NUM=$(echo "$PR_URL" | sed \'s/.*pull\\/\\([0-9]*\\)/\\1/\')\n'
+                    # 'echo "Created PR #$PR_NUM"\n'
+                    # 'sleep 5\n'
                     'gh pr merge "$PR_NUM" --admin --merge --delete-branch=false\n'
                     'echo "Merged PR #$PR_NUM"\n'
                     'sleep 5\n'
