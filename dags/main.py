@@ -96,7 +96,7 @@ with DAG(
                     f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true); "
                     "sleep 5; "
                     # auto-merge the PR
-                    "gh pr merge $PR_NUM --admin --merge --delete-branch=false; "
+                    "gh pr merge $PR_NUM --merge --admin --delete-branch=false; "
                     "sleep 5; "
                     # get main and use it to merge into current branch
                     "git fetch origin main; "  # Get latest main
