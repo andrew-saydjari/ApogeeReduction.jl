@@ -76,8 +76,10 @@ with DAG(
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
                     # Create PR and capture PR number
-                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --json number -q '.number')\n"
-                    "echo 'Created PR #'$PR_NUM\n"
+                    f"PR_OUT=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH}')\n"
+                    "PR_URL=$(echo "$PR_OUT" | grep -o 'https://github.com/[^ ]*/pull/[0-9]*' | head -n 1)\n"
+                    "PR_NUM=$(echo "$PR_URL" | sed 's/.*pull\/\([0-9]*\)/\1/')\n"
+                    "echo 'Created PR #'$PR_NUMBER\n"
                     "sleep 5\n"
                     # Try to merge the PR
                     "gh pr merge $PR_NUM --admin --merge --delete-branch=false\n"
