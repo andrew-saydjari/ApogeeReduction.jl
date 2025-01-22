@@ -15,6 +15,30 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
 
+# Add this function at the top of your DAG file
+def ensure_slack_connection():
+    """Ensure Slack connection exists, create it if it doesn't"""
+    conn_id = "slack_api_default"
+    try:
+        Connection.get_connection_from_secrets(conn_id)
+    except AirflowNotFoundException:
+        slack_token = os.getenv('SLACK_TOKEN')
+        if not slack_token:
+            raise ValueError("SLACK_TOKEN environment variable not found")
+        
+        conn = Connection(
+            conn_id=conn_id,
+            conn_type="slack",
+            password=slack_token,  # Token goes in password field
+        )
+        
+        session = settings.Session()
+        session.add(conn)
+        session.commit()
+        session.close()
+
+ensure_slack_connection()
+
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
 
