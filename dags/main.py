@@ -12,6 +12,7 @@ from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.slack.notifications.slack import send_slack_notification
 
+# I struggled to move this to sandbox, because the fileloc would not update.
 # REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/ApogeeReduction.jl"
 REPO_DIR = "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_01_21/ApogeeReduction.jl"
 REPO_BRANCH = "airflow"
@@ -75,7 +76,7 @@ with DAG(
                     "git commit -m 'Auto-commit local changes'\n"
                     f"git push origin {REPO_BRANCH}\n"
                     # Create PR and capture PR number
-                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} || true)\n"
+                    f"PR_NUM=$(gh pr create --title 'Automated updates from airflow pipeline' --body 'This PR was automatically created by the airflow pipeline.' --base main --head {REPO_BRANCH} --json number -q '.number')\n"
                     "echo 'Created PR #'$PR_NUM\n"
                     "sleep 5\n"
                     # Try to merge the PR
@@ -101,7 +102,6 @@ with DAG(
             task_id="julia",
             bash_command=(
                 f'cd {REPO_DIR}; '
-                # I don't know why it is erroring on this.
                 'juliaup add 1.11.0; '
                 'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
@@ -127,19 +127,19 @@ with DAG(
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ prev_ds }}}}). Starting reduction pipeline."
+                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}). Starting reduction pipeline."
                     )
                 ],
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ prev_ds }}}}) is incomplete. "
+                             f"(night of {{{{ macros.ds_add(ds, -1) }}}}) is incomplete. "
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
-                timeout=60*60*12,
-                poke_interval=600,
-                mode="poke"
+                timeout=60*60*12, # 12 hours: ~8pm ET
+                poke_interval=600, # 10 minutes
+                mode="poke",
             )
             
             # Could set this up to take in directories for cleaner airflow running
