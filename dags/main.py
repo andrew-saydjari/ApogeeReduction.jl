@@ -72,10 +72,10 @@ with DAG(
                     f"git checkout {REPO_BRANCH}; "
                     "git add -A; "  # Stage all changes, including deletions
                     "git commit -m 'Auto-commit local changes'; "  # Commit changes with a message
-                    "git push origin {REPO_BRANCH}; "  # Push local changes
+                    f"git push origin {REPO_BRANCH}; "  # Push local changes
                     "git fetch origin main; "  # Get latest main
                     f"git merge origin/main --no-edit; "  # Merge main into current branch
-                    "git pull origin {REPO_BRANCH}"  # Pull latest changes
+                    f"git pull origin {REPO_BRANCH}"  # Pull latest changes
                 ),
             )
         ) >> (
