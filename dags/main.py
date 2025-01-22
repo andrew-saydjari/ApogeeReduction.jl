@@ -73,18 +73,20 @@ with DAG(
                     f"cd {REPO_DIR}\n"
                     "set -e\n"
                     "git add -A\n"
-                    "git commit -m 'Auto-commit local changes'\n"
-                    f"git push origin {REPO_BRANCH}\n"
-                    f'gh pr create --title "Automated updates" --body "Auto-created by airflow" --base main --head {REPO_BRANCH}\n'
-                    # should move to using the PR number, but need to go to bed
-                    # 'PR_URL=$(echo "$PR_OUT" | grep -o \'https://github.com/[^ ]*/pull/[0-9]*\' | head -n 1)\n'
-                    # 'PR_NUM=$(echo "$PR_URL" | sed \'s/.*pull\\/\\([0-9]*\\)/\\1/\')\n'
-                    # 'echo "Created PR #$PR_NUM"\n'
-                    'gh pr merge "$PR_NUM" --admin --merge --delete-branch=false\n'
-                    'echo "Merged PR #$PR_NUM"\n'
-                    "git fetch origin main\n"
-                    "git merge origin/main --no-edit\n"
-                    f"git pull origin {REPO_BRANCH}"
+                    # Check if there are changes to commit
+                    'if [[ -n "$(git status --porcelain)" ]]; then\n'
+                    "    git commit -m 'Auto-commit local changes'\n"
+                    f"    git push origin {REPO_BRANCH}\n"
+                    f'    gh pr create --title "Automated updates" --body "Auto-created by airflow" --base main --head {REPO_BRANCH}\n'
+                    # '    PR_NUM=$(echo "$PR_OUT" | grep -o \'/[0-9]*$\' | tr -d \'/\')\n'
+                    '    gh pr merge "$PR_NUM" --admin --merge --delete-branch=false\n'
+                    '    echo "Merged PR #$PR_NUM"\n'
+                    "    git fetch origin main\n"
+                    "    git merge origin/main --no-edit\n"
+                    f"    git pull origin {REPO_BRANCH}\n"
+                    "else\n"
+                    '    echo "No changes to commit"\n'
+                    "fi\n"
                 ),
             )
         ) >> (
