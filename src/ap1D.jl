@@ -207,13 +207,10 @@ function reinterp_spectra(fname ;wavecal_type = "wavecal_skyline")
     # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
     outmsk = (cntvec .== framecnts)
 
-    outname = replace(replace(replace(fname, "ap1D" => "ar1Duni"),"_a_" => "_"),".jld2" => ".h5")
-    f = h5open(outname, "w")
+    # TODO: need to be consistent about the git commit info in JLD2 and HDF5
     # Write reinterpolated data
-    write(f, "flux_1d", outflux)
-    write(f, "ivar_1d", 1 ./outvar)
-    write(f, "mask_1d", outmsk)
-    close(f)
+    outname = replace(replace(fname, "ap1D" => "ar1Duni"),"_a_" => "_")
+    jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, git_branch, git_commit)
     return
 end
 

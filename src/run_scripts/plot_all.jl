@@ -161,9 +161,9 @@ for exp_fname in sample_exposures
     tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
     expid_num = parse(Int, last(expid, 4))
 
-    expuni_fname = replace(replace(replace(exp_fname, "ap1D" => "ar1Duni"),"_a_" => "_"),".jld2" => ".h5")
-    outflux = h5read(expuni_fname, "flux_1d")
-    outmsk = h5read(expuni_fname, "mask_1d")
+    expuni_fname = replace(replace(exp_fname, "ap1D" => "ar1Duni"),"_a_" => "_")
+    outflux = load(expuni_fname, "flux_1d")
+    outmsk = load(expuni_fname, "mask_1d")
     # need to switch this back when the masking is updated
     # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
