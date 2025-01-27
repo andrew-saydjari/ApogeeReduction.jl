@@ -1,5 +1,5 @@
 ## Spectra Interpolation Module
-using Interpolations
+using Interpolations, SparseArrays
 
 function find_yinx(x::AbstractVector, y::AbstractVector)
     lx = length(x)

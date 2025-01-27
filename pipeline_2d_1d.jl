@@ -258,21 +258,20 @@ all1DObject = vcat(all1DObjectperchip...)
     df_sky_lines.linindx = 1:size(df_sky_lines, 1)
 end
 
-# ## get sky line peaks
-# println("Fitting sky line peaks:"); flush(stdout);
-# @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-#     fname, roughwave_dict, df_sky_lines)
-# @showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
+## get sky line peaks
+println("Fitting sky line peaks:"); flush(stdout);
+@everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+    fname, roughwave_dict, df_sky_lines)
+@showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
 
-# ## get wavecal from sky line peaks
-# println("Solving skyline wavelength solution:"); flush(stdout);
-# all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
-# @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+## get wavecal from sky line peaks
+println("Solving skyline wavelength solution:"); flush(stdout);
+all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
+@showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## combine chips for single exposure onto loguniform wavelength grid
+## pushing off the question of dither combinations for now (to apMADGICS stage)
 println("Reinterpolating exposure spectra:"); flush(stdout); 
 @showprogress pmap(reinterp_spectra, all1DObjectperchip[1])
 
-## add a plot to plot all to just show the chips together
 ## I should probably add some slack plots from the wavecal skylines
-## then do a dither combination (on Fri)
