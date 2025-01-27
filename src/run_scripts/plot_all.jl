@@ -147,9 +147,9 @@ end
 thread = SlackThread();
 if length(unique_mjds) > 1
     min_mjd, max_mjd = extrema(unique_mjds)
-    thread("Here are some example reinterpolated spectra on chip $(chip) from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
+    thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
 else
-    thread("Here are some example reinterpolated spectra on chip $(chip) from $(parg["tele"]) for SJD $(unique_mjds[1])")
+    thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
 end
 rng = MersenneTwister(536 + unique_mjds[1])
 

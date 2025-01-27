@@ -1,4 +1,5 @@
 ## Spectra Interpolation Module
+using Interpolations
 
 function find_yinx(x::AbstractVector, y::AbstractVector)
     lx = length(x)
