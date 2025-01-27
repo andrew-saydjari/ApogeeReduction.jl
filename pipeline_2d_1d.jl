@@ -219,9 +219,9 @@ end
 
 # extract the 2D to 1D, ideally the calibrated files
 # need to think hard about batching daily versus all data for cal load in
-println("Extracting 2D to 1D:")
+println("Extracting 2D to 1D:"); flush(stdout);
 @showprogress pmap(process_1D, all2D)
-println("Extracting 2Dcal to 1Dcal:")
+println("Extracting 2Dcal to 1Dcal:"); flush(stdout);
 all2Dcal = replace.(all2D, "ap2D" => "ap2Dcal")
 @showprogress pmap(process_1D, all2Dcal)
 
@@ -258,15 +258,19 @@ all1DObject = vcat(all1DObjectperchip...)
 end
 
 ## get sky line peaks
-println("Fitting sky line peaks:")
+println("Fitting sky line peaks:"); flush(stdout);
 @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
     fname, roughwave_dict, df_sky_lines)
 @showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
 
 ## get wavecal from sky line peaks
-println("Solving skyline wavelength solution:")
+println("Solving skyline wavelength solution:"); flush(stdout);
 all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+
+## combine chips for single exposure onto loguniform wavelength grid
+println("Reinterpolating exposure spectra:"); flush(stdout); 
+@showprogress pmap(reinterp_spectra, all1DObjectperchip[1])
 
 ## add a plot to plot all to just show the chips together
 ## I should probably add some slack plots from the wavecal skylines

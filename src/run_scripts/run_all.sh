@@ -72,9 +72,10 @@ julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist -
 # End of night plotting script
 # TODO combine?
 print_elapsed_time "Making Plots"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c"
+julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b"
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c"
 
 # Clean up logs and Report Timing
 print_elapsed_time "Job Completed"
