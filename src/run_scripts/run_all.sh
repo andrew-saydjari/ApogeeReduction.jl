@@ -7,7 +7,7 @@
 #SBATCH --mem=0 #requesting all of the memory on the node
 
 #SBATCH --time=96:00:00
-#SBATCH --job-name=ApogeeReduction
+#SBATCH --job-name=ApogeeReduction_all
 #SBATCH --output=slurm_logs/%x_%j.out
 #SBATCH --err=slurm_logs/%x_%j.err
 
@@ -72,9 +72,10 @@ julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist -
 # End of night plotting script
 # TODO combine?
 print_elapsed_time "Making Plots"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b"
-julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c"
+julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc"
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "a"
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "b"
+# julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "c"
 
 # Clean up logs and Report Timing
 print_elapsed_time "Job Completed"
