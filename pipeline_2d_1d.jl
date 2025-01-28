@@ -271,7 +271,8 @@ all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
 
 ## combine chips for single exposure onto loguniform wavelength grid
 ## pushing off the question of dither combinations for now (to apMADGICS stage)
+all1Da = replace.(all2Dperchip[1], "ap2D" => "ap1D")
 println("Reinterpolating exposure spectra:"); flush(stdout); 
-@showprogress pmap(reinterp_spectra, all1DObjectperchip[1])
+@showprogress pmap(reinterp_spectra, all1Da)
 
 ## I should probably add some slack plots from the wavecal skylines

@@ -157,8 +157,8 @@ nsamp = minimum([length(all1Da), 5])
 sample_exposures = sample(rng, all1Da, nsamp, replace = false)
 f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
 for exp_fname in sample_exposures
-    sname = split(exp_fname, "_")
-    tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+    sname = split(split(exp_fname, ".jld2")[1], "_")
+    tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
     expid_num = parse(Int, last(expid, 4))
 
     expuni_fname = replace(replace(exp_fname, "ap1D" => "ar1Duni"),"_a_" => "_")
@@ -178,10 +178,10 @@ for exp_fname in sample_exposures
         # Top panel showing full wavelength range
         ax1 = Axis(fig[1,1:2], title = "Full Spectrum", ylabel="Flux")
         # hidexdecorations!(ax1, grid=false)
-        nan_flux = copy(outflux[:,fiberindx])
+        nan_flux = copy(outflux[:,fib])
         nan_flux[isnanorzero.(nan_flux)] .= NaN
         # TODO: want to add red coloring for the pixels we are dropping because of masking
-        nan_flux[outmsk[:,fiberindx] .== 0] .= NaN
+        nan_flux[outmsk[:,fib] .== 0] .= NaN
 
         # Get full wavelength limits and add padding
         full_xlims = (minimum(logUniWaveAPOGEE[.!isnan.(nan_flux)])-2, maximum(logUniWaveAPOGEE[.!isnan.(nan_flux)])+2)
@@ -255,9 +255,9 @@ for exp_fname in sample_exposures
         resize_to_layout!(fig)
 
         savePath = dirNamePlots *
-            "ar1Duni_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
+            "ar1Duni_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType)_$(expType).png"
         save(savePath, fig)
 
-        thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
+        thread("Fiberindex: $(fib) $(fibType), $(expuni_fname)", savePath)
     end
 end

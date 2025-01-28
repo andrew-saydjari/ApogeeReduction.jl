@@ -1,6 +1,10 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
 
+src_dir = "./"
+include(src_dir * "wavecal.jl")
+include(src_dir * "skyline_peaks.jl")
+
 # this file contains the code needed to extract a 1D spectrum from a 2D images.
 # trace_params is of size (n_x_pix, n_fibers, 3)
 # the elements correspodn to flux, y-pixel, and gaussian witdth (sigma)
@@ -149,9 +153,19 @@ function reinterp_spectra(fname ;wavecal_type = "wavecal_skyline")
     # outdir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_12_05/outdir/"
     # fname = outdir * "apred/$(mjd)/" * get_1d_name(parse(Int, last(expid,4)), df) * ".jld2"
 
-    f = jldopen(replace(replace(fname, fnameType => wavecal_type), "_a_" => "_"))
-    chipWaveSoln = f["chipWaveSoln"]
-    close(f)
+    wavefname = replace(replace(fname, fnameType => wavecal_type), "_a_" => "_")
+    if isfile(wavefname)
+        f = jldopen(wavefname)
+        chipWaveSoln = f["chipWaveSoln"]
+        close(f)
+    else #this is a terrible global fallback, just so we get something to look at
+        chipWaveSoln = zeros(2048,300,3)
+        for (chipind,chip) in enumerate(["a","b","c"])
+            chipWaveSoln[:,:,chipind] .= rough_linear_wave.(1:2048, a=roughwave_dict[tele][chip][1], b=roughwave_dict[tele][chip][2])
+        end
+        println("No wavecal found for $(fname), using fallback"); flush(stdout)
+        wavecal_type = "error_fixed_fallback"
+    end
 
     for (chipind,chip) in enumerate(["a","b","c"])
         fnameloc = replace(fname,"_a_"=>"_$(chip)_")
@@ -207,10 +221,9 @@ function reinterp_spectra(fname ;wavecal_type = "wavecal_skyline")
     # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
     outmsk = (cntvec .== framecnts)
 
-    # TODO: need to be consistent about the git commit info in JLD2 and HDF5
     # Write reinterpolated data
     outname = replace(replace(fname, "ap1D" => "ar1Duni"),"_a_" => "_")
-    jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, git_branch, git_commit)
+    jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, git_branch, git_commit, wavecal_type)
     return
 end
 
