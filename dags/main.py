@@ -86,6 +86,8 @@ with DAG(
                     f"    git pull origin {REPO_BRANCH}\n"
                     "else\n"
                     '    echo "No changes to commit"\n'
+                    '    git fetch origin main\n'
+                    '    git merge origin/main --no-edit\n'
                     "fi\n"
                 ),
             )
