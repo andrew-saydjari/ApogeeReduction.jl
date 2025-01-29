@@ -86,6 +86,8 @@ with DAG(
                     f"    git pull origin {REPO_BRANCH}\n"
                     "else\n"
                     '    echo "No changes to commit"\n'
+                    '    git fetch origin main\n'
+                    '    git merge origin/main --no-edit\n'
                     "fi\n"
                 ),
             )
@@ -146,20 +148,20 @@ with DAG(
             darks = PythonOperator(
                 task_id="darks",
                 python_callable=submit_and_wait,
-                op_kwargs={'bash_command': f"{sbatch_prefix} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
+                op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
             )
 
             flats = PythonOperator(
                 task_id="flats",
                 python_callable=submit_and_wait,
-                op_kwargs={'bash_command': f"{sbatch_prefix} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
+                op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_flat_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
             )
             
             science = PythonOperator(
                 task_id="science",
                 python_callable=submit_and_wait,
                 op_kwargs={
-                    'bash_command': f"{sbatch_prefix} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"
+                    'bash_command': f"{sbatch_prefix} --job-name=ar_all_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"
                 },
                 on_success_callback=[
                     send_slack_notification_partial(
