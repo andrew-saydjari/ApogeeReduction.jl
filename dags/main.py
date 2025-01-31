@@ -129,7 +129,7 @@ with DAG(
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ ds }}}}). Starting reduction pipeline."
+                             f"(night of {{{{ ds }}}}). Starting reduction pipeline. Exposure list available at https://data.sdss5.org/sas/sdsswork/data/apogee/{observatory}/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.log.html"
                     )
                 ],
                 on_failure_callback=[
