@@ -259,12 +259,36 @@ flush(stdout);
 
 @passobj 1 workers() parg
 @everywhere sirscaldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
+@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
 
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
-@everywhere gainMat = 1.9 * ones(Float32, 2560, 2048)
-@everywhere readVarMat = 25 * ones(Float32, 2560, 2048)
+gainMatDict = Dict{String, Array{Float64, 2}}()
+readVarMatDict = Dict{String, Array{Float64, 2}}()
+for chip in parg["chips"]
+    gainMatPath = gainReadCalDir*"gain_apR-"*chip*".fits"
+    if isfile(gainMatPath)
+        f = FITS(gainMatPath)
+        gainMatDict[chip] = read(f[1])
+        close(f)
+    else
+        # once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
+        warn("Gain calibration file not found for chip $chip")
+        gainMatDict[chip] = 1.9 * ones(Float32, 2560, 2048) # electrons/DN
+    end
+
+    readVarMatPath = gainReadCalDir*"rdnoise_apR-"*chip*".fits"
+    if isfile(readVarMatPath)
+        f = FITS(readVarMatPath)
+        readVarMatDict[chip] = read(f[1])
+        close(f)
+    else
+        warn("Read noise calibration file not found for chip $chip")
+        readVarMatDict[chip] = 25 * ones(Float32, 2560, 2048) # DN/read
+    end
+end
+
 # ADD load the dark currrent map
 # load SIRS.jl models
 @everywhere sirs4amps = SIRS.restore(sirscaldir * "sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size

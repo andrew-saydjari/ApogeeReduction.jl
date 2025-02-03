@@ -51,10 +51,11 @@ end
 
 function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     ndiffs = size(dcubedat, 3) - firstind
-    dimage = gainMat .* (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
+    dimage = (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
-    ivarimage = 1 ./ (2 .* readVarMat .+ abs.(dimage))
-    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage)
+    ivarimage = 1 ./ (2 .* readVarMat .+ gainMat./dimage)
+    return dimage ./ ndiffs .* gainMat, (ndiffs .^ 2) ./ (gainMat.^2) .* ivarimage, zero(dimage) #output in electrons/read
+    # return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage) #output in DN/read
 end
 
 function outlier_mask(dimages; clip_threshold = 20)
@@ -141,7 +142,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         good_diffs = all_good_diffs[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
-            read_var = readVarMat[pixel_ind]
+            read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind].^2)
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
             d2 = d2s[pixel_ind, 1]
@@ -169,10 +170,9 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
 
             for _ in 1:n_repeat
                 rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
+                read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind].^2)
                 @views C = SymTridiagonal(
-                    (rate_guess + 2readVarMat[pixel_ind]) .* ones_vec, -readVarMat[pixel_ind] .*
-                                                                       ones_vec[1:(end - 1)])[
-                    good_diffs, good_diffs]
+                    (rate_guess + 2read_var) .* ones_vec, -read_var .* ones_vec[1:(end - 1)])[good_diffs, good_diffs]
 
                 @views ivars[pixel_ind] = ones_vec[1:n_good_diffs]' * (C \
                                                                        ones_vec[1:n_good_diffs])
@@ -186,5 +186,6 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             end
         end
     end
-    return rates, ivars, chi2s, CRimage
+    return rates ./ ndiffs, (ndiffs .^ 2) .* ivars, chi2s, CRimage # outputs in electrons/read
+    # return rates ./ ndiffs ./ gainMat, (ndiffs .^ 2) .* (gainMat.^2) .* ivars, chi2s, CRimage # outputs in DN/read
 end
