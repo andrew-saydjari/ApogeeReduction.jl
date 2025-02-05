@@ -113,6 +113,7 @@ desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to 
     # if less than 2 counts, then all pixels bad (internal flat lamps off at LCO for example)
     if ref_med < 2
         flat_im_mat[:, :, indx] .= 0
+        warn("Flat image has less than 2 e-/read on average for $(fname)")
     else
         bad_pix = copy(bad_pix_dark)
         bad_pix .|= (bmat ./ ref_med .< pcut_flat)
@@ -152,7 +153,7 @@ else
     let # flat image
         fig = Figure(size = (1200, 800), fontsize = 24)
         ax = Axis(fig[1, 1])
-        hm = heatmap!(ax, flat_im',
+        hm = heatmap!(ax, flat_im,
             colormap = :linear_kbgyw_5_98_c62_n256,
             colorrange = (0.95, 1.05),
             interpolate = false
@@ -188,7 +189,7 @@ else
 
         fig = Figure(size = (1200, 800), fontsize = 24)
         ax = Axis(fig[1, 1])
-        hm = heatmap!(ax, flat_im_msk',
+        hm = heatmap!(ax, flat_im_msk,
             colormap = :linear_kbgyw_5_98_c62_n256,
             colorrange = (0.95, 1.05),
             interpolate = false,
@@ -223,7 +224,7 @@ else
 
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])
-                hm = heatmap!(ax, flat_im_mat[:, :, i]',
+                hm = heatmap!(ax, flat_im_mat[:, :, i],
                     colormap = :linear_kbgyw_5_98_c62_n256,
                     colorrange = (0.95, 1.05),
                     interpolate = false
@@ -257,7 +258,7 @@ else
             for i in eachindex(flist)
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])
-                hm = heatmap!(ax, (flat_im_mat[:, :, i] .- flat_im)',
+                hm = heatmap!(ax, (flat_im_mat[:, :, i] .- flat_im),
                     colormap = :diverging_bkr_55_10_c35_n256,
                     colorrange = (-0.02, 0.02),
                     interpolate = false

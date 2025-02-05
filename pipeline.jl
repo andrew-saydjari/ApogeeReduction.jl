@@ -277,7 +277,7 @@ flush(stdout);
             view(gainView, 5:2044, 5:2044) .= dat
             gainMatDict[chip] = gainView
         else
-            # once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
+            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
             warn("Gain calibration file not found for chip $chip")
             gainMatDict[chip] = 1.9 * ones(Float32, 2560, 2048) # electrons/DN
         end
@@ -289,6 +289,7 @@ flush(stdout);
             close(f)
             readVarView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
             view(readVarView, 5:2044, 5:2044) .= dat
+            readVarView[isnanorzero.(readVarView)] .= 25
             readVarMatDict[chip] = readVarView
         else
             warn("Read noise calibration file not found for chip $chip")
@@ -311,12 +312,12 @@ if parg["runlist"] != ""
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-        parg["outdir"], sirscaldir,parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
+        parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else
     subiter = string.(collect(parg["chips"]))
     @everywhere process_3D_partial(chip) = process_3D(
-        parg["outdir"], sirscaldir,parg["runname"], parg["mjd"], parg["expid"], chip)
+        parg["outdir"], sirscaldir, parg["runname"], parg["mjd"], parg["expid"], chip)
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 end
 
