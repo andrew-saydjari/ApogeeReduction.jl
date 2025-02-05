@@ -45,8 +45,8 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdi
 
 # make the stacked flats
 mkdir -p ${outdir}flats
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
+# julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
+# julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
 julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --flat_dir ${doutdir} --runlist $runlist --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/"
 
 # Clean up logs and Report Timing
