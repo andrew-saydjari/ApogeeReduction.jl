@@ -194,8 +194,8 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             end
         end
     end
-    # return rates ./ ndiffs, (ndiffs .^ 2) .* ivars, chi2s, CRimage # outputs in electrons/read
-    return rates ./ ndiffs ./ gainMat, (ndiffs .^ 2) .* (gainMat .^ 2) .* ivars, chi2s, CRimage # outputs in DN/read
+    # return rates, ivars, chi2s, CRimage # outputs in electrons/read
+    return rates ./ gainMat, (gainMat .^ 2) .* ivars, chi2s, CRimage # outputs in DN/read
 end
 
 function load_gain_maps(gainReadCalDir, tele, chips)
