@@ -144,9 +144,6 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
             read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
-            if isnan(read_var)
-                println((pixel_ind, read_var))
-            end
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
             d2 = d2s[pixel_ind, 1]
@@ -166,9 +163,6 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
                 rates[pixel_ind] = (d1 - Qones' * KinvQdata) / x / ivars[pixel_ind]
                 chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
                                    rates[pixel_ind]^2 * ivars[pixel_ind]
-                if isnan(rates[pixel_ind])
-                    println((pixel_ind, x, y, rate_guess, read_var))
-                end
             end
         else
             # the appendix of https://github.com/dfink/gspice/blob/main/paper/gspice.pdf
