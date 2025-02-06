@@ -265,7 +265,9 @@ flush(stdout);
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
 @everywhere begin
+    # read noise is DN/read
     readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
+    # gain is e-/DN
     gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
 end
 
