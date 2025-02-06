@@ -163,7 +163,7 @@ else
         ax = Axis(fig[1, 1])
         hm = heatmap!(ax, flat_im,
             colormap = :linear_kbgyw_5_98_c62_n256,
-            colorrange = (0.95, 1.05),
+            colorrange = (0.92, 1.08),
             interpolate = false
         )
 
