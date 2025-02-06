@@ -8,6 +8,7 @@
     n_reads = 20
     n_diffs = n_reads - 1
 
+    # flux per read is in e-/read
     flux_per_reads = 10 .^ (range(
         start = log10(0.01), stop = log10(10000), length = detector_dims[1]))
     dcounts = (randn(rng, (detector_dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+
@@ -21,7 +22,7 @@
     dcounts .+= crs
     cr_mask = sum(crs .> 0, dims = 3) .> 0
 
-    true_im = ones(Float32, detector_dims) .* flux_per_reads
+    true_im = ones(Float32, detector_dims) .* flux_per_reads ./ gainMat
 
     outdat = zeros(Float32, (detector_dims..., n_reads))
     outdat[:, :, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
