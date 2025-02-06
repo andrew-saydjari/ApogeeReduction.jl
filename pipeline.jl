@@ -265,8 +265,8 @@ flush(stdout);
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
 @everywhere begin
-    readVarMatDict = load_read_var_maps(gainReadCalDir,parg["tele"],parg["chips"])
-    gainMatDict = load_gain_maps(gainReadCalDir,parg["tele"],parg["chips"])
+    readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
+    gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
 end
 
 # ADD load the dark currrent map

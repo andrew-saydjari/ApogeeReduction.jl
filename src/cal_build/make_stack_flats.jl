@@ -65,7 +65,7 @@ fx, fy = 10, 10    # Number of frequencies in x and y
 
 #hard coded for now
 gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
-gainMatDict = load_gain_maps(gainReadCalDir,parg["tele"],chip)
+gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], chip)
 
 dirNamePlots = parg["flat_dir"] * "plots/"
 if !ispath(dirNamePlots)
@@ -111,11 +111,11 @@ desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to 
     temp_im = floc["dimage"]
     close(floc)
 
-    bmat = temp_im[5:2044, 5:2044] 
-    bmatg = bmat.* gainMatDict[chip][5:2044, 5:2044]
+    bmat = temp_im[5:2044, 5:2044]
+    bmatg = bmat .* gainMatDict[chip][5:2044, 5:2044]
     b = bmatg[:]
     ref_med = nanzeromedian(b)
-    
+
     # if less than 2 counts, then all pixels bad (internal flat lamps off at LCO for example)
     if ref_med < 2
         flat_im_mat[:, :, indx] .= 0

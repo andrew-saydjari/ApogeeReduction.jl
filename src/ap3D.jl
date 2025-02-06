@@ -54,7 +54,7 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     ndiffs = size(dcubedat, 3) - firstind
     dimage = (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
-    ivarimage = 1 ./ (2 .* readVarMat .+ gainMat./dimage)
+    ivarimage = 1 ./ (2 .* readVarMat .+ gainMat ./ dimage)
     # return dimage ./ ndiffs .* gainMat, (ndiffs .^ 2) ./ (gainMat.^2) .* ivarimage, zero(dimage) #output in electrons/read
     return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage) #output in DN/read
 end
@@ -143,9 +143,9 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         good_diffs = all_good_diffs[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
-            read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind].^2)
+            read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
             if isnan(read_var)
-                println((pixel_ind,read_var))
+                println((pixel_ind, read_var))
             end
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
@@ -167,7 +167,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
                 chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
                                    rates[pixel_ind]^2 * ivars[pixel_ind]
                 if isnan(rates[pixel_ind])
-                    println((pixel_ind,x,y,rate_guess,read_var))
+                    println((pixel_ind, x, y, rate_guess, read_var))
                 end
             end
         else
@@ -177,9 +177,10 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
 
             for _ in 1:n_repeat
                 rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
-                read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind].^2)
+                read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
                 @views C = SymTridiagonal(
-                    (rate_guess + 2read_var) .* ones_vec, -read_var .* ones_vec[1:(end - 1)])[good_diffs, good_diffs]
+                    (rate_guess + 2read_var) .* ones_vec, -read_var .* ones_vec[1:(end - 1)])[
+                    good_diffs, good_diffs]
 
                 @views ivars[pixel_ind] = ones_vec[1:n_good_diffs]' * (C \
                                                                        ones_vec[1:n_good_diffs])
@@ -194,18 +195,18 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         end
     end
     # return rates ./ ndiffs, (ndiffs .^ 2) .* ivars, chi2s, CRimage # outputs in electrons/read
-    return rates ./ ndiffs ./ gainMat, (ndiffs .^ 2) .* (gainMat.^2) .* ivars, chi2s, CRimage # outputs in DN/read
+    return rates ./ ndiffs ./ gainMat, (ndiffs .^ 2) .* (gainMat .^ 2) .* ivars, chi2s, CRimage # outputs in DN/read
 end
 
-function load_gain_maps(gainReadCalDir,tele,chips)
+function load_gain_maps(gainReadCalDir, tele, chips)
     gainMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
-        gainMatPath = gainReadCalDir*"gain_"*tele*"_"*chip*".fits"
+        gainMatPath = gainReadCalDir * "gain_" * tele * "_" * chip * ".fits"
         if isfile(gainMatPath)
             f = FITS(gainMatPath)
             dat = read(f[1])
             close(f)
-            gainView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
+            gainView = nanzeromedian(dat) .* ones(Float64, 2560, 2048)
             view(gainView, 5:2044, 5:2044) .= dat
             gainMatDict[chip] = gainView
         else
@@ -217,15 +218,15 @@ function load_gain_maps(gainReadCalDir,tele,chips)
     return gainMatDict
 end
 
-function load_read_var_maps(gainReadCalDir,tele,chips)
+function load_read_var_maps(gainReadCalDir, tele, chips)
     readVarMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
-        readVarMatPath = gainReadCalDir*"rdnoise_"*tele*"_"*chip*".fits"
+        readVarMatPath = gainReadCalDir * "rdnoise_" * tele * "_" * chip * ".fits"
         if isfile(readVarMatPath)
             f = FITS(readVarMatPath)
-            dat = read(f[1]).^2
+            dat = read(f[1]) .^ 2
             close(f)
-            readVarView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
+            readVarView = nanzeromedian(dat) .* ones(Float64, 2560, 2048)
             view(readVarView, 5:2044, 5:2044) .= dat
             readVarView[isnanorzero.(readVarView)] .= 25
             readVarMatDict[chip] = readVarView
