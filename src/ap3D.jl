@@ -2,6 +2,7 @@
 using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean
 using TimerOutputs
+using FITSIO
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -196,10 +197,10 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     return rates ./ ndiffs ./ gainMat, (ndiffs .^ 2) .* (gainMat.^2) .* ivars, chi2s, CRimage # outputs in DN/read
 end
 
-function load_gain_maps(tele,chips)
+function load_gain_maps(gainReadCalDir,tele,chips)
     gainMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
-        gainMatPath = gainReadCalDir*"gain_apR-"*chip*".fits"
+        gainMatPath = gainReadCalDir*"gain_"*tele*"_"*chip*".fits"
         if isfile(gainMatPath)
             f = FITS(gainMatPath)
             dat = read(f[1])
@@ -219,7 +220,7 @@ end
 function load_read_var_maps(gainReadCalDir,tele,chips)
     readVarMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
-        readVarMatPath = gainReadCalDir*"rdnoise_apR-"*chip*".fits"
+        readVarMatPath = gainReadCalDir*"rdnoise_"*tele*"_"*chip*".fits"
         if isfile(readVarMatPath)
             f = FITS(readVarMatPath)
             dat = read(f[1]).^2

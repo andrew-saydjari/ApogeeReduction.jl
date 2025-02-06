@@ -64,9 +64,8 @@ pcut_flat = 0.2
 fx, fy = 10, 10    # Number of frequencies in x and y
 
 #hard coded for now
-@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
-
-@everywhere gainMatDict = load_gain_maps(gainReadCalDir,parg["tele"],parg["chips"])
+gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
+gainMatDict = load_gain_maps(gainReadCalDir,parg["tele"],chip)
 
 dirNamePlots = parg["flat_dir"] * "plots/"
 if !ispath(dirNamePlots)
