@@ -2,6 +2,7 @@
 using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean
 using TimerOutputs
+using FITSIO
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -51,10 +52,11 @@ end
 
 function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     ndiffs = size(dcubedat, 3) - firstind
-    dimage = gainMat .* (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
+    dimage = (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
-    ivarimage = 1 ./ (2 .* readVarMat .+ abs.(dimage))
-    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage)
+    ivarimage = 1 ./ (2 .* readVarMat .+ gainMat ./ dimage)
+    # return dimage ./ ndiffs .* gainMat, (ndiffs .^ 2) ./ (gainMat.^2) .* ivarimage, zero(dimage) #output in electrons/read
+    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage) #output in DN/read
 end
 
 function outlier_mask(dimages; clip_threshold = 20)
@@ -141,7 +143,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         good_diffs = all_good_diffs[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
-            read_var = readVarMat[pixel_ind]
+            read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
             d2 = d2s[pixel_ind, 1]
@@ -169,9 +171,9 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
 
             for _ in 1:n_repeat
                 rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
+                read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
                 @views C = SymTridiagonal(
-                    (rate_guess + 2readVarMat[pixel_ind]) .* ones_vec, -readVarMat[pixel_ind] .*
-                                                                       ones_vec[1:(end - 1)])[
+                    (rate_guess + 2read_var) .* ones_vec, -read_var .* ones_vec[1:(end - 1)])[
                     good_diffs, good_diffs]
 
                 @views ivars[pixel_ind] = ones_vec[1:n_good_diffs]' * (C \
@@ -186,5 +188,46 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             end
         end
     end
-    return rates, ivars, chi2s, CRimage
+    # return rates, ivars, chi2s, CRimage # outputs in electrons/read
+    return rates ./ gainMat, (gainMat .^ 2) .* ivars, chi2s, CRimage # outputs in DN/read
+end
+
+function load_gain_maps(gainReadCalDir, tele, chips)
+    gainMatDict = Dict{String, Array{Float64, 2}}()
+    for chip in string.(collect(chips))
+        gainMatPath = gainReadCalDir * "gain_" * tele * "_" * chip * ".fits"
+        if isfile(gainMatPath)
+            f = FITS(gainMatPath)
+            dat = read(f[1])
+            close(f)
+            gainView = nanzeromedian(dat) .* ones(Float64, 2560, 2048)
+            view(gainView, 5:2044, 5:2044) .= dat
+            gainMatDict[chip] = gainView
+        else
+            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
+            warn("Gain calibration file not found for chip $chip")
+            gainMatDict[chip] = 1.9 * ones(Float64, 2560, 2048) # electrons/DN
+        end
+    end
+    return gainMatDict
+end
+
+function load_read_var_maps(gainReadCalDir, tele, chips)
+    readVarMatDict = Dict{String, Array{Float64, 2}}()
+    for chip in string.(collect(chips))
+        readVarMatPath = gainReadCalDir * "rdnoise_" * tele * "_" * chip * ".fits"
+        if isfile(readVarMatPath)
+            f = FITS(readVarMatPath)
+            dat = read(f[1]) .^ 2
+            close(f)
+            readVarView = nanzeromedian(dat) .* ones(Float64, 2560, 2048)
+            view(readVarView, 5:2044, 5:2044) .= dat
+            readVarView[isnanorzero.(readVarView)] .= 25
+            readVarMatDict[chip] = readVarView
+        else
+            warn("Read noise calibration file not found for chip $chip")
+            readVarMatDict[chip] = 25 * ones(Float64, 2560, 2048) # DN/read
+        end
+    end
+    return readVarMatDict
 end

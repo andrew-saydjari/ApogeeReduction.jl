@@ -189,11 +189,11 @@ git_branch, git_commit = initalize_git(src_dir);
         # extraction 3D -> 2D
         dimage, ivarimage, chisqimage, CRimage = if extractMethod_loc == "dcs"
             # TODO some kind of outlier rejection, this just keeps all diffs
-            images = dcs(outdat, gainMat, readVarMat)
+            images = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
             images..., zeros(Int, size(images[1]))
         elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
-            sutr_wood!(outdat, gainMat, readVarMat)
+            sutr_wood!(outdat, gainMatDict[chip], readVarMatDict[chip])
         else
             error("Extraction method not recognized")
         end
@@ -259,12 +259,18 @@ flush(stdout);
 
 @passobj 1 workers() parg
 @everywhere sirscaldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
+@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
 
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
-@everywhere gainMat = 1.9 * ones(Float32, 2560, 2048)
-@everywhere readVarMat = 25 * ones(Float32, 2560, 2048)
+@everywhere begin
+    # read noise is DN/read
+    readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
+    # gain is e-/DN
+    gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
+end
+
 # ADD load the dark currrent map
 # load SIRS.jl models
 @everywhere sirs4amps = SIRS.restore(sirscaldir * "sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
@@ -277,8 +283,7 @@ if parg["runlist"] != ""
     subDic = load(parg["runlist"])
     subiter = Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
-        parg["chips"]
-    )
+        string.(collect(parg["chips"])))
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)

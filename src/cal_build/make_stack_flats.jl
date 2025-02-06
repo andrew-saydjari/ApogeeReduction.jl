@@ -4,6 +4,7 @@ src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
+include(src_dir * "/ap3D.jl")
 include(src_dir * "/ap2Dcal.jl")
 
 ## Parse command line arguments
@@ -62,6 +63,10 @@ flat_frac_cut = 0.2
 pcut_flat = 0.2
 fx, fy = 10, 10    # Number of frequencies in x and y
 
+#hard coded for now
+gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
+gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], chip)
+
 dirNamePlots = parg["flat_dir"] * "plots/"
 if !ispath(dirNamePlots)
     mkpath(dirNamePlots)
@@ -107,21 +112,25 @@ desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to 
     close(floc)
 
     bmat = temp_im[5:2044, 5:2044]
-    b = bmat[:]
+    bmatg = bmat .* gainMatDict[chip][5:2044, 5:2044]
+    b = bmatg[:]
     ref_med = nanzeromedian(b)
 
     # if less than 2 counts, then all pixels bad (internal flat lamps off at LCO for example)
     if ref_med < 2
         flat_im_mat[:, :, indx] .= 0
+        warn("Flat image has less than 2 e-/read on average for $(fname)")
     else
         bad_pix = copy(bad_pix_dark)
         bad_pix .|= (bmat ./ ref_med .< pcut_flat)
         good_pix = .!grow_msk2d(bad_pix; rad = 3)[:]
+        # TODO mask out the low gain islands so they don't distort the illumination fit
 
         cvec = design_matrix[good_pix, :] \ b[good_pix]
         modImage = reshape(design_matrix * cvec, nx, ny)
 
         flat_im_mat[:, :, indx] = bmat ./ modImage
+        flat_im_mat[:, :, indx] ./= nanzeromedian(flat_im_mat[:, :, indx]) # handles explicit gain modeling
         flat_im .+= flat_im_mat[:, :, indx]
         model_im .+= modImage
     end
@@ -152,9 +161,9 @@ else
     let # flat image
         fig = Figure(size = (1200, 800), fontsize = 24)
         ax = Axis(fig[1, 1])
-        hm = heatmap!(ax, flat_im',
+        hm = heatmap!(ax, flat_im,
             colormap = :linear_kbgyw_5_98_c62_n256,
-            colorrange = (0.95, 1.05),
+            colorrange = (0.92, 1.08),
             interpolate = false
         )
 
@@ -188,7 +197,7 @@ else
 
         fig = Figure(size = (1200, 800), fontsize = 24)
         ax = Axis(fig[1, 1])
-        hm = heatmap!(ax, flat_im_msk',
+        hm = heatmap!(ax, flat_im_msk,
             colormap = :linear_kbgyw_5_98_c62_n256,
             colorrange = (0.95, 1.05),
             interpolate = false,
@@ -223,7 +232,7 @@ else
 
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])
-                hm = heatmap!(ax, flat_im_mat[:, :, i]',
+                hm = heatmap!(ax, flat_im_mat[:, :, i],
                     colormap = :linear_kbgyw_5_98_c62_n256,
                     colorrange = (0.95, 1.05),
                     interpolate = false
@@ -257,7 +266,7 @@ else
             for i in eachindex(flist)
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])
-                hm = heatmap!(ax, (flat_im_mat[:, :, i] .- flat_im)',
+                hm = heatmap!(ax, (flat_im_mat[:, :, i] .- flat_im),
                     colormap = :diverging_bkr_55_10_c35_n256,
                     colorrange = (-0.02, 0.02),
                     interpolate = false
