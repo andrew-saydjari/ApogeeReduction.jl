@@ -265,37 +265,8 @@ flush(stdout);
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
 @everywhere begin
-    gainMatDict = Dict{String, Array{Float64, 2}}()
-    readVarMatDict = Dict{String, Array{Float64, 2}}()
-    for chip in string.(collect(parg["chips"]))
-        gainMatPath = gainReadCalDir*"gain_apR-"*chip*".fits"
-        if isfile(gainMatPath)
-            f = FITS(gainMatPath)
-            dat = read(f[1])
-            close(f)
-            gainView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
-            view(gainView, 5:2044, 5:2044) .= dat
-            gainMatDict[chip] = gainView
-        else
-            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
-            warn("Gain calibration file not found for chip $chip")
-            gainMatDict[chip] = 1.9 * ones(Float32, 2560, 2048) # electrons/DN
-        end
-
-        readVarMatPath = gainReadCalDir*"rdnoise_apR-"*chip*".fits"
-        if isfile(readVarMatPath)
-            f = FITS(readVarMatPath)
-            dat = read(f[1]).^2
-            close(f)
-            readVarView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
-            view(readVarView, 5:2044, 5:2044) .= dat
-            readVarView[isnanorzero.(readVarView)] .= 25
-            readVarMatDict[chip] = readVarView
-        else
-            warn("Read noise calibration file not found for chip $chip")
-            readVarMatDict[chip] = 25 * ones(Float32, 2560, 2048) # DN/read
-        end
-    end
+    readVarMatDict = load_read_var_maps(gainReadCalDir,parg["tele"],parg["chips"])
+    gainMatDict = load_gain_maps(gainReadCalDir,parg["tele"],parg["chips"])
 end
 
 # ADD load the dark currrent map

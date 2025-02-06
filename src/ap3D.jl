@@ -195,3 +195,43 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     # return rates ./ ndiffs, (ndiffs .^ 2) .* ivars, chi2s, CRimage # outputs in electrons/read
     return rates ./ ndiffs ./ gainMat, (ndiffs .^ 2) .* (gainMat.^2) .* ivars, chi2s, CRimage # outputs in DN/read
 end
+
+function load_gain_maps(tele,chips)
+    gainMatDict = Dict{String, Array{Float64, 2}}()
+    for chip in string.(collect(chips))
+        gainMatPath = gainReadCalDir*"gain_apR-"*chip*".fits"
+        if isfile(gainMatPath)
+            f = FITS(gainMatPath)
+            dat = read(f[1])
+            close(f)
+            gainView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
+            view(gainView, 5:2044, 5:2044) .= dat
+            gainMatDict[chip] = gainView
+        else
+            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
+            warn("Gain calibration file not found for chip $chip")
+            gainMatDict[chip] = 1.9 * ones(Float64, 2560, 2048) # electrons/DN
+        end
+    end
+    return gainMatDict
+end
+
+function load_read_var_maps(gainReadCalDir,tele,chips)
+    readVarMatDict = Dict{String, Array{Float64, 2}}()
+    for chip in string.(collect(chips))
+        readVarMatPath = gainReadCalDir*"rdnoise_apR-"*chip*".fits"
+        if isfile(readVarMatPath)
+            f = FITS(readVarMatPath)
+            dat = read(f[1]).^2
+            close(f)
+            readVarView = nanzeromedian(dat) .*ones(Float64, 2560, 2048)
+            view(readVarView, 5:2044, 5:2044) .= dat
+            readVarView[isnanorzero.(readVarView)] .= 25
+            readVarMatDict[chip] = readVarView
+        else
+            warn("Read noise calibration file not found for chip $chip")
+            readVarMatDict[chip] = 25 * ones(Float64, 2560, 2048) # DN/read
+        end
+    end
+    return readVarMatDict
+end
