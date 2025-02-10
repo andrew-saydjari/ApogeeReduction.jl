@@ -207,7 +207,7 @@ function load_gain_maps(gainReadCalDir, tele, chips)
             gainMatDict[chip] = gainView
         else
             #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
-            warn("Gain calibration file not found for chip $chip")
+            @warn "Gain calibration file not found for chip $chip"
             gainMatDict[chip] = 1.9 * ones(Float64, 2560, 2048) # electrons/DN
         end
     end
@@ -229,7 +229,7 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
             readVarView[readVarView.==1] .= refval
             readVarMatDict[chip] = readVarView
         else
-            warn("Read noise calibration file not found for chip $chip")
+            @warn "Read noise calibration file not found for chip $chip"
             readVarMatDict[chip] = 25 * ones(Float64, 2560, 2048) # DN/read
         end
     end
