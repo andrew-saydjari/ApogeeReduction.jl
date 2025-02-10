@@ -55,8 +55,10 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     dimage = (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
     # bad to use measured flux as the photon noise
     ivarimage = 1 ./ (2 .* readVarMat .+ gainMat ./ dimage)
+    ivarimage[ivarimage.<0] .= 1e-9 # set weight to zero for pixels with negative DCS IVAR
+
     # return dimage ./ ndiffs .* gainMat, (ndiffs .^ 2) ./ (gainMat.^2) .* ivarimage, zero(dimage) #output in electrons/read
-    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage) #output in DN/read
+    return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage), zeros(Int, size(dimage)) #output in DN/read
 end
 
 function outlier_mask(dimages; clip_threshold = 20)
@@ -220,9 +222,11 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
             f = FITS(readVarMatPath)
             dat = read(f[1]) .^ 2
             close(f)
-            readVarView = nanzeromedian(dat) .* ones(Float64, 2560, 2048)
+            refval = nanzeromedian(dat)
+            readVarView = refval .* ones(Float64, 2560, 2048)
             view(readVarView, 5:2044, 5:2044) .= dat
-            readVarView[isnanorzero.(readVarView)] .= 25
+            readVarView[isnanorzero.(readVarView)] .= refval
+            readVarView[readVarView.==1] .= refval
             readVarMatDict[chip] = readVarView
         else
             warn("Read noise calibration file not found for chip $chip")
