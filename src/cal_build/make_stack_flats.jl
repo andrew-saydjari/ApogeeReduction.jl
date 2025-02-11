@@ -119,7 +119,7 @@ desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to 
     # if less than 2 counts, then all pixels bad (internal flat lamps off at LCO for example)
     if ref_med < 2
         flat_im_mat[:, :, indx] .= 0
-        warn("Flat image has less than 2 e-/read on average for $(fname)")
+        @warn "Flat image has less than 2 e-/read on average for $(fname)"
     else
         bad_pix = copy(bad_pix_dark)
         bad_pix .|= (bmat ./ ref_med .< pcut_flat)
