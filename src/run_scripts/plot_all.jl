@@ -128,7 +128,13 @@ for chip in string.(collect(parg["chips"]))
             ax2 = Axis(fig[2, 1])
             lines!(ax2, 1:2048, dat, color = :dodgerblue)
             scatter!(ax2, 1:2048, datbad, color = :red, markersize = 2)
-            ylims!(ax2, 0, 2 * nanzeromedian(dat))
+            ymaxt = 2 * nanzeromedian(dat)
+            ymaxv = if .!isnan(ymaxt)
+                ymaxt
+            else
+                1
+            end
+            ylims!(ax2, 0, ymaxv)
             xlims!(ax2, 0, 2049)
             ax2.xlabel = "Pixel Index"
             ax2.ylabel = "ADU"
