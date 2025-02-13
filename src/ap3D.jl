@@ -110,8 +110,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
-        @views datacube[:, :, i] .= gainMat .*
-                                    (datacube[:, :, i] .- datacube[:, :, i - 1])
+        @views datacube[:, :, i] .= (datacube[:, :, i] .- datacube[:, :, i - 1])
     end
     # this view is to minimize indexing headaches
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
@@ -145,7 +144,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         good_diffs = all_good_diffs[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
-            read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
+            read_var = readVarMat[pixel_ind]
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
             d2 = d2s[pixel_ind, 1]
@@ -153,7 +152,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             Qones = Q * ones_vec
 
             for _ in 1:n_repeat
-                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
+                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] / gainMat[pixel_ind] : 0
                 x = (rate_guess + 1.5read_var)
                 y = 2 * x / read_var
 
@@ -172,8 +171,8 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             # this implementation is super naive
 
             for _ in 1:n_repeat
-                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] : 0
-                read_var = readVarMat[pixel_ind] * (gainMat[pixel_ind] .^ 2)
+                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] / gainMat[pixel_ind] : 0
+                read_var = readVarMat[pixel_ind]
                 @views C = SymTridiagonal(
                     (rate_guess + 2read_var) .* ones_vec, -read_var .* ones_vec[1:(end - 1)])[
                     good_diffs, good_diffs]
@@ -190,8 +189,8 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             end
         end
     end
-    # return rates, ivars, chi2s, CRimage # outputs in electrons/read
-    return rates ./ gainMat, (gainMat .^ 2) .* ivars, chi2s, CRimage # outputs in DN/read
+    # return rates .* gainMat, ivars ./ (gainMat .^ 2), chi2s, CRimage # outputs in electrons/read
+    return rates, ivars, chi2s, CRimage # outputs in DN/read
 end
 
 function load_gain_maps(gainReadCalDir, tele, chips)
