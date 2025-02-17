@@ -219,7 +219,8 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
         readVarMatPath = gainReadCalDir * "rdnoise_" * tele * "_" * chip * ".fits"
         if isfile(readVarMatPath)
             f = FITS(readVarMatPath)
-            dat = read(f[1]) .^ 2
+            # TODO: Tim and I need to sort out this factor of 2
+            dat = (read(f[1]) .^ 2) ./ 2
             close(f)
             refval = nanzeromedian(dat)
             readVarView = refval .* ones(Float64, 2560, 2048)

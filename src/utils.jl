@@ -1,8 +1,8 @@
 using StatsBase: iqr
 using Jackknife
 
-# ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
-ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
+ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
+# ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^4
@@ -70,6 +70,14 @@ nanzeroiqr(x) =
         iqr(filter(!isnanorzero, x)) / 1.34896
     end
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
+
+function log10n(x)
+    if x <= 0
+        return NaN
+    else
+        return log10(x)
+    end
+end
 
 function grow_msk2d(msk; rad = 1)
     (sx, sy) = size(msk)

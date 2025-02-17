@@ -4,8 +4,8 @@ src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
-include(src_dir * "/ap3D.jl")
-include(src_dir * "/ap2Dcal.jl")
+include(src_dir * "/ar3D.jl")
+include(src_dir * "/ar2Dcal.jl")
 
 ## Parse command line arguments
 function parse_commandline()
