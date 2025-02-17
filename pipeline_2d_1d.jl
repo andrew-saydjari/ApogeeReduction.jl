@@ -96,7 +96,7 @@ flush(stdout);
     using ParallelDataTransfer, SIRS, ProgressMeter
 
     src_dir = "./"
-    include(src_dir * "src/ap1D.jl")
+    include(src_dir * "src/ar1D.jl")
     include(src_dir * "src/spectraInterpolation.jl")
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
@@ -118,8 +118,8 @@ git_branch, git_commit = initalize_git(src_dir);
         sname = split(split(fname, "/")[end], "_")
         fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
 
-        fnamecal = if (fnameType == "ap2D")
-            replace(fname, "ap2D" => "ap2Dcal")
+        fnamecal = if (fnameType == "ar2D")
+            replace(fname, "ar2D" => "ar2Dcal")
         else
             fname
         end
@@ -146,7 +146,7 @@ git_branch, git_commit = initalize_git(src_dir);
         end
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
-        outfname = replace(fname, "ap2D" => "ap1D")
+        outfname = replace(fname, "ar2D" => "ar1D")
         jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
     end
 end
@@ -181,7 +181,7 @@ for mjd in unique_mjds
     close(f)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ap1D" => "ap2D") * ".jld2"
+        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".jld2"
     end
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
@@ -225,7 +225,7 @@ flush(stdout);
 @showprogress pmap(process_1D, all2D)
 println("Extracting 2Dcal to 1Dcal:");
 flush(stdout);
-all2Dcal = replace.(all2D, "ap2D" => "ap2Dcal")
+all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
 @showprogress pmap(process_1D, all2Dcal)
 
 ## get all OBJECT files (happy to add any other types that see sky?)
@@ -270,12 +270,12 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
-all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
+all1DObjectSkyPeaks = replace.(all1DObject, "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## combine chips for single exposure onto loguniform wavelength grid
 ## pushing off the question of dither combinations for now (to apMADGICS stage)
-all1Da = replace.(all2Dperchip[1], "ap2D" => "ap1D")
+all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
 println("Reinterpolating exposure spectra:");
 flush(stdout);
 @showprogress pmap(reinterp_spectra, all1Da)

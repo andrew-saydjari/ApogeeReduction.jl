@@ -71,6 +71,14 @@ nanzeroiqr(x) =
     end
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
+function log10n(x)
+    if x <= 0
+        return NaN
+    else
+        return log10(x)
+    end
+end
+
 function grow_msk2d(msk; rad = 1)
     (sx, sy) = size(msk)
     msknew = zeros(Bool, (sx, sy))

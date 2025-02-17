@@ -267,7 +267,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
         msk = abs.(sky_line_mat[i, 1, :] .- medx_detect[i]) .<= 3 * sigma_detect[i]
         sky_line_mat_clean[i, :, .!msk] .= NaN
     end
-    outname = replace(fname, "ap1D" => "skyLine_peaks")
+    outname = replace(fname, "ar1D" => "skyLine_peaks")
     f = h5open(outname, "w")
     # Write cleaned data
     write(f, "sky_line_mat_clean", sky_line_mat_clean)

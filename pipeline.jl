@@ -110,8 +110,8 @@ flush(stdout);
     using ParallelDataTransfer, SIRS, ProgressMeter
 
     src_dir = "./"
-    include(src_dir * "src/ap3D.jl")
-    include(src_dir * "src/ap2Dcal.jl")
+    include(src_dir * "src/ar3D.jl")
+    include(src_dir * "src/ar2Dcal.jl")
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
 end
@@ -129,12 +129,12 @@ git_branch, git_commit = initalize_git(src_dir);
     # firstind overriden for APO dome flats
     function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
             cor1fnoise = true, extractMethod = "sutr_wood")
-        dirName = outdir * "/apred/$(mjd)/"
+        dirName = joinpath(outdir, "apred/$(mjd)/")
         if !ispath(dirName)
             mkpath(dirName)
         end
 
-        df = h5open(outdir * "almanac/$(runname).h5") do f
+        df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
             df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
 
@@ -200,13 +200,13 @@ git_branch, git_commit = initalize_git(src_dir);
 
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(
-            ["ap2D", df.observatory[expid], df.mjd[expid],
+            ["ar2D", df.observatory[expid], df.mjd[expid],
                 chip, df.exposure[expid], df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            outdir * "/apred/$(mjd)/" * outfname * ".jld2"; dimage, ivarimage, chisqimage, CRimage, nread_used, git_branch, git_commit)
-        return outdir * "/apred/$(mjd)/" * outfname * ".jld2"
+            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage, nread_used, git_branch, git_commit)
+        return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
@@ -246,7 +246,7 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
 
-        outfname = replace(fname, "ap2D" => "ap2Dcal")
+        outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(
             outfname; dimage, ivarimage, pix_bitmask, nread_used, git_branch, git_commit)
     end

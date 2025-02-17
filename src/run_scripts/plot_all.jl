@@ -5,7 +5,7 @@ src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
-include(src_dir * "/ap1D.jl")
+include(src_dir * "/ar1D.jl")
 
 ## Parse command line arguments
 function parse_commandline()
@@ -140,7 +140,7 @@ for chip in string.(collect(parg["chips"]))
             ax2.ylabel = "ADU"
 
             savePath = dirNamePlots *
-                       "ap1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
+                       "ar1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
             save(savePath, fig)
 
             thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
@@ -167,7 +167,7 @@ for exp_fname in sample_exposures
     tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
     expid_num = parse(Int, last(expid, 4))
 
-    expuni_fname = replace(replace(exp_fname, "ap1D" => "ar1Duni"), "_a_" => "_")
+    expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
     outflux = load(expuni_fname, "flux_1d")
     outmsk = load(expuni_fname, "mask_1d")
     # need to switch this back when the masking is updated
