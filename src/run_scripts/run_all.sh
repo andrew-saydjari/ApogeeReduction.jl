@@ -7,7 +7,7 @@
 #SBATCH --mem=0 #requesting all of the memory on the node
 
 #SBATCH --time=96:00:00
-#SBATCH --job-name=ApogeeReduction_all
+#SBATCH --job-name=ar_all
 #SBATCH --output=slurm_logs/%x_%j.out
 #SBATCH --err=slurm_logs/%x_%j.err
 
@@ -52,7 +52,7 @@ print_elapsed_time() {
 print_elapsed_time "Running Almanac"
 almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file --fibers
 
-# # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
+# get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imagine sitting at ApogeeReduction.jl level)
 print_elapsed_time "Building Runlist"
 julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
 

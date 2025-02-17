@@ -270,7 +270,7 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
-all1DObjectSkyPeaks = replace.(all1DObject, "ap1D" => "skyLine_peaks")
+all1DObjectSkyPeaks = replace.(all1DObject, "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## combine chips for single exposure onto loguniform wavelength grid
