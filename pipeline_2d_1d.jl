@@ -102,6 +102,10 @@ flush(stdout);
     include(src_dir * "src/utils.jl")
     include(src_dir * "src/skyline_peaks.jl")
     include(src_dir * "src/wavecal.jl")
+
+    ###decide which type of cal to use for traces (i.e. dome or quartz flats)
+    # trace_type = "dome"
+    trace_type = "quartz" #probably should use this!
 end
 
 println(BLAS.get_config());
@@ -129,7 +133,7 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask = load(fnamecal, "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
-        traceList = sort(glob("domeTraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
+        traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
@@ -201,16 +205,16 @@ all2D = vcat(all2Dperchip...)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
     for chip in ["a", "b", "c"]
-        traceList = sort(glob("domeTrace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
-            parg["outdir"] * "dome_flats/"))
+        traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
+            parg["outdir"] * "$(trace_type)_flats/"))
         if length(traceList) > 1
-            @warn "Multiple dome trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
+            @warn "Multiple $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
         elseif length(traceList) == 0
-            @error "No dome trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "dome_flats/")."
+            @error "No $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "$(trace_type)_flats/")."
         end
         calPath = traceList[1]
         linkPath = parg["outdir"] * "apred/$(mjd)/" *
-                   replace(basename(calPath), "domeTrace" => "domeTraceMain")
+                   replace(basename(calPath), "$(trace_type)Trace" => "$(trace_type)TraceMain")
         if !isfile(linkPath)
             # come back to why this symlink does not work
             cp(calPath, linkPath)
