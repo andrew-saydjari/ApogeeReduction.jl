@@ -63,7 +63,7 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdi
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
     # Extract traces from dome flats
-    print_elapsed_time "Extracting Traces from Dome Flats"
+    print_elapsed_time "Extracting Traces from Dome and Quartz Flats"
     ./src/cal_build/run_trace_cal.sh $tele $mjd $mjd
 
     # Run pipeline 1D only
