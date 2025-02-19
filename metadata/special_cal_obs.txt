@@ -3,4 +3,5 @@
 apo    60356    47940110-47940123    b2b         "back-to-back flat exposures"
 lco    60425    48630077-48630084    b2b         "back-to-back flat exposures"
 apo    59549    39870035-39870035    spQF        "sparsePak quartz flat"
-lco    60044    44820015-44820015    spQF        "sparsePak quartz flat"
+lco    60044    44820002-44820002    spQF        "sparsePak quartz flat"
+lco    60044    44820015-44820024    spQF        "sparsePak quartz flat"
