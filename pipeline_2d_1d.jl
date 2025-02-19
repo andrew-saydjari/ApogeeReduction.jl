@@ -15,7 +15,6 @@ println("Package activation took $dt");
 t_then = t_now;
 flush(stdout);
 
-
 ## Parse command line arguments
 # we have forced this one to run over all chips for the sake of the wavelength solution
 function parse_commandline()
