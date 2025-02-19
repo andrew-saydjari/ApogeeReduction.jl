@@ -35,11 +35,11 @@ for tstmjd in mjd_list
     df = DataFrame(read(f[parg["tele"] * "/$(tstmjd)/exposures"]))
     df.nreadInt = parse.(Int, df.nread)
     expindx_list = findall((df.imagetyp .== "QuartzFlat"))
-#    if f[parg["tele"]] == 'lco'
-#        expindx_list = findall((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
-#    elseif f[parg["tele"]] == 'apo'
-#        expindx_list = findall((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 10))
-#    end
+    #    if f[parg["tele"]] == 'lco'
+    #        expindx_list = findall((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
+    #    elseif f[parg["tele"]] == 'apo'
+    #        expindx_list = findall((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 10))
+    #    end
     for expindx in expindx_list
         push!(darks_mjd, parse(Int, tstmjd))
         push!(darks_expid, expindx)
