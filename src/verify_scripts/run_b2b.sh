@@ -54,7 +54,7 @@ while read -r line; do
         expid_end=$(echo $expid_range | cut -d'-' -f2 | sed 's/^[0-9]\{4\}//')
      
         # print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
-        # sbatchCustom --job-name=b2b_${tele}_${mjd} ./src/run_scripts/run_all.sh ${tele} ${mjd} true ${data_dir}
+        sbatchCustom --job-name=b2b_${tele}_${mjd} ./src/run_scripts/run_all.sh ${tele} ${mjd} true ${data_dir}
         
         # Store job ID and associated information
         job_ids+=($SLURM_ID)
@@ -63,18 +63,18 @@ while read -r line; do
 done < "metadata/special_cal_obs.txt"
 
 # Wait for all jobs to complete
-# print_elapsed_time "Waiting for all reduction jobs to complete"
-# for job_id in "${job_ids[@]}"; do
-#     squeue -h -j $job_id > /dev/null 2>&1
-#     while [ $? -eq 0 ]; do
-#         sleep 5
-#         squeue -h -j $job_id > /dev/null 2>&1
-#     done
-# done
+print_elapsed_time "Waiting for all reduction jobs to complete"
+for job_id in "${job_ids[@]}"; do
+    squeue -h -j $job_id > /dev/null 2>&1
+    while [ $? -eq 0 ]; do
+        sleep 1
+        squeue -h -j $job_id > /dev/null 2>&1
+    done
+done
 
 # Run all back2back_flats.jl scripts
 print_elapsed_time "Running all Back2Back plots"
-for i in "${!job_ids[@]}"; do
+for i in "${!job_info[@]}"; do
     # Extract stored information
     IFS='|' read -r tele mjd expid_start expid_end <<< "${job_info[$i]}"
     
