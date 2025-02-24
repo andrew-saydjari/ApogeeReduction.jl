@@ -54,7 +54,7 @@ while read -r line; do
         expid_end=$(echo $expid_range | cut -d'-' -f2 | sed 's/^[0-9]\{4\}//')
      
         # print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
-        # sbatchCustom --job-name=b2b_${tele}_${mjd} ./src/run_scripts/run_all.sh ${tele} ${mjd} true ${data_dir}
+        sbatchCustom --job-name=b2b_${tele}_${mjd} ./src/run_scripts/run_all.sh ${tele} ${mjd} true ${data_dir}
         
         # Store job ID and associated information
         job_ids+=($SLURM_ID)
