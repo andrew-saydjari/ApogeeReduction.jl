@@ -242,7 +242,12 @@ for exp_fname in sample_exposures
             fig[4, 1], title = "Chip Blue-Green Edge", xlabel = "Wavelength (Å)", ylabel = "Flux")
         chip_b_xlims = (15834 - 70, 15834 + 70)
         chip_b_mask = chip_b_xlims[1] .<= logUniWaveAPOGEE .<= chip_b_xlims[2]
-        chip_b_ylims = extrema(filter(!isnan, nan_flux[chip_b_mask]))
+        filtered_dat = filter(!isnan, nan_flux[chip_b_mask])
+        chip_b_ylims = if isempty(filtered_dat)
+            (0, 1)
+        else
+            extrema(filtered_dat)
+        end
         chip_b_yrange = chip_b_ylims[2] - chip_b_ylims[1]
         chip_b_ylims = (
             chip_b_ylims[1] - 0.05 * chip_b_yrange, chip_b_ylims[2] + 0.05 * chip_b_yrange)
@@ -254,7 +259,12 @@ for exp_fname in sample_exposures
         hideydecorations!(ax6, grid = false)
         chip_a_xlims = (16454 - 70, 16454 + 70)
         chip_a_mask = chip_a_xlims[1] .<= logUniWaveAPOGEE .<= chip_a_xlims[2]
-        chip_a_ylims = extrema(filter(!isnan, nan_flux[chip_a_mask]))
+        filtered_dat = filter(!isnan, nan_flux[chip_a_mask])
+        chip_a_ylims = if isempty(filtered_dat)
+            (0, 1)
+        else
+            extrema(filtered_dat)
+        end
         chip_a_yrange = chip_a_ylims[2] - chip_a_ylims[1]
         chip_a_ylims = (
             chip_a_ylims[1] - 0.05 * chip_a_yrange, chip_a_ylims[2] + 0.05 * chip_a_yrange)

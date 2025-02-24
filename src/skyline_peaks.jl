@@ -245,7 +245,12 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
     unique_skyline_inds = sort(unique(vcat(map(x -> get_last_ind(x[1]), pout)...)))
     # println("$(tele) $(chip): $(length(unique_skyline_inds)) unique sky lines")
     # println(unique_skyline_inds)
-    sky_line_mat = zeros(Float64, length(unique_skyline_inds), size(pout[1][1], 1), 300)
+    first_valid_idx = findfirst(x -> !isnothing(x[1]), pout)
+    if isnothing(first_valid_idx)
+        println("No valid sky lines found for ANY fiber in$(fname)")
+        return
+    end
+    sky_line_mat = zeros(Float64, length(unique_skyline_inds), size(pout[first_valid_idx][1], 1), 300)
     fill!(sky_line_mat, NaN)
     for i in 1:300
         for (eindx, skyindx) in enumerate(unique_skyline_inds)

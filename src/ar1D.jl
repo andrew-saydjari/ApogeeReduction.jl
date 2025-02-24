@@ -1,9 +1,11 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
 
-src_dir = "./"
-include(src_dir * "wavecal.jl")
-include(src_dir * "skyline_peaks.jl")
+# src_dir = "./"
+# include(src_dir * "wavecal.jl")
+# include(src_dir * "skyline_peaks.jl")
+include("./wavecal.jl")
+include("./skyline_peaks.jl")
 
 # this file contains the code needed to extract a 1D spectrum from a 2D images.
 # trace_params is of size (n_x_pix, n_fibers, 3)
