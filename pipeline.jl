@@ -128,7 +128,7 @@ git_branch, git_commit = initalize_git(src_dir);
 @everywhere begin
     # firstind overriden for APO dome flats
     function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = true, extractMethod = "sutr_wood")
+            cor1fnoise = false, extractMethod = "sutr_wood")
         dirName = joinpath(outdir, "apred/$(mjd)/")
         if !ispath(dirName)
             mkpath(dirName)
