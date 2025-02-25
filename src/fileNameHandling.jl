@@ -32,9 +32,14 @@ function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype)
            "apred/$(mjd)/ar2D_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).jld2"
 end
 
-function get_1d_name(expid, df)
+function get_1d_name(expid, df; cal = false)
+    basename = if cal
+        "ar1Dcal"
+    else
+        "ar1D"
+    end
     return join(
-        ["ar1D", df.observatory[expid], df.mjd[expid],
+        [basename, df.observatory[expid], df.mjd[expid],
             df.chip[expid], df.exposure[expid], df.exptype[expid]],
         "_")
 end

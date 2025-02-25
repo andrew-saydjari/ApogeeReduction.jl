@@ -45,6 +45,11 @@ function parse_commandline()
         help = "outdir where to look for the dark cals"
         arg_type = String
         default = ""
+        "--dropfirstn"
+        required = false
+        help = "number of exposures to drop from the beginning of the list"
+        arg_type = Int
+        default = 0
     end
     return parse_args(s)
 end
@@ -52,6 +57,7 @@ end
 parg = parse_commandline()
 
 chip = parg["chip"]
+nfirst = 1 + parg["dropfirstn"]
 
 # make summary plots and gifs and send to slack in outer loop
 thread = SlackThread();
@@ -75,6 +81,7 @@ end
 # Load in the exact set of exposures
 mjd = load(parg["runlist"], "mjd")
 expid = load(parg["runlist"], "expid");
+# TODO this is using no dark subtraction on the flats... is that ok? (AKS thinks probably)
 flist = get_cal_file.(
     Ref(parg["flat_dir"]), Ref(parg["tele"]), mjd, expid, Ref(chip), Ref("INTERNALFLAT"))
 
@@ -131,13 +138,15 @@ desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to 
 
         flat_im_mat[:, :, indx] = bmat ./ modImage
         flat_im_mat[:, :, indx] ./= nanzeromedian(flat_im_mat[:, :, indx]) # handles explicit gain modeling
-        flat_im .+= flat_im_mat[:, :, indx]
-        model_im .+= modImage
+        if (nfirst <= indx)
+            flat_im .+= flat_im_mat[:, :, indx]
+            model_im .+= modImage
+        end
     end
 end
 
 # divide by the number of indices in the last dimension of flat_im_mat that are not all zero
-nflats = count(x -> sum(x) != 0, eachslice(flat_im_mat, dims = 3))
+nflats = count(x -> sum(x) != 0, eachslice(flat_im_mat[:,:,nfirst:end], dims = 3))
 flat_im ./= nflats
 model_im ./= nflats
 
@@ -224,7 +233,7 @@ else
     end
 
     let # video of each frame
-        if length(flist) < 5 # if there are less than 5 frames, don't make a video
+        if length(flist) < 500 # if there are less than 5 frames, don't make a video
             # Post each frame individually since there are few frames
             for (i, fname) in enumerate(flist)
                 sname = split(fname, "_")
@@ -262,7 +271,7 @@ else
     end
 
     let
-        if length(flist) < 5
+        if length(flist) < 500
             for i in eachindex(flist)
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])

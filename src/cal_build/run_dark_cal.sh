@@ -24,6 +24,7 @@ juliaup add 1.11.0
 tele=$1
 mjd_start=$2
 mjd_end=$3
+dropfirstn=${4:-0}
 
 runname="dark_cal_${tele}_${mjd_start}_${mjd_end}"
 outdir="../outdir/"
@@ -41,20 +42,14 @@ almanac -v -p 12 --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $a
 julia +1.11.0 --project="./" src/cal_build/make_runlist_darks.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/" --doCal2d false
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --doCal2d false
 
 # make the stacked darks
 mkdir -p ${outdir}darks
-julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --dark_dir ${doutdir} --runlist $runlist
-julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --dark_dir ${doutdir} --runlist $runlist
-julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --dark_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
 echo "Job completed in $formatted_time"
-
-# if [ -n "$SLURM_JOB_ID" ]; then
-#     mkdir -p slurm_logs
-#     mv ${SLURM_JOB_NAME}_${SLURM_JOBID}.out slurm_logs/${SLURM_JOB_NAME}_${SLURM_JOBID}.out
-#     mv ${SLURM_JOB_NAME}_${SLURM_JOBID}.err slurm_logs/${SLURM_JOB_NAME}_${SLURM_JOBID}.err
-# fi

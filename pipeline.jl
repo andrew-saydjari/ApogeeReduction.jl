@@ -231,8 +231,8 @@ git_branch, git_commit = initalize_git(src_dir);
         end
         darkRate = load(darkRateflst[1], "dark_rate")
         pix_bitmask = load(darkRateflst[1], "dark_pix_bitmask")
-        # comment out dark subtract for now
-        # dimage .-= darkRate * nread_used
+
+        dimage .-= darkRate
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding

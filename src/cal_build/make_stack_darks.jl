@@ -38,13 +38,20 @@ function parse_commandline()
         help = "path name to hdf5 file with keys specifying list of exposures to run"
         arg_type = String
         default = ""
+        "--dropfirstn"
+        required = false
+        help = "number of exposures to drop from the beginning of the list"
+        arg_type = Int
+        default = 0
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
 
+# that python plotting problem should be fixed with CairoMakie. Revisit.
 chip = parg["chip"] # Python plotting issues prevented this from looping, so just do with three calls
+nfirst = 1 + parg["dropfirstn"]
 
 # make summary plots and gifs and send to slack in outer loop
 thread = SlackThread();
@@ -77,10 +84,12 @@ dark_im = zeros(2560, 2048)
     close(f)
     ref_val_vec[indx] = nanzeromedian(temp_im[1:2048, 1:2048])
     temp_im[1:2048, 1:2048] .-= ref_val_vec[indx]
-    dark_im .+= temp_im
+    if nfirst <= indx
+        dark_im .+= temp_im
+    end
 end
 
-dark_im ./= length(flist)
+dark_im ./= length(flist[nfirst:end])
 cen_dark = nanzeromedian(dark_im)
 
 dat = dark_im[1:2048, 1:2048][:]
