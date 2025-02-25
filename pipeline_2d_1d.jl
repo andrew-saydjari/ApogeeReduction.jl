@@ -224,6 +224,7 @@ end
 
 # extract the 2D to 1D, ideally the calibrated files
 # need to think hard about batching daily versus all data for cal load in
+# someday we might stop doing the uncal extractions, but very useful for testing
 println("Extracting 2D to 1D:");
 flush(stdout);
 @showprogress pmap(process_1D, all2D)
@@ -233,6 +234,7 @@ all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
 @showprogress pmap(process_1D, all2Dcal)
 
 ## get all OBJECT files (happy to add any other types that see sky?)
+## currently doing skyline finding on the uncal 1D files, should think about changing?
 list1DexpObject = []
 for mjd in unique_mjds
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
@@ -281,6 +283,11 @@ all1DObjectSkyPeaks = replace.(all1DObject, "ar1D" => "skyLine_peaks")
 ## pushing off the question of dither combinations for now (to apMADGICS stage)
 all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
 println("Reinterpolating exposure spectra:");
+flush(stdout);
+@showprogress pmap(reinterp_spectra, all1Da)
+
+all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")
+println("Reinterpolating calibrated exposure spectra:");
 flush(stdout);
 @showprogress pmap(reinterp_spectra, all1Da)
 
