@@ -30,6 +30,8 @@ tele=$1
 mjd=$2
 run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
 outdir=${4:-"../outdir/"}  # Fourth argument, defaults to "../../outdir/" if not provided
+caldir_darks=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
+caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 
 runname="objects_${mjd}"
 almanac_file=${outdir}/almanac/${runname}.h5
@@ -58,7 +60,7 @@ julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --
 
 # Run the reduction pipeline to 2D/2Dcal and stop
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then

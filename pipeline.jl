@@ -70,12 +70,17 @@ function parse_commandline()
         help = "run the 2D calibration step"
         arg_type = Bool
         default = true
+        "--workers_per_node"
+        required = false
+        help = "number of workers per node"
+        arg_type = Int
+        default = 58
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
-workers_per_node = 58
+workers_per_node = parg["workers_per_node"]
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
@@ -135,7 +140,7 @@ git_branch, git_commit = initalize_git(src_dir);
         end
 
         df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
-            df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+            DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)

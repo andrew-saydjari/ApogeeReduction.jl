@@ -43,7 +43,7 @@ almanac -v -p 12 --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $a
 julia +1.11.0 --project="./" src/cal_build/make_runlist_internal_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --doCal2d false
+julia +1.11.0 --project="./" pipeline.jl --workers_per_node 40 --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --doCal2d false
 
 # make the stacked flats
 mkdir -p ${outdir}flats

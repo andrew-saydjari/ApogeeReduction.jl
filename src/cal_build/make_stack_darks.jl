@@ -193,7 +193,7 @@ let
 end
 
 let #each frame
-    if length(flist) < 5
+    if length(flist) < 500
         for (indx, fname) in enumerate(flist)
             sname = split(fname, "_")
             tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
@@ -233,7 +233,7 @@ let #each frame
 end
 
 let # each frame residuals
-    if length(flist) < 5
+    if length(flist) < 500
         for (indx, fname) in enumerate(flist)
             sname = split(fname, "_")
             tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
