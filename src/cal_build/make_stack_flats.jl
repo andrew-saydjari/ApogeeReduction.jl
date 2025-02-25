@@ -146,7 +146,7 @@ desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to 
 end
 
 # divide by the number of indices in the last dimension of flat_im_mat that are not all zero
-nflats = count(x -> sum(x) != 0, eachslice(flat_im_mat[:,:,nfirst:end], dims = 3))
+nflats = count(x -> sum(x) != 0, eachslice(flat_im_mat[:, :, nfirst:end], dims = 3))
 flat_im ./= nflats
 model_im ./= nflats
 
