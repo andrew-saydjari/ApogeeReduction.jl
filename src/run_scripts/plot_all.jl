@@ -158,7 +158,8 @@ else
     thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
 end
 
-function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname, tele, mjd, chiploc, expid, expType, expuni_fname)
+function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
+        tele, mjd, chiploc, expid, expType, expuni_fname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
