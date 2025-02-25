@@ -158,7 +158,7 @@ else
     thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
 end
 
-function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread)
+function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
@@ -258,7 +258,7 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread)
     resize_to_layout!(fig)
 
     savePath = dirNamePlots *
-               "ar1Duni_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType)_$(expType).png"
+               "$(bname)_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType)_$(expType).png"
     save(savePath, fig)
 
     thread("Fiberindex: $(fib) $(fibType), $(expuni_fname)", savePath)
@@ -277,7 +277,7 @@ for exp_fname in sample_exposures
     expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
     outflux = load(expuni_fname, "flux_1d")
     outmsk = load(expuni_fname, "mask_1d")
-    expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dcal"), "_a_" => "_")
+    expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dunical"), "_a_" => "_")
     outfluxcal = load(expunical_fname, "flux_1d")
     outmskcal = load(expunical_fname, "mask_1d")
     # need to switch this back when the masking is updated
@@ -286,7 +286,7 @@ for exp_fname in sample_exposures
     fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
-        plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread)
-        plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread)
+        plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni")
+        plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical")
     end
 end

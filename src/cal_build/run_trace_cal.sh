@@ -30,6 +30,8 @@ outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.jld2
+caldir_darks=${4:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
+caldir_flats=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}almanac
@@ -43,7 +45,7 @@ julia +1.11.0 --project="./" src/cal_build/make_runlist_dome_flats.jl --tele $te
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 echo "Running 3D->2D..."
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 mkdir -p ${outdir}dome_flats
 julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist
@@ -55,7 +57,7 @@ julia +1.11.0 --project="./" src/cal_build/make_runlist_quartz_flats.jl --tele $
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 echo "Running 3D->2D..."
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist_quartz --outdir $outdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist_quartz --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 mkdir -p ${outdir}quartz_flats
 julia +1.11.0 --project="./" src/cal_build/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist_quartz
