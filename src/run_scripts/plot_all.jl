@@ -158,7 +158,7 @@ else
     thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
 end
 
-function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname)
+function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname, tele, mjd, chiploc, expid, expType, expuni_fname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
@@ -286,7 +286,7 @@ for exp_fname in sample_exposures
     fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
     sample_fibers = sample(rng, 1:300, 5, replace = false)
     for fib in sample_fibers
-        plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni")
-        plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical")
+        plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni", tele, mjd, chiploc, expid, expType, expuni_fname)
+        plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical", tele, mjd, chiploc, expid, expType, expunical_fname)
     end
 end
