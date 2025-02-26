@@ -126,8 +126,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
 
     for xpix in 1:n_xpix
         #iterate on best-fit fluxes
-	#to remove crosstalk/contribution
-	#from neighbours
+        #to remove crosstalk/contribution
+        #from neighbours
 
         #reset model fluxes
         model_flux_indv .= 0
@@ -137,92 +137,94 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
         new_flux_1d .= 0
 
         for repeat_ind in 1:n_max_repeat
-	    new_comb_model_flux .= 0
-	    new_comb_model_var .= 0
+            new_comb_model_flux .= 0
+            new_comb_model_var .= 0
 
             if repeat_ind == 1
                 window_half_size = small_window_half_size
             else
                 window_half_size = fit_window_half_size
-	    end
+            end
 
             for fib in 1:n_fibers
                 _, y_peak, y_sigma = trace_params[xpix, fib, :]
 
-		#use large window to get model fluxes
+                #use large window to get model fluxes
                 full_ypixels = floor(Int, y_peak - large_window_half_size):ceil(
                     Int, y_peak + large_window_half_size)
                 full_ypix_boundaries = [full_ypixels .- 0.5; full_ypixels[end] + 0.5]
                 full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
 
-                ypixels = full_ypixels[begin+(large_window_half_size-window_half_size):end-(large_window_half_size-window_half_size)]
-		model_vals = full_model_vals[begin+(large_window_half_size-window_half_size):end-(large_window_half_size-window_half_size)] 
-		if any(good_pixels[xpix, ypixels])
-		    #then mask the bad pixels, same as setting ivar=0 there
-    		    model_vals[.!good_pixels[xpix, ypixels]] .= 0
-		    good_flux_1d = true
-		else
-		    good_flux_1d = false
-		end
+                ypixels = full_ypixels[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
+                model_vals = full_model_vals[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
+                if any(good_pixels[xpix, ypixels])
+                    #then mask the bad pixels, same as setting ivar=0 there
+                    model_vals[.!good_pixels[xpix, ypixels]] .= 0
+                    good_flux_1d = true
+                else
+                    good_flux_1d = false
+                end
 
-		curr_pix_ivars = 1 ./ ( 1 ./ ivarimage[xpix, ypixels] .+ comb_model_var[ypixels] .- model_var_indv[fib,ypixels])
+                curr_pix_ivars = 1 ./ (1 ./ ivarimage[xpix, ypixels] .+ comb_model_var[ypixels] .-
+                                  model_var_indv[fib, ypixels])
                 ivar_1d[xpix, fib] = sum(model_vals .^ 2 .* curr_pix_ivars)
-		flux_weights = model_vals .* curr_pix_ivars ./ ivar_1d[xpix, fib]
-		new_flux_1d[fib] = sum(flux_weights .* (dimage[xpix,ypixels] .- comb_model_flux[ypixels] .+ model_flux_indv[fib,ypixels]))
+                flux_weights = model_vals .* curr_pix_ivars ./ ivar_1d[xpix, fib]
+                new_flux_1d[fib] = sum(flux_weights .*
+                                       (dimage[xpix, ypixels] .- comb_model_flux[ypixels] .+
+                                        model_flux_indv[fib, ypixels]))
 
                 # bitmask
-#		curr_good_fluxes = flux_weights .>= flag_thresh
-		curr_good_fluxes = model_vals .>= flag_thresh
-		if !good_flux_1d
-     		    curr_neff = sqrt(1/sum(model_vals .^ 2))
+                #		curr_good_fluxes = flux_weights .>= flag_thresh
+                curr_good_fluxes = model_vals .>= flag_thresh
+                if !good_flux_1d
+                    curr_neff = sqrt(1 / sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
-		    mask_1d[xpix, fib] += bad_1d_no_good_pix
-		elseif any(curr_good_fluxes)
-     		    curr_neff = sqrt(1/sum(model_vals[curr_good_fluxes] .^ 2))
+                    mask_1d[xpix, fib] += bad_1d_no_good_pix
+                elseif any(curr_good_fluxes)
+                    curr_neff = sqrt(1 / sum(model_vals[curr_good_fluxes] .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[curr_good_fluxes]])
-		else
-     		    curr_neff = sqrt(1/sum(model_vals .^ 2))
+                else
+                    curr_neff = sqrt(1 / sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
-		end
+                end
 
-	        if (!isfinite(new_flux_1d[fib])) | (ivar_1d[xpix, fib] == 0.0)
-		    new_flux_1d[fib] = 0.0
-		    ivar_1d[xpix, fib] = 0.0
-		    mask_1d[xpix, fib] += bad_1d_failed_extract
-	        end
+                if (!isfinite(new_flux_1d[fib])) | (ivar_1d[xpix, fib] == 0.0)
+                    new_flux_1d[fib] = 0.0
+                    ivar_1d[xpix, fib] = 0.0
+                    mask_1d[xpix, fib] += bad_1d_failed_extract
+                end
 
-		if curr_neff > 50
-		    new_flux_1d[fib] = 0.0
-		    ivar_1d[xpix, fib] = 0.0
-		    mask_1d[xpix, fib] += bad_1d_neff
-		end
+                if curr_neff > 50
+                    new_flux_1d[fib] = 0.0
+                    ivar_1d[xpix, fib] = 0.0
+                    mask_1d[xpix, fib] += bad_1d_neff
+                end
 
-		if good_flux_1d
-                    model_flux_indv[fib,full_ypixels] .= max(0,new_flux_1d[fib])*full_model_vals
-    		    new_comb_model_flux[full_ypixels] .+= model_flux_indv[fib,full_ypixels]
+                if good_flux_1d
+                    model_flux_indv[fib, full_ypixels] .= max(0, new_flux_1d[fib]) * full_model_vals
+                    new_comb_model_flux[full_ypixels] .+= model_flux_indv[fib, full_ypixels]
 
-		    if ivar_1d[xpix, fib] > 0
-                        model_var_indv[fib,full_ypixels] .= max(0,1/ivar_1d[xpix, fib])*(full_model_vals .^ 2)
-    		        new_comb_model_var[full_ypixels] .+= model_var_indv[fib,full_ypixels]
-		    end
-		end
+                    if ivar_1d[xpix, fib] > 0
+                        model_var_indv[fib, full_ypixels] .= max(0, 1 / ivar_1d[xpix, fib]) *
+                                                             (full_model_vals .^ 2)
+                        new_comb_model_var[full_ypixels] .+= model_var_indv[fib, full_ypixels]
+                    end
+                end
+            end
 
-	    end
+            if all(abs.(new_flux_1d .- flux_1d[xpix, :]) .< 0.01) & (repeat_ind > 1)
+                flux_1d[xpix, :] .= new_flux_1d
+                break
+            end
 
-	    if all(abs.(new_flux_1d .- flux_1d[xpix,:]) .< 0.01) & (repeat_ind > 1)
-                flux_1d[xpix,:] .= new_flux_1d 
-	        break
-	    end
-
-	    flux_1d[xpix,:] .= new_flux_1d
-	    comb_model_flux .= new_comb_model_flux
-	    comb_model_var .= new_comb_model_var
-	end
+            flux_1d[xpix, :] .= new_flux_1d
+            comb_model_flux .= new_comb_model_flux
+            comb_model_var .= new_comb_model_var
+        end
     end
 
     flux_1d, ivar_1d, mask_1d
 end
-
 
 function get_fibTargDict(f, tele, mjd, expid)
     # worry about the read-in overhead per expid?

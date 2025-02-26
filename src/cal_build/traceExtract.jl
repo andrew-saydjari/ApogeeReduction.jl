@@ -153,12 +153,12 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
             #preallocate curr_M_T_dot_V_inv
             curr_M_T_dot_V_inv = M_vects[:, :, j]' .* fit_ivars[:, j]'
 
-	    if (return_cov) & (r_ind == n_iter)
-	        # only invert matrix on the last iteration
+            if (return_cov) & (r_ind == n_iter)
+                # only invert matrix on the last iteration
                 curr_V = inv(curr_M_T_dot_V_inv * M_vects[:, :, j])
                 v_hat[:, j] = curr_V * (curr_M_T_dot_V_inv * flux_diffs[:, j])
                 v_hat_cov[:, :, j] = curr_V
-	    else
+            else
                 v_hat[:, j] = (curr_M_T_dot_V_inv * M_vects[:, :, j]) \
                               (curr_M_T_dot_V_inv * flux_diffs[:, j])
             end
