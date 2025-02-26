@@ -100,8 +100,9 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
     flux_1d, ivar_1d, mask_1d
 end
 
-
-function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params; small_window_half_size = 2, fit_window_half_size=5, large_window_half_size = 10, n_max_repeat = 5, flag_thresh = 0.001)
+function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
+        small_window_half_size = 2, fit_window_half_size = 5,
+        large_window_half_size = 10, n_max_repeat = 5, flag_thresh = 0.001)
     n_xpix = size(trace_params, 1)
     n_ypix = size(dimage, 2)
     n_fibers = size(trace_params, 2)
