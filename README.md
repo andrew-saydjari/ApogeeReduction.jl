@@ -60,6 +60,10 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 128   | 7     | reads dropped for CR rejection = 1 |
 | 256   | 8     | reads dropped for CR rejection > 1 |
 | 512   | 9     | bad linear SUTR chi2 |
+| 1024  | 10    | failed 1D extraction |
+| 2048  | 11    | no nearby good pixels in 1D extraction |
+| 4096  | 12    | neff>50 in 1D extraction |
+
 
 ## Testing
 
