@@ -129,7 +129,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
 	#to remove crosstalk/contribution
 	#from neighbours
 
-	#reset model fluxes
+        #reset model fluxes
         model_flux_indv .= 0
         comb_model_flux .= 0
         model_var_indv .= 0
