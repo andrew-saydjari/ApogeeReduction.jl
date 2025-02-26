@@ -144,7 +144,8 @@ git_branch, git_commit = initalize_git(src_dir);
         flux_1d, ivar_1d, mask_1d = if parg["extraction"] == "boxcar"
             extract_boxcar(dimage, ivarimage, pix_bitmask, regularized_trace_params)
         elseif parg["extraction"] == "optimal"
-            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+            #            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+            extract_optimal_iter(dimage, ivarimage, pix_bitmask, regularized_trace_params)
         else
             error("Extraction method $(parg["extraction"]) not recognized")
         end

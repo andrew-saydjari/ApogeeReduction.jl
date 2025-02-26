@@ -153,13 +153,14 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
             #preallocate curr_M_T_dot_V_inv
             curr_M_T_dot_V_inv = M_vects[:, :, j]' .* fit_ivars[:, j]'
 
-            if !return_cov
-                v_hat[:, j] = (curr_M_T_dot_V_inv * M_vects[:, :, j]) \
-                              (curr_M_T_dot_V_inv * flux_diffs[:, j])
-            else
+            if (return_cov) & (r_ind == n_iter)
+                # only invert matrix on the last iteration
                 curr_V = inv(curr_M_T_dot_V_inv * M_vects[:, :, j])
                 v_hat[:, j] = curr_V * (curr_M_T_dot_V_inv * flux_diffs[:, j])
                 v_hat_cov[:, :, j] = curr_V
+            else
+                v_hat[:, j] = (curr_M_T_dot_V_inv * M_vects[:, :, j]) \
+                              (curr_M_T_dot_V_inv * flux_diffs[:, j])
             end
         end
 
@@ -181,12 +182,12 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
 end
 
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
-        image_mask = nothing, mid = 1025, n_center_cols = 100, verbose = false)
+        good_pixels = nothing, mid = 1025, n_center_cols = 100, verbose = false)
     noise_image = 1 ./ sqrt.(ivar_image)
-    if isnothing(image_mask)
-        image_mask = ones(Bool, size(image_data))
+    if isnothing(good_pixels)
+        good_pixels = ones(Bool, size(image_data))
     end
-    image_mask .= image_mask .& (ivar_image .> 0)
+    good_pixels .= good_pixels .& (ivar_image .> 0)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
     x_center = mid
 
@@ -197,7 +198,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
         (x_center - n_center_cols):(x_center + n_center_cols), begin:end])'
     cutout_errs = copy(noise_image[
         (x_center - n_center_cols):(x_center + n_center_cols), begin:end])'
-    cutout_masks = copy(image_mask[
+    cutout_masks = copy(good_pixels[
         (x_center - n_center_cols):(x_center + n_center_cols), begin:end])'
 
     # Mask bad pixels
@@ -634,7 +635,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
 
     all_rel_fluxes_mat = copy(image_data)
     all_rel_errs_mat = copy(noise_image)
-    all_rel_masks_mat = copy(image_mask)
+    all_rel_masks_mat = copy(good_pixels)
 
     all_rel_fluxes_mat[.!all_rel_masks_mat] .= 0
     all_rel_errs_mat[.!all_rel_masks_mat] .= Inf
