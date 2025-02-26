@@ -175,7 +175,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params; smal
 		if !good_flux_1d
      		    curr_neff = sqrt(1/sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
-		    mask_1d[xpix, fib] &= bad_1d_no_good_pix
+		    mask_1d[xpix, fib] += bad_1d_no_good_pix
 		elseif any(curr_good_fluxes)
      		    curr_neff = sqrt(1/sum(model_vals[curr_good_fluxes] .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[curr_good_fluxes]])
@@ -187,13 +187,13 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params; smal
 	        if (!isfinite(new_flux_1d[fib])) | (ivar_1d[xpix, fib] == 0.0)
 		    new_flux_1d[fib] = 0.0
 		    ivar_1d[xpix, fib] = 0.0
-		    mask_1d[xpix, fib] &= bad_1d_failed_extract
+		    mask_1d[xpix, fib] += bad_1d_failed_extract
 	        end
 
-		if curr_neff > 5
+		if curr_neff > 50
 		    new_flux_1d[fib] = 0.0
 		    ivar_1d[xpix, fib] = 0.0
-		    mask_1d[xpix, fib] &= bad_1d_neff
+		    mask_1d[xpix, fib] += bad_1d_neff
 		end
 
 		if good_flux_1d
