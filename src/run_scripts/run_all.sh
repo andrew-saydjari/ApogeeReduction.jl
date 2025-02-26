@@ -30,6 +30,8 @@ tele=$1
 mjd=$2
 run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
 outdir=${4:-"../outdir/"}  # Fourth argument, defaults to "../../outdir/" if not provided
+caldir_darks=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
+caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 
 runname="objects_${mjd}"
 almanac_file=${outdir}/almanac/${runname}.h5
@@ -48,27 +50,27 @@ print_elapsed_time() {
     echo
 }
 
-# get the data summary file for the MJD
-print_elapsed_time "Running Almanac"
-almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file --fibers
+# # get the data summary file for the MJD
+# print_elapsed_time "Running Almanac"
+# almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file --fibers
 
-# get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imagine sitting at ApogeeReduction.jl level)
-print_elapsed_time "Building Runlist"
-julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
+# # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imagine sitting at ApogeeReduction.jl level)
+# print_elapsed_time "Building Runlist"
+# julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
-# Run the reduction pipeline to 2D/2Dcal and stop
-print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_09_21/outdir/" --caldir_flats "/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2024_10_03/outdir/"
+# # Run the reduction pipeline to 2D/2Dcal and stop
+# print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
+# julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
-    # Extract traces from dome flats
-    print_elapsed_time "Extracting Traces from Dome and Quartz Flats"
-    ./src/cal_build/run_trace_cal.sh $tele $mjd $mjd
+    # # Extract traces from dome flats
+    # print_elapsed_time "Extracting Traces from Dome and Quartz Flats"
+    # ./src/cal_build/run_trace_cal.sh $tele $mjd $mjd $caldir_darks $caldir_flats
 
-    # Run pipeline 1D only
-    print_elapsed_time "Running 2D->1D Pipeline"
-    julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+    # # Run pipeline 1D only
+    # print_elapsed_time "Running 2D->1D Pipeline"
+    # julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
 
     # End of night plotting script
     print_elapsed_time "Making Plots"
