@@ -1,8 +1,8 @@
 using StatsBase: iqr
 using Jackknife
 
-# ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
-ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
+ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
+#ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^4
@@ -11,6 +11,11 @@ bad_flat_pix_bits = 2^6;
 bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
 bad_chi2_pix_bits = 2^9;
 bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits;
+
+# flags for 1d flux extraction
+bad_1d_failed_extract = 2^10;
+bad_1d_no_good_pix = 2^11;
+bad_1d_neff = 2^12;
 
 function initalize_git(git_dir)
     git_commit = LibGit2.head(git_dir)

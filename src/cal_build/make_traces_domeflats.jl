@@ -76,7 +76,7 @@ end
     # Load in the exact set of exposures
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
-    flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i], expid[i], chip, "DOMEFLAT")
+    flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i], expid[i], chip, "DOMEFLAT", use_cal = true)
              for chip in chips, i in eachindex(mjd)]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
@@ -90,10 +90,14 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
     f = jldopen(fname)
     image_data = f["dimage"][1:2048, 1:2048]
     ivar_image = f["ivarimage"][1:2048, 1:2048]
+    pix_bitmask_image = f["pix_bitmask"][1:2048, 1:2048] 
     close(f)
 
+#    trace_params, trace_param_covs = trace_extract(
+#        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
+    good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0) 
     trace_params, trace_param_covs = trace_extract(
-        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; image_mask = nothing)
+        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = good_pixels)
 
     jldsave(
         parg["trace_dir"] *
