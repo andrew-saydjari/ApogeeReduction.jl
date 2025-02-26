@@ -134,7 +134,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
         comb_model_flux .= 0
         model_var_indv .= 0
         comb_model_var .= 0
-	new_flux_1d .= 0
+        new_flux_1d .= 0
 
         for repeat_ind in 1:n_max_repeat
 	    new_comb_model_flux .= 0
