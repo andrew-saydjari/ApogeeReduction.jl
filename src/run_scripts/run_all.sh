@@ -60,6 +60,7 @@ julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --
 
 # Run the reduction pipeline to 2D/2Dcal and stop
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
+# --workers_per_node 28 ## sometimes have to adjust this, could programmatically set based on the average or max read number in the exposures for that night
 julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 # Only continue if run_2d_only is false

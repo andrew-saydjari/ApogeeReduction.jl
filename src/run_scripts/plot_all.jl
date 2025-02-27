@@ -176,8 +176,12 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     nan_flux[outmsk[:, fib] .== 0] .= NaN
 
     # Get full wavelength limits and add padding
-    full_xlims = (minimum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) - 2,
-        maximum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) + 2)
+    full_xlims = if all(isnan, nan_flux)
+        (minimum(logUniWaveAPOGEE), maximum(logUniWaveAPOGEE))
+    else
+        (minimum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) - 2,
+         maximum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) + 2)
+    end
     full_mask = full_xlims[1] .<= logUniWaveAPOGEE .<= full_xlims[2]
     full_ylims = extrema(filter(!isnan, nan_flux[full_mask]))
     full_yrange = full_ylims[2] - full_ylims[1]
