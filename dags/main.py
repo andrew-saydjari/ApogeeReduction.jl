@@ -30,9 +30,13 @@ def wait_for_slurm(job_id):
 
 # Modify your BashOperator to capture and wait for the job ID
 def submit_and_wait(bash_command, **context):
+    # Set environment variable for the subprocess
+    env = os.environ.copy()
+    env["SLACK_CHANNEL"] = "C08B7FKMP16" # apogee-reduction-jl
+    
     # Now bash_command comes directly from the arguments
     print(f"Submitting command: {bash_command}")
-    result = subprocess.run(bash_command.split(), capture_output=True, text=True)
+    result = subprocess.run(bash_command.split(), capture_output=True, text=True, env=env)
     
     if result.returncode != 0:
         raise Exception(f"SLURM submission failed: {result.stderr}")
