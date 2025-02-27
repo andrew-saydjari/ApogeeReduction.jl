@@ -123,8 +123,10 @@ with DAG(
             python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
         )
 
+    # Replace the observatory_groups section with this new implementation
+    # Process LCO first, then APO (temporaily, while we are still doing serial reductinos)
     observatory_groups = []
-    for observatory in observatories:
+    for observatory in ["lco", "apo"]:  # Changed order to LCO first
         with TaskGroup(group_id=observatory) as group:
             filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.done"
             transfer = FileSensor(
@@ -179,11 +181,14 @@ with DAG(
                 ]               
             )   
             transfer >> darks >> flats >> science
-        
+            
         observatory_groups.append(group)
 
-        # Add final notification task
-    
+    # Modify the final dependencies to chain the observatories sequentially
+    group_git >> group_setup >> observatory_groups[0] >> observatory_groups[1] >> final_notification
+    # group_git >> group_setup >> observatory_groups >> final_notification ## this is the original we want to use during parallel reductions
+
+    # Add final notification task
     final_notification = PythonOperator(
         task_id="completion_notification",
         python_callable=lambda **_: None,  # dummy function that does nothing
@@ -194,8 +199,3 @@ with DAG(
         ],
         dag=dag
     )
-
-    group_git >> group_setup >> observatory_groups >> final_notification
-    
-
-
