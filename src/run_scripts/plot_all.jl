@@ -180,7 +180,7 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
         (minimum(logUniWaveAPOGEE), maximum(logUniWaveAPOGEE))
     else
         (minimum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) - 2,
-         maximum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) + 2)
+            maximum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) + 2)
     end
     full_mask = full_xlims[1] .<= logUniWaveAPOGEE .<= full_xlims[2]
     full_ylims = extrema(filter(!isnan, nan_flux[full_mask]))
