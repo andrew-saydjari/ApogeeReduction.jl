@@ -184,10 +184,6 @@ with DAG(
             
         observatory_groups.append(group)
 
-    # Modify the final dependencies to chain the observatories sequentially
-    group_git >> group_setup >> observatory_groups[0] >> observatory_groups[1] >> final_notification
-    # group_git >> group_setup >> observatory_groups >> final_notification ## this is the original we want to use during parallel reductions
-
     # Add final notification task
     final_notification = PythonOperator(
         task_id="completion_notification",
@@ -199,3 +195,7 @@ with DAG(
         ],
         dag=dag
     )
+    
+    # Modify the final dependencies to chain the observatories sequentially
+    group_git >> group_setup >> observatory_groups[0] >> observatory_groups[1] >> final_notification
+    # group_git >> group_setup >> observatory_groups >> final_notification ## this is the original we want to use during parallel reductions
