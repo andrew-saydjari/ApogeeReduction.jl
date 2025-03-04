@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# run all the data for a given night. Arguments documented below
+
 #SBATCH --account=sdss-np
 #SBATCH --partition=sdss-shared-np
 #SBATCH --nodes=1
@@ -25,6 +28,7 @@ else
 fi
 juliaup add 1.11.0
 
+# ARGUMENTS
 # hardcode the mjd and expid for now
 tele=$1
 mjd=$2

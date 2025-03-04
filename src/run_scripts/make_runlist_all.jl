@@ -1,3 +1,5 @@
+# makes a runlist of all the exposures that should be run for a given night.
+# called by run_all.sh
 using Pkg;
 Pkg.instantiate();
 using HDF5, JLD2, ArgParse, DataFrames
