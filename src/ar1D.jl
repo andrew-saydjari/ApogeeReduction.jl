@@ -102,7 +102,7 @@ end
 
 function get_fibTargDict(f, tele, mjd, expid)
     # translate confSummary/almanac terminology to AR.jl terminology
-    const fps_era_fiber_category_names = Dict(
+    fps_era_fiber_category_names = Dict(
         "science" => "sci",
         "sky_boss" => "skyB",
         "standard_apogee" => "tel",
