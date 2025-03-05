@@ -172,9 +172,8 @@ git_branch, git_commit = initalize_git(src_dir);
         dtime_read = (hdr["INTOFF"] / 1000)seconds #dt_read,seconds
         dtime_delay = hdr["INTDELAY"]seconds #seconds
 
-        mjd_mid_exposure = modified_julian(image_start_time + dtime_delay 
-	                                   + dtime_read*(n_read_dropped + 0.5*nread_used))
-        
+        mjd_mid_exposure = modified_julian(image_start_time + dtime_delay
+                                           + dtime_read * (n_read_dropped + 0.5 * nread_used))
 
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
