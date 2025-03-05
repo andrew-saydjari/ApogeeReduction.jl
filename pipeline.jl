@@ -113,15 +113,13 @@ flush(stdout);
     using FITSIO, HDF5, FileIO, JLD2, Glob
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, SIRS, ProgressMeter
-    using Dates: DateTime
+    using AstroTime: from_utc, modified_julian, seconds
 
     src_dir = "./"
     include(src_dir * "src/ar3D.jl")
     include(src_dir * "src/ar2Dcal.jl")
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
-
-    mjd_datetime = DateTime("1858-11-17T00:00:00.000", "y-m-dTH:M:S.s")
 end
 
 println(BLAS.get_config());
@@ -146,9 +144,6 @@ git_branch, git_commit = initalize_git(src_dir);
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
 
-        sec_since_mjd = (DateTime(df."date-obs"[expid], "y-m-dTH:M:S.s") - mjd_datetime).value /
-                        1000
-
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
             df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
@@ -171,6 +166,15 @@ git_branch, git_commit = initalize_git(src_dir);
 
         tdat = @view cubedat[:, :, firstind_loc:end]
         nread_used = size(tdat, 3) - 1
+
+        n_read_dropped = firstind_loc-1
+        image_start_time = from_utc(hdr["DATE-OBS"])
+        dtime_read = (hdr["INTOFF"]/1000)seconds #dt_read,seconds
+        dtime_delay = hdr["INTDELAY"]seconds #seconds
+
+        mjd_mid_exposure = modified_julian(image_start_time + dtime_delay 
+	                                   + dtime_read*(n_read_dropped + 0.5*nread_used))
+        
 
         ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
         if cor1fnoise
@@ -221,7 +225,7 @@ git_branch, git_commit = initalize_git(src_dir);
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
             joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage,
-            nread_used, sec_since_mjd, git_branch, git_commit)
+            nread_used, mjd_mid_exposure, git_branch, git_commit)
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
     end
 
@@ -233,7 +237,7 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
         nread_used = load(fname, "nread_used")
-        sec_since_mjd = load(fname, "sec_since_mjd")
+        mjd_mid_exposure = load(fname, "mjd_mid_exposure")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
 
@@ -265,7 +269,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(
-            outfname; dimage, ivarimage, pix_bitmask, nread_used, sec_since_mjd, git_branch, git_commit)
+            outfname; dimage, ivarimage, pix_bitmask, nread_used, mjd_mid_exposure, git_branch, git_commit)
     end
 end
 t_now = now();
