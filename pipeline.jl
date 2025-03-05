@@ -146,7 +146,8 @@ git_branch, git_commit = initalize_git(src_dir);
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
 
-        sec_since_mjd = (DateTime(df."date-obs"[expid],"y-m-dTH:M:S.s")-mjd_datetime).value/1000 
+        sec_since_mjd = (DateTime(df."date-obs"[expid], "y-m-dTH:M:S.s") - mjd_datetime).value /
+                        1000
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
