@@ -121,8 +121,7 @@ flush(stdout);
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
 
-    mjd_datetime = DateTime("1858-11-17T00:00:00.000","y-m-dTH:M:S.s")
-
+    mjd_datetime = DateTime("1858-11-17T00:00:00.000", "y-m-dTH:M:S.s")
 end
 
 println(BLAS.get_config());
@@ -147,7 +146,8 @@ git_branch, git_commit = initalize_git(src_dir);
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
 
-        sec_since_mjd = (DateTime(df."date-obs"[expid],"y-m-dTH:M:S.s")-mjd_datetime).value/1000 
+        sec_since_mjd = (DateTime(df."date-obs"[expid], "y-m-dTH:M:S.s") - mjd_datetime).value /
+                        1000
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
@@ -220,7 +220,8 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage, nread_used, sec_since_mjd, git_branch, git_commit)
+            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage,
+            nread_used, sec_since_mjd, git_branch, git_commit)
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
     end
 
