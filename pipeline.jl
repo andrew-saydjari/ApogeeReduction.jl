@@ -121,8 +121,7 @@ flush(stdout);
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
 
-    mjd_datetime = DateTime("1858-11-17T00:00:00.000","y-m-dTH:M:S.s")
-
+    mjd_datetime = DateTime("1858-11-17T00:00:00.000", "y-m-dTH:M:S.s")
 end
 
 println(BLAS.get_config());
