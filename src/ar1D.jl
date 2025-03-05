@@ -108,6 +108,10 @@ function get_fibTargDict(f, tele, mjd, expid)
         "standard_apogee" => "tel",
         "sky_apogee" => "sky"
     )
+    # other fiber types:
+    # "blank"s from plate era
+    # FPI era "serendipitous" APOGEE fibers are those which "accidentally" point at a bright
+    # star (for BOSS reasons).
 
     # worry about the read-in overhead per expid?
     df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
