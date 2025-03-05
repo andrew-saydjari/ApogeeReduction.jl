@@ -6,15 +6,18 @@ using FITSIO
 
 function apz2cube(fname)
     f = FITS(fname)
-    hdr = read_header(f[2])
+    #    hdr_dict = Dict("ave" => read_header(f[2]))
+    hdr_dict = Dict()
+    hdr_dict[1] = read_header(f[3])
     avg_dcounts = read(f[2])
     cubedat = zeros(Float32, size(avg_dcounts)..., length(f) - 2) #use float bc of NaN
     cubedat[:, :, 1] .= read(f[3])
     for i in 2:(length(f) - 2)
+        hdr_dict[i] = read_header(f[i + 2])
         cubedat[:, :, i] .= read(f[i + 2]) .+ avg_dcounts .+ cubedat[:, :, i - 1]
     end
     close(f)
-    return cubedat, hdr
+    return cubedat, hdr_dict
 end
 
 # feeling against this sort of subtraction, but we do see why one might want to do it in the darks
