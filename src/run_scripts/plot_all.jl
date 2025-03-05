@@ -1,4 +1,5 @@
 # This is a script that makes the plots for a nightly processing and posts them to the slack channel.
+# called by run_all.sh
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Random, HDF5, DataFrames
 
 src_dir = "../"
