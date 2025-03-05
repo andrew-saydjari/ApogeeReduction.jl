@@ -113,12 +113,16 @@ flush(stdout);
     using FITSIO, HDF5, FileIO, JLD2, Glob
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, SIRS, ProgressMeter
+    using Dates: DateTime
 
     src_dir = "./"
     include(src_dir * "src/ar3D.jl")
     include(src_dir * "src/ar2Dcal.jl")
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
+
+    mjd_datetime = DateTime("1858-11-17T00:00:00.000","y-m-dTH:M:S.s")
+
 end
 
 println(BLAS.get_config());
@@ -142,6 +146,8 @@ git_branch, git_commit = initalize_git(src_dir);
         df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
+
+        sec_since_mjd = (DateTime(df."date-obs"[expid],"y-m-dTH:M:S.s")-mjd_datetime).value/1000 
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
@@ -214,7 +220,7 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage, nread_used, git_branch, git_commit)
+            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage, nread_used, sec_since_mjd, git_branch, git_commit)
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
     end
 
@@ -226,6 +232,7 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
         nread_used = load(fname, "nread_used")
+        sec_since_mjd = load(fname, "sec_since_mjd")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
 
@@ -257,7 +264,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(
-            outfname; dimage, ivarimage, pix_bitmask, nread_used, git_branch, git_commit)
+            outfname; dimage, ivarimage, pix_bitmask, nread_used, sec_since_mjd, git_branch, git_commit)
     end
 end
 t_now = now();
