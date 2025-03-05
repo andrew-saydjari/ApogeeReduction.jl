@@ -39,7 +39,7 @@ function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_hal
 end
 
 """
-Extract a 1D spectrum using a boxcar kernel with width from trace_params. This is used twice. 
+Extract a 1D spectrum using a boxcar kernel with width from trace_params. This is used twice.
 Once for the flux and once for the variance.
 """
 function extract_boxcar_core(dimage_in, trace_params, boxcar_halfwidth)
@@ -227,6 +227,18 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
 end
 
 function get_fibTargDict(f, tele, mjd, expid)
+    # translate confSummary/almanac terminology to AR.jl terminology
+    fps_era_fiber_category_names = Dict(
+        "science" => "sci",
+        "sky_boss" => "skyB",
+        "standard_apogee" => "tel",
+        "sky_apogee" => "sky"
+    )
+    # other fiber types:
+    # "blank"s from plate era
+    # FPI era "serendipitous" APOGEE fibers are those which "accidentally" point at a bright
+    # star (for BOSS reasons).
+
     # worry about the read-in overhead per expid?
     df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
     mjdfps2plate = get_fps_plate_divide(tele)
@@ -237,7 +249,8 @@ function get_fibTargDict(f, tele, mjd, expid)
     fibtargDict = if (df_exp.exptype[expid] == "OBJECT")
         try
             df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configNumStr)"]))
-            Dict(parse.(Int, df_fib[!, "fiber_id"]) .=> df_fib[!, "target_type"])
+            Dict(parse.(Int, df_fib[!, "fiber_id"]) .=>
+                get.(fps_era_fiber_category_names, df_fib[!, "category"]))
         catch
             Dict(1:300 .=> "fiberTypeFail")
         end
