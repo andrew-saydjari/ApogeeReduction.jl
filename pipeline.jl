@@ -169,7 +169,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         n_read_dropped = firstind_loc - 1
         image_start_time = from_utc(hdr["DATE-OBS"])
-        dtime_read = (hdr["INTOFF"]/1000)seconds #dt_read,seconds
+        dtime_read = (hdr["INTOFF"] / 1000)seconds #dt_read,seconds
         dtime_delay = hdr["INTDELAY"]seconds #seconds
 
         mjd_mid_exposure = modified_julian(image_start_time + dtime_delay 
