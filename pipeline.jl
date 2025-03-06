@@ -182,7 +182,7 @@ git_branch, git_commit = initalize_git(src_dir);
         mjd_mid_exposure_rough = modified_julian(first_image_start_time
                                                  +
                                                  dtime_read *
-                                                 (0.5 + n_read_dropped + 0.5 * (size(tdat, 3))))
+                                                 (0.5 + 0.5 * (size(tdat, 3))))
         mjd_mid_exposure_precise = modified_julian(first_image_start_time + 0.5 * dtime_read
                                                    +
                                                    0.5 *
