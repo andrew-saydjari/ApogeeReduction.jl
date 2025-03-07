@@ -294,9 +294,9 @@ git_branch, git_commit = initalize_git(src_dir);
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(
-            outfname; dimage, ivarimage, pix_bitmask, nread_used, 
-	    mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
-	    mjd_mid_exposure, git_branch, git_commit)
+            outfname; dimage, ivarimage, pix_bitmask, nread_used,
+            mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
+            mjd_mid_exposure, git_branch, git_commit)
     end
 end
 t_now = now();
