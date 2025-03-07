@@ -304,8 +304,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid;
     #only keep peaks that are substantially above the minimum function
     relative_fluxes = (poss_local_max_fluxes .- med_min_fluxes) ./
                       (med_max_fluxes .- med_min_fluxes)
-    good_max_inds = abs.(relative_fluxes .- 1.0) .< 0.5
-
+    good_max_inds = (abs.(relative_fluxes .- 1.0) .< 0.5) .& (local_max_waves .>= 11) .&
+                    (local_max_waves .<= 2048 - 11)
     good_y_vals = local_max_waves[good_max_inds]
 
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
