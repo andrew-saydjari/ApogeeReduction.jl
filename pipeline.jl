@@ -176,13 +176,21 @@ git_branch, git_commit = initalize_git(src_dir);
         last_image_start_time = TAIEpoch(hdr_dict[lastind_loc]["DATE-OBS"])
         dtime_read = (hdr_dict[firstind_loc]["INTOFF"] / 1000 / 3600 / 24)days #dt_read, orig in ms, convert to days
         dtime_delay = (hdr_dict[firstind_loc]["INTDELAY"] / 3600 / 24)days #orig in seconds, convert to days
+        exptime_est = (hdr_dict[firstind_loc]["EXPTIME"] / 3600 / 24)days
 
-        # DO NOT use dtime_delay because we start directly at first_image_start_time
+        # NOT using dtime_delay because we start directly at first_image_start_time
+        # (though we might need to think about this more: not sure what dtime_delay does)
         # REMEMBER to add half of a dtime_read to shift to center of exposure
+
+        # Like DRP outputs (we think)
+        mjd_mid_exposure_old = modified_julian(first_image_start_time 
+						+ 0.5 * exptime_est * size(tdat, 3) / nread_total)
+        # Using dread_time*nread_USED
         mjd_mid_exposure_rough = modified_julian(first_image_start_time
                                                  +
                                                  dtime_read *
                                                  (0.5 + 0.5 * (size(tdat, 3) - 1)))
+        # Using times directly from header
         mjd_mid_exposure_precise = modified_julian(first_image_start_time + 0.5 * dtime_read
                                                    +
                                                    0.5 *
@@ -238,8 +246,8 @@ git_branch, git_commit = initalize_git(src_dir);
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
             joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage,
-            nread_used, mjd_mid_exposure_rough, mjd_mid_exposure_precise, mjd_mid_exposure,
-            git_branch, git_commit)
+            nread_used, mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise, 
+	    mjd_mid_exposure, git_branch, git_commit)
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
     end
 
@@ -251,6 +259,7 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
         nread_used = load(fname, "nread_used")
+        mjd_mid_exposure_old = load(fname, "mjd_mid_exposure_old")
         mjd_mid_exposure_rough = load(fname, "mjd_mid_exposure_rough")
         mjd_mid_exposure_precise = load(fname, "mjd_mid_exposure_precise")
         mjd_mid_exposure = load(fname, "mjd_mid_exposure")
@@ -285,7 +294,9 @@ git_branch, git_commit = initalize_git(src_dir);
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(
-            outfname; dimage, ivarimage, pix_bitmask, nread_used, mjd_mid_exposure, git_branch, git_commit)
+            outfname; dimage, ivarimage, pix_bitmask, nread_used, 
+	    mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
+	    mjd_mid_exposure, git_branch, git_commit)
     end
 end
 t_now = now();
