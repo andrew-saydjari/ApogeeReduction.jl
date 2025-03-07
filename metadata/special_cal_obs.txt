@@ -2,7 +2,7 @@
 #tele  mjd      expid_range          cal_type    description
 apo    60356    47940110-47940123    b2b         "back-to-back flat exposures"
 lco    60425    48630077-48630084    b2b         "back-to-back flat exposures"
-apo    59549    39870035-39870035    spQF        "sparsePak quartz flat"
+apo    59549    39870034-39870043    spQF        "sparsePak quartz flat"
 lco    60044    44820002-44820024    spQF        "sparsePak quartz flat"
 apo    59145    35830008-35830037    uD          "ultra dark, 100 reads"
 lco    59142    35800002-35800031    uD          "ultra dark, 100 reads"
