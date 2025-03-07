@@ -183,8 +183,9 @@ git_branch, git_commit = initalize_git(src_dir);
         # REMEMBER to add half of a dtime_read to shift to center of exposure
 
         # Like DRP outputs (we think)
-        mjd_mid_exposure_old = modified_julian(first_image_start_time 
-						+ 0.5 * exptime_est * size(tdat, 3) / nread_total)
+        mjd_mid_exposure_old = modified_julian(first_image_start_time
+                                               +
+                                               0.5 * exptime_est * size(tdat, 3) / nread_total)
         # Using dread_time*nread_USED
         mjd_mid_exposure_rough = modified_julian(first_image_start_time
                                                  +
