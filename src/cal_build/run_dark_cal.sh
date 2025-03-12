@@ -6,7 +6,7 @@
 
 #SBATCH --mem=0 #requesting all of the memory on the node
 
-#SBATCH --time=96:00:00
+#SBATCH --time=8:00:00
 #SBATCH --job-name=ApogeeReduction_dark_cal
 #SBATCH --output=slurm_logs/%x_%j.out
 #SBATCH --err=slurm_logs/%x_%j.err
