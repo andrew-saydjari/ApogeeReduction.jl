@@ -16,10 +16,6 @@ if tmux has-session -t $BASE_SESSION_NAME 2>/dev/null; then
     SESSION_NAME="${BASE_SESSION_NAME}_$i"
 fi
 
-# Find the most recent SLURM output files
-SLURM_OUT=$(ls -t ar*.out | head -n1)
-SLURM_ERR=$(ls -t ar*.err | head -n1)
-
 # Create a new tmux session
 tmux new-session -d -s $SESSION_NAME
 
