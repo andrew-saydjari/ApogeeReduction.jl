@@ -3,7 +3,7 @@
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
-module load sdssdb/main almanac/default sdsstools postgresql ffmpeg
+module load sdssdb/main almanac/0.1.4 sdsstools postgresql ffmpeg
 if [ -n "$SLURM_JOB_NODELIST" ]; then
     echo $SLURM_JOB_NODELIST
 else
