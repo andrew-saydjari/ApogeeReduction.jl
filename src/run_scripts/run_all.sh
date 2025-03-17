@@ -55,6 +55,7 @@ print_elapsed_time() {
 
 # get the data summary file for the MJD
 print_elapsed_time "Running Almanac"
+# switch to almanac -vvv for true verbosity (but only after upgrading to almanac 0.1.5)
 almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file --fibers
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imagine sitting at ApogeeReduction.jl level)
