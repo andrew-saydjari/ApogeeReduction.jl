@@ -3,7 +3,7 @@
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
-module load sdssdb/main almanac sdsstools postgresql ffmpeg
+module load sdssdb/main almanac/0.1.4 sdsstools postgresql ffmpeg
 juliaup add 1.11.0
 
 # hardcode the mjd and expid for now

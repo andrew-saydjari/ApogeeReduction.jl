@@ -12,7 +12,6 @@
 #SBATCH --time=8:00:00
 #SBATCH --job-name=ar_all
 #SBATCH --output=slurm_logs/%x_%j.out
-#SBATCH --err=slurm_logs/%x_%j.err
 
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=7155301634@vtext.com
@@ -20,7 +19,8 @@
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
-module load sdssdb/main almanac sdsstools postgresql ffmpeg
+# TODO switch to almanac/default once that's working.
+module load sdssdb/main almanac/0.1.4 sdsstools postgresql ffmpeg
 if [ -n "$SLURM_JOB_NODELIST" ]; then
     echo $SLURM_JOB_NODELIST
 else
@@ -56,6 +56,7 @@ print_elapsed_time() {
 
 # get the data summary file for the MJD
 print_elapsed_time "Running Almanac"
+# switch to almanac -vvv for true verbosity (but only after upgrading to almanac 0.1.5)
 almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_file --fibers
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imagine sitting at ApogeeReduction.jl level)
