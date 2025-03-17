@@ -3,7 +3,7 @@
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
-module load sdssdb/main almanac sdsstools postgresql ffmpeg
+module load sdssdb/main almanac/default sdsstools postgresql ffmpeg
 if [ -n "$SLURM_JOB_NODELIST" ]; then
     echo $SLURM_JOB_NODELIST
 else
@@ -43,19 +43,19 @@ declare -a job_info=()
 while read -r line; do
     # Skip comments and empty lines
     [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
-    
+
     # Read fields from each line
     read -r tele mjd expid_range cal_type description <<< "$line"
-    
+
     # Only process b2b calibration types
-    if [ "$cal_type" = "b2b" ]; then     
+    if [ "$cal_type" = "b2b" ]; then
         # Extract start and end expids from range and remove first 4 digits
         expid_start=$(echo $expid_range | cut -d'-' -f1 | sed 's/^[0-9]\{4\}//')
         expid_end=$(echo $expid_range | cut -d'-' -f2 | sed 's/^[0-9]\{4\}//')
-     
+
         # print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
         sbatchCustom --job-name=b2b_${tele}_${mjd} ./src/run_scripts/run_all.sh ${tele} ${mjd} true ${data_dir}
-        
+
         # Store job ID and associated information
         job_ids+=($SLURM_ID)
         job_info+=("$tele|$mjd|$expid_start|$expid_end")
@@ -77,7 +77,7 @@ print_elapsed_time "Running all Back2Back plots"
 for i in "${!job_info[@]}"; do
     # Extract stored information
     IFS='|' read -r tele mjd expid_start expid_end <<< "${job_info[$i]}"
-    
+
     print_elapsed_time "Making Back2Back Plots $tele $mjd"
     julia +1.11.0 --project="./" src/verify_scripts/back2back_flats.jl \
         --tele $tele \
