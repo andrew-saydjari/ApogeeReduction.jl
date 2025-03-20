@@ -16,7 +16,7 @@
 
     # pepper with cosmic rays. These diffs should be excluded
     n_crs = 10000
-    cr_count = 1e6
+    cr_count = 1e4
     crs = zeros(size(dcounts))
     crs[rand(rng, eachindex(dcounts), n_crs)] .= cr_count
     dcounts .+= crs
@@ -29,13 +29,18 @@
     outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5) .* gainMat
     outdat ./= gainMat
 
-    @time dimage, ivarimage, chisqimage = ApogeeReduction.sutr_wood!(
+    @time dimage, ivarimage, chisqimage, CRimage, sat_mask = ApogeeReduction.sutr_wood!(
         outdat, gainMat, readVarMat)
 
     flux_diffs = (dimage .- true_im)
     zscores = flux_diffs .* sqrt.(ivarimage)
 
     high_flux_mask = (true_im .> 1000)
+
+    @test all(cr_mask[CRimage .> 0])  # everything flagged as CR is actually CR
+    @test mean(CRimage[cr_mask])≈1 rtol=2e-3 # nearly all CR pixels are flagged
+
+    @test sum(sat_mask) == 0 # no saturated pixels
 
     # mean zscore should be 0, but it's biased at low fluxes
     @test isapprox(mean(zscores), 0.0, atol = 0.05)
