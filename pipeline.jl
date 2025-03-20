@@ -228,10 +228,10 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage, chisqimage, CRimage = if extractMethod_loc == "dcs"
+        dimage, ivarimage, chisqimage, CRimage, saturation_image = if extractMethod_loc == "dcs"
             # TODO some kind of outlier rejection, this just keeps all diffs
             images = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
-            images..., zeros(Int, size(images[1]))
+            images..., zeros(Int, size(images[1])), zeros(Int, size(images[1]))
         elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
             sutr_wood!(outdat, gainMatDict[chip], readVarMatDict[chip])
@@ -246,9 +246,9 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         jldsave(
-            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage, CRimage,
-            nread_used, mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
-            mjd_mid_exposure, git_branch, git_commit)
+            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage,
+            CRimage, saturation_image, nread_used, mjd_mid_exposure_old, mjd_mid_exposure_rough,
+            mjd_mid_exposure_precise, mjd_mid_exposure, git_branch, git_commit)
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
     end
 
@@ -266,6 +266,7 @@ git_branch, git_commit = initalize_git(src_dir);
         mjd_mid_exposure = load(fname, "mjd_mid_exposure")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
+        saturation_mask = load(fname, "saturation_mask")
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
@@ -292,6 +293,7 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask .|= (CRimage .== 1) * 2^7
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
+        pix_bitmask .|= saturation_mask * 2^13
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(

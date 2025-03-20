@@ -64,6 +64,21 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage), zeros(Int, size(dimage)) #output in DN/read
 end
 
+"""
+Find pixels that are saturated in the datacube. This must be called before the datacube is
+overwritten with the difference images. Returns a mask of the saturated pixels (not reads).
+"""
+function saturation_mask(datacube; high_ADU_threshold = 35000, flat_read_threshold = 200)
+    mask = zeros(Bool, size(datacube)[1:2])
+    for i in axes(datacube, 1), j in axes(datacube, 2)
+        if (datacube[i, j, end] > high_ADU_threshold) &&
+           (datacube[i, j, end] - datacube[i, j, end - 1] < flat_read_threshold)
+            mask[i, j] = true
+        end
+    end
+    mask
+end
+
 function outlier_mask(dimages; clip_threshold = 20)
     mask = ones(Bool, size(dimages))
     for i in axes(dimages, 1), j in axes(dimages, 2)
@@ -80,8 +95,8 @@ end
 Fit the counts for each read to compute the count rate and variance for each pixel.
 This assumes that all images are sequential (ie separated by the same read time).
 
-In principle, this function is merely taking the weighted-average of the rate diffs for each pixel, 
-under the assumption that their uncertainties are described by a covariance matrix with diagonal 
+In principle, this function is merely taking the weighted-average of the rate diffs for each pixel,
+under the assumption that their uncertainties are described by a covariance matrix with diagonal
 elements given by (2*read_variance + photon_noise) and off-diagonal elements given by -photon_noise.
 In practice solving against this covariance matrix is a bit tricky.  This function uses the Woodbury
 matrix identity to solve the system of equations.
@@ -92,7 +107,7 @@ matrix identity to solve the system of equations.
 - `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
 
 # Keyword Arguments
-- firstind: the index of the first read that should be used. 
+- firstind: the index of the first read that should be used.
 - n_repeat: number of iterations to run, default is 2
 
 # Returns
@@ -100,16 +115,21 @@ A tuple of `(rates, ivars, chi2s)` where:
 - `rates` is the best-fit count rate for each pixel
 - `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
 - `chi2s` is the chi squared value for each pixel
+- `CRimage` is the cosmic ray count image
+- `sat_mask` is the mask of saturated pixels
 
 !!! warning
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
 
-Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler. 
+Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler.
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
 function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
-    # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024 
+    # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
+
+    # identify saturated pixels
+    sat_mask = saturation_mask(datacube)
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
@@ -118,8 +138,10 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     # this view is to minimize indexing headaches
     dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
 
-    all_good_diffs = outlier_mask(dimages)
-    CRimage = sum(.!all_good_diffs, dims = 3)[:, :, 1]
+    not_cosmic_ray = outlier_mask(dimages)
+    # don't try to do CR rejection on saturated pixels
+    not_cosmic_ray[sat_mask, :] .= true
+    CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
 
     rates = dropdims(mean(dimages; dims = 3), dims = 3)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
@@ -144,7 +166,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     d2s = sum(abs2, dimages, dims = 3)
 
     for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
-        good_diffs = all_good_diffs[pixel_ind, :]
+        good_diffs = not_cosmic_ray[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
             read_var = readVarMat[pixel_ind]
@@ -193,7 +215,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         end
     end
     # return rates .* gainMat, ivars ./ (gainMat .^ 2), chi2s, CRimage # outputs in electrons/read
-    return rates, ivars, chi2s, CRimage # outputs in DN/read
+    return rates, ivars, chi2s, CRimage, sat_mask # outputs in DN/read
 end
 
 function load_gain_maps(gainReadCalDir, tele, chips)
@@ -208,7 +230,7 @@ function load_gain_maps(gainReadCalDir, tele, chips)
             view(gainView, 5:2044, 5:2044) .= dat
             gainMatDict[chip] = gainView
         else
-            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error 
+            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error
             @warn "Gain calibration file not found for chip $chip"
             gainMatDict[chip] = 1.9 * ones(Float64, 2560, 2048) # electrons/DN
         end
