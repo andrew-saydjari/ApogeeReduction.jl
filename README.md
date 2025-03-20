@@ -63,6 +63,7 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 1024  | 10    | failed 1D extraction |
 | 2048  | 11    | no nearby good pixels in 1D extraction |
 | 4096  | 12    | neff>50 in 1D extraction |
+| 8192  | 13    | pixel likely saturated |
 
 
 ## Testing

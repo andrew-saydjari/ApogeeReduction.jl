@@ -266,6 +266,7 @@ git_branch, git_commit = initalize_git(src_dir);
         mjd_mid_exposure = load(fname, "mjd_mid_exposure")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
+        saturation_mask = load(fname, "saturation_mask")
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
@@ -292,6 +293,7 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask .|= (CRimage .== 1) * 2^7
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
+        pix_bitmask .|= saturation_mask * 2^13
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         jldsave(
