@@ -48,7 +48,7 @@
     # less biased at high fluxes
     @test isapprox(mean((dimage ./ true_im)[high_flux_mask]), 1, atol = 3e-4)
 
-    # Same tests, but only for CR pixels, and with looser tolerances because there are fewer 
+    # Same tests, but only for CR pixels, and with looser tolerances because there are fewer
     @test isapprox(mean(zscores[cr_mask]), 0.0, atol = 0.05)
     @test isapprox(mean(zscores[cr_mask .& high_flux_mask]), 0.0, atol = 1.6e-2) # 1e-2
     @test isapprox(std(zscores[cr_mask]), 1, atol = 0.03) #TODO not passing?
