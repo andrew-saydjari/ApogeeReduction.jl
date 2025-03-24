@@ -19,92 +19,102 @@ function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv
         elseif n == 2
             factor = zscore
         elseif n == 3
-            factor = (zscore.^2) .- 1
+            factor = (zscore .^ 2) .- 1
         elseif n == 4
-            factor = (zscore.^3) .- 3 .* zscore
+            factor = (zscore .^ 3) .- 3 .* zscore
         elseif n == 5
-            factor = (zscore.^4) .- 6 .* (zscore.^2) .+ 3
+            factor = (zscore .^ 4) .- 6 .* (zscore .^ 2) .+ 3
         elseif n == 6
-            factor = (zscore.^5) .- 10 .* (zscore.^3) .+ 15 .* zscore
+            factor = (zscore .^ 5) .- 10 .* (zscore .^ 3) .+ 15 .* zscore
         elseif n == 7
-            factor = (zscore.^6) .- 15 .* (zscore.^4) .+ 45 .* (zscore.^2) .- 15
+            factor = (zscore .^ 6) .- 15 .* (zscore .^ 4) .+ 45 .* (zscore .^ 2) .- 15
         elseif n == 8
-            factor = (zscore.^7) .- 21 .* (zscore.^5) .+ 105 .* (zscore.^3) .- 105 .* zscore
+            factor = (zscore .^ 7) .- 21 .* (zscore .^ 5) .+ 105 .* (zscore .^ 3) .- 105 .* zscore
         elseif n == 9
-            factor = (zscore.^8) .- 28 .* (zscore.^6) .+ 210 .* (zscore.^4) .- 420 .* (zscore.^2) .+ 105
+            factor = (zscore .^ 8) .- 28 .* (zscore .^ 6) .+ 210 .* (zscore .^ 4) .-
+                     420 .* (zscore .^ 2) .+ 105
         elseif n == 10
-            factor = (zscore.^9) .- 36 .* (zscore.^7) .+ 378 .* (zscore.^5) .- 1260 .* (zscore.^3) .+ 945 .* zscore
+            factor = (zscore .^ 9) .- 36 .* (zscore .^ 7) .+ 378 .* (zscore .^ 5) .-
+                     1260 .* (zscore .^ 3) .+ 945 .* zscore
         elseif n == 11
-            factor = (zscore.^10) .- 45 .* (zscore.^8) .+ 630 .* (zscore.^6) .- 3150 .* (zscore.^4) .+ 4725 .* (zscore.^2) .- 945
-    #    else
-    #        raise ValueError(f'ERROR: order n={n} for Hermite polynomial is not an option. Must be leq 11.')
+            factor = (zscore .^ 10) .- 45 .* (zscore .^ 8) .+ 630 .* (zscore .^ 6) .-
+                     3150 .* (zscore .^ 4) .+ 4725 .* (zscore .^ 2) .- 945
+            #    else
+            #        raise ValueError(f'ERROR: order n={n} for Hermite polynomial is not an option. Must be leq 11.')
         end
-        
-        gauss = exp.(-0.5 .* (zscore.^2)) ./ ((2*π)^0.5) ./ width
-    
-        return -1 .* gauss .* factor ./ (width .^ (n-1))
+
+        gauss = exp.(-0.5 .* (zscore .^ 2)) ./ ((2 * π)^0.5) ./ width
+
+        return -1 .* gauss .* factor ./ (width .^ (n - 1))
     else
         if n == 0
-    	    dgauss_dz = (1/((2*π)^0.5)) .* exp.(-0.5 .* (zscore.^2))
+            dgauss_dz = (1 / ((2 * π)^0.5)) .* exp.(-0.5 .* (zscore .^ 2))
             #integrate the Gaussian
             return 0.5 .* (1 .+ erf.(zscore ./ (2^0.5))), dgauss_dz
         elseif n == 1
             factor = ones(size(zscore))
-	    dfactor_dz = zeros(size(zscore))
+            dfactor_dz = zeros(size(zscore))
         elseif n == 2
             factor = zscore
-	    dfactor_dz = ones(size(zscore))
+            dfactor_dz = ones(size(zscore))
         elseif n == 3
-            factor = (zscore.^2) .- 1
-	    dfactor_dz = 2 .* (zscore)
+            factor = (zscore .^ 2) .- 1
+            dfactor_dz = 2 .* (zscore)
         elseif n == 4
-            factor = (zscore.^3) .- 3 .* zscore
-	    dfactor_dz = 3 .* (zscore.^2) .- 3
+            factor = (zscore .^ 3) .- 3 .* zscore
+            dfactor_dz = 3 .* (zscore .^ 2) .- 3
         elseif n == 5
-            factor = (zscore.^4) .- 6 .* (zscore.^2) .+ 3
-	    dfactor_dz = 4 .* (zscore.^3) .- (6*2) .* zscore
+            factor = (zscore .^ 4) .- 6 .* (zscore .^ 2) .+ 3
+            dfactor_dz = 4 .* (zscore .^ 3) .- (6 * 2) .* zscore
         elseif n == 6
-            factor = (zscore.^5) .- 10 .* (zscore.^3) .+ 15 .* zscore
-	    dfactor_dz = 5 .* (zscore.^4) .- (10*3) .* (zscore.^2) .+ 15
+            factor = (zscore .^ 5) .- 10 .* (zscore .^ 3) .+ 15 .* zscore
+            dfactor_dz = 5 .* (zscore .^ 4) .- (10 * 3) .* (zscore .^ 2) .+ 15
         elseif n == 7
-            factor = (zscore.^6) .- 15 .* (zscore.^4) .+ 45 .* (zscore.^2) .- 15
-	    dfactor_dz = 6 .* (zscore.^5) .- (15*4) .* (zscore.^3) .+ (45*2) .* (zscore)
+            factor = (zscore .^ 6) .- 15 .* (zscore .^ 4) .+ 45 .* (zscore .^ 2) .- 15
+            dfactor_dz = 6 .* (zscore .^ 5) .- (15 * 4) .* (zscore .^ 3) .+ (45 * 2) .* (zscore)
         elseif n == 8
-            factor = (zscore.^7) .- 21 .* (zscore.^5) .+ 105 .* (zscore.^3) .- 105 .* zscore
-	    dfactor_dz = 7 .* (zscore.^6) .- (21*5) .* (zscore.^4) .+ (105*3) .* (zscore.^2) .- 105
+            factor = (zscore .^ 7) .- 21 .* (zscore .^ 5) .+ 105 .* (zscore .^ 3) .- 105 .* zscore
+            dfactor_dz = 7 .* (zscore .^ 6) .- (21 * 5) .* (zscore .^ 4) .+
+                         (105 * 3) .* (zscore .^ 2) .- 105
         elseif n == 9
-            factor = (zscore.^8) .- 28 .* (zscore.^6) .+ 210 .* (zscore.^4) .- 420 .* (zscore.^2) .+ 105
-	    dfactor_dz = 8 .* (zscore.^7) .- (28*6) .* (zscore.^5) .+ (210*4) .* (zscore.^3) .- (420*2) .* zscore
+            factor = (zscore .^ 8) .- 28 .* (zscore .^ 6) .+ 210 .* (zscore .^ 4) .-
+                     420 .* (zscore .^ 2) .+ 105
+            dfactor_dz = 8 .* (zscore .^ 7) .- (28 * 6) .* (zscore .^ 5) .+
+                         (210 * 4) .* (zscore .^ 3) .- (420 * 2) .* zscore
         elseif n == 10
-            factor = (zscore.^9) .- 36 .* (zscore.^7) .+ 378 .* (zscore.^5) .- 1260 .* (zscore.^3) .+ 945 .* zscore
-	    dfactor_dz = 9 .* (zscore.^8) .- (36*7) .* (zscore.^6) .+ (378*5) .* (zscore.^4) .- (1260*3) .* (zscore.^2) .+ 945
+            factor = (zscore .^ 9) .- 36 .* (zscore .^ 7) .+ 378 .* (zscore .^ 5) .-
+                     1260 .* (zscore .^ 3) .+ 945 .* zscore
+            dfactor_dz = 9 .* (zscore .^ 8) .- (36 * 7) .* (zscore .^ 6) .+
+                         (378 * 5) .* (zscore .^ 4) .- (1260 * 3) .* (zscore .^ 2) .+ 945
         elseif n == 11
-            factor = (zscore.^10) .- 45 .* (zscore.^8) .+ 630 .* (zscore.^6) .- 3150 .* (zscore.^4) .+ 4725 .* (zscore.^2) .- 945
-	    dfactor_dz = 10 .* (zscore.^9) .- (45*8) .* (zscore.^7) .+ (630*6) .* (zscore.^5) .- (3150*4) .* (zscore.^3) .+ (4725*2) .* zscore
-    #    else
-    #        raise ValueError(f'ERROR: order n={n} for Hermite polynomial is not an option. Must be leq 11.')
+            factor = (zscore .^ 10) .- 45 .* (zscore .^ 8) .+ 630 .* (zscore .^ 6) .-
+                     3150 .* (zscore .^ 4) .+ 4725 .* (zscore .^ 2) .- 945
+            dfactor_dz = 10 .* (zscore .^ 9) .- (45 * 8) .* (zscore .^ 7) .+
+                         (630 * 6) .* (zscore .^ 5) .- (3150 * 4) .* (zscore .^ 3) .+
+                         (4725 * 2) .* zscore
+            #    else
+            #        raise ValueError(f'ERROR: order n={n} for Hermite polynomial is not an option. Must be leq 11.')
         end
-        
-        gauss = exp.(-0.5 .* (zscore.^2)) ./ ((2*π)^0.5) ./ width
-	dgauss_dz = gauss .* (-1 .* zscore)
-    
-        return -1 .* gauss .* factor ./ (width .^ (n-1)), -1 .* (gauss .* dfactor_dz .+ dgauss_dz .* factor) ./ (width .^ (n-1)) 
 
+        gauss = exp.(-0.5 .* (zscore .^ 2)) ./ ((2 * π)^0.5) ./ width
+        dgauss_dz = gauss .* (-1 .* zscore)
+
+        return -1 .* gauss .* factor ./ (width .^ (n - 1)),
+        -1 .* (gauss .* dfactor_dz .+ dgauss_dz .* factor) ./ (width .^ (n - 1))
     end
 end
 
-
-function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots=false)
+function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
     if tele == "apo"
-	profile_mjd = "59549"
-	profile_expid = "39870035"
+        profile_mjd = "59549"
+        profile_expid = "39870035"
     elseif tele == "lco"
-	profile_mjd = "60044"
-	profile_expid = "44820015"
+        profile_mjd = "60044"
+        profile_expid = "44820015"
     end
 
-    profile_fname = profile_path * "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2"
-
+    profile_fname = profile_path *
+                    "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2"
 
     prof_params = jldopen(profile_fname)
 
@@ -114,136 +124,147 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots=false)
 
     prof_width_coeffs = prof_params["y_width_coeffs"]
     gh_order = prof_params["gh_order"][1]
-    n_gauss = gh_order+1
-    poly_order = prof_params["poly_order"][1] 
-    prof_height_coeffs = zeros((n_gauss,poly_order+1))
-    smooth_new_indv_widths = ones(size(fiber_inds,1))
-    smooth_new_indv_heights = zeros((size(fiber_inds,1),n_gauss))
+    n_gauss = gh_order + 1
+    poly_order = prof_params["poly_order"][1]
+    prof_height_coeffs = zeros((n_gauss, poly_order + 1))
+    smooth_new_indv_widths = ones(size(fiber_inds, 1))
+    smooth_new_indv_heights = zeros((size(fiber_inds, 1), n_gauss))
     for j in 1:n_gauss
-        prof_height_coeffs[j,:] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials 
-	smooth_new_indv_heights[:,j] .= Polynomial(prof_height_coeffs[j,:]).(fiber_inds)
+        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials 
+        smooth_new_indv_heights[:, j] .= Polynomial(prof_height_coeffs[j, :]).(fiber_inds)
     end
-        
+
     close(prof_params)
 
     if make_plots
         dirNamePlots = "../outdir/plots/"
 
         for j in 1:n_gauss
-
             fig = Figure(size = (800, 800))
             ax = Axis(fig[1, 1],
                 xlabel = "Fiber Index",
                 ylabel = "GH Height $(j-1)",
                 title = "Trace Profile GH Heights\nTele: $(tele), MJD: $(profile_mjd), Chip: $(chip), Expid: $(profile_expid)")
 
-            scatter!(ax, fiber_inds, smooth_new_indv_heights[:,j])
-    
+            scatter!(ax, fiber_inds, smooth_new_indv_heights[:, j])
+
             tracePlot_heights_Path = dirNamePlots *
-                             "GH$(j-1)_heights_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
+                                     "GH$(j-1)_heights_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
             save(tracePlot_heights_Path, fig)
         end
     end
-	
-    med_center_to_fiber_func = fit(prof_fiber_centers,prof_fiber_inds,3)
 
-    min_prof_fib = minimum(prof_fiber_inds) 
-    max_prof_fib = maximum(prof_fiber_inds) 
+    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
 
-    smoothed_cdf_zeros = zeros(size(fiber_inds,1))
-    smoothed_cdf_scales = zeros(size(fiber_inds,1))
+    min_prof_fib = minimum(prof_fiber_inds)
+    max_prof_fib = maximum(prof_fiber_inds)
+
+    smoothed_cdf_zeros = zeros(size(fiber_inds, 1))
+    smoothed_cdf_scales = zeros(size(fiber_inds, 1))
     n_offset_pix = 15
 
-    x = range(start=-n_offset_pix,stop=n_offset_pix,step=1)
-    x_bins = range(start=x[1]-0.5,stop=x[end]+0.5,step=1/n_sub)
-    cdf = zeros(size(x_bins,1))
-    dcdf_dz = zeros(size(x_bins,1))
+    x = range(start = -n_offset_pix, stop = n_offset_pix, step = 1)
+    x_bins = range(start = x[1] - 0.5, stop = x[end] + 0.5, step = 1 / n_sub)
+    cdf = zeros(size(x_bins, 1))
+    dcdf_dz = zeros(size(x_bins, 1))
 
-    all_y_prof = zeros((size(fiber_inds,1),size(x_bins,1)))
-    all_y_prof_deriv = zeros((size(fiber_inds,1),size(x_bins,1)))
+    all_y_prof = zeros((size(fiber_inds, 1), size(x_bins, 1)))
+    all_y_prof_deriv = zeros((size(fiber_inds, 1), size(x_bins, 1)))
 
-    for ind in 1:size(fiber_inds,1)
+    for ind in 1:size(fiber_inds, 1)
         fiber_ind = fiber_inds[ind]
-	cdf[:] .= 0
-	dcdf_dz[:] .= 0
+        cdf[:] .= 0
+        dcdf_dz[:] .= 0
 
         for j in 1:n_gauss
-	    vals,deriv_vals = int_gauss_hermite_term(x_bins,j-1,return_deriv=true)
-            cdf .+= smooth_new_indv_heights[ind,j]*vals
-            dcdf_dz .+= smooth_new_indv_heights[ind,j]*deriv_vals
-	end
+            vals, deriv_vals = int_gauss_hermite_term(x_bins, j - 1, return_deriv = true)
+            cdf .+= smooth_new_indv_heights[ind, j] * vals
+            dcdf_dz .+= smooth_new_indv_heights[ind, j] * deriv_vals
+        end
 
         smoothed_cdf_zeros[ind] = cdf[1]
         cdf .-= smoothed_cdf_zeros[ind]
         smoothed_cdf_scales[ind] = cdf[end]
         cdf ./= smoothed_cdf_scales[ind]
-	dcdf_dz ./= smoothed_cdf_scales[ind]
+        dcdf_dz ./= smoothed_cdf_scales[ind]
 
-	all_y_prof[ind,:] .= cdf
-	all_y_prof_deriv[ind,:] .= dcdf_dz
+        all_y_prof[ind, :] .= cdf
+        all_y_prof_deriv[ind, :] .= dcdf_dz
     end
 
     x_prof_min = x_bins[1]
-    x_prof_max_ind = size(x_bins,1)
+    x_prof_max_ind = size(x_bins, 1)
 
     if make_plots
-        x_centers = 0.5 .* (x_bins[begin+1:end] .+ x_bins[begin:end-1])
+        x_centers = 0.5 .* (x_bins[(begin + 1):end] .+ x_bins[begin:(end - 1)])
 
         fig = Figure(size = (800, 800))
         ax = Axis(fig[1, 1],
             xlabel = "dy (pix)",
             ylabel = "Profile Height",
-	    limits = ((-5,5), nothing),
+            limits = ((-5, 5), nothing),
             title = "Trace Profiles\nTele: $(tele), MJD: $(profile_mjd), Chip: $(chip), Expid: $(profile_expid)")
 
-        for j in 1:size(prof_fiber_inds,1)
+        for j in 1:size(prof_fiber_inds, 1)
             fiber_ind = prof_fiber_inds[j]
-    	    ind = findall(fiber_inds .== fiber_ind)[1]
-       	    cdf[:] .= all_y_prof[ind,:]
-	    pdf = diff(cdf) ./ diff(x_bins)
+            ind = findall(fiber_inds .== fiber_ind)[1]
+            cdf[:] .= all_y_prof[ind, :]
+            pdf = diff(cdf) ./ diff(x_bins)
 
-            lines!(ax, x_centers, pdf .+ 0.02*(j-1))
-    
+            lines!(ax, x_centers, pdf .+ 0.02 * (j - 1))
         end
 
         tracePlot_heights_Path = dirNamePlots *
-                         "GH_profiles_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
+                                 "GH_profiles_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
         save(tracePlot_heights_Path, fig)
     end
 
-    return med_center_to_fiber_func,x_prof_min,x_prof_max_ind,n_sub,min_prof_fib,max_prof_fib,all_y_prof,all_y_prof_deriv
+    return med_center_to_fiber_func,
+    x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
 end
 
-function pdf_func_mult(x,mean,width,fiber_inds,x_prof_min,x_prof_max_ind,n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv;return_deriv=false)
-    x_bins = x[:,1] .+ range(-0.5,size(x,2))'
+function cdf_func_indv(x_bins, mean, width, fiber_ind, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv)
     z_bins = (x_bins .- mean) ./ width
-    z_ints = ceil.(Int,round.((z_bins .- x_prof_min) .* n_sub)) .+ 1
-    z_ints = clamp.(z_ints,1,x_prof_max_ind)
+    z_ints = ceil.(Int, round.((z_bins .- x_prof_min) .* n_sub)) .+ 1
+    z_ints = clamp.(z_ints, 1, x_prof_max_ind)
 
-    fib_ints = (fiber_inds .- min_prof_fib) .+ 1 .+ zeros(Int,size(z_ints))
-    pdfs = diff(getindex.(Ref(all_y_prof), fib_ints, z_ints),dims=2)
+    cdf = all_y_prof[fiber_ind .- min_prof_fib .+ 1, z_ints]
+    return cdf
+end
+
+function pdf_func_mult(x, mean, width, fiber_inds, x_prof_min, x_prof_max_ind, n_sub,
+        min_prof_fib, all_y_prof, all_y_prof_deriv; return_deriv = false)
+    x_bins = x[:, 1] .+ range(-0.5, size(x, 2))'
+    z_bins = (x_bins .- mean) ./ width
+    z_ints = ceil.(Int, round.((z_bins .- x_prof_min) .* n_sub)) .+ 1
+    z_ints = clamp.(z_ints, 1, x_prof_max_ind)
+
+    fib_ints = (fiber_inds .- min_prof_fib) .+ 1 .+ zeros(Int, size(z_ints))
+    pdfs = diff(getindex.(Ref(all_y_prof), fib_ints, z_ints), dims = 2)
     if !return_deriv
         return pdfs
     else
-        dpdf_dmus = diff(getindex.(Ref(all_y_prof_deriv), fib_ints, z_ints),dims=2) .* (-1 ./ width)
-        dpdf_dsigs = diff(getindex.(Ref(all_y_prof_deriv), fib_ints, z_ints) .* (-1 .* z_bins ./ width) ,dims=2)
-        return pdfs,dpdf_dmus,dpdf_dsigs
+        dpdf_dmus = diff(getindex.(Ref(all_y_prof_deriv), fib_ints, z_ints), dims = 2) .*
+                    (-1 ./ width)
+        dpdf_dsigs = diff(
+            getindex.(Ref(all_y_prof_deriv), fib_ints, z_ints) .* (-1 .* z_bins ./ width), dims = 2)
+        return pdfs, dpdf_dmus, dpdf_dsigs
     end
 end
 
-
 function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
-	fiber_inds,x_prof_min,x_prof_max_ind,
-        n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv;
+        fiber_inds, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv;
         n_iter = 10, dmu = 0.01, dsig = 0.01, return_cov = false,
         use_first_guess_heights = false, max_center_move = 3,
         min_widths = 0.5, max_widths = 2.0)
     fit_fluxes = copy(all_rel_fluxes[fit_inds])'
     fit_errs = copy(all_rel_errs[fit_inds])'
     fit_ivars = fit_errs .^ -2
-#    fit_ivars[fit_ivars .== 0] .= 1e-10
-    fit_ivars[fit_ivars .== 0] .= minimum(fit_ivars[fit_ivars .!= 0])/1000
+    #    fit_ivars[fit_ivars .== 0] .= 1e-10
+    fit_ivars[fit_ivars .== 0] .= minimum(fit_ivars[fit_ivars .!= 0]) / 1000
 
     curr_guess = copy(first_guess_params)
     new_params = copy(first_guess_params)
@@ -255,7 +276,7 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     M_vects = zeros(Float64,
         (size(fit_fluxes, 1), size(first_guess_params, 2), curr_n_peaks))
     curr_M_T_dot_V_inv = zeros(Float64,
-	(size(first_guess_params, 2),size(fit_fluxes, 1)))
+        (size(first_guess_params, 2), size(fit_fluxes, 1)))
 
     comb_model_fluxes = zeros(size(all_rel_fluxes))
     param_offsets = zeros(Float64, size(curr_guess))
@@ -264,17 +285,19 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_fluxes .= all_rel_fluxes[fit_inds]'
         fit_errs .= all_rel_errs[fit_inds]'
         fit_ivars = fit_errs .^ -2
-#        fit_ivars[fit_ivars .== 0] .= 1e-10
-        fit_ivars[fit_ivars .== 0] .= minimum(fit_ivars[fit_ivars .!= 0])/1000
+        #        fit_ivars[fit_ivars .== 0] .= 1e-10
+        fit_ivars[fit_ivars .== 0] .= minimum(fit_ivars[fit_ivars .!= 0]) / 1000
 
         # CDF version
-        model_fluxes_unit_height,dmodel_dmu,dmodel_dsig = pdf_func_mult(fit_inds,curr_guess[:,2],curr_guess[:,3],
-						 fiber_inds,x_prof_min,x_prof_max_ind,
-						 n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv,return_deriv=true)
+        model_fluxes_unit_height, dmodel_dmu, dmodel_dsig = pdf_func_mult(
+            fit_inds, curr_guess[:, 2], curr_guess[:, 3],
+            fiber_inds, x_prof_min, x_prof_max_ind,
+            n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv, return_deriv = true)
 
-	best_model_fluxes_unit_height = pdf_func_mult(best_model_fit_inds,curr_guess[:,2],curr_guess[:,3],
-                                        fiber_inds,x_prof_min,x_prof_max_ind,
-                                        n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv)
+        best_model_fluxes_unit_height = pdf_func_mult(
+            best_model_fit_inds, curr_guess[:, 2], curr_guess[:, 3],
+            fiber_inds, x_prof_min, x_prof_max_ind,
+            n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv)
 
         if r_ind == 1
             #then fit only for the heights using the first guesses on centers and widths
@@ -320,8 +343,8 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
 
         model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height)
 
-	dmodel_dmu .*= curr_guess[:,1]
-	dmodel_dsig .*= curr_guess[:,1]
+        dmodel_dmu .*= curr_guess[:, 1]
+        dmodel_dsig .*= curr_guess[:, 1]
 
         best_model_fluxes = (curr_guess[:, 1] .* best_model_fluxes_unit_height)
 
@@ -351,18 +374,18 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
             #preallocate curr_M_T_dot_V_inv
             curr_M_T_dot_V_inv[:] = M_vects[:, :, j]' .* fit_ivars[:, j]'
 
-	    try
+            try
                 v_hat[:, j] = (curr_M_T_dot_V_inv * M_vects[:, :, j]) \
                               (curr_M_T_dot_V_inv * flux_diffs[:, j])
                 if (return_cov) & (r_ind == n_iter)
                     # only invert matrix on the last iteration
                     v_hat_cov[:, :, j] = inv(curr_M_T_dot_V_inv * M_vects[:, :, j])
                 end
-	    catch
-	        #put back to the first guess
-	        v_hat[:, j] .= first_guess_params[j, :] .- curr_guess[j, :]
-		v_hat_cov[:, :, j] .= NaN 
-	    end
+            catch
+                #put back to the first guess
+                v_hat[:, j] .= first_guess_params[j, :] .- curr_guess[j, :]
+                v_hat_cov[:, :, j] .= NaN
+            end
         end
 
         new_params[:] = curr_guess .+ v_hat'
@@ -372,9 +395,12 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
             min.(2048 - 11, first_guess_params[:, 2] .+ max_center_move))
         new_params[:, 3] .= clamp.(new_params[:, 3], min_widths, max_widths)
 
-	bad_params = (new_params[:, 3] .<= min_widths .* 1.01) .| (new_params[:, 3] .>= max_widths .* 0.99) .| (new_params[:, 2] .<= first_guess_params[:, 2] .- max_center_move .+ 0.01) .| (new_params[:, 2] .>= first_guess_params[:, 2] .+ max_center_move .- 0.01)
-	new_params[bad_params, :] .= first_guess_params[bad_params, :]
-	v_hat_cov[:, :, bad_params] .= NaN
+        bad_params = (new_params[:, 3] .<= min_widths .* 1.01) .|
+                     (new_params[:, 3] .>= max_widths .* 0.99) .|
+                     (new_params[:, 2] .<= first_guess_params[:, 2] .- max_center_move .+ 0.01) .|
+                     (new_params[:, 2] .>= first_guess_params[:, 2] .+ max_center_move .- 0.01)
+        new_params[bad_params, :] .= first_guess_params[bad_params, :]
+        v_hat_cov[:, :, bad_params] .= NaN
 
         curr_guess .= new_params
     end
@@ -386,11 +412,10 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     end
 end
 
-
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
-	med_center_to_fiber_func,x_prof_min,x_prof_max_ind,n_sub,min_prof_fib,max_prof_fib,all_y_prof,all_y_prof_deriv;
+        med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
+        max_prof_fib, all_y_prof, all_y_prof_deriv;
         good_pixels = nothing, mid = 1025, n_center_cols = 100, verbose = false)
-
     noise_image = 1 ./ sqrt.(ivar_image)
     if isnothing(good_pixels)
         good_pixels = ones(Bool, size(image_data))
@@ -516,7 +541,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
                     (local_max_waves .<= 2048 - 11)
     good_y_vals = local_max_waves[good_max_inds]
 
-
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
     offset_inds = range(start = -4, stop = 4, step = 1)
     #use a larger number of pixels for removing the contribution from neighbouring peaks
@@ -539,7 +563,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     fit_errs = copy(all_rel_errs[fit_inds])
     fit_ivars = fit_errs .^ -2
 
-    curr_fiber_inds = clamp.(ceil.(Int,round.(med_center_to_fiber_func.(float.(good_y_vals)))),min_prof_fib,max_prof_fib)
+    curr_fiber_inds = clamp.(ceil.(Int, round.(med_center_to_fiber_func.(float.(good_y_vals)))),
+        min_prof_fib, max_prof_fib)
 
     # first guess parameters
     first_guess_params = zeros(Float64, size(fit_fluxes, 1), 3)
@@ -557,8 +582,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
-	curr_fiber_inds,x_prof_min,x_prof_max_ind,
-        n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv,
+        curr_fiber_inds, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
         n_iter = 10, dmu = dmu, dsig = dsig, return_cov = false,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
@@ -682,7 +707,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     #This ONLY works because we are fitting all the peaks simultaneously
     #and removing contamination from neighbouring fibers
     offset_inds = range(-7, 7, step = 1)
-#    offset_inds = range(-4, 4, step = 1)
+    #    offset_inds = range(-4, 4, step = 1)
 
     curr_best_heights = zeros(Float64, size(all_peak_locs)) .+ 0.00001
     for j in 1:size(new_params, 1)
@@ -711,12 +736,13 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     first_guess_params[:, 2] .= all_peak_locs #center position index for mu
     first_guess_params[:, 3] .= curr_best_widths # sigma
 
-    curr_fiber_inds = clamp.(ceil.(Int,round.(med_center_to_fiber_func.(all_peak_locs))),min_prof_fib,max_prof_fib)
+    curr_fiber_inds = clamp.(
+        ceil.(Int, round.(med_center_to_fiber_func.(all_peak_locs))), min_prof_fib, max_prof_fib)
 
     new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
-        curr_fiber_inds,x_prof_min,x_prof_max_ind,
-        n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv,
+        curr_fiber_inds, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
         n_iter = 20, dmu = dmu, dsig = dsig, return_cov = false,
         use_first_guess_heights = true, max_center_move = 3,
         min_widths = 0.8 .* first_guess_params[:, 3],
@@ -826,8 +852,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
 
-#    curr_fiber_inds = ceil.(Int,round.(med_center_to_fiber_func.(best_fit_ave_params[:,2])))
-    curr_fiber_inds = clamp.(range(1,size(best_fit_ave_params,1)),min_prof_fib,max_prof_fib)
+    #    curr_fiber_inds = ceil.(Int,round.(med_center_to_fiber_func.(best_fit_ave_params[:,2])))
+    curr_fiber_inds = clamp.(range(1, size(best_fit_ave_params, 1)), min_prof_fib, max_prof_fib)
 
     med_flux = nanmedian(best_fit_ave_params[:, 1], 1)
     good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.1
@@ -870,8 +896,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     all_rel_ivars_mat = 1 ./ (all_rel_errs_mat .^ 2)
     all_rel_ivars_mat[.!all_rel_masks_mat] .= 0
-#    all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= 1e-10
-    all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= minimum(all_rel_ivars_mat[all_rel_ivars_mat .!= 0])/1000
+    #    all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= 1e-10
+    all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= minimum(all_rel_ivars_mat[all_rel_ivars_mat .!= 0]) /
+                                                  1000
     all_rel_errs_mat = all_rel_ivars_mat .^ -0.5
 
     first_guess_params = copy(best_fit_ave_params)
@@ -926,8 +953,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
             all_rel_errs_mat[x_ind, :],
             first_guess_params,
             fit_inds, best_model_fit_inds, offset_inds,
-            curr_fiber_inds,x_prof_min,x_prof_max_ind,
-            n_sub,min_prof_fib,all_y_prof,all_y_prof_deriv,
+            curr_fiber_inds, x_prof_min, x_prof_max_ind,
+            n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
             n_iter = 10, dmu = dmu, dsig = dsig, return_cov = true,
             use_first_guess_heights = true, max_center_move = 1,
             min_widths = 0.5 .* first_guess_params[:, 3],
@@ -960,5 +987,3 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     return param_outputs, param_output_covs
 end
-
-

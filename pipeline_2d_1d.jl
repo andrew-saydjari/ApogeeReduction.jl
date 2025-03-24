@@ -102,6 +102,7 @@ flush(stdout);
     include(src_dir * "src/utils.jl")
     include(src_dir * "src/skyline_peaks.jl")
     include(src_dir * "src/wavecal.jl")
+    include(src_dir * "src/cal_build/traceExtract_GH.jl")
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -121,6 +122,9 @@ git_branch, git_commit = initalize_git(src_dir);
     function process_1D(fname)
         sname = split(split(fname, "/")[end], "_")
         fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
+
+        med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv = gh_profiles(
+            tele, mjd, chip, expid; n_sub = 100)
 
         fnamecal = if (fnameType == "ar2D")
             replace(fname, "ar2D" => "ar2Dcal")
@@ -145,7 +149,9 @@ git_branch, git_commit = initalize_git(src_dir);
             extract_boxcar(dimage, ivarimage, pix_bitmask, regularized_trace_params)
         elseif parg["extraction"] == "optimal"
             #            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
-            extract_optimal_iter(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+            extract_optimal_iter(dimage, ivarimage, pix_bitmask, regularized_trace_params,
+                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+                min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)
         else
             error("Extraction method $(parg["extraction"]) not recognized")
         end
