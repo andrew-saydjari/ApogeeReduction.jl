@@ -100,9 +100,11 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
     flux_1d, ivar_1d, mask_1d
 end
 
-function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
-        small_window_half_size = 2, fit_window_half_size = 5,
-        large_window_half_size = 10, n_max_repeat = 5, flag_thresh = 0.001)
+function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
+        med_center_to_fiber_func, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
+        small_window_half_size = 2, fit_window_half_size = 4,
+        large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001)
     n_xpix = size(trace_params, 1)
     n_ypix = size(dimage, 2)
     n_fibers = size(trace_params, 2)
@@ -153,7 +155,11 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params;
                 full_ypixels = floor(Int, y_peak - large_window_half_size):ceil(
                     Int, y_peak + large_window_half_size)
                 full_ypix_boundaries = [full_ypixels .- 0.5; full_ypixels[end] + 0.5]
-                full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
+                #                full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
+                prof_fib_ind = clamp(fib, min_prof_fib, max_prof_fib)
+                full_model_vals = diff(cdf_func_indv(full_ypix_boundaries, y_peak, y_sigma,
+                    prof_fib_ind, x_prof_min, x_prof_max_ind,
+                    n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv))
 
                 ypixels = full_ypixels[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
                 model_vals = full_model_vals[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
