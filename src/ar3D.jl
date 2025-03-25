@@ -111,7 +111,7 @@ matrix identity to solve the system of equations.
 - n_repeat: number of iterations to run, default is 2
 
 # Returns
-A tuple of `(rates, ivars, chi2s)` where:
+A tuple of:
 - `rates` is the best-fit count rate for each pixel
 - `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
 - `chi2s` is the chi squared value for each pixel
