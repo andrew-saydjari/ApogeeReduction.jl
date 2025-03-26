@@ -66,3 +66,20 @@
 - bad pixel mask evolution
 - sky flux variation over field of view
 - fix SlackThreads.jl for new API [completed, AKS]
+
+## TODO: Before 2025 Meeting
+- line spread functions (Kevin & Adam)
+- wavelength solutions (Kevin, Andrew, Adam)
+- time evolution of trace positions (Kevin)
+- cross-talk model (Andrew)
+- relative fluxing (Andrew)
+- Almanac fiber types (Adam/Andy)
+- scattered light modelling (Andy)
+- LCO calibration products (gain, read noise, nonlinearity maps)
+- document everything (Andrew, Kevin, Adam)
+- overleaf outline (Andrew, Kevin, Adam)
+
+## TODO: After 2025 Meeting
+- persistence modelling
+- nonlinearity correction
+
