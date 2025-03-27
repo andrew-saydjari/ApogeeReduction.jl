@@ -2,7 +2,8 @@ using Polynomials: fit, Polynomial
 using SpecialFunctions: erf
 using Interpolations: linear_interpolation, Line
 
-profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
+#profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
+profile_path = "../../data/"
 
 function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv = false)
     #integrated version of Gaussian-Hermite terms
@@ -706,8 +707,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     #(see weird discontinuities in height and width vs X)
     #This ONLY works because we are fitting all the peaks simultaneously
     #and removing contamination from neighbouring fibers
-    offset_inds = range(-7, 7, step = 1)
-    #    offset_inds = range(-4, 4, step = 1)
+    # offset_inds = range(-7, 7, step = 1)
+    offset_inds = range(-4, 4, step = 1)
 
     curr_best_heights = zeros(Float64, size(all_peak_locs)) .+ 0.00001
     for j in 1:size(new_params, 1)
