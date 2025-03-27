@@ -126,6 +126,7 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
     all_y_prof_deriv = zeros((size(fiber_inds, 1), size(x_bins, 1)))
 
     for ind in 1:size(fiber_inds, 1)
+        fiber_ind = fiber_inds[ind]
         cdf[:] .= 0
         dcdf_dz[:] .= 0
 
