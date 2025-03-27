@@ -5,103 +5,58 @@ using Interpolations: linear_interpolation, Line
 #profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
 profile_path = "../../data/"
 
+function _gauss_hermite_poly(x, n)
+    if n == 1
+        ones(size(x))
+    elseif n == 2
+        collect(x) # type stability
+    elseif n == 3
+        @. x^2 - 1
+    elseif n == 4
+        @. x * (-3 + x^2)
+    elseif n == 5
+        @. 3 + x^2 * (-6 + x^2)
+    elseif n == 6
+        @. x * (15 + x^2 * (-10 + x^2))
+    elseif n == 7
+        @. -15 + x^2 * (45 + x^2 * (-15 + x^2))
+    elseif n == 8
+        @. x * (-105 + x^2 * (105 + x^2 * (-21 + x^2)))
+    elseif n == 9
+        @. 105 + x^2 * (-420 + x^2 * (210 + x^2 * (-28 + x^2)))
+    elseif n == 10
+        @. x * (945 + x^2 * (-1260 + x^2 * (378 + x^2 * (-36 + x^2))))
+    elseif n == 11
+        @. -945 + x^2 * (4725 + x^2 * (-3150 + x^2 * (630 + x^2 * (-45 + x^2))))
+    else
+        throw(ArgumentError("n must be between 0 and 11"))
+    end
+end
+
+"""
+integrated Gauss-Hermite terms
+
+cdf H(n) = -1*H(n-1)
+"""
 function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv = false)
     #integrated version of Gaussian-Hermite terms
-    #rule is cdf H(n) = -1*H(n-1)
-
     zscore = (x_bins .- mean) ./ width
 
-    if !return_deriv
-        if n == 0
-            #integrate the Gaussian
-            return 0.5 .* (1 .+ erf.(zscore ./ (2^0.5)))
-        elseif n == 1
-            factor = ones(size(zscore))
-        elseif n == 2
-            factor = zscore
-        elseif n == 3
-            factor = (zscore .^ 2) .- 1
-        elseif n == 4
-            factor = (zscore .^ 3) .- 3 .* zscore
-        elseif n == 5
-            factor = (zscore .^ 4) .- 6 .* (zscore .^ 2) .+ 3
-        elseif n == 6
-            factor = (zscore .^ 5) .- 10 .* (zscore .^ 3) .+ 15 .* zscore
-        elseif n == 7
-            factor = (zscore .^ 6) .- 15 .* (zscore .^ 4) .+ 45 .* (zscore .^ 2) .- 15
-        elseif n == 8
-            factor = (zscore .^ 7) .- 21 .* (zscore .^ 5) .+ 105 .* (zscore .^ 3) .- 105 .* zscore
-        elseif n == 9
-            factor = (zscore .^ 8) .- 28 .* (zscore .^ 6) .+ 210 .* (zscore .^ 4) .-
-                     420 .* (zscore .^ 2) .+ 105
-        elseif n == 10
-            factor = (zscore .^ 9) .- 36 .* (zscore .^ 7) .+ 378 .* (zscore .^ 5) .-
-                     1260 .* (zscore .^ 3) .+ 945 .* zscore
-        elseif n == 11
-            factor = (zscore .^ 10) .- 45 .* (zscore .^ 8) .+ 630 .* (zscore .^ 6) .-
-                     3150 .* (zscore .^ 4) .+ 4725 .* (zscore .^ 2) .- 945
-            #    else
-            #        raise ValueError(f'ERROR: order n={n} for Hermite polynomial is not an option. Must be leq 11.')
-        end
+    # this makes it normalized in "x" space
+    width_factor = width^(-n)
+    gauss_and_width_factor = @. -exp(-0.5 * zscore^2) / sqrt(2π) * width_factor
 
-        gauss = exp.(-0.5 .* (zscore .^ 2)) ./ ((2 * π)^0.5) ./ width
-
-        return -1 .* gauss .* factor ./ (width .^ (n - 1))
+    cdf = if n == 0
+        @. 0.5(1 + erf(zscore / sqrt(2)))
     else
-        if n == 0
-            dgauss_dz = (1 / ((2 * π)^0.5)) .* exp.(-0.5 .* (zscore .^ 2))
-            #integrate the Gaussian
-            return 0.5 .* (1 .+ erf.(zscore ./ (2^0.5))), dgauss_dz
-        elseif n == 1
-            factor = ones(size(zscore))
-            dfactor_dz = zeros(size(zscore))
-        elseif n == 2
-            factor = zscore
-            dfactor_dz = ones(size(zscore))
-        elseif n == 3
-            factor = (zscore .^ 2) .- 1
-            dfactor_dz = 2 .* (zscore)
-        elseif n == 4
-            factor = (zscore .^ 3) .- 3 .* zscore
-            dfactor_dz = 3 .* (zscore .^ 2) .- 3
-        elseif n == 5
-            factor = (zscore .^ 4) .- 6 .* (zscore .^ 2) .+ 3
-            dfactor_dz = 4 .* (zscore .^ 3) .- (6 * 2) .* zscore
-        elseif n == 6
-            factor = (zscore .^ 5) .- 10 .* (zscore .^ 3) .+ 15 .* zscore
-            dfactor_dz = 5 .* (zscore .^ 4) .- (10 * 3) .* (zscore .^ 2) .+ 15
-        elseif n == 7
-            factor = (zscore .^ 6) .- 15 .* (zscore .^ 4) .+ 45 .* (zscore .^ 2) .- 15
-            dfactor_dz = 6 .* (zscore .^ 5) .- (15 * 4) .* (zscore .^ 3) .+ (45 * 2) .* (zscore)
-        elseif n == 8
-            factor = (zscore .^ 7) .- 21 .* (zscore .^ 5) .+ 105 .* (zscore .^ 3) .- 105 .* zscore
-            dfactor_dz = 7 .* (zscore .^ 6) .- (21 * 5) .* (zscore .^ 4) .+
-                         (105 * 3) .* (zscore .^ 2) .- 105
-        elseif n == 9
-            factor = (zscore .^ 8) .- 28 .* (zscore .^ 6) .+ 210 .* (zscore .^ 4) .-
-                     420 .* (zscore .^ 2) .+ 105
-            dfactor_dz = 8 .* (zscore .^ 7) .- (28 * 6) .* (zscore .^ 5) .+
-                         (210 * 4) .* (zscore .^ 3) .- (420 * 2) .* zscore
-        elseif n == 10
-            factor = (zscore .^ 9) .- 36 .* (zscore .^ 7) .+ 378 .* (zscore .^ 5) .-
-                     1260 .* (zscore .^ 3) .+ 945 .* zscore
-            dfactor_dz = 9 .* (zscore .^ 8) .- (36 * 7) .* (zscore .^ 6) .+
-                         (378 * 5) .* (zscore .^ 4) .- (1260 * 3) .* (zscore .^ 2) .+ 945
-        elseif n == 11
-            factor = (zscore .^ 10) .- 45 .* (zscore .^ 8) .+ 630 .* (zscore .^ 6) .-
-                     3150 .* (zscore .^ 4) .+ 4725 .* (zscore .^ 2) .- 945
-            dfactor_dz = 10 .* (zscore .^ 9) .- (45 * 8) .* (zscore .^ 7) .+
-                         (630 * 6) .* (zscore .^ 5) .- (3150 * 4) .* (zscore .^ 3) .+
-                         (4725 * 2) .* zscore
-            #    else
-            #        raise ValueError(f'ERROR: order n={n} for Hermite polynomial is not an option. Must be leq 11.')
-        end
+        _gauss_hermite_poly(zscore, n) .* gauss_and_width_factor
+    end
 
-        gauss = exp.(-0.5 .* (zscore .^ 2)) ./ ((2 * π)^0.5) ./ width
-        dgauss_dz = gauss .* (-1 .* zscore)
-
-        return -1 .* gauss .* factor ./ (width .^ (n - 1)),
-        -1 .* (gauss .* dfactor_dz .+ dgauss_dz .* factor) ./ (width .^ (n - 1))
+    if return_deriv
+        pdf = -_gauss_hermite_poly(zscore, n + 1) .* gauss_and_width_factor
+        cdf, pdf
+    else
+        cdf
     end
 end
 
@@ -131,7 +86,7 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
     smooth_new_indv_widths = ones(size(fiber_inds, 1))
     smooth_new_indv_heights = zeros((size(fiber_inds, 1), n_gauss))
     for j in 1:n_gauss
-        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials 
+        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials
         smooth_new_indv_heights[:, j] .= Polynomial(prof_height_coeffs[j, :]).(fiber_inds)
     end
 
