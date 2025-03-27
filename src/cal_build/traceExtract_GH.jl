@@ -5,14 +5,11 @@ using Interpolations: linear_interpolation, Line
 #profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
 profile_path = "../../data/"
 
-function _gauss_hermite_cdf(x, n)
-    factor = if n == 0
-        #integrate the Gaussian
-        return @. 0.5(1 + erf(x / (2^0.5)))
-    elseif n == 1
+function _gauss_hermite_poly(x, n)
+    if n == 1
         ones(size(x))
     elseif n == 2
-        x
+        collect(x) # type stability
     elseif n == 3
         @. x^2 - 1
     elseif n == 4
@@ -34,10 +31,6 @@ function _gauss_hermite_cdf(x, n)
     else
         throw(ArgumentError("n must be between 0 and 11"))
     end
-
-    gauss = @. exp(-0.5 * x^2) / ((2π)^0.5)
-
-    -1 .* gauss .* factor
 end
 
 """
@@ -47,16 +40,20 @@ cdf H(n) = -1*H(n-1)
 """
 function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv = false)
     #integrated version of Gaussian-Hermite terms
-
     zscore = (x_bins .- mean) ./ width
 
     # this makes it normalized in "x" space
     width_factor = width^(-n)
+    gauss_and_width_factor = @. -exp(-0.5 * zscore^2) / sqrt(2π) * width_factor
 
-    cdf = _gauss_hermite_cdf(zscore, n) * width_factor
+    cdf = if n == 0
+        @. 0.5(1 + erf(zscore / sqrt(2)))
+    else
+        _gauss_hermite_poly(zscore, n) .* gauss_and_width_factor
+    end
 
     if return_deriv
-        pdf = -_gauss_hermite_cdf(zscore, n + 1) * width_factor
+        pdf = -_gauss_hermite_poly(zscore, n + 1) .* gauss_and_width_factor
         cdf, pdf
     else
         cdf
