@@ -123,15 +123,13 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
     prof_fiber_centers = prof_params["fiber_median_y_center"] .+ 1
     fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
-    prof_width_coeffs = prof_params["y_width_coeffs"]
     gh_order = prof_params["gh_order"][1]
     n_gauss = gh_order + 1
     poly_order = prof_params["poly_order"][1]
     prof_height_coeffs = zeros((n_gauss, poly_order + 1))
-    smooth_new_indv_widths = ones(size(fiber_inds, 1))
     smooth_new_indv_heights = zeros((size(fiber_inds, 1), n_gauss))
     for j in 1:n_gauss
-        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials 
+        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials
         smooth_new_indv_heights[:, j] .= Polynomial(prof_height_coeffs[j, :]).(fiber_inds)
     end
 
@@ -173,7 +171,6 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
     all_y_prof_deriv = zeros((size(fiber_inds, 1), size(x_bins, 1)))
 
     for ind in 1:size(fiber_inds, 1)
-        fiber_ind = fiber_inds[ind]
         cdf[:] .= 0
         dcdf_dz[:] .= 0
 
@@ -258,7 +255,7 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
         fiber_inds, x_prof_min, x_prof_max_ind,
         n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv;
-        n_iter = 10, dmu = 0.01, dsig = 0.01, return_cov = false,
+        n_iter = 10, return_cov = false,
         use_first_guess_heights = false, max_center_move = 3,
         min_widths = 0.5, max_widths = 2.0)
     fit_fluxes = copy(all_rel_fluxes[fit_inds])'
@@ -280,7 +277,6 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         (size(first_guess_params, 2), size(fit_fluxes, 1)))
 
     comb_model_fluxes = zeros(size(all_rel_fluxes))
-    param_offsets = zeros(Float64, size(curr_guess))
 
     for r_ind in 1:n_iter
         fit_fluxes .= all_rel_fluxes[fit_inds]'
@@ -428,12 +424,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     x_inds = [-n_center_cols, n_center_cols + 1] .+ x_center
 
     # Cutout image in x direction
-    cutout_fluxes = copy(image_data[
-        (x_center - n_center_cols):(x_center + n_center_cols), begin:end])'
-    cutout_errs = copy(noise_image[
-        (x_center - n_center_cols):(x_center + n_center_cols), begin:end])'
-    cutout_masks = copy(good_pixels[
-        (x_center - n_center_cols):(x_center + n_center_cols), begin:end])'
+    cutout_fluxes = image_data[(x_center - n_center_cols):(x_center + n_center_cols), :]'
+    cutout_errs = noise_image[(x_center - n_center_cols):(x_center + n_center_cols), :]'
+    cutout_masks = good_pixels[(x_center - n_center_cols):(x_center + n_center_cols), :]'
 
     # Mask bad pixels
     cutout_fluxes[.!cutout_masks] .= 0
@@ -547,9 +540,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     #use a larger number of pixels for removing the contribution from neighbouring peaks
     best_model_offset_inds = range(start = -10, stop = 10, step = 1)
 
-    all_min_fluxes = min_func.(y_vals)
-    all_max_fluxes = max_func.(y_vals)
-
     #fit scaled fluxes
     #    all_rel_fluxes = (comb_fluxes) ./ (all_max_fluxes)
     #    all_rel_errs = comb_errs ./ (all_max_fluxes)
@@ -560,8 +550,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     fit_inds = good_y_vals .+ offset_inds'
     best_model_fit_inds = good_y_vals .+ best_model_offset_inds'
 
-    fit_fluxes = copy(all_rel_fluxes[fit_inds])
-    fit_errs = copy(all_rel_errs[fit_inds])
+    fit_fluxes = all_rel_fluxes[fit_inds]
+    fit_errs = all_rel_errs[fit_inds]
     fit_ivars = fit_errs .^ -2
 
     curr_fiber_inds = clamp.(ceil.(Int, round.(med_center_to_fiber_func.(float.(good_y_vals)))),
@@ -575,17 +565,11 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     first_guess_params[:, 1] .*= (2 * π)^0.5 * first_guess_params[:, 3] # change to integrated height
 
-    dmu = 0.01
-    dsig = 0.01
-
-    dmu = 0.001
-    dsig = 0.001
-
     new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
         curr_fiber_inds, x_prof_min, x_prof_max_ind,
         n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
-        n_iter = 10, dmu = dmu, dsig = dsig, return_cov = false,
+        n_iter = 10, return_cov = false,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
 
@@ -744,7 +728,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         fit_inds, best_model_fit_inds, offset_inds,
         curr_fiber_inds, x_prof_min, x_prof_max_ind,
         n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
-        n_iter = 20, dmu = dmu, dsig = dsig, return_cov = false,
+        n_iter = 20, return_cov = false,
         use_first_guess_heights = true, max_center_move = 3,
         min_widths = 0.8 .* first_guess_params[:, 3],
         max_widths = 1.2 .* first_guess_params[:, 3])
@@ -956,7 +940,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
             fit_inds, best_model_fit_inds, offset_inds,
             curr_fiber_inds, x_prof_min, x_prof_max_ind,
             n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
-            n_iter = 10, dmu = dmu, dsig = dsig, return_cov = true,
+            n_iter = 10, return_cov = true,
             use_first_guess_heights = true, max_center_move = 1,
             min_widths = 0.5 .* first_guess_params[:, 3],
             max_widths = 2.0 .* first_guess_params[:, 3])
