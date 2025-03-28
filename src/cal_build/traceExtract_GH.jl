@@ -239,7 +239,7 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     v_hat = zeros(Float64, (3, curr_n_peaks))
     v_hat_cov = zeros(Float64, (3, 3, curr_n_peaks))
 
-    #(n_pix,n_params,n_peaks)
+    # Derivative matrix (n_pix,n_params,n_peaks)
     M_vects = zeros(Float64,
         (size(fit_fluxes, 1), size(first_guess_params, 2), curr_n_peaks))
     curr_M_T_dot_V_inv = zeros(Float64,
@@ -386,21 +386,16 @@ Returns: trace centers, widths, and heights, and their covariances.
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
-        good_pixels = nothing, mid = 1025, n_center_cols = 100, verbose = false)
+        good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false)
     noise_image = 1 ./ sqrt.(ivar_image)
-    if isnothing(good_pixels)
-        good_pixels = ones(Bool, size(image_data))
-    end
     good_pixels .= good_pixels .& (ivar_image .> 0)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
-    x_center = mid
-
-    x_inds = [-n_center_cols, n_center_cols + 1] .+ x_center
 
     # Cutout image in x direction
-    cutout_fluxes = image_data[(x_center - n_center_cols):(x_center + n_center_cols), :]'
-    cutout_errs = noise_image[(x_center - n_center_cols):(x_center + n_center_cols), :]'
-    cutout_masks = good_pixels[(x_center - n_center_cols):(x_center + n_center_cols), :]'
+    r = (mid - n_center_cols):(mid + n_center_cols)
+    cutout_fluxes = image_data[r, :]'
+    cutout_errs = noise_image[r, :]'
+    cutout_masks = good_pixels[r, :]'
 
     # Mask bad pixels
     cutout_fluxes[.!cutout_masks] .= 0
@@ -818,8 +813,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.1
     low_throughput_fibers = findall(.!good_throughput_fibers)
 
-    #     x_inds = range(1, 2048, step = 1)
-    #     x_inds = range(1,size(image_data,1),step=1)
     x_inds = axes(image_data, 1)
     final_param_outputs = zeros((
         size(x_inds, 1), size(best_fit_ave_params, 1), size(best_fit_ave_params, 2)))
@@ -941,8 +934,5 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
                                                                       nearest_inds[1]))
     end
 
-    param_outputs = final_param_outputs
-    param_output_covs = final_param_output_covs
-
-    return param_outputs, param_output_covs
+    final_param_outputs, final_param_output_covs
 end
