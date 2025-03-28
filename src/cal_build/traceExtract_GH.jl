@@ -94,10 +94,14 @@ function gh_profiles(tele, mjd, chip, expid;
     profile_fname = joinpath(profile_path,
         "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2")
 
-    prof_fiber_inds, prof_fiber_centers, smooth_new_indv_heights = jldopen(profile_fname) do params
+    # opening the file with a "do" closure guarantees that the file is closed
+    # (analogous to "with open() as f:" in Python)
+    # the last line of the closure is returned and assigned to the variables
+    prof_fiber_inds, prof_fiber_centers, smooth_new_indv_heights, n_gauss = jldopen(profile_fname) do params
         fiber_inds = collect(minimum(params["fiber_index"]):maximum(params["fiber_index"])) .+ 1
-        gh_order = params["gh_order"][1]
-        n_gauss = gh_order + 1
+
+        # number of Gauss-Hermite terms
+        n_gauss = params["gh_order"][1] + 1
 
         heights = zeros((length(fiber_inds), n_gauss))
         for j in 1:n_gauss
@@ -105,13 +109,8 @@ function gh_profiles(tele, mjd, chip, expid;
             heights[:, j] .= Polynomial(coeffs).(fiber_inds)
         end
 
-        return (
-            params["fiber_index"] .+ 1,
-            params["fiber_median_y_center"] .+ 1,
-            heights
-        )
+        (params["fiber_index"] .+ 1, params["fiber_median_y_center"] .+ 1, heights, n_gauss)
     end
-    n_gauss = size(smooth_new_indv_heights, 2)
 
     fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
