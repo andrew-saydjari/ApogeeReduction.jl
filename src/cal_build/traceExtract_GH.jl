@@ -2,8 +2,8 @@ using Polynomials: fit, Polynomial
 using SpecialFunctions: erf
 using Interpolations: linear_interpolation, Line
 
-#profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
-profile_path = "../../data/"
+profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
+#profile_path = "../../data/"
 
 function _gauss_hermite_poly(x, n)
     if n == 1
@@ -60,7 +60,28 @@ function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv
     end
 end
 
-function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
+"""
+Read in and construct the Gauss-Hermite profiles and associated fiber indices for a given night,
+chip, and telescope.
+
+Keyword arguments:
+- `n_sub`: the number of sub-pixels to use in the profile
+- `make_plots`: whether to make plots of the profiles
+- `profile_path`: the path to the profile files
+
+Returns:
+- `med_center_to_fiber_func`: a function that maps the median fiber center to the fiber index
+- `x_prof_min`
+- `x_prof_max_ind`
+- `n_sub`: the number of sub-pixels to use in the profile
+- `min_prof_fib`: the minimum fiber index in the profile
+- `max_prof_fib`: the maximum fiber index in the profile
+- `all_y_prof`: the Gauss-Hermite profiles
+"""
+function gh_profiles(tele, mjd, chip, expid;
+        n_sub = 100, make_plots = false, profile_path = "../../data/")
+
+    # TODO actually get these from the arguments
     if tele == "apo"
         profile_mjd = "59549"
         profile_expid = "39870035"
@@ -69,26 +90,29 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
         profile_expid = "44820015"
     end
 
-    profile_fname = profile_path *
-                    "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2"
+    profile_fname = joinpath(profile_path,
+        "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2")
 
-    prof_params = jldopen(profile_fname)
+    prof_fiber_inds, prof_fiber_centers, smooth_new_indv_heights = jldopen(profile_fname) do params
+        fiber_inds = collect(minimum(params["fiber_index"]):maximum(params["fiber_index"])) .+ 1
+        gh_order = params["gh_order"][1]
+        n_gauss = gh_order + 1
 
-    prof_fiber_inds = prof_params["fiber_index"] .+ 1
-    prof_fiber_centers = prof_params["fiber_median_y_center"] .+ 1
-    fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
+        heights = zeros((length(fiber_inds), n_gauss))
+        for j in 1:n_gauss
+            coeffs = reverse(params["gh_$(j-1)_height_coeffs"])
+            heights[:, j] .= Polynomial(coeffs).(fiber_inds)
+        end
 
-    gh_order = prof_params["gh_order"][1]
-    n_gauss = gh_order + 1
-    poly_order = prof_params["poly_order"][1]
-    prof_height_coeffs = zeros((n_gauss, poly_order + 1))
-    smooth_new_indv_heights = zeros((size(fiber_inds, 1), n_gauss))
-    for j in 1:n_gauss
-        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials
-        smooth_new_indv_heights[:, j] .= Polynomial(prof_height_coeffs[j, :]).(fiber_inds)
+        return (
+            params["fiber_index"] .+ 1,
+            params["fiber_median_y_center"] .+ 1,
+            heights
+        )
     end
+    n_gauss = size(smooth_new_indv_heights, 2)
 
-    close(prof_params)
+    fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
     if make_plots
         dirNamePlots = "../outdir/plots/"
@@ -117,6 +141,7 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
     smoothed_cdf_scales = zeros(size(fiber_inds, 1))
     n_offset_pix = 15
 
+    # TODO simplify
     x = range(start = -n_offset_pix, stop = n_offset_pix, step = 1)
     x_bins = range(start = x[1] - 0.5, stop = x[end] + 0.5, step = 1 / n_sub)
     cdf = zeros(size(x_bins, 1))
@@ -172,8 +197,8 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
         save(tracePlot_heights_Path, fig)
     end
 
-    return med_center_to_fiber_func,
-    x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
+    return (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+        min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)
 end
 
 function cdf_func_indv(x_bins, mean, width, fiber_ind, x_prof_min, x_prof_max_ind,
@@ -364,6 +389,11 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     end
 end
 
+"""
+Extract the trace parameters from the image data assuming Gauss-Hermite profiles.
+
+Returns: trace centers, widths, and heights, and their covariances.
+"""
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
