@@ -78,7 +78,7 @@ Returns a tuple of:
 - `all_y_prof_deriv`: the derivatives of the Gauss-Hermite profiles
 """
 function gh_profiles(tele, mjd, chip, expid;
-        n_sub = 100, make_plots = false, profile_path = "../../data/", plot_path = "../outdir/plots/")
+        n_sub = 100, make_plots = false, profile_path = "./data/", plot_path = "../outdir/plots/")
 
     # TODO actually get these from the arguments
     if tele == "apo"
