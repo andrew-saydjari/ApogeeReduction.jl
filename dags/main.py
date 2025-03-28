@@ -20,10 +20,6 @@ REPO_BRANCH = "airflow"
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
 
-def notify_without_return(**kwargs):
-    send_slack_notification_partial(kwargs['text'])
-    return None
-
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id):
     while True:
@@ -134,12 +130,14 @@ with DAG(
         with TaskGroup(group_id=observatory) as group:
             initial_notification = PythonOperator(
                 task_id="initial_notification",
-                python_callable=notify_without_return,
-                op_kwargs={
-                    "text": f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                           f"(night of {{{{ ds }}}}). "
-                           f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/"
-                }
+                python_callable=lambda **_: None,  # Simple no-op function
+                on_success_callback=[
+                    send_slack_notification_partial(
+                        text=f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                            f"(night of {{{{ ds }}}}). "
+                            f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/"
+                    )
+                ]
             )
             filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.done"
             transfer = FileSensor(
