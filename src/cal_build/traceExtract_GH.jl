@@ -2,9 +2,6 @@ using Polynomials: fit, Polynomial
 using SpecialFunctions: erf
 using Interpolations: linear_interpolation, Line
 
-profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
-#profile_path = "../../data/"
-
 function _gauss_hermite_poly(x, n)
     if n == 1
         ones(size(x))
