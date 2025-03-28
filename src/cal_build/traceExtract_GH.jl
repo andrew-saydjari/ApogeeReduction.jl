@@ -70,14 +70,15 @@ Keyword arguments:
 - `profile_path`: the path to the profile files
 - `plot_path`: the path to save the plots
 
-Returns:
+Returns a tuple of:
 - `med_center_to_fiber_func`: a function that maps the median fiber center to the fiber index
 - `x_prof_min`
 - `x_prof_max_ind`
 - `n_sub`: the number of sub-pixels to use in the profile
-- `min_prof_fib`: the minimum fiber index in the profile
-- `max_prof_fib`: the maximum fiber index in the profile
+- `min_prof_fib`: the minimum fiber index with a defined profile
+- `max_prof_fib`: the maximum fiber index with a defined profile
 - `all_y_prof`: the Gauss-Hermite profiles
+- `all_y_prof_deriv`: the derivatives of the Gauss-Hermite profiles
 """
 function gh_profiles(tele, mjd, chip, expid;
         n_sub = 100, make_plots = false, profile_path = "../../data/", plot_path = "../outdir/plots/")
@@ -113,7 +114,8 @@ function gh_profiles(tele, mjd, chip, expid;
     end
 
     # min-to-max fiber indices, including the ones that don't have a profile.
-    # this is prevent extrapolation
+    # this is prevent extrapolation. We want to interpolate betweeen sparePak-defined profiles,
+    # without going past the first or last in the sparsePak observation.
     fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
     if make_plots
@@ -132,35 +134,24 @@ function gh_profiles(tele, mjd, chip, expid;
         end
     end
 
-    smoothed_cdf_zeros = zeros(size(fiber_inds, 1))
-    smoothed_cdf_scales = zeros(size(fiber_inds, 1))
     n_offset_pix = 15
-
     x_bins = range(-n_offset_pix - 0.5, n_offset_pix + 0.5, step = 1 / n_sub)
-    cdf = zeros(size(x_bins, 1))
-    dcdf_dz = zeros(size(x_bins, 1))
-
+    # these will be filled with the cdf and pdf of the GH profiles for each fiber
     all_y_prof = zeros((size(fiber_inds, 1), size(x_bins, 1)))
     all_y_prof_deriv = zeros((size(fiber_inds, 1), size(x_bins, 1)))
-
     for ind in 1:size(fiber_inds, 1)
         # sum the Gauss-Hermite terms into the cdf and its derivative
-        cdf .= 0
-        dcdf_dz .= 0
         for j in 1:n_gauss
             vals, deriv_vals = int_gauss_hermite_term(x_bins, j - 1, return_deriv = true)
-            cdf .+= smooth_new_indv_heights[ind, j] * vals
-            dcdf_dz .+= smooth_new_indv_heights[ind, j] * deriv_vals
+            all_y_prof[ind, :] .+= smooth_new_indv_heights[ind, j] * vals
+            all_y_prof_deriv[ind, :] .+= smooth_new_indv_heights[ind, j] * deriv_vals
         end
 
-        smoothed_cdf_zeros[ind] = cdf[1]
-        cdf .-= smoothed_cdf_zeros[ind]
-        smoothed_cdf_scales[ind] = cdf[end]
-        cdf ./= smoothed_cdf_scales[ind]
-        dcdf_dz ./= smoothed_cdf_scales[ind]
-
-        all_y_prof[ind, :] .= cdf
-        all_y_prof_deriv[ind, :] .= dcdf_dz
+        smoothed_cdf_zero = all_y_prof[ind, 1]
+        all_y_prof[ind, :] .-= smoothed_cdf_zero
+        smoothed_cdf_scale = all_y_prof[ind, end]
+        all_y_prof[ind, :] ./= smoothed_cdf_scale
+        all_y_prof_deriv[ind, :] ./= smoothed_cdf_scale
     end
 
     if make_plots
