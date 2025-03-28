@@ -112,6 +112,7 @@ function gh_profiles(tele, mjd, chip, expid;
         (params["fiber_index"] .+ 1, params["fiber_median_y_center"] .+ 1, heights, n_gauss)
     end
 
+    # all fiber indices, including the ones that don't have a profile
     fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
     if make_plots
@@ -129,11 +130,6 @@ function gh_profiles(tele, mjd, chip, expid;
             save(tracePlot_heights_Path, fig)
         end
     end
-
-    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
-
-    min_prof_fib = minimum(prof_fiber_inds)
-    max_prof_fib = maximum(prof_fiber_inds)
 
     smoothed_cdf_zeros = zeros(size(fiber_inds, 1))
     smoothed_cdf_scales = zeros(size(fiber_inds, 1))
@@ -193,8 +189,10 @@ function gh_profiles(tele, mjd, chip, expid;
         save(tracePlot_heights_Path, fig)
     end
 
+    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
+
     return (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
-        min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)
+        first(fiber_inds), last(fiber_inds), all_y_prof, all_y_prof_deriv)
 end
 
 function cdf_func_indv(x_bins, mean, width, fiber_ind, x_prof_min, x_prof_max_ind,
