@@ -189,7 +189,7 @@ with DAG(
                     )
                 ]               
             )   
-            transfer >> darks >> flats >> science
+            initial_notification >> transfer >> darks >> flats >> science
             
         observatory_groups.append(group)
 
