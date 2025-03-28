@@ -20,6 +20,10 @@ REPO_BRANCH = "airflow"
 def send_slack_notification_partial(text):
     return send_slack_notification(text=text, channel="#apogee-reduction-jl")
 
+def notify_without_return(**kwargs):
+    send_slack_notification_partial(kwargs['text'])
+    return None
+
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id):
     while True:
@@ -130,7 +134,7 @@ with DAG(
         with TaskGroup(group_id=observatory) as group:
             initial_notification = PythonOperator(
                 task_id="initial_notification",
-                python_callable=send_slack_notification_partial,
+                python_callable=notify_without_return,
                 op_kwargs={
                     "text": f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
                            f"(night of {{{{ ds }}}}). "
