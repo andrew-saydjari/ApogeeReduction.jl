@@ -112,7 +112,8 @@ function gh_profiles(tele, mjd, chip, expid;
         (params["fiber_index"] .+ 1, params["fiber_median_y_center"] .+ 1, heights, n_gauss)
     end
 
-    # all fiber indices, including the ones that don't have a profile
+    # min-to-max fiber indices, including the ones that don't have a profile.
+    # this is prevent extrapolation
     fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
     if make_plots
@@ -143,9 +144,9 @@ function gh_profiles(tele, mjd, chip, expid;
     all_y_prof_deriv = zeros((size(fiber_inds, 1), size(x_bins, 1)))
 
     for ind in 1:size(fiber_inds, 1)
-        cdf[:] .= 0
-        dcdf_dz[:] .= 0
-
+        # sum the Gauss-Hermite terms into the cdf and its derivative
+        cdf .= 0
+        dcdf_dz .= 0
         for j in 1:n_gauss
             vals, deriv_vals = int_gauss_hermite_term(x_bins, j - 1, return_deriv = true)
             cdf .+= smooth_new_indv_heights[ind, j] * vals
@@ -161,9 +162,6 @@ function gh_profiles(tele, mjd, chip, expid;
         all_y_prof[ind, :] .= cdf
         all_y_prof_deriv[ind, :] .= dcdf_dz
     end
-
-    x_prof_min = x_bins[1]
-    x_prof_max_ind = size(x_bins, 1)
 
     if make_plots
         x_centers = 0.5 .* (x_bins[(begin + 1):end] .+ x_bins[begin:(end - 1)])
@@ -191,8 +189,14 @@ function gh_profiles(tele, mjd, chip, expid;
 
     med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
 
+    # things to return
+    x_prof_min = first(x_bins)
+    x_prof_max_ind = length(x_bins)
+    min_prof_fib = first(fiber_inds)
+    max_prof_fib = last(fiber_inds)
+
     return (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
-        first(fiber_inds), last(fiber_inds), all_y_prof, all_y_prof_deriv)
+        min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)
 end
 
 function cdf_func_indv(x_bins, mean, width, fiber_ind, x_prof_min, x_prof_max_ind,
