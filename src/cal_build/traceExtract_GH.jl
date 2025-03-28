@@ -68,6 +68,7 @@ Keyword arguments:
 - `n_sub`: the number of sub-pixels to use in the profile
 - `make_plots`: whether to make plots of the profiles
 - `profile_path`: the path to the profile files
+- `plot_path`: the path to save the plots
 
 Returns:
 - `med_center_to_fiber_func`: a function that maps the median fiber center to the fiber index
@@ -79,7 +80,7 @@ Returns:
 - `all_y_prof`: the Gauss-Hermite profiles
 """
 function gh_profiles(tele, mjd, chip, expid;
-        n_sub = 100, make_plots = false, profile_path = "../../data/")
+        n_sub = 100, make_plots = false, profile_path = "../../data/", plot_path = "../outdir/plots/")
 
     # TODO actually get these from the arguments
     if tele == "apo"
@@ -115,8 +116,6 @@ function gh_profiles(tele, mjd, chip, expid;
     fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
     if make_plots
-        dirNamePlots = "../outdir/plots/"
-
         for j in 1:n_gauss
             fig = Figure(size = (800, 800))
             ax = Axis(fig[1, 1],
@@ -126,8 +125,8 @@ function gh_profiles(tele, mjd, chip, expid;
 
             scatter!(ax, fiber_inds, smooth_new_indv_heights[:, j])
 
-            tracePlot_heights_Path = dirNamePlots *
-                                     "GH$(j-1)_heights_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
+            tracePlot_heights_Path = joinpath(plot_path,
+                "GH$(j-1)_heights_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png")
             save(tracePlot_heights_Path, fig)
         end
     end
@@ -141,9 +140,7 @@ function gh_profiles(tele, mjd, chip, expid;
     smoothed_cdf_scales = zeros(size(fiber_inds, 1))
     n_offset_pix = 15
 
-    # TODO simplify
-    x = range(start = -n_offset_pix, stop = n_offset_pix, step = 1)
-    x_bins = range(start = x[1] - 0.5, stop = x[end] + 0.5, step = 1 / n_sub)
+    x_bins = range(-n_offset_pix - 0.5, n_offset_pix + 0.5, step = 1 / n_sub)
     cdf = zeros(size(x_bins, 1))
     dcdf_dz = zeros(size(x_bins, 1))
 
@@ -192,8 +189,8 @@ function gh_profiles(tele, mjd, chip, expid;
             lines!(ax, x_centers, pdf .+ 0.02 * (j - 1))
         end
 
-        tracePlot_heights_Path = dirNamePlots *
-                                 "GH_profiles_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
+        tracePlot_heights_Path = joinpath(plot_path,
+            "GH_profiles_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png")
         save(tracePlot_heights_Path, fig)
     end
 
