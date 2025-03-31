@@ -232,32 +232,76 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     flux_1d, ivar_1d, mask_1d
 end
 
-function get_fibTargDict(f, tele, mjd, expid)
+"""
+Given an open HDF.file, `f`, and the telescope, mjd, and a "short" expid, return a dictionary
+mapping fiber id to fiber type.
+"""
+function get_fibTargDict(f, tele, mjd, exposure_id)
+    exposure_id = short_expid_to_long(mjd, exposure_id)
+
     # translate confSummary/almanac terminology to AR.jl terminology
-    fps_era_fiber_category_names = Dict(
+    fiber_type_names = Dict(
+        # fps era
         "science" => "sci",
         "sky_boss" => "skyB",
         "standard_apogee" => "tel",
-        "sky_apogee" => "sky"
+        "sky_apogee" => "sky",
+
+        # Plate era
+        "science" => "sci",
+        "standard" => "tel",
+        "sky" => "sky"
     )
-    # other fiber types:
+    # TODO other fiber types:
     # "blank"s from plate era
     # FPI era "serendipitous" APOGEE fibers are those which "accidentally" point at a bright
     # star (for BOSS reasons).
+    # TODO Andrew thinks the fibers with category "" might be serendipitous targets
 
-    # worry about the read-in overhead per expid?
-    df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
     mjdfps2plate = get_fps_plate_divide(tele)
-    configName = (mjd > mjdfps2plate) ? "fps" : "plates"
-    configIDname = (mjd > mjdfps2plate) ? "configid" : "plateid"
-    configNumStr = df_exp[expid, Symbol(configIDname)]
+    configName, configIdCol, target_type_col = if mjd > mjdfps2plate
+        "fps", "configid", "category"
+    else
+        "plates", "plateid", "target_type" # TODO should this be source_type?
+    end
 
-    fibtargDict = if (df_exp.exptype[expid] == "OBJECT")
+    df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
+    if !(exposure_id in df_exp.exposure)
+        @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
+        return Dict(1:300 .=> "fiberTypeFail")
+    end
+    exposure_info = df_exp[findfirst(df_exp[!, "exposure"] .== exposure_id), :]
+    configid = exposure_info[configIdCol]
+
+    fibtargDict = if exposure_info.exptype == "OBJECT"
         try
-            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configNumStr)"]))
-            Dict(parse.(Int, df_fib[!, "fiber_id"]) .=>
-                get.(fps_era_fiber_category_names, df_fib[!, "category"]))
-        catch
+            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configid)"]))
+            # normalizes all column names to lowercase
+            rename!(df_fib, lowercase.(names(df_fib)))
+
+            # sometimes the fiber id column is called "fiber_id" and sometimes it is called "fiberid"
+            fiberid_col = if "fiber_id" in names(df_fib)
+                "fiber_id"
+            elseif "fiberid" in names(df_fib)
+                "fiberid"
+            else
+                error("fiber_id or fiberid column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
+            end
+
+            fiber_types = map(df_fib[!, target_type_col]) do t
+                if t in keys(fiber_type_names)
+                    fiber_type_names[t]
+
+                else
+                    @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
+                    "fiberTypeFail"
+                end
+            end
+            Dict(df_fib[!, fiberid_col] .=> fiber_types)
+        catch e
+            rethrow(e)
+            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."
+            show(e)
             Dict(1:300 .=> "fiberTypeFail")
         end
     else
