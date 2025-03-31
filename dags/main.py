@@ -7,7 +7,7 @@ from astropy.time import Time
 from airflow import DAG
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.slack.notifications.slack import send_slack_notification
@@ -46,6 +46,13 @@ def submit_and_wait(bash_command, **context):
     
     wait_for_slurm(job_id)
     return job_id
+
+class TransferFileSensor(FileSensor):
+    def poke(self, context) -> bool:
+        if Time(context["data_interval_start"]).mjd < 59148:
+            raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
+        return super().poke(context)
+        
 
 observatories = ("apo", "lco")
 
@@ -140,15 +147,8 @@ with DAG(
                 ]
             )
 
-            # If the data interval start is more than a week ago, don't wait for the file transfer.
-            recency = BranchPythonOperator(
-                task_id="recency",
-                python_callable=lambda data_interval_start, **_: "darks" if data_interval_start < (datetime.now(data_interval_start.tz) - timedelta(weeks=1)) else "transfer"
-                provide_context=True
-            )
-            
             filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.done"
-            transfer = FileSensor(
+            transfer = TransferFileSensor(
                 task_id="transfer",
                 filepath=filepath,
                 on_success_callback=[
@@ -167,7 +167,7 @@ with DAG(
                 on_skipped_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ ds }}}}) assumed to exist: not awaiting `done` file. Starting reduction pipeline."
+                             f"(night of {{{{ ds }}}}) assumed to already exist: not awaiting `done` file. Starting reduction pipeline."
                     )
                 ],
                 timeout=60*60*18, # 18 hours: midnight ET
@@ -206,8 +206,7 @@ with DAG(
                     )
                 ]               
             )   
-            initial_notification >> recency >> [transfer, darks] >> flats >> science
-            transfer >> darks # necessary if we awaited the transfer
+            initial_notification >> transfer >> darks >> flats >> science
             
         observatory_groups.append(group)
 
