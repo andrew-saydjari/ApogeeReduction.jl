@@ -175,7 +175,7 @@ function gh_profiles(tele, mjd, chip, expid;
         save(tracePlot_heights_Path, fig)
     end
 
-#    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
+    #    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
     med_center_to_fiber_func = linear_interpolation(
         prof_fiber_centers, prof_fiber_inds, extrapolation_bc = Line())
 
@@ -857,9 +857,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     best_model_fit_inds = floor.(Int, round.(first_guess_params[:, 2])) .+
                           best_model_offset_inds'
 
-    best_fit_spacing = diff(best_fit_ave_params[:,2])
-    new_offsets = zeros(Float64,size(first_guess_params,1))
-    x_mean = length(first_guess_params)*0.5 
+    best_fit_spacing = diff(best_fit_ave_params[:, 2])
+    new_offsets = zeros(Float64, size(first_guess_params, 1))
+    x_mean = mean(curr_fiber_inds)
 
     @showprogress enabled=verbose desc="Fitting traces" for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
@@ -897,18 +897,19 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         first_guess_params[:, 1] .= best_fit_ave_params[:, 1] .*
                                     nanmedian(first_guess_params[:, 1] ./ best_fit_ave_params[:, 1])
 
-	#enforce spacing between fibers for first guess positions
-	#but account for small changes in spacing by fitting for slope & intercept
-        curr_spacing = diff(first_guess_params[:,2])
-	spacing_shift = nanmedian(curr_spacing .- best_fit_spacing)
-	new_offsets[2:end] .= cumsum(best_fit_spacing .+ spacing_shift, dims=1)
-	predict_centers = nanmedian(first_guess_params[:,2] .- new_offsets) .+ new_offsets
-	curr_diff = first_guess_params[:,2] .- predict_centers
-	y_mean = nanmedian(curr_diff)
-        missing_slope = sum((curr_diff .- y_mean) .* (curr_fiber_inds .- x_mean))/sum((curr_fiber_inds .- x_mean).^2)
+        #enforce spacing between fibers for first guess positions
+        #but account for small changes in spacing by fitting for slope & intercept
+        curr_spacing = diff(first_guess_params[:, 2])
+        spacing_shift = nanmedian(curr_spacing .- best_fit_spacing)
+        new_offsets[2:end] .= cumsum(best_fit_spacing .+ spacing_shift, dims = 1)
+        predict_centers = nanmedian(first_guess_params[:, 2] .- new_offsets) .+ new_offsets
+        curr_diff = first_guess_params[:, 2] .- predict_centers
+        y_mean = nanmedian(curr_diff)
+        missing_slope = sum((curr_diff .- y_mean) .* (curr_fiber_inds .- x_mean)) /
+                        sum((curr_fiber_inds .- x_mean) .^ 2)
         missing_inter = nanmedian(curr_diff .- missing_slope .* curr_fiber_inds)
         predict_centers .+= curr_fiber_inds .* missing_slope .+ missing_inter
-	first_guess_params[:, 2] .= clamp.(predict_centers,11,2048-11)
+        first_guess_params[:, 2] .= clamp.(predict_centers, 11, 2048 - 11)
 
         # first guess parameters
         fit_inds .= floor.(Int, round.(first_guess_params[:, 2])) .+ offset_inds'
