@@ -248,14 +248,13 @@ function get_fibTargDict(f, tele, mjd, expid)
         # Plate era
         "science" => "sci",
         "standard" => "tel",
-        "sky" => "sky",
-
-        # TODO other fiber types:
-        # "blank"s from plate era
-        # FPI era "serendipitous" APOGEE fibers are those which "accidentally" point at a bright
-        # star (for BOSS reasons).
-        # TODO Andrew thinks the fibers with category "" might be serendipitous targets
+        "sky" => "sky"
     )
+    # TODO other fiber types:
+    # "blank"s from plate era
+    # FPI era "serendipitous" APOGEE fibers are those which "accidentally" point at a bright
+    # star (for BOSS reasons).
+    # TODO Andrew thinks the fibers with category "" might be serendipitous targets
 
     mjdfps2plate = get_fps_plate_divide(tele)
     configName, configIdCol, target_type_col = if mjd > mjdfps2plate
@@ -286,7 +285,6 @@ function get_fibTargDict(f, tele, mjd, expid)
             else
                 error("fiber_id or fiberid column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
             end
-
 
             fiber_types = map(df_fib[!, target_type_col]) do t
                 if t in keys(fiber_type_names)
