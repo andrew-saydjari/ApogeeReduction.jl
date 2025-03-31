@@ -26,8 +26,17 @@ function build_raw_path(obs, mjd, chip, expid)
     return join([base, obs, mjd, fname], "/")
 end
 
+function short_expid_to_long(mjd, expid)
+    # this should probably be done with math
+    return parse(Int, string(mjd - 55562) * lpad(expid, 4, "0"))
+end
+
+function long_expid_to_short(mjd, expid)
+    return expid - (mjd - 55562) * 10000
+end
+
 function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype; use_cal = false)
-    expid_adj = string(mjd - 55562) * lpad(expid, 4, "0") # what a fun forced hard code!
+    expid_adj = short_expid_to_long(mjd, expid)
     if use_cal
         fname_type = "ar2Dcal"
     else
@@ -77,6 +86,6 @@ function get_fps_plate_divide(tele)
     if (tele == "apo")
         return 59423
     elseif (tele == "lco")
-        return 59810 # still need to confirm this 
+        return 59810 # still need to confirm this
     end
 end

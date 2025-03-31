@@ -233,10 +233,12 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 end
 
 """
-Given an open HDF.file, `f`, and the telescope, mjd, and expid, return a dictionary mapping fiber id
-to fiber type.
+Given an open HDF.file, `f`, and the telescope, mjd, and a "short" expid, return a dictionary
+mapping fiber id to fiber type.
 """
-function get_fibTargDict(f, tele, mjd, expid)
+function get_fibTargDict(f, tele, mjd, exposure_id)
+    exposure_id = short_expid_to_long(mjd, exposure_id)
+
     # translate confSummary/almanac terminology to AR.jl terminology
     fiber_type_names = Dict(
         # fps era
@@ -264,11 +266,11 @@ function get_fibTargDict(f, tele, mjd, expid)
     end
 
     df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
-    if !(expid in df_exp.exposure)
-        @warn "Exposure $(expid) not found in $(tele)/$(mjd)/exposures"
+    if !(exposure_id in df_exp.exposure)
+        @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
     end
-    exposure_info = df_exp[findfirst(df_exp[!, "exposure"] .== expid), :]
+    exposure_info = df_exp[findfirst(df_exp[!, "exposure"] .== exposure_id), :]
     configid = exposure_info[configIdCol]
 
     fibtargDict = if exposure_info.exptype == "OBJECT"
@@ -298,7 +300,7 @@ function get_fibTargDict(f, tele, mjd, expid)
             Dict(df_fib[!, fiberid_col] .=> fiber_types)
         catch e
             rethrow(e)
-            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(expid)). Returning fiberTypeFail for all fibers."
+            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."
             show(e)
             Dict(1:300 .=> "fiberTypeFail")
         end
