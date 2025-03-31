@@ -78,6 +78,7 @@
 - LCO calibration products (gain, read noise, nonlinearity maps)
 - document everything (Andrew, Kevin, Adam)
 - overleaf outline (Andrew, Kevin, Adam)
+- saturation handling where we define n_read_max, and propagate to neighbouring pixels (Adam)
 
 ## TODO: After 2025 Meeting
 - persistence modelling
