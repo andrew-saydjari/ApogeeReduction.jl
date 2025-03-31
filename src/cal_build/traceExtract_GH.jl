@@ -386,7 +386,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
         good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
-	low_throughput_thresh = 0.05)
+        low_throughput_thresh = 0.05)
     noise_image = 1 ./ sqrt.(ivar_image)
     good_pixels .= good_pixels .& (ivar_image .> 0)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
