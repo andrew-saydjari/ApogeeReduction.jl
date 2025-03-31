@@ -175,7 +175,9 @@ function gh_profiles(tele, mjd, chip, expid;
         save(tracePlot_heights_Path, fig)
     end
 
-    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
+#    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
+    med_center_to_fiber_func = linear_interpolation(
+        prof_fiber_centers, prof_fiber_inds, extrapolation_bc = Line())
 
     # things to return
     x_prof_min = first(x_bins)
@@ -807,7 +809,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     curr_fiber_inds = clamp.(range(1, size(best_fit_ave_params, 1)), min_prof_fib, max_prof_fib)
 
     med_flux = nanmedian(best_fit_ave_params[:, 1], 1)
-    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.1
+    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.05
     low_throughput_fibers = findall(.!good_throughput_fibers)
 
     x_inds = axes(image_data, 1)
