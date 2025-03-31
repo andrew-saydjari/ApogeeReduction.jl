@@ -47,6 +47,13 @@ def submit_and_wait(bash_command, **context):
     wait_for_slurm(job_id)
     return job_id
 
+class TransferFileSensor(FileSensor):
+    def poke(self, context) -> bool:
+        if Time(context["data_interval_start"]).mjd < 59148:
+            raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
+        return super().poke(context)
+        
+
 observatories = ("apo", "lco")
 
 sbatch_prefix = re.sub(r"\s+", " ", f"""
@@ -139,8 +146,9 @@ with DAG(
                     )
                 ]
             )
+
             filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.done"
-            transfer = FileSensor(
+            transfer = TransferFileSensor(
                 task_id="transfer",
                 filepath=filepath,
                 on_success_callback=[
@@ -156,6 +164,12 @@ with DAG(
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
+                on_skipped_callback=[
+                    send_slack_notification_partial(
+                        text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                             f"(night of {{{{ ds }}}}) assumed to already exist: not awaiting `done` file. Starting reduction pipeline."
+                    )
+                ],
                 timeout=60*60*18, # 18 hours: midnight ET
                 poke_interval=600, # 10 minutes
                 mode="poke",
@@ -166,6 +180,7 @@ with DAG(
                 task_id="darks",
                 python_callable=submit_and_wait,
                 op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
+                trigger_rule="none_failed" # so this doesn't get skipped if the FileSensor is skipped
             )
 
             flats = PythonOperator(
