@@ -142,7 +142,7 @@ with DAG(
 
             # If the data interval start is more than a week ago, don't wait for the file transfer.
             recency = BranchPythonOperator(
-                task_id="check_recency",
+                task_id="recency",
                 python_callable=lambda data_interval_start, **_: "darks" if data_interval_start < (datetime.now(data_interval_start.tz) - timedelta(weeks=1)) else "transfer"
                 provide_context=True
             )
@@ -207,6 +207,7 @@ with DAG(
                 ]               
             )   
             initial_notification >> recency >> [transfer, darks] >> flats >> science
+            transfer >> darks # necessary if we awaited the transfer
             
         observatory_groups.append(group)
 
