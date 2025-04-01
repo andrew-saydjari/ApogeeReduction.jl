@@ -184,7 +184,12 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
             maximum(logUniWaveAPOGEE[.!isnan.(nan_flux)]) + 2)
     end
     full_mask = full_xlims[1] .<= logUniWaveAPOGEE .<= full_xlims[2]
-    full_ylims = extrema(filter(!isnan, nan_flux[full_mask]))
+    filtered_dat = filter(!isnan, nan_flux[full_mask])
+    full_ylims = if isempty(filtered_dat)
+        (0, 1)
+    else
+        extrema(filtered_dat)
+    end
     full_yrange = full_ylims[2] - full_ylims[1]
     full_ylims = (full_ylims[1] - 0.05 * full_yrange, full_ylims[2] + 0.05 * full_yrange)
 
@@ -196,7 +201,12 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     # hidexdecorations!(ax2, grid=false)
     xlims = (15220, 15340)
     mask = xlims[1] .<= logUniWaveAPOGEE .<= xlims[2]
-    ylims = extrema(filter(!isnan, nan_flux[mask]))
+    filtered_dat = filter(!isnan, nan_flux[mask])
+    ylims = if isempty(filtered_dat)
+        (0, 1)
+    else
+        extrema(filtered_dat)
+    end
     yrange = ylims[2] - ylims[1]
     ylims = (ylims[1] - 0.05 * yrange, ylims[2] + 0.05 * yrange)
 
@@ -208,7 +218,12 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     # hidexdecorations!(ax3, grid=false)
     left_xlims = (minimum(full_xlims), minimum(full_xlims) + 100)
     left_mask = left_xlims[1] .<= logUniWaveAPOGEE .<= left_xlims[2]
-    left_ylims = extrema(filter(!isnan, nan_flux[left_mask]))
+    filtered_dat = filter(!isnan, nan_flux[left_mask])
+    left_ylims = if isempty(filtered_dat)
+        (0, 1)
+    else
+        extrema(filtered_dat)
+    end
     left_yrange = left_ylims[2] - left_ylims[1]
     left_ylims = (left_ylims[1] - 0.05 * left_yrange, left_ylims[2] + 0.05 * left_yrange)
 
@@ -221,7 +236,12 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     # hidexdecorations!(ax4, grid=false)
     right_xlims = (maximum(full_xlims) - 100, maximum(full_xlims))
     right_mask = right_xlims[1] .<= logUniWaveAPOGEE .<= right_xlims[2]
-    right_ylims = extrema(filter(!isnan, nan_flux[right_mask]))
+    filtered_dat = filter(!isnan, nan_flux[right_mask])
+    right_ylims = if isempty(filtered_dat)
+        (0, 1)
+    else
+        extrema(filtered_dat)
+    end
     right_yrange = right_ylims[2] - right_ylims[1]
     right_ylims = (right_ylims[1] - 0.05 * right_yrange, right_ylims[2] + 0.05 * right_yrange)
 
