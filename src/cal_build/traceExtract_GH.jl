@@ -2,9 +2,6 @@ using Polynomials: fit, Polynomial
 using SpecialFunctions: erf
 using Interpolations: linear_interpolation, Line
 
-#profile_path = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250226/outdir/trace_profile/"
-profile_path = "./data/"
-
 function _gauss_hermite_poly(x, n)
     if n == 1
         ones(size(x))
@@ -60,7 +57,30 @@ function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv
     end
 end
 
-function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
+"""
+Read in and construct the Gauss-Hermite profiles and associated fiber indices for a given night,
+chip, and telescope.
+
+Keyword arguments:
+- `n_sub`: the number of sub-pixels to use in the profile
+- `make_plots`: whether to make plots of the profiles
+- `profile_path`: the path to the profile files
+- `plot_path`: the path to save the plots
+
+Returns a tuple of:
+- `med_center_to_fiber_func`: a function that maps the median fiber center to the fiber index
+- `x_prof_min`
+- `x_prof_max_ind`
+- `n_sub`: the number of sub-pixels to use in the profile
+- `min_prof_fib`: the minimum fiber index with a defined profile
+- `max_prof_fib`: the maximum fiber index with a defined profile
+- `all_y_prof`: the Gauss-Hermite profiles
+- `all_y_prof_deriv`: the derivatives of the Gauss-Hermite profiles
+"""
+function gh_profiles(tele, mjd, chip, expid;
+        n_sub = 100, make_plots = false, profile_path = "./data/", plot_path = "../outdir/plots/")
+
+    # TODO actually get these from the arguments
     if tele == "apo"
         profile_mjd = "59549"
         profile_expid = "39870035"
@@ -69,30 +89,33 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
         profile_expid = "44820015"
     end
 
-    profile_fname = profile_path *
-                    "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2"
+    profile_fname = joinpath(profile_path,
+        "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2")
 
-    prof_params = jldopen(profile_fname)
+    # opening the file with a "do" closure guarantees that the file is closed
+    # (analogous to "with open() as f:" in Python)
+    # the last line of the closure is returned and assigned to the variables
+    prof_fiber_inds, prof_fiber_centers, smooth_new_indv_heights, n_gauss = jldopen(profile_fname) do params
+        fiber_inds = collect(minimum(params["fiber_index"]):maximum(params["fiber_index"])) .+ 1
 
-    prof_fiber_inds = prof_params["fiber_index"] .+ 1
-    prof_fiber_centers = prof_params["fiber_median_y_center"] .+ 1
-    fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
+        # number of Gauss-Hermite terms
+        n_gauss = params["gh_order"][1] + 1
 
-    gh_order = prof_params["gh_order"][1]
-    n_gauss = gh_order + 1
-    poly_order = prof_params["poly_order"][1]
-    prof_height_coeffs = zeros((n_gauss, poly_order + 1))
-    smooth_new_indv_heights = zeros((size(fiber_inds, 1), n_gauss))
-    for j in 1:n_gauss
-        prof_height_coeffs[j, :] .= reverse(prof_params["gh_$(j-1)_height_coeffs"]) #numpy to Julia Polynomials
-        smooth_new_indv_heights[:, j] .= Polynomial(prof_height_coeffs[j, :]).(fiber_inds)
+        heights = zeros((length(fiber_inds), n_gauss))
+        for j in 1:n_gauss
+            coeffs = reverse(params["gh_$(j-1)_height_coeffs"])
+            heights[:, j] .= Polynomial(coeffs).(fiber_inds)
+        end
+
+        (params["fiber_index"] .+ 1, params["fiber_median_y_center"] .+ 1, heights, n_gauss)
     end
 
-    close(prof_params)
+    # min-to-max fiber indices, including the ones that don't have a profile.
+    # this is prevent extrapolation. We want to interpolate betweeen sparePak-defined profiles,
+    # without going past the first or last in the sparsePak observation.
+    fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
 
     if make_plots
-        dirNamePlots = "../outdir/plots/"
-
         for j in 1:n_gauss
             fig = Figure(size = (800, 800))
             ax = Axis(fig[1, 1],
@@ -102,51 +125,31 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
 
             scatter!(ax, fiber_inds, smooth_new_indv_heights[:, j])
 
-            tracePlot_heights_Path = dirNamePlots *
-                                     "GH$(j-1)_heights_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
+            tracePlot_heights_Path = joinpath(plot_path,
+                "GH$(j-1)_heights_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png")
             save(tracePlot_heights_Path, fig)
         end
     end
 
-    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
-
-    min_prof_fib = minimum(prof_fiber_inds)
-    max_prof_fib = maximum(prof_fiber_inds)
-
-    smoothed_cdf_zeros = zeros(size(fiber_inds, 1))
-    smoothed_cdf_scales = zeros(size(fiber_inds, 1))
     n_offset_pix = 15
-
-    x = range(start = -n_offset_pix, stop = n_offset_pix, step = 1)
-    x_bins = range(start = x[1] - 0.5, stop = x[end] + 0.5, step = 1 / n_sub)
-    cdf = zeros(size(x_bins, 1))
-    dcdf_dz = zeros(size(x_bins, 1))
-
+    x_bins = range(-n_offset_pix - 0.5, n_offset_pix + 0.5, step = 1 / n_sub)
+    # these will be filled with the cdf and pdf of the GH profiles for each fiber
     all_y_prof = zeros((size(fiber_inds, 1), size(x_bins, 1)))
     all_y_prof_deriv = zeros((size(fiber_inds, 1), size(x_bins, 1)))
-
     for ind in 1:size(fiber_inds, 1)
-        cdf[:] .= 0
-        dcdf_dz[:] .= 0
-
+        # sum the Gauss-Hermite terms into the cdf and its derivative
         for j in 1:n_gauss
             vals, deriv_vals = int_gauss_hermite_term(x_bins, j - 1, return_deriv = true)
-            cdf .+= smooth_new_indv_heights[ind, j] * vals
-            dcdf_dz .+= smooth_new_indv_heights[ind, j] * deriv_vals
+            all_y_prof[ind, :] .+= smooth_new_indv_heights[ind, j] * vals
+            all_y_prof_deriv[ind, :] .+= smooth_new_indv_heights[ind, j] * deriv_vals
         end
 
-        smoothed_cdf_zeros[ind] = cdf[1]
-        cdf .-= smoothed_cdf_zeros[ind]
-        smoothed_cdf_scales[ind] = cdf[end]
-        cdf ./= smoothed_cdf_scales[ind]
-        dcdf_dz ./= smoothed_cdf_scales[ind]
-
-        all_y_prof[ind, :] .= cdf
-        all_y_prof_deriv[ind, :] .= dcdf_dz
+        smoothed_cdf_zero = all_y_prof[ind, 1]
+        all_y_prof[ind, :] .-= smoothed_cdf_zero
+        smoothed_cdf_scale = all_y_prof[ind, end]
+        all_y_prof[ind, :] ./= smoothed_cdf_scale
+        all_y_prof_deriv[ind, :] ./= smoothed_cdf_scale
     end
-
-    x_prof_min = x_bins[1]
-    x_prof_max_ind = size(x_bins, 1)
 
     if make_plots
         x_centers = 0.5 .* (x_bins[(begin + 1):end] .+ x_bins[begin:(end - 1)])
@@ -167,13 +170,23 @@ function gh_profiles(tele, mjd, chip, expid; n_sub = 100, make_plots = false)
             lines!(ax, x_centers, pdf .+ 0.02 * (j - 1))
         end
 
-        tracePlot_heights_Path = dirNamePlots *
-                                 "GH_profiles_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png"
+        tracePlot_heights_Path = joinpath(plot_path,
+            "GH_profiles_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).png")
         save(tracePlot_heights_Path, fig)
     end
 
-    return med_center_to_fiber_func,
-    x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
+    #    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
+    med_center_to_fiber_func = linear_interpolation(
+        prof_fiber_centers, prof_fiber_inds, extrapolation_bc = Line())
+
+    # things to return
+    x_prof_min = first(x_bins)
+    x_prof_max_ind = length(x_bins)
+    min_prof_fib = first(fiber_inds)
+    max_prof_fib = last(fiber_inds)
+
+    return (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+        min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)
 end
 
 function cdf_func_indv(x_bins, mean, width, fiber_ind, x_prof_min, x_prof_max_ind,
@@ -225,7 +238,7 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     v_hat = zeros(Float64, (3, curr_n_peaks))
     v_hat_cov = zeros(Float64, (3, 3, curr_n_peaks))
 
-    #(n_pix,n_params,n_peaks)
+    # Derivative matrix (n_pix,n_params,n_peaks)
     M_vects = zeros(Float64,
         (size(fit_fluxes, 1), size(first_guess_params, 2), curr_n_peaks))
     curr_M_T_dot_V_inv = zeros(Float64,
@@ -364,24 +377,25 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     end
 end
 
+"""
+Extract the trace parameters from the image data assuming Gauss-Hermite profiles.
+
+Returns: trace centers, widths, and heights, and their covariances.
+"""
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
-        good_pixels = nothing, mid = 1025, n_center_cols = 100, verbose = false)
+        good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
+        low_throughput_thresh = 0.05)
     noise_image = 1 ./ sqrt.(ivar_image)
-    if isnothing(good_pixels)
-        good_pixels = ones(Bool, size(image_data))
-    end
     good_pixels .= good_pixels .& (ivar_image .> 0)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
-    x_center = mid
-
-    x_inds = [-n_center_cols, n_center_cols + 1] .+ x_center
 
     # Cutout image in x direction
-    cutout_fluxes = image_data[(x_center - n_center_cols):(x_center + n_center_cols), :]'
-    cutout_errs = noise_image[(x_center - n_center_cols):(x_center + n_center_cols), :]'
-    cutout_masks = good_pixels[(x_center - n_center_cols):(x_center + n_center_cols), :]'
+    r = (mid - n_center_cols):(mid + n_center_cols)
+    cutout_fluxes = image_data[r, :]'
+    cutout_errs = noise_image[r, :]'
+    cutout_masks = good_pixels[r, :]'
 
     # Mask bad pixels
     cutout_fluxes[.!cutout_masks] .= 0
@@ -752,7 +766,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     end
 
     #remove the edge possible peaks if they have no throughput, because they likely don't exist
-    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.1
+    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.2
     low_throughput_fibers = findall(.!good_throughput_fibers)
     if size(low_throughput_fibers, 1) > 0
         if low_throughput_fibers[1] == 1
@@ -796,11 +810,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     curr_fiber_inds = clamp.(range(1, size(best_fit_ave_params, 1)), min_prof_fib, max_prof_fib)
 
     med_flux = nanmedian(best_fit_ave_params[:, 1], 1)
-    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.1
+    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh
     low_throughput_fibers = findall(.!good_throughput_fibers)
 
-    #     x_inds = range(1, 2048, step = 1)
-    #     x_inds = range(1,size(image_data,1),step=1)
     x_inds = axes(image_data, 1)
     final_param_outputs = zeros((
         size(x_inds, 1), size(best_fit_ave_params, 1), size(best_fit_ave_params, 2)))
@@ -846,6 +858,10 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     best_model_fit_inds = floor.(Int, round.(first_guess_params[:, 2])) .+
                           best_model_offset_inds'
 
+    best_fit_spacing = diff(best_fit_ave_params[:, 2])
+    new_offsets = zeros(Float64, size(first_guess_params, 1))
+    x_mean = mean(curr_fiber_inds)
+
     @showprogress enabled=verbose desc="Fitting traces" for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
 
@@ -881,6 +897,20 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
                                     nanmedian(first_guess_params[:, 3] ./ best_fit_ave_params[:, 3])
         first_guess_params[:, 1] .= best_fit_ave_params[:, 1] .*
                                     nanmedian(first_guess_params[:, 1] ./ best_fit_ave_params[:, 1])
+
+        #enforce spacing between fibers for first guess positions
+        #but account for small changes in spacing by fitting for slope & intercept
+        curr_spacing = diff(first_guess_params[:, 2])
+        spacing_shift = nanmedian(curr_spacing .- best_fit_spacing)
+        new_offsets[2:end] .= cumsum(best_fit_spacing .+ spacing_shift, dims = 1)
+        predict_centers = nanmedian(first_guess_params[:, 2] .- new_offsets) .+ new_offsets
+        curr_diff = first_guess_params[:, 2] .- predict_centers
+        y_mean = nanmedian(curr_diff)
+        missing_slope = sum((curr_diff .- y_mean) .* (curr_fiber_inds .- x_mean)) /
+                        sum((curr_fiber_inds .- x_mean) .^ 2)
+        missing_inter = nanmedian(curr_diff .- missing_slope .* curr_fiber_inds)
+        predict_centers .+= curr_fiber_inds .* missing_slope .+ missing_inter
+        first_guess_params[:, 2] .= clamp.(predict_centers, 11, 2048 - 11)
 
         # first guess parameters
         fit_inds .= floor.(Int, round.(first_guess_params[:, 2])) .+ offset_inds'
@@ -922,8 +952,5 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
                                                                       nearest_inds[1]))
     end
 
-    param_outputs = final_param_outputs
-    param_output_covs = final_param_output_covs
-
-    return param_outputs, param_output_covs
+    final_param_outputs, final_param_output_covs
 end
