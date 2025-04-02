@@ -73,7 +73,6 @@
 - time evolution of trace positions (Kevin)
 - cross-talk model (Andrew)
 - relative fluxing (Andrew)
-- Almanac fiber types (Adam/Andy)
 - scattered light modelling (Andy)
 - LCO calibration products (gain, read noise, nonlinearity maps)
 - document everything (Andrew, Kevin, Adam)
