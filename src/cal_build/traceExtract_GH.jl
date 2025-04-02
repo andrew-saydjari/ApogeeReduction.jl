@@ -926,7 +926,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
             curr_fiber_inds, x_prof_min, x_prof_max_ind,
             n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
             n_iter = 10, return_cov = true,
-            use_first_guess_heights = true, max_center_move = 1,
+            use_first_guess_heights = true, max_center_move = 2,
             min_widths = 0.5 .* first_guess_params[:, 3],
             max_widths = 2.0 .* first_guess_params[:, 3])
 
