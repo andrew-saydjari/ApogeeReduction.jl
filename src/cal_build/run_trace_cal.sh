@@ -49,6 +49,9 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdi
 mkdir -p ${outdir}dome_flats
 julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist
 
+echo "Running 2D->1D Pipeline for DomeFlats"
+julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+
 runlist_quartz=${outdir}almanac/runlist_${runname}.jld2
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
 echo "Getting quartzflat runlist..."
@@ -60,6 +63,9 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist_quartz 
 
 mkdir -p ${outdir}quartz_flats
 julia +1.11.0 --project="./" src/cal_build/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist_quartz
+
+echo "Running 2D->1D Pipeline for QuartzFlats"
+julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist_quartz --outdir $outdir --runname $runname
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
