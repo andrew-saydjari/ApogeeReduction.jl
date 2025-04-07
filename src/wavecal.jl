@@ -56,9 +56,9 @@ end
 # Sky line wavecal
 function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # initial guess for the (low-order)chip polynomial parameters
-    chipPolyParams0 = [-1.070 1
+    chipPolyParams0 = [-1.0748 1.00168
                        0 1
-                       1.076 1]
+                       1.07089 0.98763]
     outname = replace(replace(fname, "skyLine_peaks" => "wavecal_skyline"), "_a_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
     linParams, nlParams, resid_vec = get_sky_wavecal(
