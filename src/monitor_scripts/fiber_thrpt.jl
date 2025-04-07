@@ -44,7 +44,7 @@ function summarize_fiber_thrpt(flat_type, tele)
         mkpath(dirname(fname_out))
     end
 
-    jldsave(fname_out;
+    safe_jldsave(fname_out;
         adjfiberindx = adjfiberindx,
         traceid = traceid,
         fiberid = fiberid,
