@@ -15,7 +15,7 @@ jobs:
     - name: Check for jldsave usage
       run: |
         # Find files containing "jldsave" but exclude src/utils.jl
-        FOUND=$(grep --line-number -r "jldsave" . --exclude-dir={.git,.github} --exclude="src/utils.jl" || true)
+        FOUND=$(grep --line-number -r "jldsave" . --exclude-dir={.git,.github} | grep -v "src/utils.jl:" || true)
 
         # Filter out safe_jld2save occurrences
         FILTERED=$(echo "$FOUND" | grep -v "safe_jldsave" || true)
