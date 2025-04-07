@@ -18,7 +18,7 @@ jobs:
         FOUND=$(grep --line-number -r "jldsave" . --exclude-dir={.git,.github} --exclude="src/utils.jl" || true)
 
         # Filter out safe_jld2save occurrences
-        FILTERED=$(echo "$FOUND" | grep -v "safe_jld2save" || true)
+        FILTERED=$(echo "$FOUND" | grep -v "safe_jldsave" || true)
 
         if [ ! -z "$FILTERED" ]; then
           echo "Found unauthorized use of 'jldsave' in the following locations:"
