@@ -145,13 +145,13 @@ git_branch, git_commit = initalize_git(src_dir);
         # everything to some degree
         regularized_trace_params = regularize_trace(trace_params)
 
-        flux_1d, ivar_1d, mask_1d = if parg["extraction"] == "boxcar"
-            extract_boxcar(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        flux_1d, ivar_1d, mask_1d, resid_fluxes, resid_ivars = if parg["extraction"] == "boxcar"
+            extract_boxcar(dimage, ivarimage, pix_bitmask, regularized_trace_params, return_resids = true)
         elseif parg["extraction"] == "optimal"
             #            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
             extract_optimal_iter(dimage, ivarimage, pix_bitmask, regularized_trace_params,
                 med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
-                min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)
+                min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, return_resids = true)
         else
             error("Extraction method $(parg["extraction"]) not recognized")
         end
@@ -159,6 +159,8 @@ git_branch, git_commit = initalize_git(src_dir);
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         outfname = replace(fname, "ar2D" => "ar1D")
         jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
+        resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
+        jldsave(resid_outfname; resid_flux, resid_ivar, git_branch, git_commit)
     end
 end
 t_now = now();
