@@ -1,3 +1,4 @@
+using Polynomials: Polynomial
 
 function linear_loss_fit(x, y; wporder = 2, returnL2only = false)
     A = positional_poly_mat(x, porder = wporder)
@@ -57,30 +58,51 @@ end
 function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # initial guess for the (low-order)chip polynomial parameters
     if "_apo_" in fname
-        chipPolyParams0 = [-1.0716 1.00111
-                           0 1
-                           1.07009 0.98803]
+        # chipPolyParams0 = [-1.0716 1.00111
+        #                    0 1
+        #                    1.07009 0.98803]
+        offset_func_chip1 = Polynomial([-1.07221500e+00,  4.52450367e-06])
+        scale_func_chip1 = Polynomial([1.00093875e+00, -4.41886670e-07])
+        offset_func_chip3 = Polynomial([1.06972294e+00, 2.77444782e-06])
+        scale_func_chip3 = Polynomial([9.87857338e-01, 1.09350510e-06])
     elseif "_lco_" in fname
-        chipPolyParams0 = [-1.0748 1.00168
-                           0 1
-                           1.07089 0.98763]
+        # chipPolyParams0 = [-1.0748 1.00168
+        #                    0 1
+        #                    1.07089 0.98763]
+        offset_func_chip1 = Polynomial([-1.07456222e+00, -1.52100076e-07])
+        scale_func_chip1 = Polynomial([1.00123795e+00, 5.30751281e-07])
+        offset_func_chip3 = Polynomial([1.07199520e+00, -7.11920517e-06])
+        scale_func_chip3 = Polynomial([9.87968936e-01, -2.76150881e-07])
     else
-        chipPolyParams0 = [-1.070 1
-                           0 1
-                           1.076 1]
+        # chipPolyParams0 = [-1.070 1
+        #                    0 1
+        #                    1.076 1]
+        offset_func_chip1 = Polynomial([-1.070, 0.0])
+        scale_func_chip1 = Polynomial([1.0, 0.0])
+        offset_func_chip3 = Polynomial([1.076, 0.0])
+        scale_func_chip3 = Polynomial([1.0, 0.0])
     end
+    fibInds = 1:300
+    chipPolyParams0 = zeros(Float64, (size(fibInds,1), 3, cporder+1))
+    chipPolyParams0[:, 1, 1] .= offset_func_chip1.(fibInds)
+    chipPolyParams0[:, 1, 2] .= scale_func_chip1.(fibInds)
+    chipPolyParams0[:, 2, 1] .= 0.0
+    chipPolyParams0[:, 2, 2] .= 1.0
+    chipPolyParams0[:, 3, 1] .= offset_func_chip3.(fibInds)
+    chipPolyParams0[:, 3, 2] .= scale_func_chip3.(fibInds)
+    
     outname = replace(replace(fname, "skyLine_peaks" => "wavecal_skyline"), "_a_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
     linParams, nlParams, resid_vec = get_sky_wavecal(
         sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
         chipPolyParams0; cporder = cporder, wporder = wporder)
 
-    chipWaveSoln = zeros(Float64, 2048, 300, 3)
+    chipWaveSoln = zeros(Float64, 2048, size(fibInds,1), 3)
     x = 1:2048
     ximport = (x .- 1024) ./ 2048
     for chip in ["a", "b", "c"]
         chipIndx = getChipIndx(chip)
-        for fibIndx in 1:300
+        for fibIndx in fibInds            
             params2ChipPolyParams!(chipPolyParams0, nlParams[fibIndx, :], cporder)
             xt = transform_x_chips(ximport, chipPolyParams0[chipIndx, :])
             Ax = positional_poly_mat(xt, porder = 2)
@@ -104,7 +126,7 @@ function get_sky_wavecal(
         yv = sky_line_fwlst[:, i]
         chipIntv = sky_line_chipInt[:, i]
         msk = .!isnan.(xv)
-        chipPolyParams = copy(chipPolyParams0)
+        chipPolyParams = copy(chipPolyParams0[i, :, :])
         inparams = ChipPolyParams2Params(chipPolyParams)
         function nonlinear_loss_fit_partial(inparams)
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
