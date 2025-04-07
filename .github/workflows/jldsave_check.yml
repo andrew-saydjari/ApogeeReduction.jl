@@ -15,7 +15,7 @@ jobs:
     - name: Check for jldsave usage
       run: |
         # Find files containing "jldsave" but exclude src/utils.jl
-        FOUND=$(grep -r "jldsave" . --exclude-dir={.git,.github} --exclude="src/utils.jl" || true)
+        FOUND=$(grep --line-number -r "jldsave" . --exclude-dir={.git,.github} --exclude="src/utils.jl" || true)
 
         # Filter out safe_jld2save occurrences
         FILTERED=$(echo "$FOUND" | grep -v "safe_jld2save" || true)
@@ -26,7 +26,7 @@ jobs:
           echo "Please use 'safe_jld2save' from src/utils.jl instead."
 
           # Create the comment body with properly interpreted newlines
-          COMMENT=$(echo -e "Found use of 'jldsave' in the following locations:\n\n\`\`\`\n$FILTERED\n\`\`\`\n\nPlease use 'safe_jld2save' from src/utils.jl instead.")
+          COMMENT=$(echo -e "Found use of `jldsave` in the following locations:\n\n\`\`\`\n$FILTERED\n\`\`\`\n\nPlease use `safe_jld2save` from src/utils.jl instead. See #165 for more information.")
 
           # Post the comment to the PR
           gh auth login --with-token <<< "${{ github.token }}"
