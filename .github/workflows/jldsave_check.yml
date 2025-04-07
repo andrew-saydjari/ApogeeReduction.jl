@@ -26,7 +26,7 @@ jobs:
           echo "Please use 'safe_jld2save' from src/utils.jl instead."
 
           # Create the comment body with properly interpreted newlines
-          COMMENT=$(echo -e "Found use of \`jldsave\` in the following locations:\n\n\`\`\`\n$FILTERED\n\`\`\`\n\nPlease use \`safe_jld2save\` from src/utils.jl instead. See #165 for more information.")
+          COMMENT=$(echo -e "Found use of \`jldsave\` in the following locations:\n\n\`\`\`\n$FILTERED\n\`\`\`\n\nPlease use \`safe_jld2save\` from src/utils.jl instead. See #165 for more information.\n\n(This comment will not be updated as changes are pushed. Check the workflow status for the up-to-date results.)")
 
           # Post the comment to the PR
           gh auth login --with-token <<< "${{ github.token }}"
