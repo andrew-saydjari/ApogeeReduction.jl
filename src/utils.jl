@@ -1,5 +1,6 @@
 using StatsBase: iqr
 using Jackknife
+using JLD2
 
 # ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
 if !haskey(ENV, "SLACK_CHANNEL")
@@ -177,5 +178,5 @@ function safe_jldsave(filename; kwargs...)
             throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
         end
     end
-    jldsave(filename; kwargs...)
+    JLD2.jldsave(filename; kwargs...)
 end
