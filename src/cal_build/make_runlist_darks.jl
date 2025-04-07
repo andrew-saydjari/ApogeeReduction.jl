@@ -1,6 +1,7 @@
 using Pkg;
 Pkg.instantiate();
-using HDF5, JLD2, ArgParse, DataFrames
+using HDF5, ArgParse, DataFrames
+include("../utils.jl") # for safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()
@@ -27,8 +28,8 @@ end
 
 parg = parse_commandline()
 
-darks_mjd = []
-darks_expid = []
+darks_mjd = Int[]
+darks_expid = Int[]
 f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
@@ -43,4 +44,4 @@ for tstmjd in mjd_list
     end
 end
 
-jldsave(parg["output"]; mjd = darks_mjd, expid = darks_expid)
+safe_jldsave(parg["output"]; mjd = darks_mjd, expid = darks_expid)

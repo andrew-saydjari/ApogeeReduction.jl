@@ -158,7 +158,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         outfname = replace(fname, "ar2D" => "ar1D")
-        jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
+        safe_safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
     end
 end
 t_now = now();

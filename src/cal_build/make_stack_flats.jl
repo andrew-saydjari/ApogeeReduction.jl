@@ -154,7 +154,7 @@ pix_bit_mask = zeros(Int, 2040, 2040)
 pix_bit_mask .|= (flat_im .< flat_frac_cut) * 2^6 # too low response in flat
 
 # save dark_pix_bitmask and dark_rate (electron per read)
-jldsave(
+safe_jldsave(
     parg["flat_dir"] *
     "flats/flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).jld2";
     flat_im = flat_im,

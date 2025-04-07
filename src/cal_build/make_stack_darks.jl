@@ -110,7 +110,7 @@ dat = dark_im[1:2048, 1:2048][pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .== 0
 sig_after = nanzeroiqr(dat)
 
 # save dark_pix_bitmask and dark_rate (electron per read)
-jldsave(
+safe_jldsave(
     parg["dark_dir"] *
     "darks/darkRate_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).jld2";
     dark_rate = dark_im,

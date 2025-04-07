@@ -79,7 +79,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         end
     end
 
-    jldsave(outname; linParams = linParams, nlParams = nlParams,
+    safe_jldsave(outname; linParams = linParams, nlParams = nlParams,
         resid_vec = resid_vec, chipWaveSoln = chipWaveSoln)
 end
 

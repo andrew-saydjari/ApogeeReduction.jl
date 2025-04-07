@@ -418,7 +418,7 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
 
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_a_" => "_")
-    jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar,
+    safe_jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar,
         mask_1d = outmsk, git_branch, git_commit, wavecal_type)
     return
 end
