@@ -94,13 +94,15 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
     pix_bitmask_image = f["pix_bitmask"][1:2048, 1:2048]
     close(f)
 
-    med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv = gh_profiles(
+    med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
+    all_y_prof, all_y_prof_deriv = gh_profiles(
         teleloc, mjdloc, chiploc, expidloc; n_sub = 100)
 
     #    trace_params, trace_param_covs = trace_extract(
     #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
     good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
-    trace_params, trace_param_covs = trace_extract(
+    trace_params,
+    trace_param_covs = trace_extract(
         image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
         ; good_pixels = good_pixels)

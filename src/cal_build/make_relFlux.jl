@@ -97,7 +97,7 @@ for mjd in unique_mjds
         DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
     function get_1d_name_partial(expid)
-        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal=true) * ".jld2"
+        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
     end
 
     file_list = get_1d_name_partial.(expid_list)
@@ -105,7 +105,7 @@ for mjd in unique_mjds
 end
 
 ## need to get cal_type from runlist
-exp_type_lst = map(x->split(split(x,"FLAT")[1],"_")[end],all1Da)
+exp_type_lst = map(x->split(split(x, "FLAT")[1], "_")[end], all1Da)
 unique_exp_lst = unique(exp_type_lst)
 if length(unique_exp_lst) > 1
     error("Multiple cal types found in runlist")
@@ -113,13 +113,14 @@ end
 cal_type = lowercase(unique_exp_lst[1])
 @passobj 1 workers() cal_type # make cal_type available to all workers
 
-flist_chips  = []
+flist_chips = []
 for chip in chips
     push!(flist_chips, replace.(all1Da, "_a_"=>"_$(chip)_"))
 end
 all1D = vcat(flist_chips...)
 
-all1Daout = map(x->replace(replace(x, "apred"=>"$(cal_type)_flats"),"ar1Dcal" => "$(cal_type)Flux"),all1Da)
+all1Daout = map(
+    x->replace(replace(x, "apred"=>"$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux"), all1Da)
 dname = dirname(all1Daout[1])
 if !ispath(dname)
     mkpath(dname)
@@ -128,13 +129,14 @@ end
 @everywhere begin
     function get_and_save_relFlux(fname)
         absthrpt, relthrpt, bitmsk_relthrpt = get_relFlux(fname)
-        outfname = replace(replace(fname, "apred"=>"$(cal_type)_flats"),"ar1Dcal" => "$(cal_type)Flux")
+        outfname = replace(
+            replace(fname, "apred"=>"$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux")
         jldsave(outfname; absthrpt, relthrpt, bitmsk_relthrpt)
     end
 end
 
 desc = "get and save relFlux from DomeFlats"
-@showprogress desc=desc pmap(get_and_save_relFlux,all1D)
+@showprogress desc=desc pmap(get_and_save_relFlux, all1D)
 
 # add plotting
 thread = SlackThread()
@@ -151,27 +153,27 @@ thread("$(cal_type) relFluxing")
         else
             error("Unknown telescope: $(tele)")
         end
-        absthrpt = zeros(300,length(chips))
-        relthrpt = zeros(300,length(chips))
-        bitmsk_relthrpt = zeros(Int,300,length(chips))
+        absthrpt = zeros(300, length(chips))
+        relthrpt = zeros(300, length(chips))
+        bitmsk_relthrpt = zeros(Int, 300, length(chips))
         for (cindx, chip) in enumerate(chips)
             local_fname = replace(fname, "_a_"=>"_$(chip)_")
             f = jldopen(local_fname)
-            absthrpt[:,cindx] = f["absthrpt"]
-            relthrpt[:,cindx] = f["relthrpt"]
-            bitmsk_relthrpt[:,cindx] = f["bitmsk_relthrpt"]
+            absthrpt[:, cindx] = f["absthrpt"]
+            relthrpt[:, cindx] = f["relthrpt"]
+            bitmsk_relthrpt[:, cindx] = f["bitmsk_relthrpt"]
             close(f)
         end
         # plot the relFlux
-        fig = Figure(size=(1200, 400))
+        fig = Figure(size = (1200, 400))
         for (cindx, chip) in enumerate(chips)
-            ax = Axis(fig[1, cindx], title="RelFlux Chip $(chip)")
-            msk = bitmsk_relthrpt[:,cindx].==0
-            scatter!(ax, xvec[msk], relthrpt[msk,cindx], color="limegreen")
-            msk = (bitmsk_relthrpt[:,cindx].& 2^0).==2^0
-            scatter!(ax, xvec[msk], relthrpt[msk,cindx], color="orange")
-            msk = (bitmsk_relthrpt[:,cindx].& 2^1).==2^1
-            scatter!(ax, xvec[msk], relthrpt[msk,cindx], color="red")
+            ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chip)")
+            msk = bitmsk_relthrpt[:, cindx] .== 0
+            scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "limegreen")
+            msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
+            scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "orange")
+            msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
+            scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "red")
         end
         # we should be more uniform about the naming convention
         savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expid).png"
@@ -181,7 +183,7 @@ thread("$(cal_type) relFluxing")
 end
 
 desc = "plotting relFlux"
-savePaths = @showprogress desc=desc pmap(plot_relFlux,all1Daout)
+savePaths = @showprogress desc=desc pmap(plot_relFlux, all1Daout)
 for savePath in savePaths
     thread("Relfluxing", savePath)
 end

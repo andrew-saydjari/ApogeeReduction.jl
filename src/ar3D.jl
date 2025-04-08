@@ -40,15 +40,20 @@ function refarray_zpt!(dcubedat)
 end
 
 function vert_ref_edge_corr_amp!(dcubedat_out)
-    dcubedat_out[1:512, ..] .-= mean([mean(dcubedat_out[1:512, 1:4, ..]),
+    dcubedat_out[1:512,
+        ..] .-= mean([mean(dcubedat_out[1:512, 1:4, ..]),
         mean(dcubedat_out[1:512, (end - 3):(end - 1), ..])])
-    dcubedat_out[513:1024, ..] .-= mean([mean(dcubedat_out[513:1024, 1:4, ..]),
+    dcubedat_out[513:1024,
+        ..] .-= mean([mean(dcubedat_out[513:1024, 1:4, ..]),
         mean(dcubedat_out[513:1024, (end - 3):(end - 1), ..])])
-    dcubedat_out[1025:1536, ..] .-= mean([mean(dcubedat_out[1025:1536, 1:4, ..]),
+    dcubedat_out[1025:1536,
+        ..] .-= mean([mean(dcubedat_out[1025:1536, 1:4, ..]),
         mean(dcubedat_out[1025:1536, (end - 3):(end - 1), ..])])
-    dcubedat_out[1537:2048, ..] .-= mean([mean(dcubedat_out[1537:2048, 1:4, ..]),
+    dcubedat_out[1537:2048,
+        ..] .-= mean([mean(dcubedat_out[1537:2048, 1:4, ..]),
         mean(dcubedat_out[1537:2048, (end - 3):(end - 1), ..])])
-    dcubedat_out[2049:end, ..] .-= mean([mean(dcubedat_out[2049:end, 1:4, ..]),
+    dcubedat_out[2049:end,
+        ..] .-= mean([mean(dcubedat_out[2049:end, 1:4, ..]),
         mean(dcubedat_out[2049:end, (end - 3):(end - 1), ..])])
     return
 end
@@ -71,6 +76,7 @@ overwritten with the difference images. Returns a mask of the saturated pixels (
 function saturation_mask(datacube; high_ADU_threshold = 35000, flat_read_threshold = 200)
     mask = zeros(Bool, size(datacube)[1:2])
     for i in axes(datacube, 1), j in axes(datacube, 2)
+
         if (datacube[i, j, end] > high_ADU_threshold) &&
            (datacube[i, j, end] - datacube[i, j, end - 1] < flat_read_threshold)
             mask[i, j] = true
@@ -82,6 +88,7 @@ end
 function outlier_mask(dimages; clip_threshold = 20)
     mask = ones(Bool, size(dimages))
     for i in axes(dimages, 1), j in axes(dimages, 2)
+
         @views μ = mean(dimages[i, j, :])
         @views σ = iqr(dimages[i, j, :]) / 1.34896
         @views @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
@@ -136,7 +143,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
         @views datacube[:, :, i] .= (datacube[:, :, i] .- datacube[:, :, i - 1])
     end
     # this view is to minimize indexing headaches
-    dimages = view(datacube, :, :, (firstind + 1):size(datacube, 3))
+    dimages = view(datacube,:,:,((firstind + 1):size(datacube, 3)))
 
     not_cosmic_ray = outlier_mask(dimages)
     # don't try to do CR rejection on saturated pixels
@@ -165,7 +172,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     d1s = sum(dimages, dims = 3)
     d2s = sum(abs2, dimages, dims = 3)
 
-    for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
+    for pixel_ind in CartesianIndices(view(dimages,:,:,1))
         good_diffs = not_cosmic_ray[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
