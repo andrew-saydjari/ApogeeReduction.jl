@@ -251,7 +251,7 @@ for mjd in unique_mjds
     close(f)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal=true) * ".jld2"
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
         else
             return nothing
         end
