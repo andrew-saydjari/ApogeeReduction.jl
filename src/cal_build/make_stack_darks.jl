@@ -151,7 +151,7 @@ let
 end
 
 dark_im_msk = copy(dark_im)
-dark_im_msk[pix_bit_mask .& 2^3 .== 0] .= 0;
+dark_im_msk[pix_bit_mask .& 2 ^ 3 .== 0] .= 0;
 dark_im_msk[pix_bit_mask .& bad_pix_bits .!= 0] .= NaN;
 
 totNum = length(pix_bit_mask[1:2048, 1:2048])

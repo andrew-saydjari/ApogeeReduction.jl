@@ -61,7 +61,8 @@ if !ispath(dirNamePlots)
 end
 
 function get_IQR(x, y; cnts_cut = 100, nbin_med = 100)
-    edges, centers, binStat = binnedStatistic(
+    edges, centers,
+    binStat = binnedStatistic(
         y,
         x,
         nbins = nbin_med,

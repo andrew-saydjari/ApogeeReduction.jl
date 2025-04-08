@@ -61,7 +61,8 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
                        1.076 1]
     outname = replace(replace(fname, "skyLine_peaks" => "wavecal_skyline"), "_a_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
-    linParams, nlParams, resid_vec = get_sky_wavecal(
+    linParams, nlParams,
+    resid_vec = get_sky_wavecal(
         sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
         chipPolyParams0; cporder = cporder, wporder = wporder)
 
@@ -103,7 +104,8 @@ function get_sky_wavecal(
         res = optimize(
             nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
         nlParamsOpt = Optim.minimizer(res)
-        linResid, linParamsOpt = nonlinear_loss_fit!(
+        linResid,
+        linParamsOpt = nonlinear_loss_fit!(
             chipPolyParams, nlParamsOpt, xv[msk], yv[msk], chipIntv[msk];
             wporder = wporder, cporder = cporder, returnL2only = false)
         nlParams[i, :] = nlParamsOpt

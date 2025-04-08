@@ -155,8 +155,9 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? reset anomaly fix (currently just drop first ind or two as our "fix")
         # REMOVES FIRST READ (as a view)
         # might need to adjust for the few read cases (2,3,4,5)
-        firstind_loc, extractMethod_loc = if ((df.exptype[expid] == "DOMEFLAT") &
-                                              (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+        firstind_loc,
+        extractMethod_loc = if ((df.exptype[expid] == "DOMEFLAT") &
+                                (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
             2, "dcs"
         elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
             2, "dcs"
@@ -228,7 +229,10 @@ git_branch, git_commit = initalize_git(src_dir);
         # ADD? nonlinearity correction
 
         # extraction 3D -> 2D
-        dimage, ivarimage, chisqimage, CRimage, saturation_image = if extractMethod_loc == "dcs"
+        dimage, ivarimage,
+        chisqimage,
+        CRimage,
+        saturation_image = if extractMethod_loc == "dcs"
             # TODO some kind of outlier rejection, this just keeps all diffs
             images = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
             images..., zeros(Int, size(images[1])), zeros(Int, size(images[1]))
@@ -335,7 +339,8 @@ if parg["runlist"] != ""
     subiter = Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))
-    @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
+    @everywhere process_3D_partial(((mjd, expid),
+        chip)) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else

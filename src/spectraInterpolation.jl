@@ -90,7 +90,8 @@ function generateInterpMatrix_sparse_inv(
     cindx = find_yinx(waveobs, wavemod)
     row, col, val = Int[], Int[], Float64[]
     for (modind, modval) in enumerate(wavemod)
-        indxvec, wvec = returnWeights_inv(waveobs, obsBitMsk, pixindx, modval, cindx[modind],
+        indxvec,
+        wvec = returnWeights_inv(waveobs, obsBitMsk, pixindx, modval, cindx[modind],
             kernsize = kernsize, linFallBack = linFallBack)
         if !isnan(wvec[1]) .& (wvec[1] .!= 1.0)
             wvec ./= sum(wvec)

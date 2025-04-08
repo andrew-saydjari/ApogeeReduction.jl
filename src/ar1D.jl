@@ -14,6 +14,24 @@ include("./skyline_peaks.jl")
 # hold off on prop ivar through until we switch to sutr_wood, also could implement a chi2 cut here
 # add a condition that we should drop any x pixel where a bad bit in any of the pixels being summed is bad
 
+function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
+    f = jldopen(fname)
+    flux_1d = f["flux_1d"]
+    mask_1d = f["mask_1d"]
+    mask_1d_good = (mask_1d .& bad_pix_bits) .== 0;
+    close(f)
+
+    absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1);
+    bitmsk_relthrpt = zeros(Int, length(absthrpt))
+    relthrpt = copy(absthrpt)
+    relthrpt ./= nanzeromedian(relthrpt);
+
+    thresh = (1 .- sig_cut*nanzeroiqr(relthrpt))
+    bitmsk_relthrpt[relthrpt .< thresh].|=2^0
+    bitmsk_relthrpt[relthrpt .< rel_val_cut].|=2^1
+    return absthrpt, relthrpt, bitmsk_relthrpt
+end
+
 """
 Regularize the trace by applying a running median filter to each param in each fiber.
 Could be denoised further by fitting a low-order polynomial or similar.
@@ -23,7 +41,10 @@ function regularize_trace(trace_params; window_size = 101)
     n_xpix, n_fibers = size(trace_params)[1:2]
     regularized_trace = similar(trace_params)
     for fiber in 1:n_fibers, param in 1:3
-        regularized_trace[:, fiber, param] = running_median(
+
+        regularized_trace[:,
+            fiber,
+            param] = running_median(
             trace_params[:, fiber, param], window_size, :asym_trunc; nan = :ignore)
     end
     regularized_trace
@@ -46,6 +67,7 @@ function extract_boxcar_core(dimage_in, trace_params, boxcar_halfwidth)
     out = zeros(Float64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
+
         _, ypixf, _ = trace_params[xpix, fib, :]
         ypix = round(Int, ypixf)
         out[xpix, fib] = sum(dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
@@ -57,9 +79,11 @@ function extract_boxcar_bitmask(dimage_in, trace_params, boxcar_halfwidth)
     mask = zeros(Int64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
+
         _, ypixf, _ = trace_params[xpix, fib, :]
         ypix = round(Int, ypixf)
-        mask[xpix, fib] = reduce(
+        mask[xpix,
+            fib] = reduce(
             |, dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
     end
     mask
@@ -83,6 +107,7 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
 
     for xpix in 1:n_xpix, fib in 1:n_fibers
+
         _, y_peak, y_sigma = trace_params[xpix, fib, :]
 
         ypixels = floor(Int, y_peak - window_half_size):ceil(
@@ -90,8 +115,9 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
         ypix_boundaries = [ypixels .- 0.5; ypixels[end] + 0.5]
         weights = diff(cdf.(Normal(y_peak, y_sigma), ypix_boundaries))
 
-        flux_1d[xpix, fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
-                             sum(weights .^ 2 .* ivarimage[xpix, ypixels])
+        flux_1d[xpix,
+            fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
+                   sum(weights .^ 2 .* ivarimage[xpix, ypixels])
         ivar_1d[xpix, fib] = sum(weights .^ 2 .* ivarimage[xpix, ypixels])
 
         # bitmask
@@ -152,7 +178,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 _, y_peak, y_sigma = trace_params[xpix, fib, :]
 
                 #use large window to get model fluxes
-                full_ypixels = floor(Int, y_peak - large_window_half_size):ceil(
+                full_ypixels = floor(
+                    Int, y_peak - large_window_half_size):ceil(
                     Int, y_peak + large_window_half_size)
                 full_ypix_boundaries = [full_ypixels .- 0.5; full_ypixels[end] + 0.5]
                 #                full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
@@ -211,8 +238,9 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                     new_comb_model_flux[full_ypixels] .+= model_flux_indv[fib, full_ypixels]
 
                     if ivar_1d[xpix, fib] > 0
-                        model_var_indv[fib, full_ypixels] .= max(0, 1 / ivar_1d[xpix, fib]) *
-                                                             (full_model_vals .^ 2)
+                        model_var_indv[fib,
+                            full_ypixels] .= max(0, 1 / ivar_1d[xpix, fib]) *
+                                             (full_model_vals .^ 2)
                         new_comb_model_var[full_ypixels] .+= model_var_indv[fib, full_ypixels]
                     end
                 end
@@ -352,7 +380,9 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
     else #this is a terrible global fallback, just so we get something to look at
         chipWaveSoln = zeros(2048, 300, 3)
         for (chipind, chip) in enumerate(["a", "b", "c"])
-            chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
+            chipWaveSoln[:,
+                :,
+                chipind] .= rough_linear_wave.(
                 1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
         end
         println("No wavecal found for $(fname), using fallback")
