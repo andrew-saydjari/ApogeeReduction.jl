@@ -131,7 +131,7 @@ end
         absthrpt, relthrpt, bitmsk_relthrpt = get_relFlux(fname)
         outfname = replace(
             replace(fname, "apred"=>"$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux")
-        jldsave(outfname; absthrpt, relthrpt, bitmsk_relthrpt)
+        safe_jld2save(outfname; absthrpt, relthrpt, bitmsk_relthrpt)
     end
 end
 
