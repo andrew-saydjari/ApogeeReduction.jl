@@ -19,16 +19,16 @@
 module load sdssdb/main almanac/main sdsstools postgresql ffmpeg
 juliaup add 1.11.0
 
-# hardcode the mjd and expid for now
 tele=$1
 mjd_start=$2
 mjd_end=$3
 
-runname="trace_cal_${tele}_${mjd_start}_${mjd_end}"
 outdir="../outdir/"
 doutdir=$outdir
+runname="trace_cal_${tele}_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
-runlist=${outdir}almanac/runlist_${runname}.jld2
+domerunlist=${outdir}almanac/runlist_dome_${runname}.jld2
+quartzrunlist=${outdir}almanac/runlist_quartz_${runname}.jld2
 caldir_darks=${4:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 caldir_flats=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 
@@ -40,32 +40,38 @@ almanac -v -p 12 --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $a
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
 echo "Getting domeflat runlist..."
-julia +1.11.0 --project="./" src/cal_build/make_runlist_dome_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
+julia +1.11.0 --project="./" src/cal_build/make_runlist_dome_flats.jl --tele $tele --almanac_file $almanac_file --output $domerunlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 echo "Running 3D->2D..."
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 mkdir -p ${outdir}dome_flats
-julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $domerunlist
 
-echo "Running 2D->1D Pipeline for DomeFlats"
-julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
-
-runlist_quartz=${outdir}almanac/runlist_${runname}.jld2
-# get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
+#### Parallel reduction for quartz flats ####
 echo "Getting quartzflat runlist..."
-julia +1.11.0 --project="./" src/cal_build/make_runlist_quartz_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist_quartz
+julia +1.11.0 --project="./" src/cal_build/make_runlist_quartz_flats.jl --tele $tele --almanac_file $almanac_file --output $quartzrunlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 echo "Running 3D->2D..."
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist_quartz --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $quartzrunlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 
 mkdir -p ${outdir}quartz_flats
-julia +1.11.0 --project="./" src/cal_build/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $runlist_quartz
+julia +1.11.0 --project="./" src/cal_build/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $quartzrunlist
 
+#### 2D->1D and relFlux ####
+## DomeFlats
+echo "Running 2D->1D Pipeline for DomeFlats"
+julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname
+
+julia +1.11.0 --project="./" src/cal_build/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $domerunlist --runname $runname
+
+## QuartzFlats
 echo "Running 2D->1D Pipeline for QuartzFlats"
-julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist_quartz --outdir $outdir --runname $runname
+julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $quartzrunlist --outdir $outdir --runname $runname
+
+julia +1.11.0 --project="./" src/cal_build/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $quartzrunlist --runname $runname
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

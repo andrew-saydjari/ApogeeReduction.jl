@@ -21,14 +21,14 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     mask_1d_good = (mask_1d .& bad_pix_bits).==0;
     close(f)
 
-    domeflat_relflux = dropdims(nanzeromedian(flux_1d,1),dims=1);
-    bmsk_relflux = zeros(Int,length(domeflat_relflux))
-    dat = copy(domeflat_relflux)
-    dat ./= nanzeromedian(dat);
+    absthrpt = dropdims(nanzeromedian(flux_1d,1),dims=1);
+    bitmsk_relthrpt = zeros(Int,length(absthrpt))
+    relthrpt = copy(absthrpt)
+    relthrpt ./= nanzeromedian(relthrpt);
 
-    thresh = (1 .- sig_cut*nanzeroiqr(dat))
-    bmsk_relflux[dat .< thresh].&=2^0
-    bmsk_relflux[dat .< rel_val_cut].&=2^1
+    thresh = (1 .- sig_cut*nanzeroiqr(relthrpt))
+    bitmsk_relthrpt[relthrpt .< thresh].|=2^0
+    bitmsk_relthrpt[relthrpt .< rel_val_cut].|=2^1
     return absthrpt, relthrpt, bitmsk_relthrpt
 end
 

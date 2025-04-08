@@ -93,7 +93,7 @@ flush(stdout);
     BLAS.set_num_threads(1)
     using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
     using DataFrames, EllipsisNotation, StatsBase
-    using ParallelDataTransfer, SIRS, ProgressMeter
+    using ParallelDataTransfer, ProgressMeter
 
     src_dir = "./"
     include(src_dir * "src/ar1D.jl")

@@ -8,6 +8,8 @@ include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
 include(src_dir * "/ar1D.jl")
 
+## TODO add sky flux relFlux consistency check plots
+
 ## Parse command line arguments
 function parse_commandline()
     s = ArgParseSettings()

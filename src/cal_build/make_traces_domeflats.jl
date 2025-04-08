@@ -84,7 +84,7 @@ end
 end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
-plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
+plot_paths = @showprogress desc=desc pmap(flist) do fname
     sname = split(fname, "_")
     teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
     mjdfps2plate = get_fps_plate_divide(teleloc)
