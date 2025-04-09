@@ -166,6 +166,10 @@ end
 
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
 
+"""
+This function is a wrapper around JLD2.jldsave that checks if the types of the values to be saved
+will result in a hard-to-read HDF5 file and warn if so.
+"""
 function safe_jldsave(filename; kwargs...)
     for (k, v) in kwargs
         t = if isa(v, Array)
@@ -173,9 +177,10 @@ function safe_jldsave(filename; kwargs...)
         else
             typeof(v)
         end
-        if !(t in [Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
+        if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
             UInt16, UInt8, Float64, Float32, String])
-            throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
+            #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
+            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
         end
     end
     JLD2.jldsave(filename; kwargs...)
