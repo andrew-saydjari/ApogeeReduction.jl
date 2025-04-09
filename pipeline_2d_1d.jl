@@ -146,7 +146,10 @@ git_branch, git_commit = initalize_git(src_dir);
         # everything to some degree
         regularized_trace_params = regularize_trace(trace_params)
 
-        flux_1d, ivar_1d, mask_1d, resid_flux, resid_ivar = if parg["extraction"] == "boxcar"
+        flux_1d, ivar_1d,
+        mask_1d,
+        resid_flux,
+        resid_ivar = if parg["extraction"] == "boxcar"
             extract_boxcar(
                 dimage, ivarimage, pix_bitmask, regularized_trace_params, return_resids = true)
         elseif parg["extraction"] == "optimal"
