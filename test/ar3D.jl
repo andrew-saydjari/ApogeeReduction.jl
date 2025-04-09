@@ -29,7 +29,8 @@
     outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5) .* gainMat
     outdat ./= gainMat
 
-    @time dimage, ivarimage, chisqimage, CRimage, sat_mask = ApogeeReduction.sutr_wood!(
+    @time dimage, ivarimage, chisqimage,
+    CRimage, sat_mask = ApogeeReduction.sutr_wood!(
         outdat, gainMat, readVarMat)
 
     flux_diffs = (dimage .- true_im)

@@ -1,0 +1,38 @@
+name: Check jldsave Usage
+
+on:
+  pull_request
+
+jobs:
+  check-jldsave:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Check for jldsave usage
+      run: |
+        # Find files containing "jldsave" but exclude src/utils.jl
+        FOUND=$(grep --line-number -r "jldsave" . --exclude-dir={.git,.github} | grep -v "src/utils.jl:" || true)
+
+        # Filter out safe_jld2save occurrences
+        FILTERED=$(echo "$FOUND" | grep -v "safe_jldsave" || true)
+
+        if [ ! -z "$FILTERED" ]; then
+          echo "Found unauthorized use of 'jldsave' in the following locations:"
+          echo "$FILTERED"
+          echo "Please use 'safe_jld2save' from src/utils.jl instead."
+
+          # Create the comment body with properly interpreted newlines
+          COMMENT=$(echo -e "Found use of \`jldsave\` in the following locations:\n\n\`\`\`\n$FILTERED\n\`\`\`\n\nPlease use \`safe_jld2save\` from src/utils.jl instead. See #165 for more information.\n\n(This comment will not be updated as changes are pushed. Check the workflow status for the up-to-date results.)")
+
+          # Post the comment to the PR
+          gh auth login --with-token <<< "${{ github.token }}"
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$COMMENT"
+
+          exit 1
+        else
+          echo "No unauthorized jldsave usage found."
+        fi

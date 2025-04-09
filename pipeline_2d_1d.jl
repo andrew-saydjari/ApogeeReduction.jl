@@ -93,7 +93,7 @@ flush(stdout);
     BLAS.set_num_threads(1)
     using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
     using DataFrames, EllipsisNotation, StatsBase
-    using ParallelDataTransfer, SIRS, ProgressMeter
+    using ParallelDataTransfer, ProgressMeter
 
     src_dir = "./"
     include(src_dir * "src/ar1D.jl")
@@ -123,7 +123,8 @@ git_branch, git_commit = initalize_git(src_dir);
         sname = split(split(fname, "/")[end], "_")
         fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
 
-        med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv = gh_profiles(
+        med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
+        all_y_prof, all_y_prof_deriv = gh_profiles(
             tele, mjd, chip, expid; n_sub = 100)
 
         fnamecal = if (fnameType == "ar2D")
@@ -252,7 +253,7 @@ for mjd in unique_mjds
     close(f)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df) * ".jld2"
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
         else
             return nothing
         end

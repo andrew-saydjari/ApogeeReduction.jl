@@ -21,6 +21,9 @@ end
 
 parg = parse_commandline()
 
+## This should be deprecated in favor of the new relFluxing
+## however, one might want to use it as a scaffold for comparisons. Revisit TODO
+
 #this just dumps everything we have in outdir into a throughput file/plot
 #runs on both quartz and dome flats and both telescopes
 function summarize_fiber_thrpt(flat_type, tele)
@@ -44,7 +47,7 @@ function summarize_fiber_thrpt(flat_type, tele)
         mkpath(dirname(fname_out))
     end
 
-    jldsave(fname_out;
+    safe_jldsave(fname_out;
         adjfiberindx = adjfiberindx,
         traceid = traceid,
         fiberid = fiberid,

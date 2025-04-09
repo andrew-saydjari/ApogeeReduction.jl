@@ -13,3 +13,4 @@ stash/
 .gitignore
 **/__pycache__/
 
+adams_jupyter_notebooks/*
