@@ -1,6 +1,6 @@
 using Pkg;
 Pkg.instantiate();
-using JLD2, ArgParse, DataFrames
+using JLD2, ArgParse, DataFrames, HDF5
 include("../utils.jl") # for safe_jldsave
 
 ## Parse command line arguments
