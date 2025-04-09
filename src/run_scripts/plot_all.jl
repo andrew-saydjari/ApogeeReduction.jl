@@ -117,7 +117,7 @@ for chip in ["a", "b", "c"]
             colorrange = (-5, 5),
             interpolate = false
         )
-  
+
         text!(ax,
             0.5, 1.05,
             text = "Zscore Residuals\nTele: $(tele), MJD: $(mjd), ExpID: $(expid), Chip: $(chiploc)",
