@@ -1,4 +1,5 @@
 using ArgParse, Distributed, SlurmClusterManager, SlackThreads
+include("../utils.jl") # for safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()
@@ -105,7 +106,7 @@ for mjd in unique_mjds
 end
 
 ## need to get cal_type from runlist
-exp_type_lst = map(x->split(split(x, "FLAT")[1], "_")[end], all1Da)
+exp_type_lst = map(x -> split(split(x, "FLAT")[1], "_")[end], all1Da)
 unique_exp_lst = unique(exp_type_lst)
 if length(unique_exp_lst) > 1
     error("Multiple cal types found in runlist")
@@ -115,12 +116,12 @@ cal_type = lowercase(unique_exp_lst[1])
 
 flist_chips = []
 for chip in chips
-    push!(flist_chips, replace.(all1Da, "_a_"=>"_$(chip)_"))
+    push!(flist_chips, replace.(all1Da, "_a_" => "_$(chip)_"))
 end
 all1D = vcat(flist_chips...)
 
 all1Daout = map(
-    x->replace(replace(x, "apred"=>"$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux"), all1Da)
+    x -> replace(replace(x, "apred" => "$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux"), all1Da)
 dname = dirname(all1Daout[1])
 if !ispath(dname)
     mkpath(dname)
@@ -130,7 +131,7 @@ end
     function get_and_save_relFlux(fname)
         absthrpt, relthrpt, bitmsk_relthrpt = get_relFlux(fname)
         outfname = replace(
-            replace(fname, "apred"=>"$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux")
+            replace(fname, "apred" => "$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux")
         safe_jld2save(outfname; absthrpt, relthrpt, bitmsk_relthrpt)
     end
 end
@@ -157,7 +158,7 @@ thread("$(cal_type) relFluxing")
         relthrpt = zeros(300, length(chips))
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
         for (cindx, chip) in enumerate(chips)
-            local_fname = replace(fname, "_a_"=>"_$(chip)_")
+            local_fname = replace(fname, "_a_" => "_$(chip)_")
             f = jldopen(local_fname)
             absthrpt[:, cindx] = f["absthrpt"]
             relthrpt[:, cindx] = f["relthrpt"]
