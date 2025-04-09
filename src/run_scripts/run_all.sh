@@ -76,7 +76,7 @@ if [ "$run_2d_only" != "true" ]; then
 
     # Run pipeline 1D only
     print_elapsed_time "Running 2D->1D Pipeline"
-    julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+    julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 32
 
     # End of night plotting script
     print_elapsed_time "Making Plots"
