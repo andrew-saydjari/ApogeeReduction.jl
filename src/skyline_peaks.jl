@@ -1,5 +1,5 @@
 import FastRunningMedian: running_median
-using Optim
+using Optim, HDF5
 
 function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
     # Find indices where flux is above 99th percentile

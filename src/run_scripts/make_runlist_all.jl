@@ -3,6 +3,7 @@
 using Pkg;
 Pkg.instantiate();
 using HDF5, JLD2, ArgParse, DataFrames
+include("../utils.jl") # for safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()

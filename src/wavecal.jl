@@ -1,3 +1,4 @@
+using HDF5
 
 function linear_loss_fit(x, y; wporder = 2, returnL2only = false)
     A = positional_poly_mat(x, porder = wporder)
