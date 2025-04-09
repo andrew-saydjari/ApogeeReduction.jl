@@ -82,4 +82,6 @@
 ## TODO: After 2025 Meeting
 - persistence modelling
 - nonlinearity correction
+- absolute fluxing
+  
 
