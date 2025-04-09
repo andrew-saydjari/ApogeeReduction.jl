@@ -41,9 +41,9 @@ function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params;
     mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params, boxcar_halfwidth)
 
     if return_resids
-        flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivar_2d
+        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
     else
-        flux_1d, ivar_1d, mask_1d
+        return flux_1d, ivar_1d, mask_1d
     end
 end
 
@@ -235,8 +235,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 
             flux_1d[xpix, :] .= new_flux_1d
 	    if return_resids
-	        resid_fluxes_2d[xpix, :] .= new_comb_model_flux    
-	        resid_ivar_2d[xpix, :] .= 1 ./ new_comb_model_var  
+	        resid_fluxes_2d[xpix, :] .= dimage[xpix, :] .- new_comb_model_flux
+	        resid_ivars_2d[xpix, :] .= 1 ./ (1 ./ ivarimage[xpix, :] .+ new_comb_model_var)
 	    end
 
             if all(abs.(new_flux_1d .- flux_1d[xpix, :]) .< 0.01) & (repeat_ind > 1)
@@ -250,9 +250,9 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     end
 
     if return_resids
-        flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivar_2d
+        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
     else
-        flux_1d, ivar_1d, mask_1d
+        return flux_1d, ivar_1d, mask_1d
     end
 end
 

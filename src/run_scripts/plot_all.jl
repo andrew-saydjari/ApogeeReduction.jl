@@ -76,7 +76,7 @@ for mjd in unique_mjds
     close(f)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ar1D" => "ar2Dresiduals") * ".jld2"
+        replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".jld2"
     end
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
@@ -98,13 +98,13 @@ for chip in ["a", "b", "c"]
 
     # TODO parallelize plotting
     # we should customize this to the exposures we want to see and types of stars we want
-    nsamp = minimum([length(all2D), 5])
+    nsamp = minimum([length(all2D), 20])
     sample_exposures = sample(rng, all2D, nsamp, replace = false)
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     for exp_fname in sample_exposures
         sname = split(exp_fname, "_")
         tele, mjd, chiploc, expid, = sname[(end - 4):(end - 1)]
-        exptype = sname[end][:(end - 5)]
+        exptype = sname[end][begin:(end - 5)]
         expid_num = parse(Int, last(expid, 4))
         flux_2d = load(exp_fname, "resid_flux")
         ivar_2d = load(exp_fname, "resid_ivar")
@@ -120,7 +120,7 @@ for chip in ["a", "b", "c"]
   
         text!(ax,
             0.5, 1.05,
-            text = "Zscore Residuals\nTele: $(tele), MJD: $(mjd), ExpID: $(expid), Chip: $(chip_loc)",
+            text = "Zscore Residuals\nTele: $(tele), MJD: $(mjd), ExpID: $(expid), Chip: $(chiploc)",
             align = (:center, :bottom),
             space = :relative
         )
@@ -132,7 +132,7 @@ for chip in ["a", "b", "c"]
         resize_to_layout!(fig)
 
         savePath = dirNamePlots *
-                   "ar2Dresiduals_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(exptype).png"
+                   "ar2Dresidualscal_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(exptype).png"
         save(savePath, fig, px_per_unit = 3)
         thread("$(exp_fname)", savePath)
     end

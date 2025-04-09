@@ -36,9 +36,9 @@ mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
     df = DataFrame(read(f[parg["tele"] * "/$(tstmjd)/exposures"]))
     df.nreadInt = parse.(Int, df.nread)
-    good_exp = (df.nreadInt .> 3)
-              .| ((df.imagetyp .== "DomeFlat") &. (df.observatory .== "apo"))
-              .| ((df.imagetyp .== "QuartzFlat") &. (df.nreadInt .== 3))
+    good_exp = (df.nreadInt .> 3) .|
+               ((df.imagetyp .== "DomeFlat") .& (df.observatory .== "apo")) .|
+               ((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
     expindx_list = findall(good_exp)
 #    expindx_list = findall((df.nreadInt .> 3) .| (df.imagetyp .== "DomeFlat") .|
 #                           (df.imagetyp .== "QuartzFlat"))
