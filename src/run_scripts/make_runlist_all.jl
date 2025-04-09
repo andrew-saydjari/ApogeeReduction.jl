@@ -30,8 +30,8 @@ end
 
 parg = parse_commandline()
 
-darks_mjd = []
-darks_expid = []
+darks_mjd = Int[]
+darks_expid = Int[]
 f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
