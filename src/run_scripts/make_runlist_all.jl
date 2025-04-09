@@ -44,4 +44,4 @@ for tstmjd in mjd_list
     end
 end
 
-safe_jldsave(parg["output"]; mjd = darks_mjd, expid = darks_expid)
+jldsave(parg["output"]; mjd = darks_mjd, expid = darks_expid)
