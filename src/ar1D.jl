@@ -50,13 +50,22 @@ function regularize_trace(trace_params; window_size = 101)
     regularized_trace
 end
 
-function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_halfwidth = 2)
+function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params;
+        boxcar_halfwidth = 2, return_resids = false)
+    if return_resids
+        resid_fluxes_2d = zeros(Float64, size(dimage))
+        resid_ivars_2d = zeros(Float64, size(dimage))
+    end
     flux_1d = extract_boxcar_core(dimage, trace_params, boxcar_halfwidth)
     var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params, boxcar_halfwidth)
     ivar_1d = 1.0 ./ var_1d
     mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params, boxcar_halfwidth)
 
-    flux_1d, ivar_1d, mask_1d
+    if return_resids
+        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+    else
+        return flux_1d, ivar_1d, mask_1d
+    end
 end
 
 """
@@ -130,7 +139,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind,
         n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
         small_window_half_size = 2, fit_window_half_size = 4,
-        large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001)
+        large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001,
+        return_resids = false)
     n_xpix = size(trace_params, 1)
     n_ypix = size(dimage, 2)
     n_fibers = size(trace_params, 2)
@@ -151,6 +161,11 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     new_comb_model_var = zeros(Float64, n_ypix)
 
     new_flux_1d = zeros(Float64, n_fibers)
+
+    if return_resids
+        resid_fluxes_2d = zeros(Float64, size(dimage))
+        resid_ivars_2d = zeros(Float64, size(dimage))
+    end
 
     for xpix in 1:n_xpix
         #iterate on best-fit fluxes
@@ -246,18 +261,26 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 end
             end
 
+            flux_1d[xpix, :] .= new_flux_1d
+            if return_resids
+                resid_fluxes_2d[xpix, :] .= dimage[xpix, :] .- new_comb_model_flux
+                resid_ivars_2d[xpix, :] .= 1 ./ (1 ./ ivarimage[xpix, :] .+ new_comb_model_var)
+            end
+
             if all(abs.(new_flux_1d .- flux_1d[xpix, :]) .< 0.01) & (repeat_ind > 1)
-                flux_1d[xpix, :] .= new_flux_1d
                 break
             end
 
-            flux_1d[xpix, :] .= new_flux_1d
             comb_model_flux .= new_comb_model_flux
             comb_model_var .= new_comb_model_var
         end
     end
 
-    flux_1d, ivar_1d, mask_1d
+    if return_resids
+        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+    else
+        return flux_1d, ivar_1d, mask_1d
+    end
 end
 
 """

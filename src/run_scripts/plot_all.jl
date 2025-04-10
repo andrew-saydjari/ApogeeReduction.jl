@@ -71,6 +71,75 @@ else
     [parg["expid"]]
 end
 
+list2Dexp = []
+for mjd in unique_mjds
+    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+    close(f)
+    function get_2d_name_partial(expid)
+        parg["outdir"] * "/apred/$(mjd)/" *
+        replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".jld2"
+    end
+    local2D = get_2d_name_partial.(expid_list)
+    push!(list2Dexp, local2D)
+end
+all2Da = vcat(list2Dexp...)
+
+# per chip example 2D flux residuals from 1D extraction
+for chip in ["a", "b", "c"]
+    all2D = replace.(all2Da, "_a_" => "_$(chip)_")
+
+    thread = SlackThread()
+    if length(unique_mjds) > 1
+        min_mjd, max_mjd = extrema(unique_mjds)
+        thread("Here are some example 2D residuals after 1D extraction on chip $(chip) from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
+    else
+        thread("Here are some example 2D residuals after 1D extraction on chip $(chip) from $(parg["tele"]) for SJD $(unique_mjds[1])")
+    end
+    rng = MersenneTwister(351 + unique_mjds[1])
+
+    # TODO parallelize plotting
+    # we should customize this to the exposures we want to see and types of stars we want
+    nsamp = minimum([length(all2D), 20])
+    sample_exposures = sample(rng, all2D, nsamp, replace = false)
+    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+    for exp_fname in sample_exposures
+        sname = split(exp_fname, "_")
+        tele, mjd, chiploc, expid, = sname[(end - 4):(end - 1)]
+        exptype = sname[end][begin:(end - 5)]
+        expid_num = parse(Int, last(expid, 4))
+        flux_2d = load(exp_fname, "resid_flux")
+        ivar_2d = load(exp_fname, "resid_ivar")
+        resid_zscore = flux_2d .* (ivar_2d .^ 0.5)
+
+        fig = Figure(size = (840, 800), fontsize = 24)
+        ax = Axis(fig[1, 1])
+        hm = heatmap!(ax, resid_zscore,
+            colormap = :diverging_bkr_55_10_c35_n256,
+            colorrange = (-5, 5),
+            interpolate = false
+        )
+
+        text!(ax,
+            0.5, 1.05,
+            text = "Zscore Residuals\nTele: $(tele), MJD: $(mjd), ExpID: $(expid), Chip: $(chiploc)",
+            align = (:center, :bottom),
+            space = :relative
+        )
+
+        Colorbar(fig[1, 2], hm, width = 20, height = Relative(1.0))
+        colgap!(fig.layout, 1, 20)  # Set spacing between image 1 and colorbar 1
+        data_aspect = diff(hm[1][])[1] / (diff(hm[2][])[1])
+        colsize!(fig.layout, 1, Aspect(1, data_aspect))
+        resize_to_layout!(fig)
+
+        savePath = dirNamePlots *
+                   "ar2Dresidualscal_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(exptype).png"
+        save(savePath, fig, px_per_unit = 3)
+        thread("$(exp_fname)", savePath)
+    end
+end
+
 all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
     df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
