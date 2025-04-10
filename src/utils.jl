@@ -169,19 +169,31 @@ normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
 """
 This function is a wrapper around JLD2.jldsave that checks if the types of the values to be saved
 will result in a hard-to-read HDF5 file and warn if so.
+
+It also converts BitArrays to Array{Bool} if necessary, this means that the saved data will be 8x
+larger (Bools are 1 byte), even when read back into Julia.
 """
 function safe_jldsave(filename; kwargs...)
+    to_save = Dict{Symbol, Any}()
     for (k, v) in kwargs
-        t = if isa(v, Array)
-            eltype(v)
+        # convert BitArray to Array{Bool} if necessary
+        if v isa BitArray
+            to_save[k] = convert(Array{Bool}, v)
         else
-            typeof(v)
-        end
-        if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
-            UInt16, UInt8, Float64, Float32, String])
-            #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
-            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+            to_save[k] = v
+
+            # if the value will result in a hard-to-read HDF5 file, warn
+            t = if isa(v, Array)
+                eltype(v)
+            else
+                typeof(v)
+            end
+            if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
+                UInt16, UInt8, Float64, Float32, String])
+                #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
+                @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+            end
         end
     end
-    JLD2.jldsave(filename; kwargs...)
+    JLD2.jldsave(filename; to_save...)
 end

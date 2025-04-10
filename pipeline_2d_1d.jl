@@ -56,12 +56,17 @@ function parse_commandline()
         help = "extraction method (boxcar or optimal)"
         arg_type = String
         default = "optimal"
+        "--workers_per_node"
+        required = false
+        help = "number of workers per node"
+        arg_type = Int
+        default = 32
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
-workers_per_node = 32
+workers_per_node = parg["workers_per_node"]
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
