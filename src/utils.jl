@@ -170,7 +170,7 @@ normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
 This function is a wrapper around JLD2.jldsave that checks if the types of the values to be saved
 will result in a hard-to-read HDF5 file and warn if so.
 
-It also converts BitArrays to Array{Bool} if necessary, this means that the saved data will be 8x
+It also converts BitArrays to Array{Bool} if necessary. This means that the saved data will be 8x
 larger (Bools are 1 byte), even when read back into Julia.
 """
 function safe_jldsave(filename; kwargs...)
