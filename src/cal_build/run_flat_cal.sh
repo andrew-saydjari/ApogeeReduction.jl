@@ -29,7 +29,7 @@ runname="flat_cal_${tele}_${mjd_start}_${mjd_end}"
 outdir="../outdir/"
 doutdir=$outdir
 almanac_file=${outdir}almanac/${runname}.h5
-runlist=${outdir}almanac/runlist_${runname}.jld2
+runlist=${outdir}almanac/runlist_${runname}.h5
 caldir_darks=${outdir}
 
 # set up the output directory (if does not exist)

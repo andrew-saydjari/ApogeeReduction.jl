@@ -43,7 +43,7 @@ function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype; use_cal = fals
         fname_type = "ar2D"
     end
     return parent_dir *
-           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).jld2"
+           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).h5"
 end
 
 function get_1d_name(expid, df; cal = false)

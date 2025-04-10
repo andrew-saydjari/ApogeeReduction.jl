@@ -39,7 +39,7 @@ caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u603975
 
 runname="objects_${mjd}"
 almanac_file=${outdir}/almanac/${runname}.h5
-runlist=${outdir}/almanac/runlist_${runname}.jld2
+runlist=${outdir}/almanac/runlist_${runname}.h5
 
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}/almanac

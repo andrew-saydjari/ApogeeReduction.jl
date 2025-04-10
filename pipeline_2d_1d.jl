@@ -143,7 +143,7 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask = load(fnamecal, "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
-        traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
+        traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).h5",
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
@@ -199,7 +199,7 @@ for mjd in unique_mjds
     close(f)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".jld2"
+        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
     end
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
@@ -219,7 +219,7 @@ all2D = vcat(all2Dperchip...)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
     for chip in ["a", "b", "c"]
-        traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
+        traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
             parg["outdir"] * "$(trace_type)_flats/"))
         if length(traceList) > 1
             @warn "Multiple $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
@@ -256,7 +256,7 @@ for mjd in unique_mjds
     close(f)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
         else
             return nothing
         end

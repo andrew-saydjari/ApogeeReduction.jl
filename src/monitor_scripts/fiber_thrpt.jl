@@ -42,7 +42,7 @@ function summarize_fiber_thrpt(flat_type, tele)
         trace_params = load(fname_loc, "trace_params")
         thrpt_mat[:, cindx, findx] .= dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
     end
-    fname_out = joinpath(parg["outdir"], "monitor", "$(flat_type)_thrpt_summary_$(tele).jld2")
+    fname_out = joinpath(parg["outdir"], "monitor", "$(flat_type)_thrpt_summary_$(tele).h5")
     if !ispath(dirname(fname_out))
         mkpath(dirname(fname_out))
     end

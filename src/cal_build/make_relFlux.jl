@@ -98,7 +98,7 @@ for mjd in unique_mjds
         DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
     function get_1d_name_partial(expid)
-        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
+        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
 
     file_list = get_1d_name_partial.(expid_list)

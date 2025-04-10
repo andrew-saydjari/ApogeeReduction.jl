@@ -101,7 +101,7 @@ design_matrix = gen_design_mat(nx, ny, fx, fy, X, Y)
 flat_im_mat = zeros(2040, 2040, length(flist))
 # this is using the mjd of the first exposure, which works if we are processing an ultra dark run
 # but we might want to reconsider moving this inside the loop if we decide to use nightly flats moving forward
-darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
 df_dark = cal2df(darkFlist)
 calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd[1], chip)
 
@@ -156,7 +156,7 @@ pix_bit_mask .|= (flat_im .< flat_frac_cut) * 2^6 # too low response in flat
 # save dark_pix_bitmask and dark_rate (electron per read)
 safe_jldsave(
     parg["flat_dir"] *
-    "flats/flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).jld2";
+    "flats/flatFraction_$(parg["tele"])_$(chip)_$(parg["mjd-start"])_$(parg["mjd-end"]).h5";
     flat_im = flat_im,
     flat_pix_bitmask = pix_bit_mask,
     model_im = model_im)

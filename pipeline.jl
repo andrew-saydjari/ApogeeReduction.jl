@@ -250,10 +250,10 @@ git_branch, git_commit = initalize_git(src_dir);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         safe_jldsave(
-            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage,
+            joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5"); dimage, ivarimage, chisqimage,
             CRimage, saturation_image, nread_used, mjd_mid_exposure_old, mjd_mid_exposure_rough,
             mjd_mid_exposure_precise, mjd_mid_exposure, git_branch, git_commit)
-        return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
+        return joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
@@ -360,10 +360,10 @@ end
 # probably need to capture that calFlag somehow, write a meta cal file?
 all2D = vcat(ap2dnamelist...)
 if parg["doCal2d"]
-    darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+    darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
     df_dark = cal2df(darkFlist)
 
-    flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
+    flatFlist = sort(glob("flatFraction*.h5", parg["caldir_flats"] * "flats/"))
     df_flat = cal2df(flatFlist)
 
     for mjd in unique_mjds

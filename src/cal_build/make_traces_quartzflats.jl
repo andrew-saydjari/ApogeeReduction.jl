@@ -109,7 +109,7 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
 
     safe_jldsave(
         parg["trace_dir"] *
-        "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).jld2";
+        "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).h5";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
     cut = 750

@@ -27,8 +27,8 @@ outdir="../outdir/"
 doutdir=$outdir
 runname="trace_cal_${tele}_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
-domerunlist=${outdir}almanac/runlist_dome_${runname}.jld2
-quartzrunlist=${outdir}almanac/runlist_quartz_${runname}.jld2
+domerunlist=${outdir}almanac/runlist_dome_${runname}.h5
+quartzrunlist=${outdir}almanac/runlist_quartz_${runname}.h5
 caldir_darks=${4:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 caldir_flats=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
 
