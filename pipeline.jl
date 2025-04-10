@@ -249,7 +249,7 @@ git_branch, git_commit = initalize_git(src_dir);
                 chip, df.exposure[expid], df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        jldsave(
+        safe_jldsave(
             joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage,
             CRimage, saturation_image, nread_used, mjd_mid_exposure_old, mjd_mid_exposure_rough,
             mjd_mid_exposure_precise, mjd_mid_exposure, git_branch, git_commit)
@@ -300,7 +300,7 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask .|= saturation_image * 2^13
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
-        jldsave(
+        safe_jldsave(
             outfname; dimage, ivarimage, pix_bitmask, nread_used,
             mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
             mjd_mid_exposure, git_branch, git_commit)
@@ -339,8 +339,7 @@ if parg["runlist"] != ""
     subiter = Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))
-    @everywhere process_3D_partial(((mjd, expid),
-        chip)) = process_3D(
+    @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else
