@@ -113,7 +113,7 @@ flush(stdout);
     using FITSIO, HDF5, FileIO, JLD2, Glob
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, SIRS, ProgressMeter
-    using AstroTime: TAIEpoch, modified_julian, days
+    using AstroTime: TAIEpoch, modified_julian, days, value
 
     src_dir = "./"
     include(src_dir * "src/ar3D.jl")
@@ -247,11 +247,11 @@ flush(stdout);
         safe_jldsave(
             joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5"); dimage, ivarimage, chisqimage,
             CRimage, saturation_image, nread_used,
-            # convert to Float64 to make the HDF5 file nice (see safe_jldsave docstring)
-            mjd_mid_exposure_old = Float64(mjd_mid_exposure_old),
-            mjd_mid_exposure_rough = Float64(mjd_mid_exposure_rough),
-            mjd_mid_exposure_precise = Float64(mjd_mid_exposure_precise),
-            mjd_mid_exposure = Float64(mjd_mid_exposure))
+            # convert to Float64 (days) to make the HDF5 file nice (see safe_jldsave docstring)
+            mjd_mid_exposure_old = value(mjd_mid_exposure_old),
+            mjd_mid_exposure_rough = value(mjd_mid_exposure_rough),
+            mjd_mid_exposure_precise = value(mjd_mid_exposure_precise),
+            mjd_mid_exposure = value(mjd_mid_exposure))
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
     end
 
