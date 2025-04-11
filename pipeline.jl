@@ -124,11 +124,6 @@ end
 
 println(BLAS.get_config());
 flush(stdout);
-using LibGit2;
-git_branch, git_commit = initalize_git(src_dir);
-@passobj 1 workers() git_branch;
-@passobj 1 workers() git_commit;
-## some hard coded parameters
 
 ##### 3D stage
 @everywhere begin
@@ -256,8 +251,7 @@ git_branch, git_commit = initalize_git(src_dir);
             mjd_mid_exposure_old = Float64.(mjd_mid_exposure_old),
             mjd_mid_exposure_rough = Float64.(mjd_mid_exposure_rough),
             mjd_mid_exposure_precise = Float64.(mjd_mid_exposure_precise),
-            mjd_mid_exposure = Float64.(mjd_mid_exposure),
-            git_branch, git_commit)
+            mjd_mid_exposure = Float64.(mjd_mid_exposure))
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
     end
 
@@ -308,7 +302,7 @@ git_branch, git_commit = initalize_git(src_dir);
         safe_jldsave(
             outfname; dimage, ivarimage, pix_bitmask, nread_used,
             mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
-            mjd_mid_exposure, git_branch, git_commit)
+            mjd_mid_exposure)
     end
 end
 t_now = now();

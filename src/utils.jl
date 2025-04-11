@@ -2,6 +2,21 @@ using StatsBase: iqr
 using Jackknife
 using JLD2
 
+# used to record git branch and commit in safe_jldsave
+using LibGit2
+function initalize_git(git_dir)
+    git_commit = LibGit2.head(git_dir)
+    git_repo = LibGit2.GitRepo(git_dir)
+    git_head = LibGit2.head(git_repo)
+    git_branch = LibGit2.shortname(git_head)
+    println("Running on branch: $git_branch, commit: $git_commit")
+    flush(stdout)
+    return git_branch, git_commit
+end
+# this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
+# but it is a symptom of the fact that the include situation is a bit tangled
+git_branch, git_commit = initalize_git("./")
+
 # ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
 if !haskey(ENV, "SLACK_CHANNEL")
     ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
@@ -19,16 +34,6 @@ bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi
 bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
-
-function initalize_git(git_dir)
-    git_commit = LibGit2.head(git_dir)
-    git_repo = LibGit2.GitRepo(git_dir)
-    git_head = LibGit2.head(git_repo)
-    git_branch = LibGit2.shortname(git_head)
-    println("Running on branch: $git_branch, commit: $git_commit")
-    flush(stdout)
-    return git_branch, git_commit
-end
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)
@@ -167,11 +172,11 @@ end
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
 
 """
-This function is a wrapper around JLD2.jldsave that checks if the types of the values to be saved
-will result in a hard-to-read HDF5 file and warn if so.
-
-It also converts BitArrays to Array{Bool} if necessary. This means that the saved data will be 8x
-larger (Bools are 1 byte), even when read back into Julia.
+This function is a wrapper around JLD2.jldsave with a couple of extra features:
+- It checks if the types of the values to be saved will result in a hard-to-read HDF5 file and warns if so.
+- It converts BitArrays to Array{Bool} if necessary. This means that the saved data will be 8x
+  larger (Bools are 1 byte), even when read back into Julia.
+- It records the git branch and commit in the saved file.
 """
 function safe_jldsave(filename; kwargs...)
     to_save = Dict{Symbol, Any}()
@@ -195,5 +200,10 @@ function safe_jldsave(filename; kwargs...)
             end
         end
     end
+
+    # record git branch and commit
+    to_save[:git_branch] = git_branch
+    to_save[:git_commit] = git_commit
+
     JLD2.jldsave(filename; to_save...)
 end

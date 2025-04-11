@@ -116,11 +116,6 @@ end
 
 println(BLAS.get_config());
 flush(stdout);
-using LibGit2;
-git_branch, git_commit = initalize_git(src_dir);
-@passobj 1 workers() git_branch;
-@passobj 1 workers() git_commit;
-## some hard coded parameters
 
 ##### 1D stage
 @everywhere begin
@@ -165,7 +160,7 @@ git_branch, git_commit = initalize_git(src_dir);
 
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         outfname = replace(fname, "ar2D" => "ar1D")
-        safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
+        safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d)
     end
 end
 t_now = now();
