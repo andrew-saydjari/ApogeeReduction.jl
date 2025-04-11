@@ -251,8 +251,13 @@ git_branch, git_commit = initalize_git(src_dir);
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
         safe_jldsave(
             joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5"); dimage, ivarimage, chisqimage,
-            CRimage, saturation_image, nread_used, mjd_mid_exposure_old, mjd_mid_exposure_rough,
-            mjd_mid_exposure_precise, mjd_mid_exposure, git_branch, git_commit)
+            CRimage, saturation_image, nread_used,
+            # convert to Float64 to make the HDF5 file nice (see safe_jldsave docstring)
+            mjd_mid_exposure_old = Float64.(mjd_mid_exposure_old),
+            mjd_mid_exposure_rough = Float64.(mjd_mid_exposure_rough),
+            mjd_mid_exposure_precise = Float64.(mjd_mid_exposure_precise),
+            mjd_mid_exposure = Float64.(mjd_mid_exposure),
+            git_branch, git_commit)
         return joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
     end
 
