@@ -1,6 +1,7 @@
 using StatsBase: iqr
 using Jackknife
 using JLD2
+using Distributed: myid
 
 # used to record git branch and commit in safe_jldsave
 using LibGit2
@@ -9,8 +10,11 @@ function initalize_git(git_dir)
     git_repo = LibGit2.GitRepo(git_dir)
     git_head = LibGit2.head(git_repo)
     git_branch = LibGit2.shortname(git_head)
-    println("Running on branch: $git_branch, commit: $git_commit")
-    flush(stdout)
+
+    if myid() == 1
+        println("Running on branch: $git_branch, commit: $git_commit")
+        flush(stdout)
+    end
     return git_branch, git_commit
 end
 # this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
