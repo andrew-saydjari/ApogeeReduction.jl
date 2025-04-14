@@ -17,6 +17,38 @@ function positional_poly_mat(x; porder = 2)
         return [ones(length(x)) x x .^ 2 x .^ 3]
     elseif porder == 4
         return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4]
+    elseif porder == 5
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5]
+    elseif porder == 6
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6]
+    elseif porder == 7
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7]
+    elseif porder == 8
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8]
+    elseif porder == 9
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9]
+    elseif porder == 10
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10]
+    elseif porder == 11
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11]
+    elseif porder == 12
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12]
+    elseif porder == 13
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13]
+    elseif porder == 14
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14]
+    elseif porder == 15
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15]
+    elseif porder == 16
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16]
+    elseif porder == 17
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17]
+    elseif porder == 18
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17 x .^ 18]
+    elseif porder == 19
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17 x .^ 18 x .^ 19]
+    elseif porder == 20
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17 x .^ 18 x .^ 19 x .^ 20]
     end
 end
 
