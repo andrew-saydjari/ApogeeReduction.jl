@@ -35,25 +35,80 @@ function positional_poly_mat(x; porder = 2)
     elseif porder == 10
         return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10]
     elseif porder == 11
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11]
     elseif porder == 12
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12]
     elseif porder == 13
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13]
     elseif porder == 14
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14]
     elseif porder == 15
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14 x .^
+                                                                                                              15]
     elseif porder == 16
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14 x .^
+                                                                                                              15 x .^
+                                                                                                                 16]
     elseif porder == 17
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14 x .^
+                                                                                                              15 x .^
+                                                                                                                 16 x .^
+                                                                                                                    17]
     elseif porder == 18
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17 x .^ 18]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14 x .^
+                                                                                                              15 x .^
+                                                                                                                 16 x .^
+                                                                                                                    17 x .^
+                                                                                                                       18]
     elseif porder == 19
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17 x .^ 18 x .^ 19]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14 x .^
+                                                                                                              15 x .^
+                                                                                                                 16 x .^
+                                                                                                                    17 x .^
+                                                                                                                       18 x .^
+                                                                                                                          19]
     elseif porder == 20
-        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^ 11 x .^ 12 x .^ 13 x .^ 14 x .^ 15 x .^ 16 x .^ 17 x .^ 18 x .^ 19 x .^ 20]
+        return [ones(length(x)) x x .^ 2 x .^ 3 x .^ 4 x .^ 5 x .^ 6 x .^ 7 x .^ 8 x .^ 9 x .^ 10 x .^
+                                                                                                  11 x .^
+                                                                                                     12 x .^
+                                                                                                        13 x .^
+                                                                                                           14 x .^
+                                                                                                              15 x .^
+                                                                                                                 16 x .^
+                                                                                                                    17 x .^
+                                                                                                                       18 x .^
+                                                                                                                          19 x .^
+                                                                                                                             20]
     end
 end
 
@@ -94,15 +149,15 @@ end
 # Sky line wavecal
 function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # initial guess for the (low-order)chip polynomial parameters
-    if occursin("_apo_",fname)
+    if occursin("_apo_", fname)
         # chipPolyParams0 = [-1.0716 1.00111
         #                    0 1
         #                    1.07009 0.98803]
-        offset_func_chip1 = Polynomial([-1.07221500e+00,  4.52450367e-06])
+        offset_func_chip1 = Polynomial([-1.07221500e+00, 4.52450367e-06])
         scale_func_chip1 = Polynomial([1.00093875e+00, -4.41886670e-07])
         offset_func_chip3 = Polynomial([1.06972294e+00, 2.77444782e-06])
         scale_func_chip3 = Polynomial([9.87857338e-01, 1.09350510e-06])
-    elseif occursin("_lco_",fname)
+    elseif occursin("_lco_", fname)
         # chipPolyParams0 = [-1.0748 1.00168
         #                    0 1
         #                    1.07089 0.98763]
@@ -121,7 +176,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     end
 
     fibInds = 1:300
-    chipPolyParams0 = zeros(Float64, (size(fibInds,1), 3, cporder+1))
+    chipPolyParams0 = zeros(Float64, (size(fibInds, 1), 3, cporder + 1))
     chipPolyParams0[:, 1, 1] .= offset_func_chip1.(fibInds)
     chipPolyParams0[:, 1, 2] .= scale_func_chip1.(fibInds)
     chipPolyParams0[:, 2, 1] .= 0.0
@@ -138,22 +193,23 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
 
     # iterpolate between fibers to
     # regularize the nlParams and linParams
-    interp_nlParams, interp_linParams = interpolate_wave_params(fibInds,nlParams,linParams;linParam_deg=2,nlParam_deg=1)
+    interp_nlParams, interp_linParams = interpolate_wave_params(
+        fibInds, nlParams, linParams; linParam_deg = 2, nlParam_deg = 1)
 
     # do final pass with interp params to
     # get a new constant-term for wave soln
     # (which we do not think should be interpolated)
 
-    interp_resid_vec = zeros(Float64, (size(fibInds,1), size(sky_line_uxlst, 1)))
+    interp_resid_vec = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(interp_resid_vec, NaN)
     for fibIndx in fibInds
         xv = sky_line_uxlst[:, fibIndx]
         yv = sky_line_fwlst[:, fibIndx]
         chipIntv = sky_line_chipInt[:, fibIndx]
         sky_msk = .!isnan.(xv)
-	if sum(sky_msk) == 0
+        if sum(sky_msk) == 0
             continue
-	end
+        end
 
         chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
         inparams = interp_nlParams[fibIndx, :]
@@ -166,10 +222,10 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         end
 
         A = positional_poly_mat(xt, porder = wporder)
-	curr_resids = yv[sky_msk] .- A * interp_linParams[fibIndx, :]
-	const_offset = mean(curr_resids) #could also be median
-	interp_linParams[fibIndx, 1] += const_offset
-	interp_resid_vec[fibIndx, sky_msk] .= curr_resids .- const_offset
+        curr_resids = yv[sky_msk] .- A * interp_linParams[fibIndx, :]
+        const_offset = mean(curr_resids) #could also be median
+        interp_linParams[fibIndx, 1] += const_offset
+        interp_resid_vec[fibIndx, sky_msk] .= curr_resids .- const_offset
     end
 
     chipWaveSoln = zeros(Float64, 2048, 300, 3)
@@ -185,7 +241,8 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
             yt = Ax * linParams[fibIndx, :]
             chipWaveSoln[:, fibIndx, chipIndx] .= yt
 
-            params2ChipPolyParams!(chipPolyParams0[fibIndx, :, :], interp_nlParams[fibIndx, :], cporder)
+            params2ChipPolyParams!(
+                chipPolyParams0[fibIndx, :, :], interp_nlParams[fibIndx, :], cporder)
             xt = transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
             Ax = positional_poly_mat(xt, porder = 2)
             yt = Ax * interp_linParams[fibIndx, :]
@@ -196,8 +253,8 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # the best parameters are likely the interpolated ones
     # but return the raw measurements as well
     safe_jldsave(outname; linParams = interp_linParams, nlParams = interp_nlParams,
-        resid_vec = interp_resid_vec, chipWaveSoln = interp_chipWaveSoln, 
-	raw_linParams = linParams, raw_nlParams = nlParams,
+        resid_vec = interp_resid_vec, chipWaveSoln = interp_chipWaveSoln,
+        raw_linParams = linParams, raw_nlParams = nlParams,
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln)
 end
 
@@ -232,75 +289,76 @@ function get_sky_wavecal(
     return linParams, nlParams, resid_vec
 end
 
-function fit_poly_without_outliers(xvals,yvals,deg;nsigma=3,max_repeat=3,keep=nothing)
-    summary = nanzeropercentile(yvals,percent_vec=[16.0,50.0,84.0])
+function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 3, keep = nothing)
+    summary = nanzeropercentile(yvals, percent_vec = [16.0, 50.0, 84.0])
     #change to median,-sigma,+sigma
-    summary = [summary[2],summary[2]-summary[1],summary[3]-summary[2]]
+    summary = [summary[2], summary[2] - summary[1], summary[3] - summary[2]]
 
     if isnothing(keep)
-        keep = ones(Bool, size(xvals,1))
+        keep = ones(Bool, size(xvals, 1))
     end
-    keep = keep .& 
-           (yvals .>= summary[1]-nsigma*summary[2]) .&
-           (yvals .<= summary[1]+nsigma*summary[3])
+    keep = keep .&
+           (yvals .>= summary[1] - nsigma * summary[2]) .&
+           (yvals .<= summary[1] + nsigma * summary[3])
 
     for repeatInd in 1:max_repeat
-        func = fit(xvals[keep],yvals[keep],deg)
-	curr_resids = yvals .- func.(xvals)
+        func = fit(xvals[keep], yvals[keep], deg)
+        curr_resids = yvals .- func.(xvals)
 
-        resid_summary = nanzeropercentile(curr_resids[keep],percent_vec=[16.0,50.0,84.0])
+        resid_summary = nanzeropercentile(curr_resids[keep], percent_vec = [16.0, 50.0, 84.0])
         resid_summary = [resid_summary[2],
-			  resid_summary[2]-resid_summary[1],
-			  resid_summary[3]-resid_summary[2]]
+            resid_summary[2] - resid_summary[1],
+            resid_summary[3] - resid_summary[2]]
 
-        new_good = (curr_resids .>= resid_summary[1]-nsigma*resid_summary[2]) .&
-                   (curr_resids .<= resid_summary[1]+nsigma*resid_summary[3])
+        new_good = (curr_resids .>= resid_summary[1] - nsigma * resid_summary[2]) .&
+                   (curr_resids .<= resid_summary[1] + nsigma * resid_summary[3])
 
-	if all(new_good .== keep)
-	    break
-	end
-	keep .= new_good
+        if all(new_good .== keep)
+            break
+        end
+        keep .= new_good
     end
 
-    func = fit(xvals[keep],yvals[keep],deg)
+    func = fit(xvals[keep], yvals[keep], deg)
 
     return func, keep
 end
 
-function interpolate_wave_params(fibInds,nlParams,linParams)
+function interpolate_wave_params(fibInds, nlParams, linParams)
     mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
     unique_mtp = 1:10
 
-    interp_linParams = zeros(Float64,size(linParams))
-    interp_nlParams = zeros(Float64,size(nlParams))
+    interp_linParams = zeros(Float64, size(linParams))
+    interp_nlParams = zeros(Float64, size(nlParams))
 
     #constant term in wave soln needs to fit each mtp separately
     #need a second order poly for zeroth order term
     for mtp_ind in unique_mtp
         keep_mtp = (mtp_inds .== mtp_ind)
-        func,keep = fit_poly_without_outliers(fibInds[keep_mtp],linParams[keep_mtp,1],2)
-	func_eval = func.(fibInds[keep_mtp])
-	interp_linParams[keep_mtp,1] .= func_eval .+ nanmedian((linParams[keep_mtp,1].-func_eval)[keep])
+        func, keep = fit_poly_without_outliers(fibInds[keep_mtp], linParams[keep_mtp, 1], 2)
+        func_eval = func.(fibInds[keep_mtp])
+        interp_linParams[keep_mtp, 1] .= func_eval .+
+                                         nanmedian((linParams[keep_mtp, 1] .- func_eval)[keep])
     end
 
     #need a second order poly for first order term
     j = 2
-    func,keep = fit_poly_without_outliers(fibInds,linParams[:,j],2)
+    func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
     func_eval = func.(fibInds)
-    interp_linParams[:,j] .= func_eval .+ nanmedian((linParams[:,j].-func_eval)[keep])
+    interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
 
     #need a first order poly for higher order terms
-    for j in 3:size(linParams,2)
-        func,keep = fit_poly_without_outliers(fibInds,linParams[:,j],1)
-	func_eval = func.(fibInds)
-	interp_linParams[:,j] .= func_eval .+ nanmedian((linParams[:,j].-func_eval)[keep])
+    for j in 3:size(linParams, 2)
+        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 1)
+        func_eval = func.(fibInds)
+        interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
     end
 
     #use a first order poly for the chip offset,scale parameters
-    for j in 1:size(nlParams,2)
-        func,keep = fit_poly_without_outliers(fibInds,nlParams[:,j],1)
-	func_eval = func.(fibInds)
-	interp_nlParams[:,j] .= func_eval .+ nanmedian((nlParams[:,j].-func_eval)[keep])
+    for j in 1:size(nlParams, 2)
+        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 1)
+        func_eval = func.(fibInds)
+        interp_nlParams[:, j] .= func_eval .+ nanmedian((nlParams[:, j] .- func_eval)[keep])
     end
 
     return interp_nlParams, interp_linParams

@@ -19,7 +19,8 @@ bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
 
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff
+bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
+               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff
 
 function initalize_git(git_dir)
     git_commit = LibGit2.head(git_dir)
@@ -81,16 +82,18 @@ nanzeroiqr(x) =
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
 # Single vector version
-nanzeropercentile(x::AbstractVector; percent_vec=[16.0, 50.0, 84.0]) =
+function nanzeropercentile(x::AbstractVector; percent_vec = [16.0, 50.0, 84.0])
     if all(isnanorzero, x)
         fill(NaN, length(percent_vec))
     else
         percentile(filter(!isnanorzero, x), percent_vec)
     end
+end
 
 # Array version with dimensions
-nanzeropercentile(x::AbstractArray; percent_vec=[16.0, 50.0, 84.0], dims=1) = 
-    mapslices(v -> nanzeropercentile(vec(v), percent_vec=percent_vec), x, dims=dims)
+function nanzeropercentile(x::AbstractArray; percent_vec = [16.0, 50.0, 84.0], dims = 1)
+    mapslices(v -> nanzeropercentile(vec(v), percent_vec = percent_vec), x, dims = dims)
+end
 
 function log10n(x)
     if x <= 0
