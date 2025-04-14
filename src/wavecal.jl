@@ -1,4 +1,5 @@
 using HDF5
+using Polynomials: Polynomial, fit
 
 function linear_loss_fit(x, y; wporder = 2, returnL2only = false)
     A = positional_poly_mat(x, porder = wporder)
@@ -11,7 +12,11 @@ function linear_loss_fit(x, y; wporder = 2, returnL2only = false)
 end
 
 function positional_poly_mat(x; porder = 2)
-    if porder == 2
+    if porder == 0
+        return [ones(length(x))]
+    elseif porder == 1
+        return [ones(length(x)) x]
+    elseif porder == 2
         return [ones(length(x)) x x .^ 2]
     elseif porder == 3
         return [ones(length(x)) x x .^ 2 x .^ 3]
@@ -89,9 +94,41 @@ end
 # Sky line wavecal
 function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # initial guess for the (low-order)chip polynomial parameters
-    chipPolyParams0 = [-1.070 1
-                       0 1
-                       1.076 1]
+    if "_apo_" in fname
+        # chipPolyParams0 = [-1.0716 1.00111
+        #                    0 1
+        #                    1.07009 0.98803]
+        offset_func_chip1 = Polynomial([-1.07221500e+00,  4.52450367e-06])
+        scale_func_chip1 = Polynomial([1.00093875e+00, -4.41886670e-07])
+        offset_func_chip3 = Polynomial([1.06972294e+00, 2.77444782e-06])
+        scale_func_chip3 = Polynomial([9.87857338e-01, 1.09350510e-06])
+    elseif "_lco_" in fname
+        # chipPolyParams0 = [-1.0748 1.00168
+        #                    0 1
+        #                    1.07089 0.98763]
+        offset_func_chip1 = Polynomial([-1.07456222e+00, -1.52100076e-07])
+        scale_func_chip1 = Polynomial([1.00123795e+00, 5.30751281e-07])
+        offset_func_chip3 = Polynomial([1.07199520e+00, -7.11920517e-06])
+        scale_func_chip3 = Polynomial([9.87968936e-01, -2.76150881e-07])
+    else
+        # chipPolyParams0 = [-1.070 1
+        #                    0 1
+        #                    1.076 1]
+        offset_func_chip1 = Polynomial([-1.070, 0.0])
+        scale_func_chip1 = Polynomial([1.0, 0.0])
+        offset_func_chip3 = Polynomial([1.076, 0.0])
+        scale_func_chip3 = Polynomial([1.0, 0.0])
+    end
+
+    fibInds = 1:300
+    chipPolyParams0 = zeros(Float64, (size(fibInds,1), 3, cporder+1))
+    chipPolyParams0[:, 1, 1] .= offset_func_chip1.(fibInds)
+    chipPolyParams0[:, 1, 2] .= scale_func_chip1.(fibInds)
+    chipPolyParams0[:, 2, 1] .= 0.0
+    chipPolyParams0[:, 2, 2] .= 1.0
+    chipPolyParams0[:, 3, 1] .= offset_func_chip3.(fibInds)
+    chipPolyParams0[:, 3, 2] .= scale_func_chip3.(fibInds)
+
     outname = replace(replace(fname, "skyLine_peaks" => "wavecal_skyline"), "_a_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
     linParams, nlParams,
@@ -99,22 +136,65 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
         chipPolyParams0; cporder = cporder, wporder = wporder)
 
+    # iterpolate between fibers to
+    # regularize the nlParams and linParams
+    interp_nlParams, interp_linParams = interpolate_wave_params(fibInds,nlParams,linParams;linParam_deg=2,nlParam_deg=1)
+
+    # do final pass with interp params to
+    # get a new constant-term for wave soln
+    # (which we do not think should be interpolated)
+
+    interp_resid_vec = zeros(Float64, (size(fibInds,1), size(sky_line_uxlst, 1))
+    fill!(interp_resid_vec, NaN)
+    for fibIndx in fibInds
+        xv = sky_line_uxlst[:, fibIndx]
+        yv = sky_line_fwlst[:, fibIndx]
+        chipIntv = sky_line_chipInt[:, fibIndx]
+        sky_msk = .!isnan.(xv)
+        chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
+        inparams = interp_nlParams[fibIndx, :]
+
+        params2ChipPolyParams!(chipPolyParams, inparams, cporder)
+        xt = zeros(Float64, length(xv[sky_msk]))
+        for i in 1:3
+            msk = chipIntv[sky_msk] .== i
+            xt[msk] .= transform_x_chips(xv[sky_msk][msk], chipPolyParams[i, :])
+        end
+
+        A = positional_poly_mat(xt, porder = wporder)
+	curr_resids = yv[sky_msk] .- A * interp_linParams[fibIndx, :]
+	const_offset = mean(curr_resids) #could also be median
+	interp_linParams[fibIndx, 1] += const_offset
+	interp_resid_vec[fibIndx, sky_msk] .= curr_resids .- const_offset
+    end
+
     chipWaveSoln = zeros(Float64, 2048, 300, 3)
+    interp_chipWaveSoln = zeros(Float64, 2048, 300, 3)
     x = 1:2048
     ximport = (x .- 1024) ./ 2048
     for chip in ["a", "b", "c"]
         chipIndx = getChipIndx(chip)
         for fibIndx in 1:300
-            params2ChipPolyParams!(chipPolyParams0, nlParams[fibIndx, :], cporder)
-            xt = transform_x_chips(ximport, chipPolyParams0[chipIndx, :])
+            params2ChipPolyParams!(chipPolyParams0[fibIndx, :, :], nlParams[fibIndx, :], cporder)
+            xt = transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
             Ax = positional_poly_mat(xt, porder = 2)
             yt = Ax * linParams[fibIndx, :]
             chipWaveSoln[:, fibIndx, chipIndx] .= yt
+
+            params2ChipPolyParams!(chipPolyParams0[fibIndx, :, :], interp_nlParams[fibIndx, :], cporder)
+            xt .= transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
+            Ax .= positional_poly_mat(xt, porder = 2)
+            yt .= Ax * interp_linParams[fibIndx, :]
+            interp_chipWaveSoln[:, fibIndx, chipIndx] .= yt
         end
     end
 
-    safe_jldsave(outname; linParams = linParams, nlParams = nlParams,
-        resid_vec = resid_vec, chipWaveSoln = chipWaveSoln)
+    # the best parameters are likely the interpolated ones
+    # but return the raw measurements as well
+    safe_jldsave(outname; linParams = interp_linParams, nlParams = interp_nlParams,
+        resid_vec = interp_resid_vec, chipWaveSoln = interp_chipWaveSoln, 
+	raw_linParams = linParams, nlParams = nlParams,
+        raw_resid_vec = resid_vec, chipWaveSoln = chipWaveSoln)
 end
 
 function get_sky_wavecal(
@@ -128,7 +208,7 @@ function get_sky_wavecal(
         yv = sky_line_fwlst[:, i]
         chipIntv = sky_line_chipInt[:, i]
         msk = .!isnan.(xv)
-        chipPolyParams = copy(chipPolyParams0)
+        chipPolyParams = copy(chipPolyParams0[i, :, :])
         inparams = ChipPolyParams2Params(chipPolyParams)
         function nonlinear_loss_fit_partial(inparams)
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
@@ -146,6 +226,64 @@ function get_sky_wavecal(
         resid_vec[i, msk] = linResid
     end
     return linParams, nlParams, resid_vec
+end
+
+function fit_poly_without_outliers(xvals,yvals,deg;nsigma=5,max_repeat=3)
+    summary = nanzeropercentile(yvals, [16,50,84])
+    #change to median,-sigma,+sigma
+    summary = [summary[2],summary[2]-summary[1],summary[3]-summary[2]]
+
+    keep = (yvals .>= summary[1]-nsigma*summary[2]) .&
+           (yvals .<= summary[1]+nsigma*summary[3])
+
+    for repeatInd in 1:max_repeat
+        func = fit(xvals[keep],yvals[keep],deg)
+	curr_resids = yvals .- func.(xvals)
+
+        resid_summary = nanzeropercentile(curr_resids[keep], [16,50,84])
+        resid_summary = [resid_summary[2],
+			  resid_summary[2]-resid_summary[1],
+			  resid_summary[3]-resid_summary[2]]
+
+        new_good = (curr_resids .>= resid_summary[1]-nsigma*resid_summary[2]) .&
+                   (curr_resids .<= resid_summary[1]+nsigma*resid_summary[3])
+
+	if all(new_good .== keep)
+	    break
+	end
+	keep .= new_good
+    end
+    return func, keep
+end
+
+function interpolate_wave_params(fibInds,nlParams,linParams;linParam_deg=2,nlParam_deg=1)
+    mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
+    unique_mtp = 1:10
+
+    interp_linParams = zeros(Float64,size(linParams))
+    interp_nlParams = zeros(Float64,size(nlParams))
+
+    #constant term in wave soln needs to fit each mtp separately
+    for mtp_ind in unique_mtp
+        keep_mtp = (mtp_inds .== mtp_ind)
+        func,keep = fit_poly_without_outliers(fibInds,linParams[1,keep_mtp],deg=linParam_deg)
+	func_eval = func.(fibInds[keep_mtp])
+	interp_linParams[1,keep_mtp] .= func_eval .+ nanmedian((linParams[1,keep_mtp].-func_eval)[keep])
+    end
+
+    for j in 2:size(linParams,1)
+        func,keep = fit_poly_without_outliers(fibInds,linParams[j,:],deg=linParam_deg)
+	func_eval = func.(fibInds)
+	interp_linParams[j,keep_mtp] .= func_eval .+ nanmedian((linParams[j,:].-func_eval)[keep])
+    end
+
+    for j in 1:size(nlParams,1)
+        func,keep = fit_poly_without_outliers(fibInds,nlParams[j,:],deg=nlParam_deg)
+	func_eval = func.(fibInds)
+	interp_nlParams[j,keep_mtp] .= func_eval .+ nanmedian((nlParams[j,:].-func_eval)[keep])
+    end
+
+    return interp_nlParams, interp_linParams
 end
 
 function ingest_skyLines_file(fileName)

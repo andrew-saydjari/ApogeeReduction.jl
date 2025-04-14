@@ -1,4 +1,4 @@
-using StatsBase: iqr
+using StatsBase: iqr, quantile
 using Jackknife
 using JLD2
 
@@ -80,6 +80,18 @@ nanzeroiqr(x) =
         iqr(filter(!isnanorzero, x)) / 1.34896
     end
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
+
+# Single vector version
+nanzeropercentile(x::AbstractVector; percent_vec=[16, 50, 84]) =
+    if all(isnanorzero, x)
+        fill(NaN, length(percent_vec))
+    else
+        percentile(filter(!isnanorzero, x), percent_vec)
+    end
+
+# Array version with dimensions
+nanzeropercentile(x::AbstractArray; percent_vec=[16, 50, 84], dims=1) = 
+    mapslices(v -> nanzeropercentile(vec(v), percent_vec=percent_vec), x, dims=dims)
 
 function log10n(x)
     if x <= 0

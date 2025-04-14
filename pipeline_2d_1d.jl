@@ -248,7 +248,6 @@ all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
 @showprogress pmap(process_1D, all2Dcal)
 
 ## get all OBJECT files (happy to add any other types that see sky?)
-## currently doing skyline finding on the uncal 1D files, should think about changing?
 list1DexpObject = []
 for mjd in unique_mjds
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
