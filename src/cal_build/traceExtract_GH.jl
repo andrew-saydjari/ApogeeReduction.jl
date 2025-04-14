@@ -967,3 +967,44 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     final_param_outputs, final_param_output_covs
 end
+
+function trace_plots(cal_type, trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
+    cut = 750
+    fig = Figure(size = (1600, 800), fontsize = 22)
+    ax = Axis(fig[1, 1],
+        xlabel = "FIBERID",
+        ylabel = "Fit Height",
+        title = "$(cal_type)Flat Median Height\nTele: $teleloc, MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
+
+    y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
+    scatter!(ax, 301 .- (1:300), y)
+
+    if (cal_type == "dome") && (parse(Int, mjdloc) > mjdfps2plate)
+        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
+        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
+    end
+
+    hlines!(ax, cut, linestyle = :dash)
+
+    ax = Axis(fig[1, 2],
+        xlabel = "FIBERID",
+        ylabel = "Fit Width",
+        title = "$(cal_type)Flat Median Width\nTele: $teleloc, MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
+
+    y = dropdims(nanzeromedian(trace_params[:, :, 3], 1), dims = 1)
+    scatter!(ax, 301 .- (1:300), y)
+
+    if (cal_type == "dome") && (parse(Int, mjdloc) > mjdfps2plate)
+        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
+        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
+    end
+
+    med_val = nanzeromedian(y)
+    hlines!(ax, med_val, linestyle = :dash)
+
+    tracePlot_heights_widths_Path = dirNamePlots *
+        "$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+    save(tracePlot_heights_widths_Path, fig)
+
+    return tracePlot_heights_widths_Path
+end

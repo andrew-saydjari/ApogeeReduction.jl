@@ -46,6 +46,11 @@ function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype; use_cal = fals
            "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).jld2"
 end
 
+function get_fluxing_file(parent_dir, mjd, tele, chip, expidfull, cartid)
+    return parent_dir *
+           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(chip)_$(expidfull)_DOMEFLAT_$(cartid).jld2"
+end
+
 function get_1d_name(expid, df; cal = false)
     basename = if cal
         "ar1Dcal"

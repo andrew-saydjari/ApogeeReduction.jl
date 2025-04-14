@@ -123,6 +123,11 @@ git_branch, git_commit = initalize_git(src_dir);
         sname = split(split(fname, "/")[end], "_")
         fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
 
+        # how worried should I be about loading this every time?
+        f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+        dfalmanac = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+        close(f)
+
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv = gh_profiles(
             tele, mjd, chip, expid; n_sub = 100)
@@ -135,7 +140,10 @@ git_branch, git_commit = initalize_git(src_dir);
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
-        pix_bitmask = load(fnamecal, "pix_bitmask") #strip out the replace once we are happy with ap2Dcal
+        pix_bitmask = load(fnamecal, "pix_bitmask")
+        meta_data = load(fname, "meta_data")
+        meta_data["git_branch"] = git_branch
+        meta_data["git_commit"] = git_commit
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
         traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
@@ -161,11 +169,37 @@ git_branch, git_commit = initalize_git(src_dir);
             error("Extraction method $(parg["extraction"]) not recognized")
         end
 
+        ### relative fluxing (using "c" only for now)
+        cartid = meta_data["cartid"]
+        calPath = get_fluxing_file(dfalmanac, parg["outdir"], mjd, tele, expid, cartid, fluxing_chip = "c")
+        expid_num = parse(Int, last(expid, 4)) #this is silly because we translate right back
+        fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
+        fiberTypeList = map(x->fibtargDict[x], 1:300)
+        if isnothing(calPath)
+            @warn "No fluxing file found for $(tele) $(mjd) $(chip) $(expid)"
+            relthrpt = ones(size(flux_1d,2))
+            bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d,2))
+        else
+            linkPath = joinpath(dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).jld2")
+            if !isfile(linkPath)
+                symlink(calPath, linkPath)
+            end
+            relthrpt = load(linkPath, "relthrpt")
+            bitmsk_relthrpt = load(linkPath, "bitmsk_relthrpt")
+        end
+        
+        # don't flux broken fibers (don't use warn fibers for sky)
+        msk_goodwarn = (bitmsk_relthrpt .== 0) .| (bitmsk_relthrpt .& 2^0) .== 2^0
+        if any(msk_goodwarn)
+            flux_1d[:, msk_goodwarn] ./= relthrpt[msk_goodwarn]
+            ivar_1d[:, msk_goodwarn] .*= relthrpt[msk_goodwarn] .^ 2
+        end
+                
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         outfname = replace(fname, "ar2D" => "ar1D")
-        safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, git_branch, git_commit)
+        safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, relthrpt, bitmsk_relthrpt, fiberTypeList, meta_data)
         resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
-        safe_jldsave(resid_outfname; resid_flux, resid_ivar, git_branch, git_commit)
+        safe_jldsave(resid_outfname; resid_flux, resid_ivar, meta_data)
     end
 end
 t_now = now();
@@ -293,6 +327,7 @@ flush(stdout);
 all1DObjectSkyPeaks = replace.(all1DObject, "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
+## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 ## combine chips for single exposure onto loguniform wavelength grid
 ## pushing off the question of dither combinations for now (to apMADGICS stage)
 all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
