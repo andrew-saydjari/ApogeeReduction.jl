@@ -94,7 +94,7 @@ end
 # Sky line wavecal
 function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # initial guess for the (low-order)chip polynomial parameters
-    if "_apo_" in fname
+    if occursin("_apo_",fname)
         # chipPolyParams0 = [-1.0716 1.00111
         #                    0 1
         #                    1.07009 0.98803]
@@ -102,7 +102,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         scale_func_chip1 = Polynomial([1.00093875e+00, -4.41886670e-07])
         offset_func_chip3 = Polynomial([1.06972294e+00, 2.77444782e-06])
         scale_func_chip3 = Polynomial([9.87857338e-01, 1.09350510e-06])
-    elseif "_lco_" in fname
+    elseif occursin("_lco_",fname)
         # chipPolyParams0 = [-1.0748 1.00168
         #                    0 1
         #                    1.07089 0.98763]
@@ -144,7 +144,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # get a new constant-term for wave soln
     # (which we do not think should be interpolated)
 
-    interp_resid_vec = zeros(Float64, (size(fibInds,1), size(sky_line_uxlst, 1))
+    interp_resid_vec = zeros(Float64, (size(fibInds,1), size(sky_line_uxlst, 1)))
     fill!(interp_resid_vec, NaN)
     for fibIndx in fibInds
         xv = sky_line_uxlst[:, fibIndx]
@@ -193,8 +193,8 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # but return the raw measurements as well
     safe_jldsave(outname; linParams = interp_linParams, nlParams = interp_nlParams,
         resid_vec = interp_resid_vec, chipWaveSoln = interp_chipWaveSoln, 
-	raw_linParams = linParams, nlParams = nlParams,
-        raw_resid_vec = resid_vec, chipWaveSoln = chipWaveSoln)
+	raw_linParams = linParams, raw_nlParams = nlParams,
+        raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln)
 end
 
 function get_sky_wavecal(
