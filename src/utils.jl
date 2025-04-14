@@ -197,3 +197,11 @@ function safe_jldsave(filename; kwargs...)
     end
     JLD2.jldsave(filename; kwargs...)
 end
+
+function parseCartID(x)
+    if x == "FPS"
+        return 0
+    else
+        return x
+    end
+end

@@ -77,8 +77,8 @@ end
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
     flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                 expid[i], chip, "DOMEFLAT", use_cal = true)
-             for chip in chips, i in eachindex(mjd)]
+                expid[i], chip, "DOMEFLAT", use_cal = true)
+                for i in eachindex(mjd), chip in chips]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end

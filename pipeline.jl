@@ -113,7 +113,7 @@ flush(stdout);
     using FITSIO, HDF5, FileIO, JLD2, Glob
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, SIRS, ProgressMeter
-    using AstroTime: TAIEpoch, modified_julian, days
+    using AstroTime: TAIEpoch, modified_julian, days, value
 
     src_dir = "./"
     include(src_dir * "src/ar3D.jl")
@@ -147,7 +147,7 @@ git_branch, git_commit = initalize_git(src_dir);
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
             df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
-        cartid = parse(Int, df.cartid[expid])
+        cartid = parseCartID(df.cartid[expid])
         # decompress and convert apz data format to a standard 3D cube of reads
         cubedat, hdr_dict = apz2cube(rawpath)
 
@@ -254,10 +254,10 @@ git_branch, git_commit = initalize_git(src_dir);
         meta_data["cartid"] = cartid
         meta_data["nread_used"] = nread_used
         meta_data["nread_total"] = nread_total
-        meta_data["mjd_mid_exposure_old"] = mjd_mid_exposure_old
-        meta_data["mjd_mid_exposure_rough"] = mjd_mid_exposure_rough
-        meta_data["mjd_mid_exposure_precise"] = mjd_mid_exposure_precise
-        meta_data["mjd_mid_exposure"] = mjd_mid_exposure
+        meta_data["mjd_mid_exposure_old"] = value(mjd_mid_exposure_old)
+        meta_data["mjd_mid_exposure_rough"] = value(mjd_mid_exposure_rough)
+        meta_data["mjd_mid_exposure_precise"] = value(mjd_mid_exposure_precise)
+        meta_data["mjd_mid_exposure"] = value(mjd_mid_exposure)
         meta_data["git_branch"] = git_branch
         meta_data["git_commit"] = git_commit
         safe_jldsave(
@@ -273,11 +273,11 @@ git_branch, git_commit = initalize_git(src_dir);
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
-        nread_used = load(fname, "nread_used")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
         saturation_image = load(fname, "saturation_image")
         meta_data = load(fname, "meta_data")
+        nread_used = meta_data["nread_used"]
         meta_data["git_branch"] = git_branch
         meta_data["git_commit"] = git_commit
 

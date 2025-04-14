@@ -367,41 +367,43 @@ end
 
 # hardcoded to use chip c only for now
 # must use dome flats, not quartz flats (need fiber runs to telescope)
-function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidfull; fluxing_chip = "c")
-    df_mjd = sort(dfalmanac[(dfalmanac.mjd.==mjd) .& (dfalmanac.observatory.==tele), :], :exposure)
+function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_chip = "c")
+    expidfull = parse(Int, expidstr)
+    df_mjd = sort(dfalmanac[(dfalmanac.mjd.==parse(Int, mjd)) .& (dfalmanac.observatory.==tele), :], :exposure)
     expIndex = findfirst(df_mjd.exposure.==expidfull)
     cartId = df_mjd.cartid[expIndex]
     expIndex_before = findlast((df_mjd.imagetyp=="DomeFlat") .& (df_mjd.exposure .< expidfull))
     expIndex_after = findfirst((df_mjd.imagetyp=="DomeFlat") .& (df_mjd.exposure .> expidfull))
     valid_before = if !isnothing(expIndex_before)
         all(df_mjd.cartid[expIndex_before:expIndex] .== cartId)*1
-    elseif
-        df_mjd.cartid[expIndex_before] .== cartId
+    elseif !isnothing(expIndex_before)
+        (df_mjd.cartid[expIndex_after] .== cartId)*2
     else
-        false
+        0
     end
     valid_after = if !isnothing(expIndex_after)
         all(df_mjd.cartid[expIndex:expIndex_after] .== cartId)*1
-    else
+    elseif !isnothing(expIndex_after)
         (df_mjd.cartid[expIndex_after] .== cartId)*2
+    else
+        0
     end
 
-    if valid_before .== 1
-        return get_fluxing_file(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before])
-    elseif valid_after .== 1
-        return get_fluxing_file(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after])
+    if valid_before == 1
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+    elseif valid_after == 1
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
     # any of the cases below here we could consider using a global file
-    elseif valid_before .== 2
-        return get_fluxing_file(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before])
-    elseif valid_after .== 2
-        return get_fluxing_file(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after])
+    elseif valid_before == 2
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+    elseif valid_after == 2
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
     else
         return nothing
     end
 end
 
-function 
-
+# TODO: switch to meta data dict and then save wavecal flags etc.
 function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
     # might need to add in telluric div functionality here?
 

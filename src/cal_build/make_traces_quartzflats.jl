@@ -77,8 +77,8 @@ end
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
     flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                 expid[i], chip, "QUARTZFLAT", use_cal = true)
-             for chip in chips, i in eachindex(mjd)]
+                expid[i], chip, "QUARTZFLAT", use_cal = true)
+                for i in eachindex(mjd), chip in chips]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end
@@ -118,6 +118,6 @@ end
 thread = SlackThread()
 thread("QUARTZFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 for (filename, heights_widths_path) in zip(flist, plot_paths)
-    thread("Here is the median flux and width per fiber for $(filename)", heights_path)
+    thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
 end
 thread("QuartzFlat traces done.")

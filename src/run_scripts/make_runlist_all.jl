@@ -30,7 +30,7 @@ end
 
 parg = parse_commandline()
 
-mjd_list = Int[]
+mjdexp_list = Int[]
 expid_list = Int[]
 f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
@@ -42,9 +42,9 @@ for tstmjd in mjd_list
                ((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
     expindx_list = findall(good_exp)
     for expindx in expindx_list
-        push!(mjd_list, parse(Int, tstmjd))
+        push!(mjdexp_list, parse(Int, tstmjd))
         push!(expid_list, expindx)
     end
 end
 
-safe_jldsave(parg["output"]; mjd = mjd_list, expid = expid_list)
+safe_jldsave(parg["output"]; mjd = mjdexp_list, expid = expid_list)
