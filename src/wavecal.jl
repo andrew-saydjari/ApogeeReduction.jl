@@ -151,6 +151,10 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         yv = sky_line_fwlst[:, fibIndx]
         chipIntv = sky_line_chipInt[:, fibIndx]
         sky_msk = .!isnan.(xv)
+	if sum(sky_msk) == 0
+            continue
+	end
+
         chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
         inparams = interp_nlParams[fibIndx, :]
 
@@ -182,9 +186,9 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
             chipWaveSoln[:, fibIndx, chipIndx] .= yt
 
             params2ChipPolyParams!(chipPolyParams0[fibIndx, :, :], interp_nlParams[fibIndx, :], cporder)
-            xt .= transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
-            Ax .= positional_poly_mat(xt, porder = 2)
-            yt .= Ax * interp_linParams[fibIndx, :]
+            xt = transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
+            Ax = positional_poly_mat(xt, porder = 2)
+            yt = Ax * interp_linParams[fibIndx, :]
             interp_chipWaveSoln[:, fibIndx, chipIndx] .= yt
         end
     end
@@ -228,19 +232,23 @@ function get_sky_wavecal(
     return linParams, nlParams, resid_vec
 end
 
-function fit_poly_without_outliers(xvals,yvals,deg;nsigma=5,max_repeat=3)
-    summary = nanzeropercentile(yvals, [16,50,84])
+function fit_poly_without_outliers(xvals,yvals,deg;nsigma=3,max_repeat=3,keep=nothing)
+    summary = nanzeropercentile(yvals,percent_vec=[16.0,50.0,84.0])
     #change to median,-sigma,+sigma
     summary = [summary[2],summary[2]-summary[1],summary[3]-summary[2]]
 
-    keep = (yvals .>= summary[1]-nsigma*summary[2]) .&
+    if isnothing(keep)
+        keep = ones(Bool, size(xvals,1))
+    end
+    keep = keep .& 
+           (yvals .>= summary[1]-nsigma*summary[2]) .&
            (yvals .<= summary[1]+nsigma*summary[3])
 
     for repeatInd in 1:max_repeat
         func = fit(xvals[keep],yvals[keep],deg)
 	curr_resids = yvals .- func.(xvals)
 
-        resid_summary = nanzeropercentile(curr_resids[keep], [16,50,84])
+        resid_summary = nanzeropercentile(curr_resids[keep],percent_vec=[16.0,50.0,84.0])
         resid_summary = [resid_summary[2],
 			  resid_summary[2]-resid_summary[1],
 			  resid_summary[3]-resid_summary[2]]
@@ -253,10 +261,13 @@ function fit_poly_without_outliers(xvals,yvals,deg;nsigma=5,max_repeat=3)
 	end
 	keep .= new_good
     end
+
+    func = fit(xvals[keep],yvals[keep],deg)
+
     return func, keep
 end
 
-function interpolate_wave_params(fibInds,nlParams,linParams;linParam_deg=2,nlParam_deg=1)
+function interpolate_wave_params(fibInds,nlParams,linParams)
     mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
     unique_mtp = 1:10
 
@@ -264,23 +275,32 @@ function interpolate_wave_params(fibInds,nlParams,linParams;linParam_deg=2,nlPar
     interp_nlParams = zeros(Float64,size(nlParams))
 
     #constant term in wave soln needs to fit each mtp separately
+    #need a second order poly for zeroth order term
     for mtp_ind in unique_mtp
         keep_mtp = (mtp_inds .== mtp_ind)
-        func,keep = fit_poly_without_outliers(fibInds,linParams[1,keep_mtp],deg=linParam_deg)
+        func,keep = fit_poly_without_outliers(fibInds[keep_mtp],linParams[keep_mtp,1],2)
 	func_eval = func.(fibInds[keep_mtp])
-	interp_linParams[1,keep_mtp] .= func_eval .+ nanmedian((linParams[1,keep_mtp].-func_eval)[keep])
+	interp_linParams[keep_mtp,1] .= func_eval .+ nanmedian((linParams[keep_mtp,1].-func_eval)[keep])
     end
 
-    for j in 2:size(linParams,1)
-        func,keep = fit_poly_without_outliers(fibInds,linParams[j,:],deg=linParam_deg)
+    #need a second order poly for first order term
+    j = 2
+    func,keep = fit_poly_without_outliers(fibInds,linParams[:,j],2)
+    func_eval = func.(fibInds)
+    interp_linParams[:,j] .= func_eval .+ nanmedian((linParams[:,j].-func_eval)[keep])
+
+    #need a first order poly for higher order terms
+    for j in 3:size(linParams,2)
+        func,keep = fit_poly_without_outliers(fibInds,linParams[:,j],1)
 	func_eval = func.(fibInds)
-	interp_linParams[j,keep_mtp] .= func_eval .+ nanmedian((linParams[j,:].-func_eval)[keep])
+	interp_linParams[:,j] .= func_eval .+ nanmedian((linParams[:,j].-func_eval)[keep])
     end
 
-    for j in 1:size(nlParams,1)
-        func,keep = fit_poly_without_outliers(fibInds,nlParams[j,:],deg=nlParam_deg)
+    #use a first order poly for the chip offset,scale parameters
+    for j in 1:size(nlParams,2)
+        func,keep = fit_poly_without_outliers(fibInds,nlParams[:,j],1)
 	func_eval = func.(fibInds)
-	interp_nlParams[j,keep_mtp] .= func_eval .+ nanmedian((nlParams[j,:].-func_eval)[keep])
+	interp_nlParams[:,j] .= func_eval .+ nanmedian((nlParams[:,j].-func_eval)[keep])
     end
 
     return interp_nlParams, interp_linParams

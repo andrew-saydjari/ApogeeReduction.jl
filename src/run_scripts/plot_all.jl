@@ -178,9 +178,9 @@ for chip in string.(collect(parg["chips"]))
         expid_num = parse(Int, last(expid, 4))
         flux_1d = load(exp_fname, "flux_1d")
         mask_1d = load(exp_fname, "mask_1d")
-        #        msk_loc = (mask_1d .& bad_pix_bits .== 0)
-        msk_loc = (mask_1d .&
-                   (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
+        msk_loc = (mask_1d .& bad_pix_bits .== 0)
+        #msk_loc = (mask_1d .&
+        #           (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
         fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
         sample_fibers = sample(rng, 1:300, 5, replace = false)
