@@ -8,6 +8,7 @@ slurm_logs/*.err
 slurm_logs/*.out
 *.err
 *.out
+*.txt
 
 stash/
 .gitignore
