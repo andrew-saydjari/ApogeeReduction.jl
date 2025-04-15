@@ -153,10 +153,10 @@ for mjd in unique_mjds
     append!(all1Da, file_list)
 end
 
-allExptype = map(x->split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da)
+allExptype = convert.(String,map(x->split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
 
 # Define custom sorting order for exposure types
-function get_exptype_priority(exptype::String)
+function get_exptype_priority(exptype::AbstractString)
     priority_map = Dict(
         "OBJECT" => 1,
         "DOMEFLAT" => 2,
@@ -190,7 +190,7 @@ for chip in string.(collect(parg["chips"]))
     for exptype2plot in sorted_exptypes
         msk_exptype = allExptype .== exptype2plot
         if any(msk_exptype)
-            nsamp = minimum([count(msk_exptype), 5])
+            nsamp = minimum([count(msk_exptype), 3])
             sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
 
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
@@ -205,7 +205,7 @@ for chip in string.(collect(parg["chips"]))
                         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
                 fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
-                sample_fibers = sample(rng, 1:300, 5, replace = false)
+                sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
                     fibID = fiberIndx2fiberID(fib)
                     fibType = fibtargDict[fibID]
@@ -394,7 +394,7 @@ rng = MersenneTwister(536 + unique_mjds[1])
 for exptype2plot in sorted_exptypes
     msk_exptype = allExptype .== exptype2plot
     if any(msk_exptype)
-        nsamp = minimum([count(msk_exptype), 5])
+        nsamp = minimum([count(msk_exptype), 3])
         sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         for exp_fname in sample_exposures
@@ -412,7 +412,7 @@ for exptype2plot in sorted_exptypes
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
             fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
-            sample_fibers = sample(rng, 1:300, 5, replace = false)
+            sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
                     tele, mjd, chiploc, expid, expType, expuni_fname)

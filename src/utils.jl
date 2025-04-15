@@ -8,7 +8,7 @@ if !haskey(ENV, "SLACK_CHANNEL")
 end
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
-bad_dark_pix_bits = 2^4
+bad_dark_pix_bits = 2^1 + 2^2 + 2^4
 bad_flat_pix_bits = 2^6;
 # most multiread CR detections are bad for other reasons
 bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)

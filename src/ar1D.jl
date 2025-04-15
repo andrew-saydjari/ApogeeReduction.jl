@@ -371,20 +371,20 @@ function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_ch
     expidfull = parse(Int, expidstr)
     df_mjd = sort(dfalmanac[(dfalmanac.mjd.==parse(Int, mjd)) .& (dfalmanac.observatory.==tele), :], :exposure)
     expIndex = findfirst(df_mjd.exposure.==expidfull)
-    cartId = df_mjd.cartid[expIndex]
-    expIndex_before = findlast((df_mjd.imagetyp=="DomeFlat") .& (df_mjd.exposure .< expidfull))
-    expIndex_after = findfirst((df_mjd.imagetyp=="DomeFlat") .& (df_mjd.exposure .> expidfull))
+    cartId = df_mjd.cartidInt[expIndex]
+    expIndex_before = findlast((df_mjd.imagetyp.=="DomeFlat") .& (df_mjd.exposure .< expidfull))
+    expIndex_after = findfirst((df_mjd.imagetyp.=="DomeFlat") .& (df_mjd.exposure .> expidfull))
     valid_before = if !isnothing(expIndex_before)
-        all(df_mjd.cartid[expIndex_before:expIndex] .== cartId)*1
+        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)*1
     elseif !isnothing(expIndex_before)
-        (df_mjd.cartid[expIndex_after] .== cartId)*2
+        (df_mjd.cartidInt[expIndex_after] .== cartId)*2
     else
         0
     end
     valid_after = if !isnothing(expIndex_after)
-        all(df_mjd.cartid[expIndex:expIndex_after] .== cartId)*1
+        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)*1
     elseif !isnothing(expIndex_after)
-        (df_mjd.cartid[expIndex_after] .== cartId)*2
+        (df_mjd.cartidInt[expIndex_after] .== cartId)*2
     else
         0
     end

@@ -132,6 +132,7 @@ git_branch, git_commit = initalize_git(src_dir);
         # how worried should I be about loading this every time?
         falm = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         dfalmanac = DataFrame(read(falm["$(parg["tele"])/$(mjd)/exposures"]))
+        dfalmanac.cartidInt = parseCartID.(dfalmanac.cartid)
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv = gh_profiles(
             tele, mjd, chip, expid; n_sub = 100)
@@ -178,7 +179,7 @@ git_branch, git_commit = initalize_git(src_dir);
         safe_jldsave(resid_outfname; resid_flux, resid_ivar, meta_data)
         if parg["relFlux"]
             ### relative fluxing (using "c" only for now)
-            calPath = get_fluxing_file(dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c")
+            calPath = abspath(get_fluxing_file(dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c"))
             expid_num = parse(Int, last(expid, 4)) #this is silly because we translate right back
             fibtargDict = get_fibTargDict(falm, tele, parse(Int, mjd), expid_num)
             close(falm)
@@ -188,19 +189,22 @@ git_branch, git_commit = initalize_git(src_dir);
                 relthrpt = ones(size(flux_1d,2))
                 bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d,2))
             else
-                linkPath = joinpath(dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).jld2")
-                if !isfile(linkPath)
+                linkPath = abspath(joinpath(dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).jld2"))
+                if !islink(linkPath) & isfile(calPath)
                     symlink(calPath, linkPath)
+                elseif !islink(linkPath) & !isfile(calPath)
+                    @warn "CalPath Does Note Exist: $(calPath)"
                 end
                 relthrpt = load(linkPath, "relthrpt")
+                relthrptr = reshape(relthrpt, (1, length(relthrpt)))
                 bitmsk_relthrpt = load(linkPath, "bitmsk_relthrpt")
             end
             
             # don't flux broken fibers (don't use warn fibers for sky)
             msk_goodwarn = (bitmsk_relthrpt .== 0) .| (bitmsk_relthrpt .& 2^0) .== 2^0
             if any(msk_goodwarn)
-                flux_1d[:, msk_goodwarn] ./= relthrpt[msk_goodwarn]
-                ivar_1d[:, msk_goodwarn] .*= relthrpt[msk_goodwarn] .^ 2
+                flux_1d[:, msk_goodwarn] ./= relthrptr[:,msk_goodwarn]
+                ivar_1d[:, msk_goodwarn] .*= relthrptr[:,msk_goodwarn] .^ 2
             end
                     
             # we probably want to append info from the fiber dictionary from alamanac into the file name
@@ -332,7 +336,7 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
-all1DObjectSkyPeaks = replace.(all1DObject, "ar1D" => "skyLine_peaks")
+all1DObjectSkyPeaks = replace(replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
