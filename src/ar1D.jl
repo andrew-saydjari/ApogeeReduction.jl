@@ -342,7 +342,7 @@ function get_fibTargDict(f, tele, mjd, exposure_id)
                     fiber_type_names[t]
 
                 else
-                    @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
+                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
                     "fiberTypeFail"
                 end
             end

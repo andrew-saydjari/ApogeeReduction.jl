@@ -179,16 +179,16 @@ git_branch, git_commit = initalize_git(src_dir);
         safe_jldsave(resid_outfname; resid_flux, resid_ivar, meta_data)
         if parg["relFlux"]
             ### relative fluxing (using "c" only for now)
-            calPath = abspath(get_fluxing_file(dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c"))
+            calPath = get_fluxing_file(dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c")
             expid_num = parse(Int, last(expid, 4)) #this is silly because we translate right back
             fibtargDict = get_fibTargDict(falm, tele, parse(Int, mjd), expid_num)
-            close(falm)
             fiberTypeList = map(x->fibtargDict[x], 1:300)
             if isnothing(calPath)
                 @warn "No fluxing file found for $(tele) $(mjd) $(chip) $(expid)"
                 relthrpt = ones(size(flux_1d,2))
                 bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d,2))
             else
+                calPath = abspath(calPath)
                 linkPath = abspath(joinpath(dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).jld2"))
                 if !islink(linkPath) & isfile(calPath)
                     symlink(calPath, linkPath)
@@ -212,6 +212,7 @@ git_branch, git_commit = initalize_git(src_dir);
         else
             safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, meta_data)
         end
+        close(falm)
     end
 end
 t_now = now();
