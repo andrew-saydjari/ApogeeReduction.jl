@@ -19,10 +19,10 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     mask_1d_good = (mask_1d .& bad_pix_bits) .== 0;
     close(f)
 
-    absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1);
+    absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1)
     bitmsk_relthrpt = zeros(Int, length(absthrpt))
     relthrpt = copy(absthrpt)
-    relthrpt ./= nanzeromedian(relthrpt);
+    relthrpt ./= nanzeromedian(relthrpt)
 
     thresh = (1 .- sig_cut*nanzeroiqr(relthrpt))
     bitmsk_relthrpt[relthrpt .< thresh].|=2^0
@@ -39,10 +39,9 @@ function regularize_trace(trace_params; window_size = 101)
     n_xpix, n_fibers = size(trace_params)[1:2]
     regularized_trace = similar(trace_params)
     for fiber in 1:n_fibers, param in 1:3
-
         regularized_trace[:,
-            fiber,
-            param] = running_median(
+        fiber,
+        param] = running_median(
             trace_params[:, fiber, param], window_size, :asym_trunc; nan = :ignore)
     end
     regularized_trace
@@ -74,7 +73,6 @@ function extract_boxcar_core(dimage_in, trace_params, boxcar_halfwidth)
     out = zeros(Float64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
-
         _, ypixf, _ = trace_params[xpix, fib, :]
         ypix = round(Int, ypixf)
         out[xpix, fib] = sum(dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
@@ -86,11 +84,10 @@ function extract_boxcar_bitmask(dimage_in, trace_params, boxcar_halfwidth)
     mask = zeros(Int64, N_XPIX, N_FIBERS)
     n_xpix, n_fibers = size(trace_params)[1:2]
     for xpix in 1:n_xpix, fib in 1:n_fibers
-
         _, ypixf, _ = trace_params[xpix, fib, :]
         ypix = round(Int, ypixf)
         mask[xpix,
-            fib] = reduce(
+        fib] = reduce(
             |, dimage_in[xpix, (ypix - boxcar_halfwidth):(ypix + boxcar_halfwidth)])
     end
     mask
@@ -114,7 +111,6 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
 
     for xpix in 1:n_xpix, fib in 1:n_fibers
-
         _, y_peak, y_sigma = trace_params[xpix, fib, :]
 
         ypixels = floor(Int, y_peak - window_half_size):ceil(
@@ -123,8 +119,8 @@ function extract_optimal(dimage, ivarimage, pix_bitmask, trace_params; window_ha
         weights = diff(cdf.(Normal(y_peak, y_sigma), ypix_boundaries))
 
         flux_1d[xpix,
-            fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
-                   sum(weights .^ 2 .* ivarimage[xpix, ypixels])
+        fib] = sum(weights .* dimage[xpix, ypixels] .* ivarimage[xpix, ypixels]) /
+               sum(weights .^ 2 .* ivarimage[xpix, ypixels])
         ivar_1d[xpix, fib] = sum(weights .^ 2 .* ivarimage[xpix, ypixels])
 
         # bitmask
@@ -138,7 +134,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
         n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
         small_window_half_size = 2, fit_window_half_size = 4,
         large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001,
-        return_resids = false)
+        return_resids = false, neff_thresh = 10.0)
     n_xpix = size(trace_params, 1)
     n_ypix = size(dimage, 2)
     n_fibers = size(trace_params, 2)
@@ -240,7 +236,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                     mask_1d[xpix, fib] += bad_1d_failed_extract
                 end
 
-                if curr_neff > 50
+                if curr_neff > neff_thresh
                     new_flux_1d[fib] = 0.0
                     ivar_1d[xpix, fib] = 0.0
                     mask_1d[xpix, fib] += bad_1d_neff
@@ -252,8 +248,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 
                     if ivar_1d[xpix, fib] > 0
                         model_var_indv[fib,
-                            full_ypixels] .= max(0, 1 / ivar_1d[xpix, fib]) *
-                                             (full_model_vals .^ 2)
+                        full_ypixels] .= max(0, 1 / ivar_1d[xpix, fib]) *
+                                         (full_model_vals .^ 2)
                         new_comb_model_var[full_ypixels] .+= model_var_indv[fib, full_ypixels]
                     end
                 end
@@ -441,8 +437,8 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
         chipWaveSoln = zeros(2048, 300, 3)
         for (chipind, chip) in enumerate(["a", "b", "c"])
             chipWaveSoln[:,
-                :,
-                chipind] .= rough_linear_wave.(
+            :,
+            chipind] .= rough_linear_wave.(
                 1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
         end
         println("No wavecal found for $(fname), using fallback")

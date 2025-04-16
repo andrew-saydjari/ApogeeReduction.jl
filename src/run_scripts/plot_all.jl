@@ -153,7 +153,7 @@ for mjd in unique_mjds
     append!(all1Da, file_list)
 end
 
-allExptype = convert.(String,map(x->split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
+allExptype = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
 
 # Define custom sorting order for exposure types
 function get_exptype_priority(exptype::AbstractString)
@@ -169,7 +169,7 @@ function get_exptype_priority(exptype::AbstractString)
 end
 
 # Sort allExptype using the custom priority function
-sorted_exptypes = sort(unique(allExptype), by=get_exptype_priority)
+sorted_exptypes = sort(unique(allExptype), by = get_exptype_priority)
 
 # per chip example spectra
 for chip in string.(collect(parg["chips"]))
@@ -191,7 +191,7 @@ for chip in string.(collect(parg["chips"]))
         msk_exptype = allExptype .== exptype2plot
         if any(msk_exptype)
             nsamp = minimum([count(msk_exptype), 3])
-            sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
+            sample_exposures = sample(rng, all1D[msk_exptype], nsamp, replace = false)
 
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
             for exp_fname in sample_exposures
@@ -200,9 +200,9 @@ for chip in string.(collect(parg["chips"]))
                 expid_num = parse(Int, last(expid, 4))
                 flux_1d = load(exp_fname, "flux_1d")
                 mask_1d = load(exp_fname, "mask_1d")
-                #        msk_loc = (mask_1d .& bad_pix_bits .== 0)
-                msk_loc = (mask_1d .&
-                        (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
+                msk_loc = (mask_1d .& bad_pix_bits .== 0)
+                # msk_loc = (mask_1d .&
+                #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
                 fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
@@ -236,7 +236,7 @@ for chip in string.(collect(parg["chips"]))
                     ax2.ylabel = "ADU"
 
                     savePath = dirNamePlots *
-                            "ar1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
+                               "ar1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
                     save(savePath, fig)
 
                     thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
@@ -417,7 +417,7 @@ for exptype2plot in sorted_exptypes
                 plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
                     tele, mjd, chiploc, expid, expType, expuni_fname)
                 plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical",
-                        tele, mjd, chiploc, expid, expType, expunical_fname)
+                    tele, mjd, chiploc, expid, expType, expunical_fname)
             end
         end
     end
