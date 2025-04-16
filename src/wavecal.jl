@@ -194,7 +194,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     # iterpolate between fibers to
     # regularize the nlParams and linParams
     interp_nlParams, interp_linParams = interpolate_wave_params(
-        fibInds, nlParams, linParams; linParam_deg = 2, nlParam_deg = 1)
+        fibInds, nlParams, linParams)
 
     # do final pass with interp params to
     # get a new constant-term for wave soln
@@ -226,6 +226,11 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         const_offset = mean(curr_resids) #could also be median
         interp_linParams[fibIndx, 1] += const_offset
         interp_resid_vec[fibIndx, sky_msk] .= curr_resids .- const_offset
+
+        # NOTE: using the interp params and doing a final FULL update
+        # for all params (e.g. fit full linParams, then get best nlParams)
+        # yielded the same outliers in wave soln that we want to avoid
+        # so probably shouldn't do it
     end
 
     chipWaveSoln = zeros(Float64, 2048, 300, 3)
@@ -289,7 +294,7 @@ function get_sky_wavecal(
     return linParams, nlParams, resid_vec
 end
 
-function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 3, keep = nothing)
+function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5, keep = nothing)
     summary = nanzeropercentile(yvals, percent_vec = [16.0, 50.0, 84.0])
     #change to median,-sigma,+sigma
     summary = [summary[2], summary[2] - summary[1], summary[3] - summary[2]]
