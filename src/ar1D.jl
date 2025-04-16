@@ -1,12 +1,9 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
 
-# src_dir = "./"
-# include(src_dir * "wavecal.jl")
-# include(src_dir * "skyline_peaks.jl")
 include("./wavecal.jl")
 include("./skyline_peaks.jl")
-
+include("./fileNameHandling.jl")
 # this file contains the code needed to extract a 1D spectrum from a 2D images.
 # trace_params is of size (n_x_pix, n_fibers, 3)
 # the elements correspodn to flux, y-pixel, and gaussian witdth (sigma)
@@ -20,6 +17,7 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     mask_1d = f["mask_1d"]
     mask_1d_good = (mask_1d .& bad_pix_bits) .== 0
     close(f)
+    metadata = read_metadata(fname)
 
     absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1)
     bitmsk_relthrpt = zeros(Int, length(absthrpt))
@@ -29,7 +27,7 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     thresh = (1 .- sig_cut * nanzeroiqr(relthrpt))
     bitmsk_relthrpt[relthrpt .< thresh] .|= 2^0
     bitmsk_relthrpt[relthrpt .< rel_val_cut] .|= 2^1
-    return absthrpt, relthrpt, bitmsk_relthrpt
+    return absthrpt, relthrpt, bitmsk_relthrpt, metadata
 end
 
 """
@@ -49,13 +47,22 @@ function regularize_trace(trace_params; window_size = 101)
     regularized_trace
 end
 
-function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params; boxcar_halfwidth = 2)
+function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params;
+        boxcar_halfwidth = 2, return_resids = false)
+    if return_resids
+        resid_fluxes_2d = zeros(Float64, size(dimage))
+        resid_ivars_2d = zeros(Float64, size(dimage))
+    end
     flux_1d = extract_boxcar_core(dimage, trace_params, boxcar_halfwidth)
     var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params, boxcar_halfwidth)
     ivar_1d = 1.0 ./ var_1d
     mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params, boxcar_halfwidth)
 
-    flux_1d, ivar_1d, mask_1d
+    if return_resids
+        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+    else
+        return flux_1d, ivar_1d, mask_1d
+    end
 end
 
 """
@@ -126,7 +133,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind,
         n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
         small_window_half_size = 2, fit_window_half_size = 4,
-        large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001)
+        large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001,
+        return_resids = false)
     n_xpix = size(trace_params, 1)
     n_ypix = size(dimage, 2)
     n_fibers = size(trace_params, 2)
@@ -147,6 +155,11 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     new_comb_model_var = zeros(Float64, n_ypix)
 
     new_flux_1d = zeros(Float64, n_fibers)
+
+    if return_resids
+        resid_fluxes_2d = zeros(Float64, size(dimage))
+        resid_ivars_2d = zeros(Float64, size(dimage))
+    end
 
     for xpix in 1:n_xpix
         #iterate on best-fit fluxes
@@ -242,18 +255,26 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 end
             end
 
+            flux_1d[xpix, :] .= new_flux_1d
+            if return_resids
+                resid_fluxes_2d[xpix, :] .= dimage[xpix, :] .- new_comb_model_flux
+                resid_ivars_2d[xpix, :] .= 1 ./ (1 ./ ivarimage[xpix, :] .+ new_comb_model_var)
+            end
+
             if all(abs.(new_flux_1d .- flux_1d[xpix, :]) .< 0.01) & (repeat_ind > 1)
-                flux_1d[xpix, :] .= new_flux_1d
                 break
             end
 
-            flux_1d[xpix, :] .= new_flux_1d
             comb_model_flux .= new_comb_model_flux
             comb_model_var .= new_comb_model_var
         end
     end
 
-    flux_1d, ivar_1d, mask_1d
+    if return_resids
+        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+    else
+        return flux_1d, ivar_1d, mask_1d
+    end
 end
 
 """
@@ -317,7 +338,7 @@ function get_fibTargDict(f, tele, mjd, exposure_id)
                     fiber_type_names[t]
 
                 else
-                    @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
+                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
                     "fiberTypeFail"
                 end
             end
@@ -340,6 +361,51 @@ function get_fibTargDict(f, tele, mjd, exposure_id)
     return fibtargDict
 end
 
+# hardcoded to use chip c only for now
+# must use dome flats, not quartz flats (need fiber runs to telescope)
+function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_chip = "c")
+    expidfull = parse(Int, expidstr)
+    df_mjd = sort(
+        dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
+        :exposure)
+    expIndex = findfirst(df_mjd.exposure .== expidfull)
+    cartId = df_mjd.cartidInt[expIndex]
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .< expidfull))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .> expidfull))
+    valid_before = if !isnothing(expIndex_before)
+        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
+    elseif !isnothing(expIndex_before)
+        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
+    else
+        0
+    end
+    valid_after = if !isnothing(expIndex_after)
+        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId) * 1
+    elseif !isnothing(expIndex_after)
+        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
+    else
+        0
+    end
+
+    if valid_before == 1
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+    elseif valid_after == 1
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+        # any of the cases below here we could consider using a global file
+    elseif valid_before == 2
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+    elseif valid_after == 2
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+    else
+        return nothing
+    end
+end
+
+# TODO: switch to meta data dict and then save wavecal flags etc.
 function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
     # might need to add in telluric div functionality here?
 
@@ -442,7 +508,8 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
 
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_a_" => "_")
-    safe_jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, wavecal_type)
+    safe_jldsave(
+        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, wavecal_type)
     return
 end
 

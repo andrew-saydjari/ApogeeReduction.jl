@@ -120,24 +120,28 @@ for chip in chips
 end
 all1D = vcat(flist_chips...)
 
-all1Daout = map(
-    x -> replace(replace(x, "apred" => "$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux"), all1Da)
-dname = dirname(all1Daout[1])
-if !ispath(dname)
-    mkpath(dname)
-end
-
 @everywhere begin
     function get_and_save_relFlux(fname)
-        absthrpt, relthrpt, bitmsk_relthrpt = get_relFlux(fname)
-        outfname = replace(
-            replace(fname, "apred" => "$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux")
-        safe_jldsave(outfname; absthrpt, relthrpt, bitmsk_relthrpt)
+        absthrpt, relthrpt, bitmsk_relthrpt, meta_data = get_relFlux(fname)
+        cartid = meta_data["cartid"]
+        outfname = replace(replace(replace(fname, "apred" => "$(cal_type)_flats"),
+            "ar1Dcal" => "$(cal_type)Flux", ".h5" => "_$(cartid).h5"))
+        dname = dirname(outfname)
+        if !ispath(dname)
+            mkpath(dname)
+        end
+        safe_jldsave(outfname; absthrpt, relthrpt, bitmsk_relthrpt, meta_data)
+        return outfname
     end
 end
 
 desc = "get and save relFlux from DomeFlats"
-@showprogress desc=desc pmap(get_and_save_relFlux, all1D)
+outfnames = @showprogress desc=desc pmap(get_and_save_relFlux, all1D)
+outfnamesa = outfnames[1:length(all1Da)]
+
+## I want to take the average of relFlux for adjacent exposures with the same CartID
+## average over the chips except b (or should we just take one chip?)
+# just going to use chip c for now, can revisit this question if we think it adds stability
 
 # add plotting
 thread = SlackThread()
@@ -146,7 +150,7 @@ thread("$(cal_type) relFluxing")
 @everywhere begin
     function plot_relFlux(fname)
         sname = split(fname, "_")
-        tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+        tele, mjd, chiploc, expid = sname[(end - 5):(end - 2)]
         xvec = if tele == "apo"
             1:300
         elseif tele == "lco"
@@ -157,6 +161,8 @@ thread("$(cal_type) relFluxing")
         absthrpt = zeros(300, length(chips))
         relthrpt = zeros(300, length(chips))
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
+        meta_data = load(fname, "meta_data")
+        cartid = meta_data["cartid"]
         for (cindx, chip) in enumerate(chips)
             local_fname = replace(fname, "_a_" => "_$(chip)_")
             f = jldopen(local_fname)
@@ -165,26 +171,52 @@ thread("$(cal_type) relFluxing")
             bitmsk_relthrpt[:, cindx] = f["bitmsk_relthrpt"]
             close(f)
         end
+
+        # Initialize strings to collect fiber status
+        status_str = "Fiber Status Report for $(tele) MJD=$(mjd) CartID=$(cartid):\n"
+
         # plot the relFlux
         fig = Figure(size = (1200, 400))
         for (cindx, chip) in enumerate(chips)
             ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chip)")
             msk = bitmsk_relthrpt[:, cindx] .== 0
+            broken_msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
+            warn_msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
+            warn_only_msk = warn_msk .& .!broken_msk
+
             scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "limegreen")
-            msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
-            scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "orange")
-            msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
-            scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "red")
+
+            # Broken fibers
+            scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
+            broken_fibers = xvec[broken_msk]
+            if !isempty(broken_fibers) && (chip == "c") # hardcoded for now
+                status_str *= "\nChip $(chip) Broken Fibers:\n    $(join(broken_fibers, "\n    "))"
+            end
+
+            # Warn fibers
+            scatter!(ax, xvec[warn_only_msk], relthrpt[warn_only_msk, cindx], color = "orange")
+            warn_fibers = xvec[warn_only_msk]
+            if !isempty(warn_fibers) && (chip == "c") # hardcoded for now
+                status_str *= "\nChip $(chip) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
+            end
         end
+
         # we should be more uniform about the naming convention
-        savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expid).png"
+        savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expid)_$(cartid).png"
         save(savePath, fig)
-        return savePath
+
+        return savePath, status_str
     end
 end
 
 desc = "plotting relFlux"
-savePaths = @showprogress desc=desc pmap(plot_relFlux, all1Daout)
-for savePath in savePaths
-    thread("Relfluxing", savePath)
+pout = @showprogress desc=desc pmap(plot_relFlux, outfnamesa)
+status_str_lst = map(x -> x[2], pout)
+unique_status_strs = unique(status_str_lst)
+savePath_lst = map(x -> x[1], pout)
+for status_str in unique_status_strs
+    thread("Relfluxing: $(status_str)")
+end
+for savePath in savePath_lst
+    thread("Relfluxing: $(savePath)", savePath)
 end

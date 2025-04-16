@@ -142,6 +142,7 @@ flush(stdout);
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
             df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
+        cartid = parseCartID(df.cartid[expid])
         # decompress and convert apz data format to a standard 3D cube of reads
         cubedat, hdr_dict = apz2cube(rawpath)
 
@@ -244,15 +245,19 @@ flush(stdout);
                 chip, df.exposure[expid], df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        safe_jldsave(
-            joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5"); dimage, ivarimage, chisqimage,
-            CRimage, saturation_image, nread_used,
-            # convert to Float64 (days) to make the HDF5 file nice (see safe_jldsave docstring)
-            mjd_mid_exposure_old = value(mjd_mid_exposure_old),
-            mjd_mid_exposure_rough = value(mjd_mid_exposure_rough),
-            mjd_mid_exposure_precise = value(mjd_mid_exposure_precise),
-            mjd_mid_exposure = value(mjd_mid_exposure))
-        return joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
+
+        metadata = Dict([
+            "cartid" => cartid,
+            "nread_used" => nread_used,
+            "nread_total" => nread_total,
+            "mjd_mid_exposure_old" => value(mjd_mid_exposure_old),
+            "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
+            "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
+            "mjd_mid_exposure" => value(mjd_mid_exposure)
+        ])
+        fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
+        safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
+        return fname
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
@@ -262,14 +267,12 @@ flush(stdout);
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
-        nread_used = load(fname, "nread_used")
-        mjd_mid_exposure_old = load(fname, "mjd_mid_exposure_old")
-        mjd_mid_exposure_rough = load(fname, "mjd_mid_exposure_rough")
-        mjd_mid_exposure_precise = load(fname, "mjd_mid_exposure_precise")
-        mjd_mid_exposure = load(fname, "mjd_mid_exposure")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
         saturation_image = load(fname, "saturation_image")
+
+        metadata = read_metadata(fname)
+        nread_used = metadata["nread_used"]
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
@@ -299,10 +302,7 @@ flush(stdout);
         pix_bitmask .|= saturation_image * 2^13
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
-        safe_jldsave(
-            outfname; dimage, ivarimage, pix_bitmask, nread_used,
-            mjd_mid_exposure_old, mjd_mid_exposure_rough, mjd_mid_exposure_precise,
-            mjd_mid_exposure)
+        safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
     end
 end
 t_now = now();

@@ -27,7 +27,7 @@ if !haskey(ENV, "SLACK_CHANNEL")
 end
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
-bad_dark_pix_bits = 2^4
+bad_dark_pix_bits = 2^1 + 2^2 + 2^4
 bad_flat_pix_bits = 2^6;
 # most multiread CR detections are bad for other reasons
 bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
@@ -87,6 +87,20 @@ nanzeroiqr(x) =
         iqr(filter(!isnanorzero, x)) / 1.34896
     end
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
+
+# Single vector version
+function nanzeropercentile(x::AbstractVector; percent_vec = [16, 50, 64])
+    if all(isnanorzero, x)
+        fill(NaN, length(percent_vec))
+    else
+        percentile(filter(!isnanorzero, x), percent_vec)
+    end
+end
+
+# Array version with dimensions
+function nanzeropercentile(x::AbstractArray; percent_vec = [16, 50, 64], dims = 1)
+    mapslices(v -> nanzeropercentile(vec(v), percent_vec = percent_vec), x, dims = dims)
+end
 
 function log10n(x)
     if x <= 0
@@ -175,39 +189,77 @@ end
 
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
 
+# used by safe_jldsave
+function check_type_for_jld2(value)
+    # convert BitArray to Array{Bool} if necessary
+    if value isa BitArray
+        convert(Array{Bool}, value)
+    else
+        # if the value will result in a hard-to-read HDF5 file, warn
+        t = if isa(value, Array)
+            eltype(value)
+        else
+            typeof(value)
+        end
+        if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
+            UInt16, UInt8, Float64, Float32, String])
+            #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
+            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+        end
+        value
+    end
+end
+
 """
+    safe_jldsave(filename::AbstractString, [metadata::Dict{String, <:Any}]; kwargs...)
+
 This function is a wrapper around JLD2.jldsave with a couple of extra features:
+- It write the metadata dict as a group called "metadata".
 - It checks if the types of the values to be saved will result in a hard-to-read HDF5 file and warns if so.
 - It converts BitArrays to Array{Bool} if necessary. This means that the saved data will be 8x
   larger (Bools are 1 byte), even when read back into Julia.
 - It records the git branch and commit in the saved file.
 """
-function safe_jldsave(filename; kwargs...)
+function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; kwargs...)
     to_save = Dict{Symbol, Any}()
     for (k, v) in kwargs
-        # convert BitArray to Array{Bool} if necessary
-        if v isa BitArray
-            to_save[k] = convert(Array{Bool}, v)
-        else
-            to_save[k] = v
-
-            # if the value will result in a hard-to-read HDF5 file, warn
-            t = if isa(v, Array)
-                eltype(v)
-            else
-                typeof(v)
-            end
-            if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
-                UInt16, UInt8, Float64, Float32, String])
-                #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
-                @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
-            end
+        if (k == :metadata || k == :meta_data)
+            throw(ArgumentError("The metadata dictionary is passed as the second positional argument to safe_jldsave, not as a keyword argument. Example: safe_jldsave(\"filename.jld2\", metadata; data1, data2)"))
         end
+        to_save[k] = check_type_for_jld2(v)
     end
 
     # record git branch and commit
-    to_save[:git_branch] = git_branch
-    to_save[:git_commit] = git_commit
+    #to_save[:git_branch] = git_branch
+    #to_save[:git_commit] = git_commit
 
     JLD2.jldsave(filename; to_save...)
+
+    # add metadata group
+    h5open(filename, "r+") do f
+        g = create_group(f, "metadata")
+        for (k, v) in metadata
+            g[k] = check_type_for_jld2(v)
+        end
+    end
+end
+
+"""
+    read_metadata(filename::AbstractString)
+
+This function reads the metadata from an HDF5 file and returns it as a dictionary.  This is intended
+to work with files written by safe_jldsave.
+"""
+function read_metadata(filename::AbstractString)
+    h5open(filename, "r") do f
+        read(f["metadata"])
+    end
+end
+
+function parseCartID(x)
+    if x == "FPS"
+        return 0
+    else
+        return x
+    end
 end
