@@ -376,9 +376,7 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
     else #this is a terrible global fallback, just so we get something to look at
         chipWaveSoln = zeros(2048, 300, 3)
         for (chipind, chip) in enumerate(["a", "b", "c"])
-            chipWaveSoln[:,
-            :,
-            chipind] .= rough_linear_wave.(
+            chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
                 1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
         end
         println("No wavecal found for $(fname), using fallback")
