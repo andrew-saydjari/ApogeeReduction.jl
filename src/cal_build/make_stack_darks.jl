@@ -77,7 +77,8 @@ flist = get_cal_file.(
 ref_val_vec = zeros(length(flist))
 dark_im = zeros(2560, 2048)
 
-@showprogress for (indx, fname) in enumerate(flist)
+desc = "stacking darks for $(parg["tele"]) $(chip)"
+@showprogress desc=desc for (indx, fname) in enumerate(flist)
     sname = split(fname, "_")
     f = jldopen(fname)
     temp_im = f["dimage"]

@@ -77,8 +77,8 @@ end
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
     flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                 expid[i], chip, "QUARTZFLAT", use_cal = true)
-             for chip in chips, i in eachindex(mjd)]
+                expid[i], chip, "QUARTZFLAT", use_cal = true)
+                for i in eachindex(mjd), chip in chips]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end
@@ -112,56 +112,12 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
         "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).jld2";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
-    cut = 750
-    fig = Figure(size = (800, 800))
-    ax = Axis(fig[1, 1],
-        xlabel = "FIBERID",
-        ylabel = "Fit Height",
-        title = "Quartz Flat Fit Median Height\nTele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
-
-    y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
-    scatter!(ax, 301 .- (1:300), y)
-
-    if parse(Int, mjdloc) > mjdfps2plate
-        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
-        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
-    end
-
-    hlines!(ax, cut, linestyle = :dash)
-
-    tracePlot_heights_Path = dirNamePlots *
-                             "quartzTrace_med_heights_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
-    save(tracePlot_heights_Path, fig)
-
-    fig = Figure(size = (800, 800))
-    ax = Axis(fig[1, 1],
-        xlabel = "FIBERID",
-        ylabel = "Fit Width",
-        title = "Quartz Flat Fit Median Width\nTele: $(parg["tele"]), MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
-
-    y = dropdims(nanzeromedian(trace_params[:, :, 3], 1), dims = 1)
-    scatter!(ax, 301 .- (1:300), y)
-
-    if parse(Int, mjdloc) > mjdfps2plate
-        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
-        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
-    end
-
-    med_val = nanzeromedian(y)
-    hlines!(ax, med_val, linestyle = :dash)
-
-    tracePlot_widths_Path = dirNamePlots *
-                            "quartzTrace_med_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
-    save(tracePlot_widths_Path, fig)
-
-    tracePlot_heights_Path, tracePlot_widths_Path
+    return trace_plots("quartz", trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()
 thread("QUARTZFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
-for (filename, (heights_path, widths_path)) in zip(flist, plot_paths)
-    thread("Here is the median flux per fiber for $(filename)", heights_path)
-    thread("Here is the median width per fiber for $(filename)", widths_path)
+for (filename, heights_widths_path) in zip(flist, plot_paths)
+    thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
 end
-
 thread("QuartzFlat traces done.")

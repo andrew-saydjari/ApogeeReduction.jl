@@ -153,6 +153,24 @@ for mjd in unique_mjds
     append!(all1Da, file_list)
 end
 
+allExptype = convert.(String,map(x->split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
+
+# Define custom sorting order for exposure types
+function get_exptype_priority(exptype::AbstractString)
+    priority_map = Dict(
+        "OBJECT" => 1,
+        "DOMEFLAT" => 2,
+        "INTERNALFLAT" => 3,
+        "QUARTZFLAT" => 4,
+        "DARK" => 5,
+        "ARCLAMP" => 6
+    )
+    return get(priority_map, exptype, 999)  # Unknown types get high number
+end
+
+# Sort allExptype using the custom priority function
+sorted_exptypes = sort(unique(allExptype), by=get_exptype_priority)
+
 # per chip example spectra
 for chip in string.(collect(parg["chips"]))
     all1D = replace.(all1Da, "_a_" => "_$(chip)_")
@@ -167,57 +185,63 @@ for chip in string.(collect(parg["chips"]))
     rng = MersenneTwister(351 + unique_mjds[1])
 
     # TODO parallelize plotting
-    # we should customize this to the exposures we want to see and types of stars we want
+    # we should customize this to the types of objects we want
     # for example, we want to be looking at the tellurics and pure sky
-    nsamp = minimum([length(all1D), 5])
-    sample_exposures = sample(rng, all1D, nsamp, replace = false)
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    for exp_fname in sample_exposures
-        sname = split(exp_fname, "_")
-        tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
-        expid_num = parse(Int, last(expid, 4))
-        flux_1d = load(exp_fname, "flux_1d")
-        mask_1d = load(exp_fname, "mask_1d")
-        msk_loc = (mask_1d .& bad_pix_bits .== 0)
-        #msk_loc = (mask_1d .&
-        #           (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
+    for exptype2plot in sorted_exptypes
+        msk_exptype = allExptype .== exptype2plot
+        if any(msk_exptype)
+            nsamp = minimum([count(msk_exptype), 3])
+            sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
 
-        fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
-        sample_fibers = sample(rng, 1:300, 5, replace = false)
-        for fib in sample_fibers
-            fibID = fiberIndx2fiberID(fib)
-            fibType = fibtargDict[fibID]
-            dat = flux_1d[:, fib]
-            mskt = msk_loc[:, fib]
-            dat = nanify(flux_1d[mskt, fib], mskt)
-            datbad = nanify(flux_1d[.!mskt, fib], .!mskt)
+            f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+            for exp_fname in sample_exposures
+                sname = split(exp_fname, "_")
+                tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
+                expid_num = parse(Int, last(expid, 4))
+                flux_1d = load(exp_fname, "flux_1d")
+                mask_1d = load(exp_fname, "mask_1d")
+                msk_loc = (mask_1d .& bad_pix_bits .== 0)
+                # msk_loc = (mask_1d .&
+                #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
-            fig = Figure(size = (800, 800))
-            ax1 = Axis(fig[1, 1])
-            lines!(ax1, 1:2048, dat, color = :dodgerblue)
-            scatter!(ax1, 1:2048, datbad, color = :red, markersize = 2)
-            xlims!(ax1, 0, 2049)
-            ax1.ylabel = "ADU"
+                fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
+                sample_fibers = sample(rng, 1:300, 3, replace = false)
+                for fib in sample_fibers
+                    fibID = fiberIndx2fiberID(fib)
+                    fibType = fibtargDict[fibID]
+                    dat = flux_1d[:, fib]
+                    mskt = msk_loc[:, fib]
+                    dat = nanify(flux_1d[mskt, fib], mskt)
+                    datbad = nanify(flux_1d[.!mskt, fib], .!mskt)
 
-            ax2 = Axis(fig[2, 1])
-            lines!(ax2, 1:2048, dat, color = :dodgerblue)
-            scatter!(ax2, 1:2048, datbad, color = :red, markersize = 2)
-            ymaxt = 2 * nanzeromedian(dat)
-            ymaxv = if .!isnan(ymaxt)
-                ymaxt
-            else
-                1
+                    fig = Figure(size = (800, 800))
+                    ax1 = Axis(fig[1, 1])
+                    lines!(ax1, 1:2048, dat, color = :dodgerblue)
+                    scatter!(ax1, 1:2048, datbad, color = :red, markersize = 2)
+                    xlims!(ax1, 0, 2049)
+                    ax1.ylabel = "ADU"
+
+                    ax2 = Axis(fig[2, 1])
+                    lines!(ax2, 1:2048, dat, color = :dodgerblue)
+                    scatter!(ax2, 1:2048, datbad, color = :red, markersize = 2)
+                    ymaxt = 2 * nanzeromedian(dat)
+                    ymaxv = if .!isnan(ymaxt)
+                        ymaxt
+                    else
+                        1
+                    end
+                    ylims!(ax2, 0, ymaxv)
+                    xlims!(ax2, 0, 2049)
+                    ax2.xlabel = "Pixel Index"
+                    ax2.ylabel = "ADU"
+
+                    savePath = dirNamePlots *
+                            "ar1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
+                    save(savePath, fig)
+
+                    thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
+                end
             end
-            ylims!(ax2, 0, ymaxv)
-            xlims!(ax2, 0, 2049)
-            ax2.xlabel = "Pixel Index"
-            ax2.ylabel = "ADU"
-
-            savePath = dirNamePlots *
-                       "ar1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
-            save(savePath, fig)
-
-            thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
         end
     end
 end
@@ -365,29 +389,36 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
 end
 
 rng = MersenneTwister(536 + unique_mjds[1])
-nsamp = minimum([length(all1Da), 5])
-sample_exposures = sample(rng, all1Da, nsamp, replace = false)
-f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-for exp_fname in sample_exposures
-    sname = split(split(exp_fname, ".jld2")[1], "_")
-    tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
-    expid_num = parse(Int, last(expid, 4))
 
-    expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
-    outflux = load(expuni_fname, "flux_1d")
-    outmsk = load(expuni_fname, "mask_1d")
-    expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dunical"), "_a_" => "_")
-    outfluxcal = load(expunical_fname, "flux_1d")
-    outmskcal = load(expunical_fname, "mask_1d")
-    # need to switch this back when the masking is updated
-    # msk_loc = (outmsk .& bad_pix_bits .== 0)
+# TODO: parallelize plotting
+for exptype2plot in sorted_exptypes
+    msk_exptype = allExptype .== exptype2plot
+    if any(msk_exptype)
+        nsamp = minimum([count(msk_exptype), 3])
+        sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
+        f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
+        for exp_fname in sample_exposures
+            sname = split(split(exp_fname, ".jld2")[1], "_")
+            tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
+            expid_num = parse(Int, last(expid, 4))
 
-    fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
-    sample_fibers = sample(rng, 1:300, 5, replace = false)
-    for fib in sample_fibers
-        plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
-            tele, mjd, chiploc, expid, expType, expuni_fname)
-        plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical",
-            tele, mjd, chiploc, expid, expType, expunical_fname)
+            expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
+            outflux = load(expuni_fname, "flux_1d")
+            outmsk = load(expuni_fname, "mask_1d")
+            expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dunical"), "_a_" => "_")
+            outfluxcal = load(expunical_fname, "flux_1d")
+            outmskcal = load(expunical_fname, "mask_1d")
+            # need to switch this back when the masking is updated
+            # msk_loc = (outmsk .& bad_pix_bits .== 0)
+
+            fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
+            sample_fibers = sample(rng, 1:300, 3, replace = false)
+            for fib in sample_fibers
+                plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
+                    tele, mjd, chiploc, expid, expType, expuni_fname)
+                plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical",
+                        tele, mjd, chiploc, expid, expType, expunical_fname)
+            end
+        end
     end
 end

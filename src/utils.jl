@@ -8,7 +8,7 @@ if !haskey(ENV, "SLACK_CHANNEL")
 end
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
-bad_dark_pix_bits = 2^4
+bad_dark_pix_bits = 2^1 + 2^2 + 2^4
 bad_flat_pix_bits = 2^6;
 # most multiread CR detections are bad for other reasons
 bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
@@ -82,18 +82,16 @@ nanzeroiqr(x) =
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
 # Single vector version
-function nanzeropercentile(x::AbstractVector; percent_vec = [16.0, 50.0, 84.0])
+nanzeropercentile(x::AbstractVector; percent_vec=[16,50,64]) =
     if all(isnanorzero, x)
         fill(NaN, length(percent_vec))
     else
         percentile(filter(!isnanorzero, x), percent_vec)
     end
-end
 
 # Array version with dimensions
-function nanzeropercentile(x::AbstractArray; percent_vec = [16.0, 50.0, 84.0], dims = 1)
-    mapslices(v -> nanzeropercentile(vec(v), percent_vec = percent_vec), x, dims = dims)
-end
+nanzeropercentile(x::AbstractArray; percent_vec=[16,50,64], dims=1) = 
+    mapslices(v -> nanzeropercentile(vec(v), percent_vec=percent_vec), x, dims=dims)
 
 function log10n(x)
     if x <= 0
@@ -196,8 +194,16 @@ function safe_jldsave(filename; kwargs...)
         if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
             UInt16, UInt8, Float64, Float32, String])
             #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
-            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+            # @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
         end
     end
     JLD2.jldsave(filename; kwargs...)
+end
+
+function parseCartID(x)
+    if x == "FPS"
+        return 0
+    else
+        return x
+    end
 end

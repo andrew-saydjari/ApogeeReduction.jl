@@ -1,12 +1,9 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
 
-# src_dir = "./"
-# include(src_dir * "wavecal.jl")
-# include(src_dir * "skyline_peaks.jl")
 include("./wavecal.jl")
 include("./skyline_peaks.jl")
-
+include("./fileNameHandling.jl")
 # this file contains the code needed to extract a 1D spectrum from a 2D images.
 # trace_params is of size (n_x_pix, n_fibers, 3)
 # the elements correspodn to flux, y-pixel, and gaussian witdth (sigma)
@@ -18,7 +15,8 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     f = jldopen(fname)
     flux_1d = f["flux_1d"]
     mask_1d = f["mask_1d"]
-    mask_1d_good = (mask_1d .& bad_pix_bits) .== 0
+    meta_data = load(fname, "meta_data")
+    mask_1d_good = (mask_1d .& bad_pix_bits) .== 0;
     close(f)
 
     absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1)
@@ -26,10 +24,10 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     relthrpt = copy(absthrpt)
     relthrpt ./= nanzeromedian(relthrpt)
 
-    thresh = (1 .- sig_cut * nanzeroiqr(relthrpt))
-    bitmsk_relthrpt[relthrpt .< thresh] .|= 2^0
-    bitmsk_relthrpt[relthrpt .< rel_val_cut] .|= 2^1
-    return absthrpt, relthrpt, bitmsk_relthrpt
+    thresh = (1 .- sig_cut*nanzeroiqr(relthrpt))
+    bitmsk_relthrpt[relthrpt .< thresh].|=2^0
+    bitmsk_relthrpt[relthrpt .< rel_val_cut].|=2^1
+    return absthrpt, relthrpt, bitmsk_relthrpt, meta_data
 end
 
 """
@@ -340,7 +338,7 @@ function get_fibTargDict(f, tele, mjd, exposure_id)
                     fiber_type_names[t]
 
                 else
-                    @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
+                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
                     "fiberTypeFail"
                 end
             end
@@ -363,6 +361,45 @@ function get_fibTargDict(f, tele, mjd, exposure_id)
     return fibtargDict
 end
 
+# hardcoded to use chip c only for now
+# must use dome flats, not quartz flats (need fiber runs to telescope)
+function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_chip = "c")
+    expidfull = parse(Int, expidstr)
+    df_mjd = sort(dfalmanac[(dfalmanac.mjd.==parse(Int, mjd)) .& (dfalmanac.observatory.==tele), :], :exposure)
+    expIndex = findfirst(df_mjd.exposure.==expidfull)
+    cartId = df_mjd.cartidInt[expIndex]
+    expIndex_before = findlast((df_mjd.imagetyp.=="DomeFlat") .& (df_mjd.exposure .< expidfull))
+    expIndex_after = findfirst((df_mjd.imagetyp.=="DomeFlat") .& (df_mjd.exposure .> expidfull))
+    valid_before = if !isnothing(expIndex_before)
+        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)*1
+    elseif !isnothing(expIndex_before)
+        (df_mjd.cartidInt[expIndex_after] .== cartId)*2
+    else
+        0
+    end
+    valid_after = if !isnothing(expIndex_after)
+        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)*1
+    elseif !isnothing(expIndex_after)
+        (df_mjd.cartidInt[expIndex_after] .== cartId)*2
+    else
+        0
+    end
+
+    if valid_before == 1
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+    elseif valid_after == 1
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+    # any of the cases below here we could consider using a global file
+    elseif valid_before == 2
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+    elseif valid_after == 2
+        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+    else
+        return nothing
+    end
+end
+
+# TODO: switch to meta data dict and then save wavecal flags etc.
 function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
     # might need to add in telluric div functionality here?
 
