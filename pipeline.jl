@@ -318,12 +318,12 @@ flush(stdout);
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
-@everywhere begin
-    # read noise is DN/read
-    readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
-    # gain is e-/DN
-    gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
-end
+# read noise is DN/read
+readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
+@passobj 1 workers() readVarMatDict
+# gain is e-/DN
+gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
+@passobj 1 workers() gainMatDict
 
 # ADD load the dark currrent map
 # load SIRS.jl models
