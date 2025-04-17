@@ -189,7 +189,7 @@ flush(stdout);
             else
                 calPath = abspath(calPath)
                 linkPath = abspath(joinpath(
-                    dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).jld2"))
+                    dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).h5"))
                 if !islink(linkPath) & isfile(calPath)
                     symlink(calPath, linkPath)
                 elseif !islink(linkPath) & !isfile(calPath)
