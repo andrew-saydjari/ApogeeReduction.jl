@@ -224,7 +224,7 @@ function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; k
     to_save = Dict{Symbol, Any}()
     for (k, v) in kwargs
         if (k == :metadata || k == :meta_data)
-            throw(ArgumentError("The metadata dictionary is passed as the second positional argument to safe_jldsave, not as a keyword argument. Example: safe_jldsave(\"filename.jld2\", metadata; data1, data2)"))
+            throw(ArgumentError("The metadata dictionary is passed as the second positional argument to safe_jldsave, not as a keyword argument. Example: safe_jldsave(\"filename.h5\", metadata; data1, data2)"))
         end
         to_save[k] = check_type_for_jld2(v)
     end
