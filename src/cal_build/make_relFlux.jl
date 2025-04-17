@@ -122,15 +122,15 @@ all1D = vcat(flist_chips...)
 
 @everywhere begin
     function get_and_save_relFlux(fname)
-        absthrpt, relthrpt, bitmsk_relthrpt, meta_data = get_relFlux(fname)
-        cartid = meta_data["cartid"]
+        absthrpt, relthrpt, bitmsk_relthrpt, metadata = get_relFlux(fname)
+        cartid = metadata["cartid"]
         outfname = replace(replace(replace(fname, "apred" => "$(cal_type)_flats"),
             "ar1Dcal" => "$(cal_type)Flux", ".h5" => "_$(cartid).h5"))
         dname = dirname(outfname)
         if !ispath(dname)
             mkpath(dname)
         end
-        safe_jldsave(outfname; absthrpt, relthrpt, bitmsk_relthrpt, meta_data)
+        safe_jldsave(outfname, metadata; absthrpt, relthrpt, bitmsk_relthrpt)
         return outfname
     end
 end
@@ -161,8 +161,7 @@ thread("$(cal_type) relFluxing")
         absthrpt = zeros(300, length(chips))
         relthrpt = zeros(300, length(chips))
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
-        meta_data = load(fname, "meta_data")
-        cartid = meta_data["cartid"]
+        cartid = read_metadata(fname)["cartid"]
         for (cindx, chip) in enumerate(chips)
             local_fname = replace(fname, "_a_" => "_$(chip)_")
             f = jldopen(local_fname)
