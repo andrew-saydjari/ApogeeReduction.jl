@@ -1,6 +1,6 @@
 using StatsBase: iqr
 using Jackknife
-using JLD2
+using JLD2, HDF5 # for safe_jldsave and read_metadata
 using Distributed: myid
 
 # used to record git branch and commit in safe_jldsave
