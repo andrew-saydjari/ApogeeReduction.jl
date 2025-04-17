@@ -243,6 +243,9 @@ function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; k
         end
     end
 end
+function safe_jldsave(filename::AbstractString; kwargs...)
+    safe_jldsave(filename, Dict{String, Any}(); kwargs...)
+end
 
 """
     read_metadata(filename::AbstractString)
