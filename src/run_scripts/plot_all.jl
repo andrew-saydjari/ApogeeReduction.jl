@@ -191,7 +191,7 @@ for chip in string.(collect(parg["chips"]))
         msk_exptype = allExptype .== exptype2plot
         if any(msk_exptype)
             nsamp = minimum([count(msk_exptype), 3])
-            sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
+            sample_exposures = sample(rng, all1D[msk_exptype], nsamp, replace = false)
 
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
             for exp_fname in sample_exposures
@@ -200,10 +200,9 @@ for chip in string.(collect(parg["chips"]))
                 expid_num = parse(Int, last(expid, 4))
                 flux_1d = load(exp_fname, "flux_1d")
                 mask_1d = load(exp_fname, "mask_1d")
-                #        msk_loc = (mask_1d .& bad_pix_bits .== 0)
-                msk_loc = (mask_1d .&
-                           (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix +
-                            bad_1d_neff) .== 0)
+                msk_loc = (mask_1d .& bad_pix_bits .== 0)
+                # msk_loc = (mask_1d .&
+                #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
                 fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)

@@ -134,7 +134,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
         n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
         small_window_half_size = 2, fit_window_half_size = 4,
         large_window_half_size = 12, n_max_repeat = 5, flag_thresh = 0.001,
-        return_resids = false)
+        return_resids = false, neff_thresh = 10.0)
     n_xpix = size(trace_params, 1)
     n_ypix = size(dimage, 2)
     n_fibers = size(trace_params, 2)
@@ -236,7 +236,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                     mask_1d[xpix, fib] += bad_1d_failed_extract
                 end
 
-                if curr_neff > 50
+                if curr_neff > neff_thresh
                     new_flux_1d[fib] = 0.0
                     ivar_1d[xpix, fib] = 0.0
                     mask_1d[xpix, fib] += bad_1d_neff
