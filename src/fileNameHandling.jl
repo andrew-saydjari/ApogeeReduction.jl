@@ -48,7 +48,7 @@ end
 
 function get_fluxing_file_name(parent_dir, mjd, tele, chip, expidfull, cartid)
     return parent_dir *
-           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(chip)_$(expidfull)_DOMEFLAT_$(cartid).jld2"
+           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(chip)_$(expidfull)_DOMEFLAT_$(cartid).h5"
 end
 
 function get_1d_name(expid, df; cal = false)
