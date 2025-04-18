@@ -90,7 +90,7 @@ function gh_profiles(tele, mjd, chip, expid;
     end
 
     profile_fname = joinpath(profile_path,
-        "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).jld2")
+        "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).h5")
 
     # opening the file with a "do" closure guarantees that the file is closed
     # (analogous to "with open() as f:" in Python)
@@ -344,8 +344,8 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
 
             try
                 v_hat[:,
-                    j] = (curr_M_T_dot_V_inv * M_vects[:, :, j]) \
-                         (curr_M_T_dot_V_inv * flux_diffs[:, j])
+                j] = (curr_M_T_dot_V_inv * M_vects[:, :, j]) \
+                     (curr_M_T_dot_V_inv * flux_diffs[:, j])
                 if (return_cov) & (r_ind == n_iter)
                     # only invert matrix on the last iteration
                     v_hat_cov[:, :, j] = inv(curr_M_T_dot_V_inv * M_vects[:, :, j])
@@ -360,7 +360,7 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         new_params[:] = curr_guess .+ v_hat'
         new_params[:, 1] .= max.(new_params[:, 1], 0.01)
         new_params[:,
-            2] .= clamp.(new_params[:, 2],
+        2] .= clamp.(new_params[:, 2],
             max.(11, first_guess_params[:, 2] .- max_center_move),
             min.(2048 - 11, first_guess_params[:, 2] .+ max_center_move))
         new_params[:, 3] .= clamp.(new_params[:, 3], min_widths, max_widths)
@@ -569,9 +569,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         step = 1)
     all_smooth_inds = abs.(smooth_inds' .+ peak_counts)
     all_smooth_inds[all_smooth_inds .> size(new_params,
-        1) .- 1] .= size(new_params, 1) .- 1 .+
-                    (size(new_params, 1) .- 1 .-
-                     all_smooth_inds[all_smooth_inds .> size(new_params, 1) .- 1])
+    1) .- 1] .= size(new_params, 1) .- 1 .+
+                (size(new_params, 1) .- 1 .-
+                 all_smooth_inds[all_smooth_inds .> size(new_params, 1) .- 1])
     all_smooth_inds = round.(Int, all_smooth_inds) .+ 1
 
     smoothed_widths = nansum(new_params[all_smooth_inds, 3]' .* smooth_weights, 1)'
@@ -734,9 +734,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         step = 1)
     all_smooth_inds = abs.(smooth_inds' .+ peak_counts)
     all_smooth_inds[all_smooth_inds .> size(new_params,
-        1) .- 1] .= size(new_params, 1) .- 1 .+
-                    (size(new_params, 1) .- 1 .-
-                     all_smooth_inds[all_smooth_inds .> size(new_params, 1) .- 1])
+    1) .- 1] .= size(new_params, 1) .- 1 .+
+                (size(new_params, 1) .- 1 .-
+                 all_smooth_inds[all_smooth_inds .> size(new_params, 1) .- 1])
     all_smooth_inds = round.(Int, all_smooth_inds) .+ 1
 
     smoothed_widths = nansum(new_params[all_smooth_inds, 3]' .* smooth_weights, 1)'
@@ -872,65 +872,65 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     @showprogress enabled=verbose desc="Fitting traces" for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
 
-        if abs(x_ind-mid)<n_center_cols
-            n_use=n_center_cols
-        elseif abs(x_ind-mid)<200
-            n_use=200
-        elseif abs(x_ind-mid)<300
-            n_use=300
+        if abs(x_ind - mid) < n_center_cols
+            n_use = n_center_cols
+        elseif abs(x_ind - mid) < 200
+            n_use = 200
+        elseif abs(x_ind - mid) < 300
+            n_use = 300
         else
-            n_use=500
+            n_use = 500
         end
 
-        if abs(x_ind-mid)<0.5*n_use
-            first_guess_params.=best_fit_ave_params
-        elseif x_ind>mid
-            first_guess_params.=nanmedian(
+        if abs(x_ind - mid) < 0.5 * n_use
+            first_guess_params .= best_fit_ave_params
+        elseif x_ind > mid
+            first_guess_params .= nanmedian(
                 param_outputs[(x_ind - (n_use + 1)):(x_ind - 1), :, :], 1)[
                 1, :, :]
-            param_slopes=nanmedian(
+            param_slopes = nanmedian(
                 diff(param_outputs[(x_ind - (n_use + 1)):(x_ind - 1), :, :], dims = 1), 1)[1, :, :]
-            first_guess_params.+=0.5*n_use .* param_slopes
-        elseif x_ind<mid
-            first_guess_params.=nanmedian(
+            first_guess_params .+= 0.5 * n_use .* param_slopes
+        elseif x_ind < mid
+            first_guess_params .= nanmedian(
                 param_outputs[(x_ind + 1):(x_ind + (n_use + 1)), :, :], 1)[
                 1, :, :]
-            param_slopes=nanmedian(
+            param_slopes = nanmedian(
                 diff(param_outputs[(x_ind + 1):(x_ind + (n_use + 1)), :, :], dims = 1), 1)[1, :, :]
-            first_guess_params.+=-0.5*n_use .* param_slopes
+            first_guess_params .+= -0.5 * n_use .* param_slopes
         end
 
         first_guess_params[:,
-            3].=best_fit_ave_params[:, 3] .*
-                nanmedian(first_guess_params[:, 3] ./ best_fit_ave_params[:, 3])
+        3] .= best_fit_ave_params[:, 3] .*
+              nanmedian(first_guess_params[:, 3] ./ best_fit_ave_params[:, 3])
         first_guess_params[:,
-            1].=best_fit_ave_params[:, 1] .*
-                nanmedian(first_guess_params[:, 1] ./ best_fit_ave_params[:, 1])
+        1] .= best_fit_ave_params[:, 1] .*
+              nanmedian(first_guess_params[:, 1] ./ best_fit_ave_params[:, 1])
 
         #enforce spacing between fibers for first guess positions
         #but account for small changes in spacing by fitting for slope & intercept
-        curr_spacing=diff(first_guess_params[:, 2])
-        spacing_shift=nanmedian(curr_spacing .- best_fit_spacing)
-        new_offsets[2:end].=cumsum(best_fit_spacing .+ spacing_shift, dims = 1)
-        predict_centers=nanmedian(first_guess_params[:, 2] .- new_offsets) .+ new_offsets
-        curr_diff=first_guess_params[:, 2] .- predict_centers
-        y_mean=nanmedian(curr_diff)
-        missing_slope=sum((curr_diff .- y_mean) .*
-                          (curr_fiber_inds .- x_mean))/
-        sum((curr_fiber_inds .- x_mean) .^ 2)
-        missing_inter=nanmedian(curr_diff .- missing_slope .* curr_fiber_inds)
-        predict_centers.+=curr_fiber_inds .* missing_slope .+ missing_inter
-        first_guess_params[:, 2].=clamp.(predict_centers, 11, 2048-11)
+        curr_spacing = diff(first_guess_params[:, 2])
+        spacing_shift = nanmedian(curr_spacing .- best_fit_spacing)
+        new_offsets[2:end] .= cumsum(best_fit_spacing .+ spacing_shift, dims = 1)
+        predict_centers = nanmedian(first_guess_params[:, 2] .- new_offsets) .+ new_offsets
+        curr_diff = first_guess_params[:, 2] .- predict_centers
+        y_mean = nanmedian(curr_diff)
+        missing_slope = sum((curr_diff .- y_mean) .*
+                            (curr_fiber_inds .- x_mean)) /
+                        sum((curr_fiber_inds .- x_mean) .^ 2)
+        missing_inter = nanmedian(curr_diff .- missing_slope .* curr_fiber_inds)
+        predict_centers .+= curr_fiber_inds .* missing_slope .+ missing_inter
+        first_guess_params[:, 2] .= clamp.(predict_centers, 11, 2048 - 11)
 
         # first guess parameters
-        fit_inds.=floor.(Int, round.(first_guess_params[:, 2])) .+ offset_inds'
-        best_model_fit_inds.=floor.(Int, round.(first_guess_params[:, 2])) .+
-                             best_model_offset_inds'
+        fit_inds .= floor.(Int, round.(first_guess_params[:, 2])) .+ offset_inds'
+        best_model_fit_inds .= floor.(Int, round.(first_guess_params[:, 2])) .+
+                               best_model_offset_inds'
 
-        curr_guess=copy(first_guess_params)
+        curr_guess = copy(first_guess_params)
 
         new_params,
-        v_hat_cov=fit_gaussians(all_rel_fluxes_mat[x_ind, :],
+        v_hat_cov = fit_gaussians(all_rel_fluxes_mat[x_ind, :],
             all_rel_errs_mat[x_ind, :],
             first_guess_params,
             fit_inds, best_model_fit_inds, offset_inds,
@@ -941,8 +941,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
             min_widths = 0.5 .* first_guess_params[:, 3],
             max_widths = 2.0 .* first_guess_params[:, 3])
 
-        param_outputs[x_ind, :, :].=new_params
-        param_output_covs[x_ind, :, :, :].=v_hat_cov
+        param_outputs[x_ind, :, :] .= new_params
+        param_output_covs[x_ind, :, :, :] .= v_hat_cov
     end
 
     final_param_outputs[:, good_throughput_fibers, :] .= param_outputs[:, :, :]
@@ -957,12 +957,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         param_slopes = (diff(final_param_outputs[:, nearest_inds, :], dims = 2)[:, 1, :]) ./
                        (nearest_inds[2] - nearest_inds[1])
         final_param_outputs[:,
-            low_throughput_fibers[j],
-            [2, 3]] .= (final_param_outputs[
+        low_throughput_fibers[j],
+        [2, 3]] .= (final_param_outputs[
             :, nearest_inds[1], [2, 3]] .+
-                        param_slopes[:, [2, 3]] .*
-                        (low_throughput_fibers[j] -
-                         nearest_inds[1]))
+                    param_slopes[:, [2, 3]] .*
+                    (low_throughput_fibers[j] -
+                     nearest_inds[1]))
     end
 
     final_param_outputs, final_param_output_covs

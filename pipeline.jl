@@ -124,11 +124,6 @@ end
 
 println(BLAS.get_config());
 flush(stdout);
-using LibGit2;
-git_branch, git_commit = initalize_git(src_dir);
-@passobj 1 workers() git_branch;
-@passobj 1 workers() git_commit;
-## some hard coded parameters
 
 ##### 3D stage
 @everywhere begin
@@ -250,20 +245,19 @@ git_branch, git_commit = initalize_git(src_dir);
                 chip, df.exposure[expid], df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
-        meta_data = Dict{String,Any}()
-        meta_data["cartid"] = cartid
-        meta_data["nread_used"] = nread_used
-        meta_data["nread_total"] = nread_total
-        meta_data["mjd_mid_exposure_old"] = value(mjd_mid_exposure_old)
-        meta_data["mjd_mid_exposure_rough"] = value(mjd_mid_exposure_rough)
-        meta_data["mjd_mid_exposure_precise"] = value(mjd_mid_exposure_precise)
-        meta_data["mjd_mid_exposure"] = value(mjd_mid_exposure)
-        meta_data["git_branch"] = git_branch
-        meta_data["git_commit"] = git_commit
-        safe_jldsave(
-            joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2"); dimage, ivarimage, chisqimage,
-            CRimage, saturation_image, meta_data)
-        return joinpath(outdir, "apred/$(mjd)/" * outfname * ".jld2")
+
+        metadata = Dict([
+            "cartid" => cartid,
+            "nread_used" => nread_used,
+            "nread_total" => nread_total,
+            "mjd_mid_exposure_old" => value(mjd_mid_exposure_old),
+            "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
+            "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
+            "mjd_mid_exposure" => value(mjd_mid_exposure)
+        ])
+        fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
+        safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
+        return fname
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
@@ -276,10 +270,9 @@ git_branch, git_commit = initalize_git(src_dir);
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
         saturation_image = load(fname, "saturation_image")
-        meta_data = load(fname, "meta_data")
-        nread_used = meta_data["nread_used"]
-        meta_data["git_branch"] = git_branch
-        meta_data["git_commit"] = git_commit
+
+        metadata = read_metadata(fname)
+        nread_used = metadata["nread_used"]
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
@@ -307,10 +300,9 @@ git_branch, git_commit = initalize_git(src_dir);
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
         pix_bitmask .|= saturation_image * 2^13
-        
+
         outfname = replace(fname, "ar2D" => "ar2Dcal")
-        safe_jldsave(
-            outfname; dimage, ivarimage, pix_bitmask, meta_data)
+        safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
     end
 end
 t_now = now();
@@ -326,12 +318,12 @@ flush(stdout);
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
-@everywhere begin
-    # read noise is DN/read
-    readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
-    # gain is e-/DN
-    gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
-end
+# read noise is DN/read
+readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
+@passobj 1 workers() readVarMatDict
+# gain is e-/DN
+gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
+@passobj 1 workers() gainMatDict
 
 # ADD load the dark currrent map
 # load SIRS.jl models
@@ -346,8 +338,7 @@ if parg["runlist"] != ""
     subiter = Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))
-    @everywhere process_3D_partial(((mjd, expid),
-        chip)) = process_3D(
+    @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
         parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else
@@ -368,10 +359,10 @@ end
 # probably need to capture that calFlag somehow, write a meta cal file?
 all2D = vcat(ap2dnamelist...)
 if parg["doCal2d"]
-    darkFlist = sort(glob("darkRate*.jld2", parg["caldir_darks"] * "darks/"))
+    darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
     df_dark = cal2df(darkFlist)
 
-    flatFlist = sort(glob("flatFraction*.jld2", parg["caldir_flats"] * "flats/"))
+    flatFlist = sort(glob("flatFraction*.h5", parg["caldir_flats"] * "flats/"))
     df_flat = cal2df(flatFlist)
 
     for mjd in unique_mjds

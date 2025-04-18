@@ -1,7 +1,6 @@
 /Manifest.toml
 test/Manifest.toml
 file_schema/Manifest.toml
-*.h5
 .CondaPkg
 .vscode
 slurm_logs/*.err

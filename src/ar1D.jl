@@ -15,19 +15,19 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     f = jldopen(fname)
     flux_1d = f["flux_1d"]
     mask_1d = f["mask_1d"]
-    meta_data = load(fname, "meta_data")
-    mask_1d_good = (mask_1d .& bad_pix_bits) .== 0;
+    mask_1d_good = (mask_1d .& bad_pix_bits) .== 0
     close(f)
+    metadata = read_metadata(fname)
 
     absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1)
     bitmsk_relthrpt = zeros(Int, length(absthrpt))
     relthrpt = copy(absthrpt)
     relthrpt ./= nanzeromedian(relthrpt)
 
-    thresh = (1 .- sig_cut*nanzeroiqr(relthrpt))
-    bitmsk_relthrpt[relthrpt .< thresh].|=2^0
-    bitmsk_relthrpt[relthrpt .< rel_val_cut].|=2^1
-    return absthrpt, relthrpt, bitmsk_relthrpt, meta_data
+    thresh = (1 .- sig_cut * nanzeroiqr(relthrpt))
+    bitmsk_relthrpt[relthrpt .< thresh] .|= 2^0
+    bitmsk_relthrpt[relthrpt .< rel_val_cut] .|= 2^1
+    return absthrpt, relthrpt, bitmsk_relthrpt, metadata
 end
 
 """
@@ -365,35 +365,41 @@ end
 # must use dome flats, not quartz flats (need fiber runs to telescope)
 function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_chip = "c")
     expidfull = parse(Int, expidstr)
-    df_mjd = sort(dfalmanac[(dfalmanac.mjd.==parse(Int, mjd)) .& (dfalmanac.observatory.==tele), :], :exposure)
-    expIndex = findfirst(df_mjd.exposure.==expidfull)
+    df_mjd = sort(
+        dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
+        :exposure)
+    expIndex = findfirst(df_mjd.exposure .== expidfull)
     cartId = df_mjd.cartidInt[expIndex]
-    expIndex_before = findlast((df_mjd.imagetyp.=="DomeFlat") .& (df_mjd.exposure .< expidfull))
-    expIndex_after = findfirst((df_mjd.imagetyp.=="DomeFlat") .& (df_mjd.exposure .> expidfull))
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .< expidfull))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .> expidfull))
     valid_before = if !isnothing(expIndex_before)
-        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)*1
+        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
     elseif !isnothing(expIndex_before)
-        (df_mjd.cartidInt[expIndex_after] .== cartId)*2
+        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
     else
         0
     end
     valid_after = if !isnothing(expIndex_after)
-        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)*1
+        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId) * 1
     elseif !isnothing(expIndex_after)
-        (df_mjd.cartidInt[expIndex_after] .== cartId)*2
+        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
     else
         0
     end
 
     if valid_before == 1
-        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
     elseif valid_after == 1
-        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
-    # any of the cases below here we could consider using a global file
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+        # any of the cases below here we could consider using a global file
     elseif valid_before == 2
-        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
     elseif valid_after == 2
-        return get_fluxing_file_name(parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+        return get_fluxing_file_name(
+            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
     else
         return nothing
     end
@@ -426,7 +432,7 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
 
     # this was used for looping over exposures in the visit
     # outdir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_12_05/outdir/"
-    # fname = outdir * "apred/$(mjd)/" * get_1d_name(parse(Int, last(expid,4)), df) * ".jld2"
+    # fname = outdir * "apred/$(mjd)/" * get_1d_name(parse(Int, last(expid,4)), df) * ".h5"
 
     wavefname = replace(replace(fname, fnameType => wavecal_type), "_a_" => "_")
     if isfile(wavefname)
@@ -436,9 +442,7 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
     else #this is a terrible global fallback, just so we get something to look at
         chipWaveSoln = zeros(2048, 300, 3)
         for (chipind, chip) in enumerate(["a", "b", "c"])
-            chipWaveSoln[:,
-            :,
-            chipind] .= rough_linear_wave.(
+            chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
                 1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
         end
         println("No wavecal found for $(fname), using fallback")
@@ -504,8 +508,8 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
 
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_a_" => "_")
-    safe_jldsave(outname; flux_1d = outflux, ivar_1d = 1 ./ outvar,
-        mask_1d = outmsk, git_branch, git_commit, wavecal_type)
+    safe_jldsave(
+        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, wavecal_type)
     return
 end
 

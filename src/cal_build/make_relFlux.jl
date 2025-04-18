@@ -1,4 +1,5 @@
 using ArgParse, Distributed, SlurmClusterManager, SlackThreads
+include("../utils.jl") # for safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()
@@ -97,7 +98,7 @@ for mjd in unique_mjds
         DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
     function get_1d_name_partial(expid)
-        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
+        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
 
     file_list = get_1d_name_partial.(expid_list)
@@ -105,7 +106,7 @@ for mjd in unique_mjds
 end
 
 ## need to get cal_type from runlist
-exp_type_lst = map(x->split(split(x, "FLAT")[1], "_")[end], all1Da)
+exp_type_lst = map(x -> split(split(x, "FLAT")[1], "_")[end], all1Da)
 unique_exp_lst = unique(exp_type_lst)
 if length(unique_exp_lst) > 1
     error("Multiple cal types found in runlist")
@@ -115,20 +116,26 @@ cal_type = lowercase(unique_exp_lst[1])
 
 flist_chips = []
 for chip in chips
-    push!(flist_chips, replace.(all1Da, "_a_"=>"_$(chip)_"))
+    push!(flist_chips, replace.(all1Da, "_a_" => "_$(chip)_"))
 end
 all1D = vcat(flist_chips...)
 
 @everywhere begin
     function get_and_save_relFlux(fname)
-        absthrpt, relthrpt, bitmsk_relthrpt, meta_data = get_relFlux(fname)
-        cartid = meta_data["cartid"]
-        outfname = replace(replace(replace(fname, "apred"=>"$(cal_type)_flats"), "ar1Dcal" => "$(cal_type)Flux",".jld2"=>"_$(cartid).jld2"))
+        println("reading ", fname)
+        absthrpt, relthrpt, bitmsk_relthrpt, metadata = get_relFlux(fname)
+        cartid = Int(metadata["cartid"])
+        outfname = replace(fname,
+            "apred" => "$(cal_type)_flats",
+            "ar1Dcal" => "$(cal_type)Flux",
+            ".h5" => "_$(cartid).h5"
+        )
         dname = dirname(outfname)
         if !ispath(dname)
             mkpath(dname)
         end
-        safe_jldsave(outfname; absthrpt, relthrpt, bitmsk_relthrpt, meta_data)
+        println("writing ", outfname)
+        safe_jldsave(outfname, metadata; absthrpt, relthrpt, bitmsk_relthrpt)
         return outfname
     end
 end
@@ -159,10 +166,9 @@ thread("$(cal_type) relFluxing")
         absthrpt = zeros(300, length(chips))
         relthrpt = zeros(300, length(chips))
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
-        meta_data = load(fname, "meta_data")
-        cartid = meta_data["cartid"]
+        cartid = read_metadata(fname)["cartid"]
         for (cindx, chip) in enumerate(chips)
-            local_fname = replace(fname, "_a_"=>"_$(chip)_")
+            local_fname = replace(fname, "_a_" => "_$(chip)_")
             f = jldopen(local_fname)
             absthrpt[:, cindx] = f["absthrpt"]
             relthrpt[:, cindx] = f["relthrpt"]
@@ -183,7 +189,7 @@ thread("$(cal_type) relFluxing")
             warn_only_msk = warn_msk .& .!broken_msk
 
             scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "limegreen")
-            
+
             # Broken fibers
             scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
             broken_fibers = xvec[broken_msk]
@@ -198,20 +204,20 @@ thread("$(cal_type) relFluxing")
                 status_str *= "\nChip $(chip) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
             end
         end
-        
+
         # we should be more uniform about the naming convention
         savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expid)_$(cartid).png"
         save(savePath, fig)
-        
+
         return savePath, status_str
     end
 end
 
 desc = "plotting relFlux"
 pout = @showprogress desc=desc pmap(plot_relFlux, outfnamesa)
-status_str_lst = map(x->x[2], pout)
+status_str_lst = map(x -> x[2], pout)
 unique_status_strs = unique(status_str_lst)
-savePath_lst = map(x->x[1], pout)
+savePath_lst = map(x -> x[1], pout)
 for status_str in unique_status_strs
     thread("Relfluxing: $(status_str)")
 end

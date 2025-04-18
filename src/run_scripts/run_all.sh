@@ -39,7 +39,7 @@ caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u603975
 
 runname="objects_${mjd}"
 almanac_file=${outdir}/almanac/${runname}.h5
-runlist=${outdir}/almanac/runlist_${runname}.jld2
+runlist=${outdir}/almanac/runlist_${runname}.h5
 
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}/almanac
@@ -76,7 +76,7 @@ if [ "$run_2d_only" != "true" ]; then
 
     # Run pipeline 1D only
     print_elapsed_time "Running 2D->1D Pipeline"
-    julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+    julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 32
 
     # End of night plotting script
     print_elapsed_time "Making Plots"
