@@ -176,24 +176,28 @@ flush(stdout);
         resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
         safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar)
         if parg["relFlux"]
-            ### relative fluxing (using "c" only for now)
+            # relative fluxing (using "c" only for now)
+            # this is the path to the underlying fluxing file.
+            # it is symlinked below to an exposure-specific file (linkPath).
             calPath = get_fluxing_file(
                 dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c")
             expid_num = parse(Int, last(expid, 4)) #this is silly because we translate right back
             fibtargDict = get_fibTargDict(falm, tele, parse(Int, mjd), expid_num)
             fiberTypeList = map(x -> fibtargDict[x], 1:300)
+
             if isnothing(calPath)
-                @warn "No fluxing file found for $(tele) $(mjd) $(chip) $(expid)"
+                # TODO uncomment this
+                @warn "No fluxing file available for $(tele) $(mjd) $(chip) $(expid)"
                 relthrpt = ones(size(flux_1d, 2))
                 bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
+            elseif !isfile(calPath)
+                error("Fluxing file for $(tele) $(mjd) $(chip) $(expid) does not exist")
             else
                 calPath = abspath(calPath)
                 linkPath = abspath(joinpath(
                     dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).h5"))
-                if !islink(linkPath) & isfile(calPath)
+                if !islink(linkPath)
                     symlink(calPath, linkPath)
-                elseif !islink(linkPath) & !isfile(calPath)
-                    @warn "CalPath Does Note Exist: $(calPath)"
                 end
                 relthrpt = load(linkPath, "relthrpt")
                 relthrptr = reshape(relthrpt, (1, length(relthrpt)))
