@@ -1,8 +1,5 @@
 using ArgParse, Distributed, SlurmClusterManager, SlackThreads
 
-src_dir = "../"
-include(src_dir * "/utils.jl")
-
 ## Parse command line arguments
 function parse_commandline()
     s = ArgParseSettings()
