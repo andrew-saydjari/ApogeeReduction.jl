@@ -5,6 +5,7 @@ file_schema/Manifest.toml
 .vscode
 slurm_logs/*.err
 slurm_logs/*.out
+slurm_logs/*.sh
 *.err
 *.out
 *.txt
