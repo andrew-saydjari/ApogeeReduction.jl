@@ -56,6 +56,11 @@ function parse_commandline()
         help = "extraction method (boxcar or optimal)"
         arg_type = String
         default = "optimal"
+        "--workers_per_node"
+        required = false
+        help = "number of workers per node"
+        arg_type = Int
+        default = 32
         "--relFlux"
         required = false
         help = "use relFluxing (true or false)"
@@ -66,7 +71,7 @@ function parse_commandline()
 end
 
 parg = parse_commandline()
-workers_per_node = 32
+workers_per_node = parg["workers_per_node"]
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
@@ -117,11 +122,6 @@ end
 
 println(BLAS.get_config());
 flush(stdout);
-using LibGit2;
-git_branch, git_commit = initalize_git(src_dir);
-@passobj 1 workers() git_branch;
-@passobj 1 workers() git_commit;
-## some hard coded parameters
 
 ##### 1D stage
 @everywhere begin
@@ -146,12 +146,10 @@ git_branch, git_commit = initalize_git(src_dir);
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
         pix_bitmask = load(fnamecal, "pix_bitmask")
-        meta_data = load(fname, "meta_data")
-        meta_data["git_branch"] = git_branch
-        meta_data["git_commit"] = git_commit
+        metadata = read_metadata(fname)
 
         # this seems annoying to load so often if we know we are doing a daily... need to ponder
-        traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).jld2",
+        traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).h5",
             parg["outdir"] * "apred/$(mjd)/"))
         trace_params = load(traceList[1], "trace_params")
 
@@ -176,41 +174,48 @@ git_branch, git_commit = initalize_git(src_dir);
 
         outfname = replace(fname, "ar2D" => "ar1D")
         resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
-        safe_jldsave(resid_outfname; resid_flux, resid_ivar, meta_data)
+        safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar)
         if parg["relFlux"]
-            ### relative fluxing (using "c" only for now)
-            calPath = get_fluxing_file(dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c")
+            # relative fluxing (using "c" only for now)
+            # this is the path to the underlying fluxing file.
+            # it is symlinked below to an exposure-specific file (linkPath).
+            calPath = get_fluxing_file(
+                dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c")
             expid_num = parse(Int, last(expid, 4)) #this is silly because we translate right back
             fibtargDict = get_fibTargDict(falm, tele, parse(Int, mjd), expid_num)
-            fiberTypeList = map(x->fibtargDict[x], 1:300)
+            fiberTypeList = map(x -> fibtargDict[x], 1:300)
+
             if isnothing(calPath)
-                @warn "No fluxing file found for $(tele) $(mjd) $(chip) $(expid)"
-                relthrpt = ones(size(flux_1d,2))
-                bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d,2))
+                # TODO uncomment this
+                @warn "No fluxing file available for $(tele) $(mjd) $(chip) $(expid)"
+                relthrpt = ones(size(flux_1d, 2))
+                bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
+            elseif !isfile(calPath)
+                error("Fluxing file for $(tele) $(mjd) $(chip) $(expid) does not exist")
             else
                 calPath = abspath(calPath)
-                linkPath = abspath(joinpath(dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).jld2"))
-                if !islink(linkPath) & isfile(calPath)
+                linkPath = abspath(joinpath(
+                    dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).h5"))
+                if !islink(linkPath)
                     symlink(calPath, linkPath)
-                elseif !islink(linkPath) & !isfile(calPath)
-                    @warn "CalPath Does Note Exist: $(calPath)"
                 end
                 relthrpt = load(linkPath, "relthrpt")
                 relthrptr = reshape(relthrpt, (1, length(relthrpt)))
                 bitmsk_relthrpt = load(linkPath, "bitmsk_relthrpt")
             end
-            
+
             # don't flux broken fibers (don't use warn fibers for sky)
             msk_goodwarn = (bitmsk_relthrpt .== 0) .| (bitmsk_relthrpt .& 2^0) .== 2^0
             if any(msk_goodwarn)
-                flux_1d[:, msk_goodwarn] ./= relthrptr[:,msk_goodwarn]
-                ivar_1d[:, msk_goodwarn] .*= relthrptr[:,msk_goodwarn] .^ 2
+                flux_1d[:, msk_goodwarn] ./= relthrptr[:, msk_goodwarn]
+                ivar_1d[:, msk_goodwarn] .*= relthrptr[:, msk_goodwarn] .^ 2
             end
-                    
+
             # we probably want to append info from the fiber dictionary from alamanac into the file name
-            safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, relthrpt, bitmsk_relthrpt, fiberTypeList, meta_data)
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d,
+                relthrpt, bitmsk_relthrpt, fiberTypeList)
         else
-            safe_jldsave(outfname; flux_1d, ivar_1d, mask_1d, meta_data)
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d)
         end
         close(falm)
     end
@@ -246,7 +251,7 @@ for mjd in unique_mjds
     close(f)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".jld2"
+        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
     end
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
@@ -266,7 +271,7 @@ all2D = vcat(all2Dperchip...)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
     for chip in ["a", "b", "c"]
-        traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).jld2",
+        traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
             parg["outdir"] * "$(trace_type)_flats/"))
         if length(traceList) > 1
             @warn "Multiple $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
@@ -302,7 +307,7 @@ for mjd in unique_mjds
     close(f)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".jld2"
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
         else
             return nothing
         end
@@ -336,7 +341,8 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
-all1DObjectSkyPeaks = replace(replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
+all1DObjectSkyPeaks = replace(
+    replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name

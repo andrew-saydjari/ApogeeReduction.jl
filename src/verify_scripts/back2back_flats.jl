@@ -91,7 +91,7 @@ function get_IQR(x, y; cnts_cut = 100, nbin_med = 100)
     return centers, iqr_line, med_line
 end
 
-flist = glob("ar2D_*.jld2", joinpath(parg["data_dir"], "apred/$(parg["mjd"])/"));
+flist = glob("ar2D_*.h5", joinpath(parg["data_dir"], "apred/$(parg["mjd"])/"));
 expnum_v = map(x -> parse(Int, split(basename(x), "_")[end - 1][(end - 3):end]), flist)
 chip_v = map(x -> split(basename(x), "_")[end - 2], flist);
 mskCal = parg["expid-start"] .<= expnum_v .<= parg["expid-end"];

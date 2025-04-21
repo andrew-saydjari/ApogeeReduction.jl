@@ -1,6 +1,25 @@
 using StatsBase: iqr, percentile
 using Jackknife
-using JLD2
+using JLD2, HDF5 # for safe_jldsave and read_metadata
+using Distributed: myid
+
+# used to record git branch and commit in safe_jldsave
+using LibGit2
+function initalize_git(git_dir)
+    git_commit = LibGit2.head(git_dir)
+    git_repo = LibGit2.GitRepo(git_dir)
+    git_head = LibGit2.head(git_repo)
+    git_branch = LibGit2.shortname(git_head)
+
+    if myid() == 1
+        println("Running on branch: $git_branch, commit: $git_commit")
+        flush(stdout)
+    end
+    return git_branch, git_commit
+end
+# this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
+# but it is a symptom of the fact that the include situation is a bit tangled
+git_branch, git_commit = initalize_git("./")
 
 # ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
 if !haskey(ENV, "SLACK_CHANNEL")
@@ -18,19 +37,6 @@ bad_chi2_pix_bits = 2^9;
 bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
-
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
-               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff
-
-function initalize_git(git_dir)
-    git_commit = LibGit2.head(git_dir)
-    git_repo = LibGit2.GitRepo(git_dir)
-    git_head = LibGit2.head(git_repo)
-    git_branch = LibGit2.shortname(git_head)
-    println("Running on branch: $git_branch, commit: $git_commit")
-    flush(stdout)
-    return git_branch, git_commit
-end
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)
@@ -82,16 +88,18 @@ nanzeroiqr(x) =
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
 # Single vector version
-nanzeropercentile(x::AbstractVector; percent_vec=[16,50,64]) =
+function nanzeropercentile(x::AbstractVector; percent_vec = [16, 50, 64])
     if all(isnanorzero, x)
         fill(NaN, length(percent_vec))
     else
         percentile(filter(!isnanorzero, x), percent_vec)
     end
+end
 
 # Array version with dimensions
-nanzeropercentile(x::AbstractArray; percent_vec=[16,50,64], dims=1) = 
-    mapslices(v -> nanzeropercentile(vec(v), percent_vec=percent_vec), x, dims=dims)
+function nanzeropercentile(x::AbstractArray; percent_vec = [16, 50, 64], dims = 1)
+    mapslices(v -> nanzeropercentile(vec(v), percent_vec = percent_vec), x, dims = dims)
+end
 
 function log10n(x)
     if x <= 0
@@ -180,24 +188,74 @@ end
 
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
 
-"""
-This function is a wrapper around JLD2.jldsave that checks if the types of the values to be saved
-will result in a hard-to-read HDF5 file and warn if so.
-"""
-function safe_jldsave(filename; kwargs...)
-    for (k, v) in kwargs
-        t = if isa(v, Array)
-            eltype(v)
+# used by safe_jldsave
+function check_type_for_jld2(value)
+    # convert BitArray to Array{Bool} if necessary
+    if value isa BitArray
+        convert(Array{Bool}, value)
+    else
+        # if the value will result in a hard-to-read HDF5 file, warn
+        t = if isa(value, Array)
+            eltype(value)
         else
-            typeof(v)
+            typeof(value)
         end
         if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
             UInt16, UInt8, Float64, Float32, String])
             #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
-            # @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+        end
+        value
+    end
+end
+
+"""
+    safe_jldsave(filename::AbstractString, [metadata::Dict{String, <:Any}]; kwargs...)
+
+This function is a wrapper around JLD2.jldsave with a couple of extra features:
+- It write the metadata dict as a group called "metadata".
+- It checks if the types of the values to be saved will result in a hard-to-read HDF5 file and warns if so.
+- It converts BitArrays to Array{Bool} if necessary. This means that the saved data will be 8x
+  larger (Bools are 1 byte), even when read back into Julia.
+- It records the git branch and commit in the saved file.
+"""
+function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; kwargs...)
+    to_save = Dict{Symbol, Any}()
+    for (k, v) in kwargs
+        if (k == :metadata || k == :meta_data)
+            throw(ArgumentError("The metadata dictionary is passed as the second positional argument to safe_jldsave, not as a keyword argument. Example: safe_jldsave(\"filename.h5\", metadata; data1, data2)"))
+        end
+        to_save[k] = check_type_for_jld2(v)
+    end
+
+    # record git branch and commit
+    #to_save[:git_branch] = git_branch
+    #to_save[:git_commit] = git_commit
+
+    JLD2.jldsave(filename; to_save...)
+
+    # add metadata group
+    h5open(filename, "r+") do f
+        g = create_group(f, "metadata")
+        for (k, v) in metadata
+            g[k] = check_type_for_jld2(v)
         end
     end
-    JLD2.jldsave(filename; kwargs...)
+end
+function safe_jldsave(filename::AbstractString; kwargs...)
+    safe_jldsave(filename, Dict{String, Any}(); kwargs...)
+end
+
+"""
+    read_metadata(filename::AbstractString)
+
+This function reads the metadata from an HDF5 file and returns it as a dictionary.  This is intended
+to work with files written by safe_jldsave.
+"""
+function read_metadata(filename::AbstractString)
+    h5open(filename, "r") do f
+        read(f["metadata"])
+    end
 end
 
 function parseCartID(x)

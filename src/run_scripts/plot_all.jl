@@ -78,7 +78,7 @@ for mjd in unique_mjds
     close(f)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".jld2"
+        replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".h5"
     end
     local2D = get_2d_name_partial.(expid_list)
     push!(list2Dexp, local2D)
@@ -146,7 +146,7 @@ for mjd in unique_mjds
         df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
     function get_1d_name_partial(expid)
-        parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df) * ".jld2"
+        parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df) * ".h5"
     end
 
     file_list = get_1d_name_partial.(expid_list)
@@ -398,7 +398,7 @@ for exptype2plot in sorted_exptypes
         sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         for exp_fname in sample_exposures
-            sname = split(split(exp_fname, ".jld2")[1], "_")
+            sname = split(split(exp_fname, ".h5")[1], "_")
             tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
             expid_num = parse(Int, last(expid, 4))
 
