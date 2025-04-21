@@ -32,12 +32,13 @@ bad_flat_pix_bits = 2^6;
 # most multiread CR detections are bad for other reasons
 bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
 bad_chi2_pix_bits = 2^9;
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits;
 
 # flags for 1d flux extraction
 bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
+
+bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)
