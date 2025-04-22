@@ -138,6 +138,7 @@ flush(stdout);
         df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
+        df.exposure = map(x->lpad(x, 8, '0'), df.exposure)
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(

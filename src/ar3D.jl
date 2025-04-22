@@ -6,7 +6,6 @@ using FITSIO
 
 function apz2cube(fname)
     f = FITS(fname)
-    #    hdr_dict = Dict("ave" => read_header(f[2]))
     hdr_dict = Dict()
     hdr_dict[1] = read_header(f[3])
     avg_dcounts = read(f[2])

@@ -28,7 +28,7 @@ end
 
 function short_expid_to_long(mjd, expid)
     # this should probably be done with math
-    return parse(Int, string(mjd - 55562) * lpad(expid, 4, "0"))
+    return parse(Int, lpad(string(mjd - 55562), 4, "0") * lpad(expid, 4, "0"))
 end
 
 function long_expid_to_short(mjd, expid)

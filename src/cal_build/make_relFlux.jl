@@ -124,7 +124,16 @@ all1D = vcat(flist_chips...)
     function get_and_save_relFlux(fname)
         println("reading ", fname)
         absthrpt, relthrpt, bitmsk_relthrpt, metadata = get_relFlux(fname)
-        cartid = Int(metadata["cartid"])
+        cartIDany = metadata["cartid"]
+        cartid = if typeof(cartIDany) == String
+            parse(Int, cartIDany)
+        elseif typeof(cartIDany) <: Union{Float32, Float64}
+            Int(cartIDany)
+        elseif typeof(cartIDany) <: Union{Int32, Int64}
+            cartIDany
+        else
+            error("Unknown cartid type: $(typeof(cartIDany))")
+        end
         outfname = replace(fname,
             "apred" => "$(cal_type)_flats",
             "ar1Dcal" => "$(cal_type)Flux",

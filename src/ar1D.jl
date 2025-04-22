@@ -336,13 +336,22 @@ function get_fibTargDict(f, tele, mjd, exposure_id)
             fiber_types = map(df_fib[!, target_type_col]) do t
                 if t in keys(fiber_type_names)
                     fiber_type_names[t]
-
                 else
                     # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
                     "fiberTypeFail"
                 end
             end
-            Dict(df_fib[!, fiberid_col] .=> fiber_types)
+            fibernum_col = df_fib[!, fiberid_col]
+            println(typeof(fibernum_col))
+            fibernumvec = if typeof(fibernum_col) == Vector{Int}
+                fibernum_col
+            elseif typeof(fibernum_col) == Vector{String}
+                parse.(Int, fibernum_col)
+            else
+                @warn "Fiber numbers are neither integers or strings"
+                fibernum_col
+            end
+            Dict(fibernumvec .=> fiber_types)
         catch e
             rethrow(e)
             @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."

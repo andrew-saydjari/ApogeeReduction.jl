@@ -80,7 +80,7 @@ end
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
     flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                expid[i], chip, "QUARTZFLAT", use_cal = true)
+                lpad(expid[i], 8, '0'), chip, "QUARTZFLAT", use_cal = true)
                 for i in eachindex(mjd), chip in chips]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])

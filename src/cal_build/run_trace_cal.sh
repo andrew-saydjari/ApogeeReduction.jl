@@ -7,7 +7,7 @@
 #SBATCH --mem=0 #requesting all of the memory on the node
 
 #SBATCH --time=8:00:00
-#SBATCH --job-name=ApogeeReduction_trace_cal
+#SBATCH --job-name=ar_trace_cal
 #SBATCH --output=slurm_logs/%x_%j.out
 
 #SBATCH --mail-type=ALL
@@ -60,8 +60,8 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $quartzrunlist -
 mkdir -p ${outdir}quartz_flats
 julia +1.11.0 --project="./" src/cal_build/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $quartzrunlist
 
-### 2D->1D and relFlux ####
-# DomeFlats
+## 2D->1D and relFlux ####
+DomeFlats
 echo "Running 2D->1D Pipeline for DomeFlats"
 julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname --relFlux false
 
