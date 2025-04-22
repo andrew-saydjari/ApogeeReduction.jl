@@ -505,10 +505,10 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     #only keep peaks that are substantially above the minimum function
     relative_fluxes = (poss_local_max_fluxes .- med_min_fluxes) ./
                       (med_max_fluxes .- med_min_fluxes)
-    good_max_inds = (relative_fluxes .> 0.5) .& (relative_fluxes .< 5) .& 
+    good_max_inds = (relative_fluxes .> 0.5) .& (relative_fluxes .< 5) .&
                     (local_max_waves .>= 11) .& (local_max_waves .<= 2048 - 11)
     good_y_vals = local_max_waves[good_max_inds]
-    verbose && println("Original identified peaks ",size(good_y_vals))
+    verbose && println("Original identified peaks ", size(good_y_vals))
 
     curr_fiber_inds = clamp.(ceil.(Int, round.(med_center_to_fiber_func.(float.(good_y_vals)))),
         min_prof_fib, max_prof_fib)
@@ -517,9 +517,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     good_curr_inds = (curr_fiber_inds .> min_prof_fib) .& (curr_fiber_inds .< max_prof_fib)
     fiber_to_y_func = linear_interpolation(
         float.(curr_fiber_inds[good_curr_inds]), good_y_vals[good_curr_inds], extrapolation_bc = Line())
-    better_y_vals  = ceil.(Int,round.(fiber_to_y_func.(float.(true_fiber_inds))))
+    better_y_vals = ceil.(Int, round.(fiber_to_y_func.(float.(true_fiber_inds))))
     good_y_vals = unique(better_y_vals)
-
 
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
     offset_inds = range(start = -4, stop = 4, step = 1)
@@ -557,7 +556,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     med_flux = nanmedian(new_params[:, 1], 1)
     good_throughput_fibers = (new_params[:, 1] ./ med_flux) .> 0.1
-    good_y_vals = ceil.(Int,round.(new_params[good_throughput_fibers,2]))
+    good_y_vals = ceil.(Int, round.(new_params[good_throughput_fibers, 2]))
 
     fit_inds = good_y_vals .+ offset_inds'
     best_model_fit_inds = good_y_vals .+ best_model_offset_inds'
@@ -585,11 +584,11 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
 
-    verbose && println("Updated original identified peaks ",size(good_y_vals))
+    verbose && println("Updated original identified peaks ", size(good_y_vals))
 
-    curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(new_params[:,2])))
+    curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(new_params[:, 2])))
 
-    verbose && println("Updated peaks indices ",size(good_y_vals)," ",curr_fiber_inds)
+    verbose && println("Updated peaks indices ", size(good_y_vals), " ", curr_fiber_inds)
 
     curr_best_params = copy(new_params)
 
@@ -668,7 +667,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     peak_ints = zeros(Int, size(int_spacing, 1) + 1)
     peak_ints[2:end] .= cumsum(int_spacing, dims = 1)
 
-
     keep_peaks = ones(Bool, size(peak_ints, 1))
     for r_ind in 1:2
         peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
@@ -701,10 +699,10 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     missing_ints = all_peak_ints[missing_ints]
 
-#    peak_offsets = new_params[keep_peaks, 2] .- peak_func.(peak_ints[keep_peaks])
-#    extrap = linear_interpolation(
-#        new_params[keep_peaks, 2], peak_offsets, extrapolation_bc = Line())
-#    all_peak_locs .+= extrap.(all_peak_locs)
+    #    peak_offsets = new_params[keep_peaks, 2] .- peak_func.(peak_ints[keep_peaks])
+    #    extrap = linear_interpolation(
+    #        new_params[keep_peaks, 2], peak_offsets, extrapolation_bc = Line())
+    #    all_peak_locs .+= extrap.(all_peak_locs)
 
     #use more pixels around each peak, otherwise large-width peak fitting fails
     #(see weird discontinuities in height and width vs X)
@@ -819,7 +817,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     verbose && println("Possible number of peaks:", size(best_fit_ave_params))
 
     #remove the edge possible peaks if they have no throughput, because they likely don't exist
-#    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.2
+    #    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.2
     good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh
     low_throughput_fibers = findall(.!good_throughput_fibers)
     if size(low_throughput_fibers, 1) > 0
@@ -858,23 +856,23 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         end
     end
 
-    curr_fiber_inds = ceil.(Int,round.(med_center_to_fiber_func.(best_fit_ave_params[:,2])))
-#    best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
+    curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(best_fit_ave_params[:, 2])))
+    #    best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
 
-    verbose && println("possible fiber indices ",curr_fiber_inds)
-    verbose && println("truncated fiber indices ",curr_fiber_inds[left_cut_ind:right_cut_ind])
+    verbose && println("possible fiber indices ", curr_fiber_inds)
+    verbose && println("truncated fiber indices ", curr_fiber_inds[left_cut_ind:right_cut_ind])
 
-    if right_cut_ind-left_cut_ind == 300-1
+    if right_cut_ind - left_cut_ind == 300 - 1
         #then the truncation of bad edge fibers worked
         best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
-        curr_fiber_inds = ceil.(Int,round.(med_center_to_fiber_func.(best_fit_ave_params[:,2])))
+        curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(best_fit_ave_params[:, 2])))
     else
         #likely here for plate-era data
-	#because the edge fibers can have significantly lower throughput
-	#producing < 300 fibers
-        curr_fiber_inds = ceil.(Int,round.(med_center_to_fiber_func.(best_fit_ave_params[:,2])))
-	keep_fibers = (curr_fiber_inds .>= 1) .& (curr_fiber_inds .<= 300)
-	best_fit_ave_params = best_fit_ave_params[keep_fibers, :]
+        #because the edge fibers can have significantly lower throughput
+        #producing < 300 fibers
+        curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(best_fit_ave_params[:, 2])))
+        keep_fibers = (curr_fiber_inds .>= 1) .& (curr_fiber_inds .<= 300)
+        best_fit_ave_params = best_fit_ave_params[keep_fibers, :]
     end
 
     curr_fiber_inds = clamp.(range(1, size(best_fit_ave_params, 1)), min_prof_fib, max_prof_fib)
@@ -1033,7 +1031,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     final_param_outputs, final_param_output_covs
 end
 
-function trace_plots(cal_type, trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
+function trace_plots(
+        cal_type, trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
     cut = 750
     fig = Figure(size = (1600, 800), fontsize = 22)
     ax = Axis(fig[1, 1],
@@ -1068,7 +1067,7 @@ function trace_plots(cal_type, trace_params, teleloc, mjdloc, chiploc, expidloc,
     hlines!(ax, med_val, linestyle = :dash)
 
     tracePlot_heights_widths_Path = dirNamePlots *
-        "$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+                                    "$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
     save(tracePlot_heights_widths_Path, fig)
 
     return tracePlot_heights_widths_Path
