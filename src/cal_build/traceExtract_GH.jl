@@ -390,7 +390,7 @@ Returns: trace centers, widths, and heights, and their covariances.
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
-        good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = true,
+        good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
         low_throughput_thresh = 0.05, median_trace_pos_path = "./data/")
 
     # TODO actually get these from the arguments
@@ -601,7 +601,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     first_guess_params[:, 3] .= 0.7 # sigma
 
     first_guess_params[:, 1] .*= (2 * π)^0.5 * first_guess_params[:, 3] # change to integrated height
-    println("updated first guess pos ",first_guess_params[:,2])
 
     new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
@@ -617,7 +616,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     peak_locs = new_params[1:(end - 1), 2]
     peak_spacing = new_params[2:end, 2] .- new_params[1:(end - 1), 2]
     med_peak_spacing = nanmedian(peak_spacing)
-    println("med_peak_spacing ",med_peak_spacing," ",quantile(peak_spacing,[0,0.16,0.5,0.84,1])," ",peak_locs)
 
     keep_space = (abs.(peak_spacing ./ med_peak_spacing .- 1.0) .< 0.5) # .& (peak_spacing .> 4)
 
