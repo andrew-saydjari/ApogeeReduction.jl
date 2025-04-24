@@ -390,8 +390,30 @@ Returns: trace centers, widths, and heights, and their covariances.
 function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
-        good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
-        low_throughput_thresh = 0.05)
+        good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = true,
+        low_throughput_thresh = 0.05, median_trace_pos_path = "./data/")
+
+    # TODO actually get these from the arguments
+    if tele == "apo"
+        median_trace_mjd = "60782"
+    elseif tele == "lco"
+        median_trace_mjd = "60768"
+    end
+
+    profile_fname = joinpath(median_trace_pos_path,
+        "traceCenterPositions_$(tele)_$(median_trace_mjd)_$(chip).h5")
+
+    # opening the file with a "do" closure guarantees that the file is closed
+    # (analogous to "with open() as f:" in Python)
+    # the last line of the closure is returned and assigned to the variables
+    prior_fiber_inds,prior_trace_pos = jldopen(profile_fname) do params
+        (params["fiber_index"], params["fiber_trace_pos_near_chip_center"])
+    end
+    prior_fiber_to_center_func = linear_interpolation(
+        prior_fiber_inds, prior_trace_pos, extrapolation_bc = Line())
+    prior_center_to_fiber_func = linear_interpolation(
+        prior_trace_pos, prior_fiber_inds, extrapolation_bc = Line())
+
     noise_image = 1 ./ sqrt.(ivar_image)
     good_pixels .= good_pixels .& (ivar_image .> 0)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
@@ -510,15 +532,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     good_y_vals = local_max_waves[good_max_inds]
     verbose && println("Original identified peaks ", size(good_y_vals))
 
-    curr_fiber_inds = clamp.(ceil.(Int, round.(med_center_to_fiber_func.(float.(good_y_vals)))),
-        min_prof_fib, max_prof_fib)
+    curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(float.(good_y_vals))))
+    expect_trace_pos = prior_fiber_to_center_func.(float.(curr_fiber_inds))
+    med_offset = nanmedian(expect_trace_pos-good_y_vals)
     true_fiber_inds = collect(1:300)
-    #interpolate from previously-measured peak positions to get better first guesses
-    good_curr_inds = (curr_fiber_inds .> min_prof_fib) .& (curr_fiber_inds .< max_prof_fib)
-    fiber_to_y_func = linear_interpolation(
-        float.(curr_fiber_inds[good_curr_inds]), good_y_vals[good_curr_inds], extrapolation_bc = Line())
-    better_y_vals = ceil.(Int, round.(fiber_to_y_func.(float.(true_fiber_inds))))
-    good_y_vals = unique(better_y_vals)
+    new_expect_trace_pos = prior_fiber_to_center_func.(float.(true_fiber_inds)).-med_offset
+    good_y_vals = ceil.(Int,round.(new_expect_trace_pos))
 
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
     offset_inds = range(start = -4, stop = 4, step = 1)
@@ -535,7 +554,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     fit_errs = all_rel_errs[fit_inds]
     fit_ivars = fit_errs .^ -2
 
-    curr_fiber_inds = clamp.(ceil.(Int, round.(med_center_to_fiber_func.(float.(good_y_vals)))),
+    curr_fiber_inds = clamp.(ceil.(Int, round.(prior_center_to_fiber_func.(float.(good_y_vals).+med_offset))),
         min_prof_fib, max_prof_fib)
 
     # first guess parameters
@@ -554,9 +573,16 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
 
-    med_flux = nanmedian(new_params[:, 1], 1)
-    good_throughput_fibers = (new_params[:, 1] ./ med_flux) .> 0.1
-    good_y_vals = ceil.(Int, round.(new_params[good_throughput_fibers, 2]))
+    med_flux = nanmedian(new_params[:, 1])
+    good_throughput_fibers = (new_params[:, 1] ./ med_flux) .> 0.2
+    good_y_vals = ceil.(Int,round.(new_params[good_throughput_fibers, 2]))
+
+    curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(float.(good_y_vals))))
+    expect_trace_pos = prior_fiber_to_center_func.(float.(curr_fiber_inds))
+    med_offset = nanmedian(expect_trace_pos-good_y_vals)
+    good_y_vals = ceil.(Int,round.(expect_trace_pos.-med_offset))
+
+    verbose && println("Updated identified peaks ", size(good_y_vals))
 
     fit_inds = good_y_vals .+ offset_inds'
     best_model_fit_inds = good_y_vals .+ best_model_offset_inds'
@@ -565,7 +591,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     fit_errs = all_rel_errs[fit_inds]
     fit_ivars = fit_errs .^ -2
 
-    curr_fiber_inds = clamp.(ceil.(Int, round.(med_center_to_fiber_func.(float.(good_y_vals)))),
+    curr_fiber_inds = clamp.(ceil.(Int, round.(prior_center_to_fiber_func.(float.(good_y_vals).+med_offset))),
         min_prof_fib, max_prof_fib)
 
     # first guess parameters
@@ -575,6 +601,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     first_guess_params[:, 3] .= 0.7 # sigma
 
     first_guess_params[:, 1] .*= (2 * π)^0.5 * first_guess_params[:, 3] # change to integrated height
+    println("updated first guess pos ",first_guess_params[:,2])
 
     new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
@@ -584,20 +611,15 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
 
-    verbose && println("Updated original identified peaks ", size(good_y_vals))
-
-    curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(new_params[:, 2])))
-
-    verbose && println("Updated peaks indices ", size(good_y_vals), " ", curr_fiber_inds)
-
     curr_best_params = copy(new_params)
 
     # use the location of the current peaks to fill in any gaps for low-throughput fibers
     peak_locs = new_params[1:(end - 1), 2]
     peak_spacing = new_params[2:end, 2] .- new_params[1:(end - 1), 2]
     med_peak_spacing = nanmedian(peak_spacing)
+    println("med_peak_spacing ",med_peak_spacing," ",quantile(peak_spacing,[0,0.16,0.5,0.84,1])," ",peak_locs)
 
-    keep_space = (abs.(peak_spacing ./ med_peak_spacing .- 1.0) .< 0.5) .& (peak_spacing .> 4)
+    keep_space = (abs.(peak_spacing ./ med_peak_spacing .- 1.0) .< 0.5) # .& (peak_spacing .> 4)
 
     sigma = 10.0
     n_smooth_pix = round(3 * sigma) + 1
@@ -683,9 +705,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
 
+    curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(float.(new_params[:, 2]))))
+    expect_trace_pos = prior_fiber_to_center_func.(float.(curr_fiber_inds))
+    med_offset = nanmedian(expect_trace_pos-new_params[:, 2])
     all_peak_ints = range(
         start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
-    all_peak_locs = peak_func.(all_peak_ints)
+    all_peak_locs = prior_fiber_to_center_func.(float.(all_peak_ints)).-med_offset
     keep_peak_ints = (all_peak_locs .> 1 + 10) .& (all_peak_locs .< 2048 - 10)
     all_peak_ints = all_peak_ints[keep_peak_ints]
     all_peak_locs = all_peak_locs[keep_peak_ints]
@@ -738,8 +763,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
     first_guess_params[:, 2] .= all_peak_locs #center position index for mu
     first_guess_params[:, 3] .= curr_best_widths # sigma
 
-    curr_fiber_inds = clamp.(
-        ceil.(Int, round.(med_center_to_fiber_func.(all_peak_locs))), min_prof_fib, max_prof_fib)
+    curr_fiber_inds = clamp.(ceil.(Int, round.(prior_center_to_fiber_func.(float.(all_peak_locs.+med_offset)))),min_prof_fib, max_prof_fib)
 
     new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
@@ -856,21 +880,24 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         end
     end
 
-    curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(best_fit_ave_params[:, 2])))
+    #identify which fibers should be kept using the prior_center_to_fiber_func
+    curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(best_fit_ave_params[:, 2])))
+    expect_trace_pos = prior_fiber_to_center_func.(float.(curr_fiber_inds))
+    med_offset = nanmedian(expect_trace_pos-best_fit_ave_params[:, 2])
+    curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(best_fit_ave_params[:, 2].+med_offset)))
+
     #    best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
 
-    verbose && println("possible fiber indices ", curr_fiber_inds)
-    verbose && println("truncated fiber indices ", curr_fiber_inds[left_cut_ind:right_cut_ind])
+    verbose && println("possible fiber indices ",size(curr_fiber_inds)," ", curr_fiber_inds)
+    verbose && println("truncated fiber indices ",size(curr_fiber_inds[left_cut_ind:right_cut_ind]) ," ",curr_fiber_inds[left_cut_ind:right_cut_ind])
 
-    if right_cut_ind - left_cut_ind == 300 - 1
+    if size(best_fit_ave_params[left_cut_ind:right_cut_ind, :],1) == 300
         #then the truncation of bad edge fibers worked
         best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
-        curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(best_fit_ave_params[:, 2])))
     else
         #likely here for plate-era data
         #because the edge fibers can have significantly lower throughput
         #producing < 300 fibers
-        curr_fiber_inds = ceil.(Int, round.(med_center_to_fiber_func.(best_fit_ave_params[:, 2])))
         keep_fibers = (curr_fiber_inds .>= 1) .& (curr_fiber_inds .<= 300)
         best_fit_ave_params = best_fit_ave_params[keep_fibers, :]
     end
@@ -930,7 +957,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 
     best_fit_spacing = diff(best_fit_ave_params[:, 2])
     new_offsets = zeros(Float64, size(first_guess_params, 1))
-    x_mean = mean(curr_fiber_inds)
+    curr_fib_counts = collect(1:size(curr_fiber_inds,1))
+    x_mean = mean(curr_fib_counts)
 
     @showprogress enabled=verbose desc="Fitting traces" for (ind, x_ind) in enumerate(sorted_x_inds)
         #use previous analyses to constrain first guesses
@@ -979,10 +1007,10 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
         curr_diff = first_guess_params[:, 2] .- predict_centers
         y_mean = nanmedian(curr_diff)
         missing_slope = sum((curr_diff .- y_mean) .*
-                            (curr_fiber_inds .- x_mean)) /
-                        sum((curr_fiber_inds .- x_mean) .^ 2)
-        missing_inter = nanmedian(curr_diff .- missing_slope .* curr_fiber_inds)
-        predict_centers .+= curr_fiber_inds .* missing_slope .+ missing_inter
+                            (curr_fib_counts .- x_mean)) /
+                        sum((curr_fib_counts .- x_mean) .^ 2)
+        missing_inter = nanmedian(curr_diff .- missing_slope .* curr_fib_counts)
+        predict_centers .+= curr_fib_counts .* missing_slope .+ missing_inter
         first_guess_params[:, 2] .= clamp.(predict_centers, 11, 2048 - 11)
 
         # first guess parameters
