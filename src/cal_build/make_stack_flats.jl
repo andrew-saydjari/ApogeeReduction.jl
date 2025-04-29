@@ -112,8 +112,9 @@ bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
 
 desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])"
 @showprogress desc=desc for (indx, fname) in enumerate(flist)
-    sname = split(fname, "_")
-    tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+    sname = split(split(fname, "/")[end], "_")
+    fnameType, tele, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+
     floc = jldopen(fname)
     temp_im = floc["dimage"]
     close(floc)
@@ -236,9 +237,9 @@ else
         if length(flist) < 500 # if there are less than 5 frames, don't make a video
             # Post each frame individually since there are few frames
             for (i, fname) in enumerate(flist)
-                sname = split(fname, "_")
-                teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
-
+                sname = split(split(fname, "/")[end], "_")
+                fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+            
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])
                 hm = heatmap!(ax, flat_im_mat[:, :, i],
@@ -249,7 +250,7 @@ else
 
                 text!(ax,
                     0.5, 1.05,
-                    text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                    text = "Tele: $(teleloc), MJD: $(mjdloc), Expnum: $(expnumloc), Chip: $(chiploc)",
                     align = (:center, :bottom),
                     space = :relative
                 )
@@ -287,12 +288,12 @@ else
                 colsize!(fig.layout, 1, Aspect(1, data_aspect))
                 resize_to_layout!(fig)
 
-                sname = split(flist[i], "_")
-                teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+                sname = split(split(flist[i], "/")[end], "_")
+                fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
 
                 text!(ax,
                     0.5, 1.05,
-                    text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                    text = "Tele: $(teleloc), MJD: $(mjdloc), Expnum: $(expnumloc), Chip: $(chiploc)",
                     align = (:center, :bottom),
                     space = :relative
                 )

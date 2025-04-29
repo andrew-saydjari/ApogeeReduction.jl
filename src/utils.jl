@@ -263,7 +263,13 @@ end
 function parseCartID(x)
     if x == "FPS"
         return 0
-    else
+    elseif typeof(x) <: Union{Int32, Int64}
         return x
+    elseif typeof(x) == String
+        return parse(Int, x)
+    elseif typeof(x) <: Union{Float32, Float64}
+        return Int(x)
+    else
+        error("Unknown cartid type: $(typeof(x))")
     end
 end

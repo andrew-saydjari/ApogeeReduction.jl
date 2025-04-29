@@ -278,11 +278,11 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 end
 
 """
-Given an open HDF.file, `f`, and the telescope, mjd, and a "short" expid, return a dictionary
+Given an open HDF.file, `f`, and the telescope, mjd, and expnum, return a dictionary
 mapping fiber id to fiber type.
 """
-function get_fibTargDict(f, tele, mjd, exposure_id)
-    exposure_id = short_expid_to_long(mjd, exposure_id)
+function get_fibTargDict(f, tele, mjd, expnum)
+    exposure_id = short_expid_to_long(mjd, expnum)
 
     # translate confSummary/almanac terminology to AR.jl terminology
     fiber_type_names = Dict(
@@ -363,15 +363,15 @@ end
 
 # hardcoded to use chip c only for now
 # must use dome flats, not quartz flats (need fiber runs to telescope)
-function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_chip = "c")
-    expidfull = parse(Int, expidstr)
+# use full exposure_id
+function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, exposure_id; fluxing_chip = "c")
     df_mjd = sort(
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
         :exposure)
-    expIndex = findfirst(df_mjd.exposure .== expidfull)
+    expIndex = findfirst(df_mjd.exposure .== exposure_id)
     cartId = df_mjd.cartidInt[expIndex]
-    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .< expidfull))
-    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .> expidfull))
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .< exposure_id))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .> exposure_id))
     valid_before = if !isnothing(expIndex_before)
         all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
     elseif !isnothing(expIndex_before)
@@ -389,43 +389,43 @@ function get_fluxing_file(dfalmanac, parent_dir, mjd, tele, expidstr; fluxing_ch
 
     if valid_before == 1
         return get_fluxing_file_name(
-            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_before], cartId)
     elseif valid_after == 1
         return get_fluxing_file_name(
-            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_after], cartId)
         # any of the cases below here we could consider using a global file
     elseif valid_before == 2
         return get_fluxing_file_name(
-            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_before], cartId)
+            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_before], cartId)
     elseif valid_after == 2
         return get_fluxing_file_name(
-            parent_dir, mjd, tele, fluxing_chip, df_mjd.exposure[expIndex_after], cartId)
+            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_after], cartId)
     else
         return nothing
     end
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
+function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
     # might need to add in telluric div functionality here?
 
     sname = split(split(fname, "/")[end], "_")
-    fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
+    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
     # could shift this to a preallocation step
-    outflux = zeros(length(logUniWaveAPOGEE), 300)
-    outvar = zeros(length(logUniWaveAPOGEE), 300)
-    outmsk = zeros(Int, length(logUniWaveAPOGEE), 300)
-    cntvec = zeros(Int, length(logUniWaveAPOGEE), 300)
+    outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
+    outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
+    outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
+    cntvec = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
 
-    pixvec = 1:(3 * 2048)
-    flux_stack = zeros(3 * 2048, 300)
-    ivar_stack = zeros(3 * 2048, 300)
-    mask_stack = zeros(Int, 3 * 2048, 300)
-    wave_stack = zeros(3 * 2048, 300)
-    chipBit_stack = zeros(Int, 3 * 2048, 300)
+    pixvec = 1:(N_CHIPS * N_XPIX)
+    flux_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
+    ivar_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
+    mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
+    wave_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
+    chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
 
-    ingestBit = zeros(Int, 300)
+    ingestBit = zeros(Int, N_FIBERS)
 
     # add a for loop over the exposures (stop thinking about "visits" for now)
     # probably just generate ap1D file names from the alamanc files
@@ -440,10 +440,10 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
         chipWaveSoln = f["chipWaveSoln"]
         close(f)
     else #this is a terrible global fallback, just so we get something to look at
-        chipWaveSoln = zeros(2048, 300, 3)
+        chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
         for (chipind, chip) in enumerate(["a", "b", "c"])
             chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
-                1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+                1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
         end
         println("No wavecal found for $(fname), using fallback")
         flush(stdout)
@@ -458,11 +458,11 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
         mask_1d = f["mask_1d"]
         close(f)
 
-        flux_stack[(1:2048) .+ (3 - chipind) * 2048, :] .= flux_1d[end:-1:1, :]
-        ivar_stack[(1:2048) .+ (3 - chipind) * 2048, :] .= ivar_1d[end:-1:1, :]
-        mask_stack[(1:2048) .+ (3 - chipind) * 2048, :] .= mask_1d[end:-1:1, :]
-        wave_stack[(1:2048) .+ (3 - chipind) * 2048, :] .= chipWaveSoln[end:-1:1, :, chipind]
-        chipBit_stack[(1:2048) .+ (3 - chipind) * 2048, :] .+= 2^(chipind)
+        flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
+        ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
+        mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
+        wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
+        chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
     end
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
@@ -474,7 +474,7 @@ function reinterp_spectra(fname; wavecal_type = "wavecal_skyline")
                (ivar_stack .> (10^-20))
 
     ## need to propagate the bit mask
-    for fiberindx in 1:300
+    for fiberindx in 1:N_FIBERS
         good_pix_fiber = good_pix[:, fiberindx]
         flux_fiber = flux_stack[good_pix_fiber, fiberindx]
         ivar_fiber = ivar_stack[good_pix_fiber, fiberindx]

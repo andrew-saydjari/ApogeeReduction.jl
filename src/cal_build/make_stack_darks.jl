@@ -79,7 +79,6 @@ dark_im = zeros(2560, 2048)
 
 desc = "stacking darks for $(parg["tele"]) $(chip)"
 @showprogress desc=desc for (indx, fname) in enumerate(flist)
-    sname = split(fname, "_")
     f = jldopen(fname)
     temp_im = f["dimage"]
     close(f)
@@ -196,8 +195,8 @@ end
 let #each frame
     if length(flist) < 500
         for (indx, fname) in enumerate(flist)
-            sname = split(fname, "_")
-            tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+            sname = split(split(fname, "/")[end], "_")
+            fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
             f = jldopen(fname)
             temp_im = f["dimage"]
             close(f)
@@ -213,7 +212,7 @@ let #each frame
 
             text!(ax,
                 0.5, 1.05,
-                text = "Tele: $(tele), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                text = "Tele: $(teleloc), MJD: $(mjdloc), Expnum: $(expnumloc), Chip: $(chiploc)",
                 align = (:center, :bottom),
                 space = :relative
             )
@@ -236,8 +235,8 @@ end
 let # each frame residuals
     if length(flist) < 500
         for (indx, fname) in enumerate(flist)
-            sname = split(fname, "_")
-            tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+            sname = split(split(fname, "/")[end], "_")
+            fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
             f = jldopen(fname)
             temp_im = f["dimage"]
             close(f)
@@ -253,7 +252,7 @@ let # each frame residuals
 
             text!(ax,
                 0.5, 1.05,
-                text = "Tele: $(tele), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                text = "Tele: $(teleloc), MJD: $(mjdloc), Expnum: $(expnumloc), Chip: $(chiploc)",
                 align = (:center, :bottom),
                 space = :relative
             )
