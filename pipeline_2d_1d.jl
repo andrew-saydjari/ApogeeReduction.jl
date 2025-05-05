@@ -341,7 +341,7 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
-all1DObjectSkyPeaks = replace(
+all1DObjectSkyPeaks = replace.(
     replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
