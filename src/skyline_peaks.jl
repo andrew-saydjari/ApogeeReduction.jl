@@ -2,9 +2,22 @@ import FastRunningMedian: running_median
 using Optim, HDF5
 
 function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
+    #use running median to help identify skyline peaks in data
+    #(especially for bright stars)
+    med_flux_vec = running_median(
+        flux_vec, 101, :asym_trunc, nan = :ignore)
+#    println(size(flux_vec)," ",size(med_flux_vec)," ",nanzeropercentile(med_flux_vec))
+
+    med_flux_vec[med_flux_vec .== 0.0] .= 1.0
+    scaled_flux_vec = flux_vec ./ med_flux_vec
+
     # Find indices where flux is above 99th percentile
-    thresh = percentile(flux_vec, 97.5)
-    above_thresh = findall(x -> x > thresh, flux_vec)
+    thresh = percentile(scaled_flux_vec, 97.5)
+    slope_vec = scaled_flux_vec[(begin+1):end] .- scaled_flux_vec[begin:(end-1)]
+    above_thresh = findall((scaled_flux_vec[(begin+1):(end-1)] .>= thresh) .& 
+		         (slope_vec[begin:(end-1)] .>= 0) .& (slope_vec[(begin+1):end] .<= 0) .&
+			 .!((slope_vec[begin:(end-1)] .== 0) .& (slope_vec[(begin+1):end] .== 0))) .+ 1
+#    above_thresh = findall(x -> x > thresh, flux_vec)
 
     # Group indices into segments, combining those less than 10 pixels apart
     segments = []

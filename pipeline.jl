@@ -275,7 +275,7 @@ flush(stdout);
         nread_used = metadata["nread_used"]
 
         ### dark current subtraction
-        darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
+        darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*.h5", dirname(fname)))
         if length(darkRateflst) != 1
             error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
@@ -286,7 +286,7 @@ flush(stdout);
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding
-        flatFractionflst = sort(glob("flatFraction_$(tele)_$(chip)_*", dirname(fname)))
+        flatFractionflst = sort(glob("flatFraction_$(tele)_$(chip)_*.h5", dirname(fname)))
         if length(flatFractionflst) != 1
             error("I didn't just find one flatFraction file for mjd $mjd, I found $(length(flatFractionflst))")
         end
