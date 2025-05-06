@@ -110,7 +110,7 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
 
     safe_jldsave(
         parg["trace_dir"] *
-        "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).h5";
+        "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
     return trace_plots("dome", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)

@@ -102,6 +102,7 @@ flat_im_mat = zeros(2040, 2040, length(flist))
 # this is using the mjd of the first exposure, which works if we are processing an ultra dark run
 # but we might want to reconsider moving this inside the loop if we decide to use nightly flats moving forward
 darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
+
 df_dark = cal2df(darkFlist)
 calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd[1], chip)
 

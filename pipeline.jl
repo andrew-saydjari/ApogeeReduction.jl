@@ -138,7 +138,16 @@ flush(stdout);
         df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
-        df.exposure_int = parse.(Int, df.exposure)
+        df.exposure_int = if typeof(df.exposure) <: Array{Int}
+            df.exposure
+        else
+            parse.(Int, df.exposure)
+        end
+        df.exposure_str = if typeof(df.exposure) <: Array{String}
+            df.exposure
+        else
+            lpad.(string.(df.exposure), 8, "0")
+        end
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
@@ -243,7 +252,7 @@ flush(stdout);
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(
             ["ar2D", df.observatory[expid], df.mjd[expid],
-                df.exposure[expid], chip, df.exptype[expid]],
+                last(df.exposure_str[expid],4), chip, df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
 

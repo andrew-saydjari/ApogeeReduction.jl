@@ -42,7 +42,7 @@ function get_cal_file(parent_dir, tele, mjd, expnum, chip, exptype; use_cal = fa
         fname_type = "ar2D"
     end
     return parent_dir *
-           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(expnum)_$(chip)_$(exptype).h5"
+           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(lpad(expnum, 4, "0"))_$(chip)_$(exptype).h5"
 end
 
 function get_fluxing_file_name(parent_dir, tele, chip, mjd, exposure_id, cartid)
@@ -56,7 +56,7 @@ function get_1d_name(expid, df; cal = false)
     else
         "ar1D"
     end
-    return join([fnameType, df.observatory[expid], df.mjd[expid], lpad(df.exposure[expid], 8, "0"), df.chip[expid], df.exptype[expid]], "_")
+    return join([fnameType, df.observatory[expid], df.mjd[expid], last(df.exposure_str[expid],4), df.chip[expid], df.exptype[expid]], "_")
 end
 
 function fiberIndx2fiberID(fibindx)

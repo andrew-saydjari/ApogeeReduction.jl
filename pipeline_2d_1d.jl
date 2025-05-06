@@ -105,6 +105,7 @@ flush(stdout);
     using DataFrames, EllipsisNotation, StatsBase
     using AstroTime # can remove after Adam merges the PR to recast as Float
     using ParallelDataTransfer, ProgressMeter
+    using ApogeeReduction
 
     src_dir = "./"
     include(src_dir * "src/ar1D.jl")
@@ -248,6 +249,16 @@ for mjd in unique_mjds
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     close(f)
+    df.exposure_int = if typeof(df.exposure) <: Array{Int}
+        df.exposure
+    else
+        parse.(Int, df.exposure)
+    end
+    df.exposure_str = if typeof(df.exposure) <: Array{String}
+        df.exposure
+    else
+        lpad.(string.(df.exposure), 8, "0")
+    end
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
@@ -340,7 +351,7 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
-all1DObjectSkyPeaks = replace(
+all1DObjectSkyPeaks = replace.(
     replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 

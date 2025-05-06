@@ -97,6 +97,16 @@ for mjd in unique_mjds
     df = h5open(parg["trace_dir"] * "almanac/$(parg["runname"]).h5") do f
         DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     end
+    df.exposure_int = if typeof(df.exposure) <: Array{Int}
+        df.exposure
+    else
+        parse.(Int, df.exposure)
+    end
+    df.exposure_str = if typeof(df.exposure) <: Array{String}
+        df.exposure
+    else
+        lpad.(string.(df.exposure), 8, "0")
+    end
     function get_1d_name_partial(expid)
         parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
@@ -154,8 +164,8 @@ thread("$(cal_type) relFluxing")
 
 @everywhere begin
     function plot_relFlux(fname)
-        sname = split(split(fname, "/")[end], "_")
-        fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
+        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        fnameType, tele, mjd, expnum, chiploc, exptype, cartid = sname[(end - 6):end]
 
         xvec = if tele == "apo"
             1:300

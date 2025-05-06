@@ -1,8 +1,8 @@
 using DataFrames
 
 function calStrip(fname)
-    sname = split(split(fname, "/")[end], "_")
-    calType, tele, chip, mjdstart, mjdend = sname[(end - 5):end]
+    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    calType, tele, chip, mjdstart, mjdend = sname[(end - 4):end]
     return vcat(abspath(fname), calType, tele, chip, parse(Int, mjdstart), parse(Int, mjdend))
 end
 
