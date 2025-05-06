@@ -138,6 +138,7 @@ flush(stdout);
         df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
             DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
         end
+        df.cartidInt = parseCartID.(df.cartid)
         df.exposure_int = if typeof(df.exposure) <: Array{Int}
             df.exposure
         else

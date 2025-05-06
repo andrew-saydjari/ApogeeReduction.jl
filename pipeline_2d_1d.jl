@@ -134,6 +134,16 @@ flush(stdout);
         falm = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         dfalmanac = DataFrame(read(falm["$(parg["tele"])/$(mjd)/exposures"]))
         dfalmanac.cartidInt = parseCartID.(dfalmanac.cartid)
+        dfalmanac.exposure_int = if typeof(dfalmanac.exposure) <: Array{Int}
+            dfalmanac.exposure
+        else
+            parse.(Int, dfalmanac.exposure)
+        end
+        dfalmanac.exposure_str = if typeof(dfalmanac.exposure) <: Array{String}
+            dfalmanac.exposure
+        else
+            lpad.(string.(dfalmanac.exposure), 8, "0")
+        end
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv = gh_profiles(tele, mjd, expnum, chip; n_sub = 100)
 
@@ -179,10 +189,10 @@ flush(stdout);
             # relative fluxing (using "c" only for now)
             # this is the path to the underlying fluxing file.
             # it is symlinked below to an exposure-specific file (linkPath).
-            calPath = get_fluxing_file(
-                dfalmanac, parg["outdir"], mjd, tele, expnum, fluxing_chip = "c")
+            calPath = abspath(get_fluxing_file(
+                dfalmanac, parg["outdir"], tele, mjd, expnum, fluxing_chip = "c"))
             expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
-            fibtargDict = get_fibTargDict(falm, tele, parse(Int, mjd), expid_num)
+            fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
             fiberTypeList = map(x -> fibtargDict[x], 1:300)
 
             if isnothing(calPath)
@@ -191,9 +201,8 @@ flush(stdout);
                 relthrpt = ones(size(flux_1d, 2))
                 bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
             elseif !isfile(calPath)
-                error("Fluxing file for $(tele) $(mjd) $(expnum) $(chip) does not exist")
+                error("Fluxing file $(calPath) for $(tele) $(mjd) $(expnum) $(chip) does not exist")
             else
-                calPath = abspath(calPath)
                 linkPath = abspath(joinpath(
                     dirname(fname), "relFlux_$(tele)_$(mjd)_$(expnum)_$(chip).h5"))
                 if !islink(linkPath)
@@ -315,6 +324,17 @@ for mjd in unique_mjds
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     close(f)
+    df.cartidInt = parseCartID.(df.cartid)
+    df.exposure_int = if typeof(df.exposure) <: Array{Int}
+        df.exposure
+    else
+        parse.(Int, df.exposure)
+    end
+    df.exposure_str = if typeof(df.exposure) <: Array{String}
+        df.exposure
+    else
+        lpad.(string.(df.exposure), 8, "0")
+    end
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"

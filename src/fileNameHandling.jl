@@ -26,13 +26,14 @@ function build_raw_path(tele, chip, mjd, exposure_id)
     return join([base, tele, mjd, fname], "/")
 end
 
-function short_expid_to_long(mjd, expid)
-    # this should probably be done with math
-    return lpad(parse(Int, string(mjd - 55562), 4, "0") * lpad(expid, 4, "0"))
+# both inputs are strings, as is the output
+function short_expid_to_long(mjd, expnum)
+    return lpad(string(parse(Int,mjd) - 55562), 4, "0") * lpad(expnum, 4, "0")
 end
 
-function long_expid_to_short(mjd, expid)
-    return expid - (mjd - 55562) * 10000
+# both inputs are integers, as is the output
+function long_expid_to_short(mjd, expnum)
+    return expnum - (mjd - 55562) * 10000
 end
 
 function get_cal_file(parent_dir, tele, mjd, expnum, chip, exptype; use_cal = false)
@@ -45,9 +46,9 @@ function get_cal_file(parent_dir, tele, mjd, expnum, chip, exptype; use_cal = fa
            "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(lpad(expnum, 4, "0"))_$(chip)_$(exptype).h5"
 end
 
-function get_fluxing_file_name(parent_dir, tele, chip, mjd, exposure_id, cartid)
+function get_fluxing_file_name(parent_dir, tele, mjd, exposure, chip, cartid)
     return parent_dir *
-           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(chip)_$(lpad(exposure_id, 8, "0"))_DOMEFLAT_$(cartid).h5"
+           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(exposure)_$(chip)_DOMEFLAT_$(cartid).h5"
 end
 
 function get_1d_name(expid, df; cal = false)

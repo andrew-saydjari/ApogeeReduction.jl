@@ -304,18 +304,23 @@ function get_fibTargDict(f, tele, mjd, expnum)
     # TODO Andrew thinks the fibers with category "" might be serendipitous targets
 
     mjdfps2plate = get_fps_plate_divide(tele)
-    configName, configIdCol, target_type_col = if mjd > mjdfps2plate
+    configName, configIdCol, target_type_col = if parse(Int, mjd) > mjdfps2plate
         "fps", "configid", "category"
     else
         "plates", "plateid", "target_type" # TODO should this be source_type?
     end
 
     df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
-    if !(exposure_id in df_exp.exposure)
+    df_exp.exposure_str = if typeof(df_exp.exposure) <: Array{String}
+        df_exp.exposure
+    else
+        lpad.(string.(df_exp.exposure), 8, "0")
+    end
+    if !(exposure_id in df_exp.exposure_str)
         @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
     end
-    exposure_info = df_exp[findfirst(df_exp[!, "exposure"] .== exposure_id), :]
+    exposure_info = df_exp[findfirst(df_exp[!, "exposure_str"] .== exposure_id), :]
     configid = exposure_info[configIdCol]
 
     fibtargDict = if exposure_info.exptype == "OBJECT"
@@ -342,10 +347,10 @@ function get_fibTargDict(f, tele, mjd, expnum)
                 end
             end
             fibernum_col = df_fib[!, fiberid_col]
-            println(typeof(fibernum_col))
-            fibernumvec = if typeof(fibernum_col) == Vector{Int}
+            # println(typeof(fibernum_col))
+            fibernumvec = if fibernum_col isa AbstractVector{<:Integer}
                 fibernum_col
-            elseif typeof(fibernum_col) == Vector{String}
+            elseif fibernum_col isa AbstractVector{<:String}
                 parse.(Int, fibernum_col)
             else
                 @warn "Fiber numbers are neither integers or strings"
@@ -362,7 +367,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
         Dict(1:300 .=> "cal")
     end
 
-    if mjd > mjdfps2plate
+    if parse(Int, mjd) > mjdfps2plate
         fpifib1, fpifib2 = get_fpi_guide_fiberID(tele)
         fibtargDict[fpifib1] = "fpiguide"
         fibtargDict[fpifib2] = "fpiguide"
@@ -373,14 +378,15 @@ end
 # hardcoded to use chip c only for now
 # must use dome flats, not quartz flats (need fiber runs to telescope)
 # use full exposure_id
-function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, exposure_id; fluxing_chip = "c")
+function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip = "c")
+    exposure_id = parse(Int, short_expid_to_long(mjd, expnum))
     df_mjd = sort(
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
         :exposure)
-    expIndex = findfirst(df_mjd.exposure .== exposure_id)
+    expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
     cartId = df_mjd.cartidInt[expIndex]
-    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .< exposure_id))
-    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure .> exposure_id))
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .< exposure_id))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .> exposure_id))
     valid_before = if !isnothing(expIndex_before)
         all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
     elseif !isnothing(expIndex_before)
@@ -398,17 +404,17 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, exposure_id; fluxing
 
     if valid_before == 1
         return get_fluxing_file_name(
-            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_before], cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
     elseif valid_after == 1
         return get_fluxing_file_name(
-            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_after], cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
         # any of the cases below here we could consider using a global file
     elseif valid_before == 2
         return get_fluxing_file_name(
-            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_before], cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
     elseif valid_after == 2
         return get_fluxing_file_name(
-            parent_dir, tele, fluxing_chip, mjd, df_mjd.exposure[expIndex_after], cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
     else
         return nothing
     end

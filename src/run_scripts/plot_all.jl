@@ -76,6 +76,18 @@ for mjd in unique_mjds
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
     close(f)
+    df.cartidInt = parseCartID.(df.cartid)
+    df.exposure_int = if typeof(df.exposure) <: Array{Int}
+        df.exposure
+    else
+        parse.(Int, df.exposure)
+    end
+    df.exposure_str = if typeof(df.exposure) <: Array{String}
+        df.exposure
+    else
+        lpad.(string.(df.exposure), 8, "0")
+    end
+
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".h5"
@@ -203,7 +215,7 @@ for chip in string.(collect(parg["chips"]))
                 # msk_loc = (mask_1d .&
                 #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
-                fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), parse(Int, expid))
+                fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
                     fibID = fiberIndx2fiberID(fib)
@@ -410,7 +422,7 @@ for exptype2plot in sorted_exptypes
             # need to switch this back when the masking is updated
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
-            fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
+            fibtargDict = get_fibTargDict(f, tele, mjd, expid_num)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
