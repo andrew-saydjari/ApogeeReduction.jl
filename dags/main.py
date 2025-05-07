@@ -100,6 +100,14 @@ with DAG(
                     '    git fetch origin main\n'
                     '    git merge origin/main --no-edit\n'
                     "fi\n"
+                    # --- Separate check for unpushed commits (ahead of origin) ---
+                    'read behind ahead < <(git rev-list --left-right --count origin/' + f'{REPO_BRANCH}' + '...HEAD)\n'
+                    'if [[ "$ahead" -gt 0 ]]; then\n'
+                    f'    echo "Branch is ahead of origin/{REPO_BRANCH} by $ahead commits. Pushing..."\n'
+                    f'    git push origin HEAD:{REPO_BRANCH}\n'
+                    "else\n"
+                    '    echo "Branch is up to date with origin/{REPO_BRANCH}"\n'
+                    "fi\n"
                 ),
             )
         ) >> (

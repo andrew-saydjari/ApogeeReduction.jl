@@ -1,10 +1,9 @@
 using DataFrames
 
 function calStrip(fname)
-    calType, telescope, chip, mjdstart, mjdend = split(
-        split(split(fname, "/")[end], ".")[1], "_")
-    return vcat(
-        abspath(fname), calType, telescope, chip, parse(Int, mjdstart), parse(Int, mjdend))
+    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    calType, tele, chip, mjdstart, mjdend = sname[(end - 4):end]
+    return vcat(abspath(fname), calType, tele, chip, parse(Int, mjdstart), parse(Int, mjdend))
 end
 
 function cal2df(flist)

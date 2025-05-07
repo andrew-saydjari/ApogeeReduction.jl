@@ -105,6 +105,7 @@ flush(stdout);
     using DataFrames, EllipsisNotation, StatsBase
     using AstroTime # can remove after Adam merges the PR to recast as Float
     using ParallelDataTransfer, ProgressMeter
+    using ApogeeReduction
 
     src_dir = "./"
     include(src_dir * "src/ar1D.jl")
@@ -126,16 +127,15 @@ flush(stdout);
 ##### 1D stage
 @everywhere begin
     function process_1D(fname)
-        sname = split(split(fname, "/")[end], "_")
-        fnameType, tele, mjd, chip, expid = sname[(end - 5):(end - 1)]
+        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         # how worried should I be about loading this every time?
-        falm = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-        dfalmanac = DataFrame(read(falm["$(parg["tele"])/$(mjd)/exposures"]))
-        dfalmanac.cartidInt = parseCartID.(dfalmanac.cartid)
+        falm = h5open(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"))
+        dfalmanac = read_almanac_exp_df(falm, parg["tele"], mjd)
+
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
-        all_y_prof, all_y_prof_deriv = gh_profiles(
-            tele, mjd, chip, expid; n_sub = 100)
+        all_y_prof, all_y_prof_deriv = gh_profiles(tele, mjd, expnum, chip; n_sub = 100)
 
         fnamecal = if (fnameType == "ar2D")
             replace(fname, "ar2D" => "ar2Dcal")
@@ -180,24 +180,23 @@ flush(stdout);
             # this is the path to the underlying fluxing file.
             # it is symlinked below to an exposure-specific file (linkPath).
             calPath = get_fluxing_file(
-                dfalmanac, parg["outdir"], mjd, tele, expid, fluxing_chip = "c")
-            expid_num = parse(Int, last(expid, 4)) #this is silly because we translate right back
-            fibtargDict = get_fibTargDict(falm, tele, parse(Int, mjd), expid_num)
+                dfalmanac, parg["outdir"], tele, mjd, expnum, fluxing_chip = "c")
+            expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
+            fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
             fiberTypeList = map(x -> fibtargDict[x], 1:300)
 
             if isnothing(calPath)
                 # TODO uncomment this
-                @warn "No fluxing file available for $(tele) $(mjd) $(chip) $(expid)"
+                @warn "No fluxing file available for $(tele) $(mjd) $(expnum) $(chip)"
                 relthrpt = ones(size(flux_1d, 2))
                 bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
             elseif !isfile(calPath)
-                error("Fluxing file for $(tele) $(mjd) $(chip) $(expid) does not exist")
+                error("Fluxing file $(calPath) for $(tele) $(mjd) $(expnum) $(chip) does not exist")
             else
-                calPath = abspath(calPath)
                 linkPath = abspath(joinpath(
-                    dirname(fname), "relFlux_$(tele)_$(mjd)_$(chip)_$(expid).h5"))
+                    dirname(fname), "relFlux_$(tele)_$(mjd)_$(expnum)_$(chip).h5"))
                 if !islink(linkPath)
-                    symlink(calPath, linkPath)
+                    symlink(abspath(calPath), linkPath)
                 end
                 relthrpt = load(linkPath, "relthrpt")
                 relthrptr = reshape(relthrpt, (1, length(relthrpt)))
@@ -246,9 +245,7 @@ end
 
 list2Dexp = []
 for mjd in unique_mjds
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    close(f)
+    df = read_almanac_exp_df(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
@@ -302,9 +299,7 @@ all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
 ## get all OBJECT files (happy to add any other types that see sky?)
 list1DexpObject = []
 for mjd in unique_mjds
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    close(f)
+    df = read_almanac_exp_df(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
@@ -342,7 +337,7 @@ flush(stdout);
 println("Solving skyline wavelength solution:");
 flush(stdout);
 all1DObjectSkyPeaks = replace.(
-    replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
+replace.(all1DObject, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name

@@ -102,6 +102,7 @@ flat_im_mat = zeros(2040, 2040, length(flist))
 # this is using the mjd of the first exposure, which works if we are processing an ultra dark run
 # but we might want to reconsider moving this inside the loop if we decide to use nightly flats moving forward
 darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
+
 df_dark = cal2df(darkFlist)
 calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd[1], chip)
 
@@ -112,8 +113,9 @@ bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
 
 desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])"
 @showprogress desc=desc for (indx, fname) in enumerate(flist)
-    sname = split(fname, "_")
-    tele, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    fnameType, tele, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+
     floc = jldopen(fname)
     temp_im = floc["dimage"]
     close(floc)
@@ -236,9 +238,9 @@ else
         if length(flist) < 500 # if there are less than 5 frames, don't make a video
             # Post each frame individually since there are few frames
             for (i, fname) in enumerate(flist)
-                sname = split(fname, "_")
-                teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
-
+                sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+                fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+            
                 fig = Figure(size = (1200, 800), fontsize = 24)
                 ax = Axis(fig[1, 1])
                 hm = heatmap!(ax, flat_im_mat[:, :, i],
@@ -249,7 +251,7 @@ else
 
                 text!(ax,
                     0.5, 1.05,
-                    text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                    text = "Tele: $(teleloc), MJD: $(mjdloc), Expnum: $(expnumloc), Chip: $(chiploc)",
                     align = (:center, :bottom),
                     space = :relative
                 )
@@ -288,11 +290,11 @@ else
                 resize_to_layout!(fig)
 
                 sname = split(flist[i], "_")
-                teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+                fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
 
                 text!(ax,
                     0.5, 1.05,
-                    text = "Tele: $(teleloc), MJD: $(mjdloc), Chip: $(chiploc) Expid: $(expidloc)",
+                    text = "Tele: $(teleloc), MJD: $(mjdloc), Expnum: $(expnumloc), Chip: $(chiploc)",
                     align = (:center, :bottom),
                     space = :relative
                 )

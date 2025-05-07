@@ -175,7 +175,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         scale_func_chip3 = Polynomial([1.0, 0.0])
     end
 
-    fibInds = 1:300
+    fibInds = 1:N_FIBERS
     chipPolyParams0 = zeros(Float64, (size(fibInds, 1), 3, cporder + 1))
     chipPolyParams0[:, 1, 1] .= offset_func_chip1.(fibInds)
     chipPolyParams0[:, 1, 2] .= scale_func_chip1.(fibInds)
@@ -184,7 +184,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     chipPolyParams0[:, 3, 1] .= offset_func_chip3.(fibInds)
     chipPolyParams0[:, 3, 2] .= scale_func_chip3.(fibInds)
 
-    outname = replace(replace(fname, "skyLine_peaks" => "wavecal_skyline"), "_a_" => "_")
+    outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_a_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
     linParams, nlParams,
     resid_vec = get_sky_wavecal(
@@ -216,7 +216,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
 
         params2ChipPolyParams!(chipPolyParams, inparams, cporder)
         xt = zeros(Float64, length(xv[sky_msk]))
-        for i in 1:3
+        for i in 1:N_CHIPS
             msk = chipIntv[sky_msk] .== i
             xt[msk] .= transform_x_chips(xv[sky_msk][msk], chipPolyParams[i, :])
         end
@@ -233,13 +233,13 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         # so probably shouldn't do it
     end
 
-    chipWaveSoln = zeros(Float64, 2048, 300, 3)
-    interp_chipWaveSoln = zeros(Float64, 2048, 300, 3)
-    x = 1:2048
-    ximport = (x .- 1024) ./ 2048
+    chipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, 3)
+    interp_chipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, 3)
+    x = 1:N_XPIX
+    ximport = (x .- (N_XPIX ÷ 2)) ./ N_XPIX
     for chip in ["a", "b", "c"]
         chipIndx = getChipIndx(chip)
-        for fibIndx in 1:300
+        for fibIndx in 1:N_FIBERS
             params2ChipPolyParams!(chipPolyParams0[fibIndx, :, :], nlParams[fibIndx, :], cporder)
             xt = transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
             Ax = positional_poly_mat(xt, porder = 2)
@@ -265,11 +265,11 @@ end
 
 function get_sky_wavecal(
         sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2)
-    linParams = zeros(Float64, 300, wporder + 1)
-    nlParams = zeros(Float64, 300, 2 * (cporder + 1))
-    resid_vec = zeros(Float64, 300, size(sky_line_uxlst, 1))
+    linParams = zeros(Float64, N_FIBERS, wporder + 1)
+    nlParams = zeros(Float64, N_FIBERS, 2 * (cporder + 1))
+    resid_vec = zeros(Float64, N_FIBERS, size(sky_line_uxlst, 1))
     fill!(resid_vec, NaN)
-    for i in 1:300
+    for i in 1:N_FIBERS
         xv = sky_line_uxlst[:, i]
         yv = sky_line_fwlst[:, i]
         chipIntv = sky_line_chipInt[:, i]
@@ -379,17 +379,18 @@ function ingest_skyLines_file(fileName)
         read(f["sky_line_mat_clean"])
     end
     close(f)
-    sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- 1024) ./ 2048
+    sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
     return sky_line_xlst, sky_line_wlst
 end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)
-function ingest_skyLines_exp(fname)
+function ingest_skyLines_exp(fname; chip_lst = ["a", "b", "c"])
+    # println("Ingesting sky lines for $fname")
     sky_line_uxlst = Matrix{Float64}[]
     sky_line_fwlst = Matrix{Float64}[]
     sky_line_chipInt = Matrix{Int}[]
-    for chip in ["a", "b", "c"]
+    for chip in chip_lst
         fnameloc = replace(fname, "_a_" => "_$(chip)_")
         if isfile(fnameloc)
             sky_line_xlst, sky_line_wlst = ingest_skyLines_file(fnameloc)
@@ -398,9 +399,10 @@ function ingest_skyLines_exp(fname)
             push!(sky_line_fwlst, sky_line_wlst)
             push!(sky_line_chipInt, chipIndx * ones(Int, size(sky_line_wlst)))
         else
-            push!(sky_line_uxlst, [])
-            push!(sky_line_fwlst, [])
-            push!(sky_line_chipInt, [])
+            println("Sky line file $fnameloc does not exist")
+            push!(sky_line_uxlst, Matrix{Float64}(undef, 0, 0))
+            push!(sky_line_fwlst, Matrix{Float64}(undef, 0, 0))
+            push!(sky_line_chipInt, Matrix{Int}(undef, 0, 0))
         end
     end
     sky_line_uxlst = vcat(sky_line_uxlst...)

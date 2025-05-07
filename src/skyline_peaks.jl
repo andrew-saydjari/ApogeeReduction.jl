@@ -231,8 +231,9 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
 end
 
 function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
-    sname = split(fname, "_")
-    tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+    sname = split(split(fname, "/")[end], "_")
+    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+
     f = jldopen(fname, "r+")
     flux_1d = f["flux_1d"]
     close(f)
@@ -251,9 +252,9 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
         return
     end
     sky_line_mat = zeros(
-        Float64, length(unique_skyline_inds), size(pout[first_valid_idx][1], 1), 300)
+        Float64, length(unique_skyline_inds), size(pout[first_valid_idx][1], 1), N_FIBERS)
     fill!(sky_line_mat, NaN)
-    for i in 1:300
+    for i in 1:N_FIBERS
         for (eindx, skyindx) in enumerate(unique_skyline_inds)
             if !isnothing(pout[i][1])
                 locIndx = findfirst(pout[i][1][end, :] .== skyindx)
@@ -273,7 +274,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
         msk = abs.(sky_line_mat[i, 1, :] .- medx_detect[i]) .<= 3 * sigma_detect[i]
         sky_line_mat_clean[i, :, .!msk] .= NaN
     end
-    outname = replace(replace(fname, "ar1Dcal" => "skyLine_peaks"),"ar1D" => "skyLine_peaks")
+    outname = replace(replace(fname, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
     f = h5open(outname, "w")
     # Write cleaned data
     write(f, "sky_line_mat_clean", sky_line_mat_clean)
@@ -294,7 +295,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
 end
 
 function rough_linear_wave(pix; a = 16156.8, b = -0.282)
-    return a + (pix - 1024) * b
+    return a + (pix - (N_XPIX ÷ 2)) * b
 end
 
 function replace_data(x)

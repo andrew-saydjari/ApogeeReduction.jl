@@ -14,53 +14,50 @@ function getUtahBase(release_dir, redux_ver)
     return "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/apogee/spectro/redux/$(redux_ver)/"
 end
 
-function build_raw_path(obs, mjd, chip, expid)
+function build_raw_path(tele, chip, mjd, exposure_id)
     base = "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
-    fname = if obs == "apo"
-        "apR-$chip-$expid.apz"
-    elseif obs == "lco"
-        "asR-$chip-$expid.apz"
+    fname = if tele == "apo"
+        "apR-$chip-$exposure_id.apz"
+    elseif tele == "lco"
+        "asR-$chip-$exposure_id.apz"
     else
         error("Unknown telescope")
     end
-    return join([base, obs, mjd, fname], "/")
+    return join([base, tele, mjd, fname], "/")
 end
 
-function short_expid_to_long(mjd, expid)
-    # this should probably be done with math
-    return parse(Int, string(mjd - 55562) * lpad(expid, 4, "0"))
+# both inputs are strings, as is the output
+function short_expid_to_long(mjd, expnum)
+    return lpad(string(parse(Int,mjd) - 55562), 4, "0") * lpad(expnum, 4, "0")
 end
 
-function long_expid_to_short(mjd, expid)
-    return expid - (mjd - 55562) * 10000
+# both inputs are integers, as is the output
+function long_expid_to_short(mjd, expnum)
+    return expnum - (mjd - 55562) * 10000
 end
 
-function get_cal_file(parent_dir, tele, mjd, expid, chip, imtype; use_cal = false)
-    expid_adj = short_expid_to_long(mjd, expid)
+function get_cal_file(parent_dir, tele, mjd, expnum, chip, exptype; use_cal = false)
     if use_cal
         fname_type = "ar2Dcal"
     else
         fname_type = "ar2D"
     end
     return parent_dir *
-           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(chip)_$(expid_adj)_$(imtype).h5"
+           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(lpad(expnum, 4, "0"))_$(chip)_$(exptype).h5"
 end
 
-function get_fluxing_file_name(parent_dir, mjd, tele, chip, expidfull, cartid)
+function get_fluxing_file_name(parent_dir, tele, mjd, exposure, chip, cartid)
     return parent_dir *
-           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(chip)_$(expidfull)_DOMEFLAT_$(cartid).h5"
+           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(exposure)_$(chip)_DOMEFLAT_$(cartid).h5"
 end
 
 function get_1d_name(expid, df; cal = false)
-    basename = if cal
+    fnameType = if cal
         "ar1Dcal"
     else
         "ar1D"
     end
-    return join(
-        [basename, df.observatory[expid], df.mjd[expid],
-            df.chip[expid], df.exposure[expid], df.exptype[expid]],
-        "_")
+    return join([fnameType, df.observatory[expid], df.mjd[expid], last(df.exposure_str[expid],4), df.chip[expid], df.exptype[expid]], "_")
 end
 
 function fiberIndx2fiberID(fibindx)

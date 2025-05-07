@@ -94,13 +94,10 @@ end
 
 all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
-    df = h5open(parg["trace_dir"] * "almanac/$(parg["runname"]).h5") do f
-        DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    end
+    df = read_almanac_exp_df(parg["trace_dir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
     function get_1d_name_partial(expid)
         parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
-
     file_list = get_1d_name_partial.(expid_list)
     append!(all1Da, file_list)
 end
@@ -154,8 +151,9 @@ thread("$(cal_type) relFluxing")
 
 @everywhere begin
     function plot_relFlux(fname)
-        sname = split(fname, "_")
-        tele, mjd, chiploc, expid = sname[(end - 5):(end - 2)]
+        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        fnameType, tele, mjd, expnum, chiploc, exptype, cartid = sname[(end - 6):end]
+
         xvec = if tele == "apo"
             1:300
         elseif tele == "lco"
@@ -166,9 +164,9 @@ thread("$(cal_type) relFluxing")
         absthrpt = zeros(300, length(chips))
         relthrpt = zeros(300, length(chips))
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
-        cartid = read_metadata(fname)["cartid"]
+        cartid = Int(read_metadata(fname)["cartid"])
         for (cindx, chip) in enumerate(chips)
-            local_fname = replace(fname, "_a_" => "_$(chip)_")
+            local_fname = replace(fname, "_a_" => "_$(chiploc)_")
             f = jldopen(local_fname)
             absthrpt[:, cindx] = f["absthrpt"]
             relthrpt[:, cindx] = f["relthrpt"]
@@ -182,7 +180,7 @@ thread("$(cal_type) relFluxing")
         # plot the relFlux
         fig = Figure(size = (1200, 400))
         for (cindx, chip) in enumerate(chips)
-            ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chip)")
+            ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chiploc)")
             msk = bitmsk_relthrpt[:, cindx] .== 0
             broken_msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
             warn_msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
@@ -194,19 +192,19 @@ thread("$(cal_type) relFluxing")
             scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
             broken_fibers = xvec[broken_msk]
             if !isempty(broken_fibers) && (chip == "c") # hardcoded for now
-                status_str *= "\nChip $(chip) Broken Fibers:\n    $(join(broken_fibers, "\n    "))"
+                status_str *= "\nChip $(chiploc) Broken Fibers:\n    $(join(broken_fibers, "\n    "))"
             end
 
             # Warn fibers
             scatter!(ax, xvec[warn_only_msk], relthrpt[warn_only_msk, cindx], color = "orange")
             warn_fibers = xvec[warn_only_msk]
             if !isempty(warn_fibers) && (chip == "c") # hardcoded for now
-                status_str *= "\nChip $(chip) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
+                status_str *= "\nChip $(chiploc) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
             end
         end
 
         # we should be more uniform about the naming convention
-        savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expid)_$(cartid).png"
+        savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expnum)_$(cartid).png"
         save(savePath, fig)
 
         return savePath, status_str

@@ -91,6 +91,7 @@ function get_IQR(x, y; cnts_cut = 100, nbin_med = 100)
     return centers, iqr_line, med_line
 end
 
+# why not also ar2Dcal?
 flist = glob("ar2D_*.h5", joinpath(parg["data_dir"], "apred/$(parg["mjd"])/"));
 expnum_v = map(x -> parse(Int, split(basename(x), "_")[end - 1][(end - 3):end]), flist)
 chip_v = map(x -> split(basename(x), "_")[end - 2], flist);
@@ -142,7 +143,7 @@ p = sortperm(expnum_v[mskCal])
 
     resize_to_layout!(fig)
     # need a better naming scheme that keeps the exposure ids
-    plot_name = dirNamePlots * "back2back_flat_$(parg["tele"])_$(parg["mjd"])_$(expid1).png"
-    save(plot_name, fig, px_per_unit = 3)
-    thread("back2back_flat_$(parg["tele"])_$(parg["mjd"])_$(expid1)", plot_name)
+    plot_name = "back2backFlat_$(parg["tele"])_$(parg["mjd"])_$(expid1).png"
+    save(joinpath(dirNamePlots, plot_name), fig, px_per_unit = 3)
+    thread("back2backFlat_$(parg["tele"])_$(parg["mjd"])_$(expid1)", plot_name)
 end

@@ -73,9 +73,19 @@ end
 
 list2Dexp = []
 for mjd in unique_mjds
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    close(f)
+    df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
+    df.cartidInt = parseCartID.(df.cartid)
+    df.exposure_int = if typeof(df.exposure) <: Array{Int}
+        df.exposure
+    else
+        parse.(Int, df.exposure)
+    end
+    df.exposure_str = if typeof(df.exposure) <: Array{String}
+        df.exposure
+    else
+        lpad.(string.(df.exposure), 8, "0")
+    end
+
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".h5"
@@ -104,10 +114,9 @@ for chip in ["a", "b", "c"]
     sample_exposures = sample(rng, all2D, nsamp, replace = false)
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     for exp_fname in sample_exposures
-        sname = split(exp_fname, "_")
-        tele, mjd, chiploc, expid, = sname[(end - 4):(end - 1)]
-        exptype = sname[end][begin:(end - 5)]
-        expid_num = parse(Int, last(expid, 4))
+        sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+        fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
+
         flux_2d = load(exp_fname, "resid_flux")
         ivar_2d = load(exp_fname, "resid_ivar")
         resid_zscore = flux_2d .* (ivar_2d .^ 0.5)
@@ -122,7 +131,7 @@ for chip in ["a", "b", "c"]
 
         text!(ax,
             0.5, 1.05,
-            text = "Zscore Residuals\nTele: $(tele), MJD: $(mjd), ExpID: $(expid), Chip: $(chiploc)",
+            text = "Zscore Residuals\nTele: $(tele), MJD: $(mjd), ExpNum: $(expnum), Chip: $(chiploc)",
             align = (:center, :bottom),
             space = :relative
         )
@@ -134,7 +143,7 @@ for chip in ["a", "b", "c"]
         resize_to_layout!(fig)
 
         savePath = dirNamePlots *
-                   "ar2Dresidualscal_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(exptype).png"
+                   "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(exptype).png"
         save(savePath, fig, px_per_unit = 3)
         thread("$(exp_fname)", savePath)
     end
@@ -142,9 +151,7 @@ end
 
 all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
-    df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
-        df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    end
+    df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
     function get_1d_name_partial(expid)
         parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df) * ".h5"
     end
@@ -195,16 +202,16 @@ for chip in string.(collect(parg["chips"]))
 
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
             for exp_fname in sample_exposures
-                sname = split(exp_fname, "_")
-                tele, mjd, chiploc, expid = sname[(end - 4):(end - 1)]
-                expid_num = parse(Int, last(expid, 4))
+                sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+                fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
+
                 flux_1d = load(exp_fname, "flux_1d")
                 mask_1d = load(exp_fname, "mask_1d")
                 msk_loc = (mask_1d .& bad_pix_bits .== 0)
                 # msk_loc = (mask_1d .&
                 #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
-                fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
+                fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
                     fibID = fiberIndx2fiberID(fib)
@@ -236,7 +243,7 @@ for chip in string.(collect(parg["chips"]))
                     ax2.ylabel = "ADU"
 
                     savePath = dirNamePlots *
-                               "ar1D_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType).png"
+                               "ar1D_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
                     save(savePath, fig)
 
                     thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
@@ -257,7 +264,7 @@ else
 end
 
 function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
-        tele, mjd, chiploc, expid, expType, expuni_fname)
+        tele, mjd, expnum, chiploc, exptype, expuni_fname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
@@ -381,7 +388,7 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     resize_to_layout!(fig)
 
     savePath = dirNamePlots *
-               "$(bname)_$(tele)_$(mjd)_$(chiploc)_$(expid)_$(fib)_$(fibType)_$(expType).png"
+               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
     save(savePath, fig)
 
     thread("Fiberindex: $(fib) $(fibType), $(expuni_fname)", savePath)
@@ -398,10 +405,8 @@ for exptype2plot in sorted_exptypes
         sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         for exp_fname in sample_exposures
-            sname = split(split(exp_fname, ".h5")[1], "_")
-            tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
-            expid_num = parse(Int, last(expid, 4))
-
+            sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+            fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
             expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
             outflux = load(expuni_fname, "flux_1d")
             outmsk = load(expuni_fname, "mask_1d")
@@ -411,13 +416,13 @@ for exptype2plot in sorted_exptypes
             # need to switch this back when the masking is updated
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
-            fibtargDict = get_fibTargDict(f, tele, parse(Int, mjd), expid_num)
+            fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
-                    tele, mjd, chiploc, expid, expType, expuni_fname)
+                    tele, mjd, expnum, chiploc, exptype, expuni_fname)
                 plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical",
-                    tele, mjd, chiploc, expid, expType, expunical_fname)
+                    tele, mjd, expnum, chiploc, exptype, expunical_fname)
             end
         end
     end
