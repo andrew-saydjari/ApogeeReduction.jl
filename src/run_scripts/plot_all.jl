@@ -73,9 +73,7 @@ end
 
 list2Dexp = []
 for mjd in unique_mjds
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    close(f)
+    df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
     df.cartidInt = parseCartID.(df.cartid)
     df.exposure_int = if typeof(df.exposure) <: Array{Int}
         df.exposure
@@ -116,7 +114,7 @@ for chip in ["a", "b", "c"]
     sample_exposures = sample(rng, all2D, nsamp, replace = false)
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     for exp_fname in sample_exposures
-        sname = split(split(exp_fname, "/")[end], "_")
+        sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
         fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
 
         flux_2d = load(exp_fname, "resid_flux")
@@ -153,9 +151,7 @@ end
 
 all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
-    df = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5") do f
-        df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    end
+    df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
     function get_1d_name_partial(expid)
         parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df) * ".h5"
     end
@@ -206,7 +202,7 @@ for chip in string.(collect(parg["chips"]))
 
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
             for exp_fname in sample_exposures
-                sname = split(split(exp_fname, "/")[end], "_")
+                sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
                 fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
 
                 flux_1d = load(exp_fname, "flux_1d")
@@ -409,10 +405,8 @@ for exptype2plot in sorted_exptypes
         sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         for exp_fname in sample_exposures
-            sname = split(split(exp_fname, ".h5")[1], "_")
-            tele, mjd, chiploc, expid, expType = sname[(end - 4):end]
-            expid_num = parse(Int, last(expid, 4))
-
+            sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+            fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
             expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
             outflux = load(expuni_fname, "flux_1d")
             outmsk = load(expuni_fname, "mask_1d")
@@ -422,7 +416,7 @@ for exptype2plot in sorted_exptypes
             # need to switch this back when the masking is updated
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
-            fibtargDict = get_fibTargDict(f, tele, mjd, expid_num)
+            fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",

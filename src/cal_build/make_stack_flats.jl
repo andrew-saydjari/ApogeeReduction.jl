@@ -113,7 +113,7 @@ bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
 
 desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])"
 @showprogress desc=desc for (indx, fname) in enumerate(flist)
-    sname = split(split(fname, "/")[end], "_")
+    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
     fnameType, tele, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
 
     floc = jldopen(fname)
@@ -238,7 +238,7 @@ else
         if length(flist) < 500 # if there are less than 5 frames, don't make a video
             # Post each frame individually since there are few frames
             for (i, fname) in enumerate(flist)
-                sname = split(split(fname, "/")[end], "_")
+                sname = split(split(split(fname, "/")[end],".h5")[1], "_")
                 fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
             
                 fig = Figure(size = (1200, 800), fontsize = 24)
@@ -289,7 +289,7 @@ else
                 colsize!(fig.layout, 1, Aspect(1, data_aspect))
                 resize_to_layout!(fig)
 
-                sname = split(split(flist[i], "/")[end], "_")
+                sname = split(flist[i], "_")
                 fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
 
                 text!(ax,

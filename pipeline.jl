@@ -135,25 +135,12 @@ flush(stdout);
             mkpath(dirName)
         end
 
-        df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
-            DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-        end
-        df.cartidInt = parseCartID.(df.cartid)
-        df.exposure_int = if typeof(df.exposure) <: Array{Int}
-            df.exposure
-        else
-            parse.(Int, df.exposure)
-        end
-        df.exposure_str = if typeof(df.exposure) <: Array{String}
-            df.exposure
-        else
-            lpad.(string.(df.exposure), 8, "0")
-        end
+        df = read_almanac_exp_df(joinpath(outdir, "almanac/$(runname).h5"), parg["tele"], mjd)
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
             df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
-        cartid = parseCartID(df.cartid[expid])
+        cartid = df.cartidInt[expid]
         # decompress and convert apz data format to a standard 3D cube of reads
         cubedat, hdr_dict = apz2cube(rawpath)
 
@@ -273,7 +260,7 @@ flush(stdout);
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
     function process_2Dcal(fname; chi2perdofcut = 100)
-        sname = split(split(fname, "/")[end], "_")
+        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
         fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         dimage = load(fname, "dimage")

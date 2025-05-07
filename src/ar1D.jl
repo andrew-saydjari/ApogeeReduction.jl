@@ -310,12 +310,8 @@ function get_fibTargDict(f, tele, mjd, expnum)
         "plates", "plateid", "target_type" # TODO should this be source_type?
     end
 
-    df_exp = DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
-    df_exp.exposure_str = if typeof(df_exp.exposure) <: Array{String}
-        df_exp.exposure
-    else
-        lpad.(string.(df_exp.exposure), 8, "0")
-    end
+    df_exp = read_almanac_exp_df(f, tele, mjd)
+    
     if !(exposure_id in df_exp.exposure_str)
         @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
@@ -385,8 +381,9 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
         :exposure)
     expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
     cartId = df_mjd.cartidInt[expIndex]
-    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .< exposure_id))
-    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .> exposure_id))
+    # this needs to have cuts that match those in make_runlist_dome_flats.jl
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .< exposure_id) .& (df_mjd.nreadInt .> 3))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .> exposure_id) .& (df_mjd.nreadInt .> 3))
     valid_before = if !isnothing(expIndex_before)
         all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
     elseif !isnothing(expIndex_before)
@@ -424,7 +421,7 @@ end
 function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
     # might need to add in telluric div functionality here?
 
-    sname = split(split(fname, "/")[end], "_")
+    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
     # could shift this to a preallocation step

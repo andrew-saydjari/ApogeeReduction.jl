@@ -35,8 +35,7 @@ expid_list = Int[]
 f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
-    df = DataFrame(read(f[parg["tele"] * "/$(tstmjd)/exposures"]))
-    df.nreadInt = parse.(Int, df.nread)
+    df = read_almanac_exp_df(f, parg["tele"], tstmjd)
     good_exp = (df.nreadInt .> 3) .|
                ((df.imagetyp .== "DomeFlat") .& (df.observatory .== "apo")) .|
                ((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))

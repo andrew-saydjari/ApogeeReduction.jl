@@ -94,21 +94,10 @@ end
 
 all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
-    df = h5open(parg["trace_dir"] * "almanac/$(parg["runname"]).h5") do f
-        DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
+    df = read_almanac_exp_df(parg["trace_dir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
+    function get_1d_name_partial(expid)
+        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
-    df.cartidInt = parseCartID.(df.cartid)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
-
     file_list = get_1d_name_partial.(expid_list)
     append!(all1Da, file_list)
 end
@@ -175,7 +164,7 @@ thread("$(cal_type) relFluxing")
         absthrpt = zeros(300, length(chips))
         relthrpt = zeros(300, length(chips))
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
-        cartid = read_metadata(fname)["cartid"]
+        cartid = Int(read_metadata(fname)["cartid"])
         for (cindx, chip) in enumerate(chips)
             local_fname = replace(fname, "_a_" => "_$(chiploc)_")
             f = jldopen(local_fname)

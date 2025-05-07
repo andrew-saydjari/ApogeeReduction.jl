@@ -127,23 +127,13 @@ flush(stdout);
 ##### 1D stage
 @everywhere begin
     function process_1D(fname)
-        sname = split(split(fname, "/")[end], "_")
+        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
         fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         # how worried should I be about loading this every time?
-        falm = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-        dfalmanac = DataFrame(read(falm["$(parg["tele"])/$(mjd)/exposures"]))
-        dfalmanac.cartidInt = parseCartID.(dfalmanac.cartid)
-        dfalmanac.exposure_int = if typeof(dfalmanac.exposure) <: Array{Int}
-            dfalmanac.exposure
-        else
-            parse.(Int, dfalmanac.exposure)
-        end
-        dfalmanac.exposure_str = if typeof(dfalmanac.exposure) <: Array{String}
-            dfalmanac.exposure
-        else
-            lpad.(string.(dfalmanac.exposure), 8, "0")
-        end
+        falm = h5open(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"))
+        dfalmanac = read_almanac_exp_df(falm, parg["tele"], mjd)
+
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv = gh_profiles(tele, mjd, expnum, chip; n_sub = 100)
 
@@ -189,8 +179,8 @@ flush(stdout);
             # relative fluxing (using "c" only for now)
             # this is the path to the underlying fluxing file.
             # it is symlinked below to an exposure-specific file (linkPath).
-            calPath = abspath(get_fluxing_file(
-                dfalmanac, parg["outdir"], tele, mjd, expnum, fluxing_chip = "c"))
+            calPath = get_fluxing_file(
+                dfalmanac, parg["outdir"], tele, mjd, expnum, fluxing_chip = "c")
             expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
             fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
             fiberTypeList = map(x -> fibtargDict[x], 1:300)
@@ -206,7 +196,7 @@ flush(stdout);
                 linkPath = abspath(joinpath(
                     dirname(fname), "relFlux_$(tele)_$(mjd)_$(expnum)_$(chip).h5"))
                 if !islink(linkPath)
-                    symlink(calPath, linkPath)
+                    symlink(abspath(calPath), linkPath)
                 end
                 relthrpt = load(linkPath, "relthrpt")
                 relthrptr = reshape(relthrpt, (1, length(relthrpt)))
@@ -255,19 +245,7 @@ end
 
 list2Dexp = []
 for mjd in unique_mjds
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    close(f)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
+    df = read_almanac_exp_df(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
@@ -321,20 +299,7 @@ all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
 ## get all OBJECT files (happy to add any other types that see sky?)
 list1DexpObject = []
 for mjd in unique_mjds
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-    close(f)
-    df.cartidInt = parseCartID.(df.cartid)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
+    df = read_almanac_exp_df(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"

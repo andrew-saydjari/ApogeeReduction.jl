@@ -386,6 +386,7 @@ end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)
 function ingest_skyLines_exp(fname; chip_lst = ["a", "b", "c"])
+    # println("Ingesting sky lines for $fname")
     sky_line_uxlst = Matrix{Float64}[]
     sky_line_fwlst = Matrix{Float64}[]
     sky_line_chipInt = Matrix{Int}[]
@@ -398,9 +399,10 @@ function ingest_skyLines_exp(fname; chip_lst = ["a", "b", "c"])
             push!(sky_line_fwlst, sky_line_wlst)
             push!(sky_line_chipInt, chipIndx * ones(Int, size(sky_line_wlst)))
         else
-            push!(sky_line_uxlst, [])
-            push!(sky_line_fwlst, [])
-            push!(sky_line_chipInt, [])
+            println("Sky line file $fnameloc does not exist")
+            push!(sky_line_uxlst, Matrix{Float64}(undef, 0, 0))
+            push!(sky_line_fwlst, Matrix{Float64}(undef, 0, 0))
+            push!(sky_line_chipInt, Matrix{Int}(undef, 0, 0))
         end
     end
     sky_line_uxlst = vcat(sky_line_uxlst...)
