@@ -246,7 +246,7 @@ flush(stdout);
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
 
-        metadata = Dict([
+        metadata = Dict(
             "cartid" => cartid,
             "nread_used" => nread_used,
             "nread_total" => nread_total,
@@ -254,7 +254,7 @@ flush(stdout);
             "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
             "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
             "mjd_mid_exposure" => value(mjd_mid_exposure)
-        ])
+        )
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
         safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
         return fname
