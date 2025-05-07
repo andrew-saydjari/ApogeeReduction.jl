@@ -337,7 +337,7 @@ flush(stdout);
 println("Solving skyline wavelength solution:");
 flush(stdout);
 all1DObjectSkyPeaks = replace.(
-    replace.(all1DObject, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+replace.(all1DObject, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
 @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
