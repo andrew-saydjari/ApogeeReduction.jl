@@ -264,7 +264,36 @@ end
 function parseCartID(x)
     if x == "FPS"
         return 0
-    else
+    elseif typeof(x) <: Union{Int32, Int64}
         return x
+    elseif typeof(x) == String
+        return parse(Int, x)
+    elseif typeof(x) <: Union{Float32, Float64}
+        return Int(x)
+    else
+        error("Unknown cartid type: $(typeof(x))")
     end
+end
+
+function read_almanac_exp_df(fname, tele, mjd)
+    df = if fname isa HDF5.File
+        DataFrame(read(fname["$(tele)/$(mjd)/exposures"]))
+    else
+        h5open(fname) do f
+            DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
+        end
+    end
+    df.nreadInt = parse.(Int, df.nread)
+    df.cartidInt = parseCartID.(df.cartid)
+    df.exposure_int = if typeof(df.exposure) <: Array{Int}
+        df.exposure
+    else
+        parse.(Int, df.exposure)
+    end
+    df.exposure_str = if typeof(df.exposure) <: Array{String}
+        df.exposure
+    else
+        lpad.(string.(df.exposure), 8, "0")
+    end
+    return df
 end

@@ -135,14 +135,12 @@ flush(stdout);
             mkpath(dirName)
         end
 
-        df = h5open(joinpath(outdir, "almanac/$(runname).h5")) do f
-            DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
-        end
+        df = read_almanac_exp_df(joinpath(outdir, "almanac/$(runname).h5"), parg["tele"], mjd)
 
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
-            df.observatory[expid], df.mjd[expid], chip, df.exposure[expid])
-        cartid = parseCartID(df.cartid[expid])
+            df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
+        cartid = df.cartidInt[expid]
         # decompress and convert apz data format to a standard 3D cube of reads
         cubedat, hdr_dict = apz2cube(rawpath)
 
@@ -247,11 +245,11 @@ flush(stdout);
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(
             ["ar2D", df.observatory[expid], df.mjd[expid],
-                chip, df.exposure[expid], df.exptype[expid]],
+                last(df.exposure_str[expid],4), chip, df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
 
-        metadata = Dict([
+        metadata = Dict(
             "cartid" => cartid,
             "nread_used" => nread_used,
             "nread_total" => nread_total,
@@ -259,7 +257,7 @@ flush(stdout);
             "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
             "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
             "mjd_mid_exposure" => value(mjd_mid_exposure)
-        ])
+        )
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
         safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
         return fname
@@ -267,12 +265,8 @@ flush(stdout);
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
     function process_2Dcal(fname; chi2perdofcut = 100)
-        if isnothing(fname)
-            return
-        end
-
-        sname = split(fname, "_")
-        tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         dimage = load(fname, "dimage")
         ivarimage = load(fname, "ivarimage")
@@ -284,7 +278,7 @@ flush(stdout);
         nread_used = metadata["nread_used"]
 
         ### dark current subtraction
-        darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*", dirname(fname)))
+        darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*.h5", dirname(fname)))
         if length(darkRateflst) != 1
             error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
         end
@@ -295,7 +289,7 @@ flush(stdout);
         # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
 
         ### flat fielding
-        flatFractionflst = sort(glob("flatFraction_$(tele)_$(chip)_*", dirname(fname)))
+        flatFractionflst = sort(glob("flatFraction_$(tele)_$(chip)_*.h5", dirname(fname)))
         if length(flatFractionflst) != 1
             error("I didn't just find one flatFraction file for mjd $mjd, I found $(length(flatFractionflst))")
         end

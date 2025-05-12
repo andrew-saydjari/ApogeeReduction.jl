@@ -77,7 +77,7 @@ Returns a tuple of:
 - `all_y_prof`: the Gauss-Hermite profiles
 - `all_y_prof_deriv`: the derivatives of the Gauss-Hermite profiles
 """
-function gh_profiles(tele, mjd, chip, expid;
+function gh_profiles(tele, mjd, expid, chip;
         n_sub = 100, make_plots = false, profile_path = "./data/", plot_path = "../outdir/plots/")
 
     # TODO actually get these from the arguments
@@ -387,7 +387,7 @@ Extract the trace parameters from the image data assuming Gauss-Hermite profiles
 
 Returns: trace centers, widths, and heights, and their covariances.
 """
-function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
+function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv;
         good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
@@ -1065,13 +1065,13 @@ function trace_extract(image_data, ivar_image, tele, mjd, chip, expid,
 end
 
 function trace_plots(
-        cal_type, trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
+        cal_type, trace_params, teleloc, mjdloc, expidloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
     cut = 750
     fig = Figure(size = (1600, 800), fontsize = 22)
     ax = Axis(fig[1, 1],
         xlabel = "FIBERID",
         ylabel = "Fit Height",
-        title = "$(cal_type)Flat Median Height\nTele: $teleloc, MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
+        title = "$(cal_type)Flat Median Height\nTele: $teleloc, MJD: $(mjdloc), Expnum: $(expidloc), Chip: $(chiploc)")
 
     y = dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
     scatter!(ax, 301 .- (1:300), y)
@@ -1086,7 +1086,7 @@ function trace_plots(
     ax = Axis(fig[1, 2],
         xlabel = "FIBERID",
         ylabel = "Fit Width",
-        title = "$(cal_type)Flat Median Width\nTele: $teleloc, MJD: $(mjdloc), Chip: $(chiploc), Expid: $(expidloc)")
+        title = "$(cal_type)Flat Median Width\nTele: $teleloc, MJD: $(mjdloc), Expnum: $(expidloc), Chip: $(chiploc)")
 
     y = dropdims(nanzeromedian(trace_params[:, :, 3], 1), dims = 1)
     scatter!(ax, 301 .- (1:300), y)

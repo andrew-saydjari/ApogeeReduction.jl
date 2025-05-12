@@ -33,8 +33,7 @@ expid_list = Int[]
 f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
-    df = DataFrame(read(f[parg["tele"] * "/$(tstmjd)/exposures"]))
-    df.nreadInt = parse.(Int, df.nread)
+    df = read_almanac_exp_df(f, parg["tele"], tstmjd)
     expindx_list = findall((df.imagetyp .== "Dark") .& (df.nreadInt .> 29))
     for expindx in expindx_list
         if expindx > 1 && df.imagetyp[expindx - 1] == "Dark"

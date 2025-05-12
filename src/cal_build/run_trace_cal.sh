@@ -7,7 +7,7 @@
 #SBATCH --mem=0 #requesting all of the memory on the node
 
 #SBATCH --time=8:00:00
-#SBATCH --job-name=ApogeeReduction_trace_cal
+#SBATCH --job-name=ar_trace_cal
 #SBATCH --output=slurm_logs/%x_%j.out
 
 #SBATCH --mail-type=ALL

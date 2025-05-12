@@ -88,8 +88,9 @@ end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
-    sname = split(fname, "_")
-    teleloc, mjdloc, chiploc, expidloc = sname[(end - 4):(end - 1)]
+    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+    
     mjdfps2plate = get_fps_plate_divide(teleloc)
     f = jldopen(fname)
     image_data = f["dimage"][1:2048, 1:2048]
@@ -99,24 +100,23 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
 
     med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
     all_y_prof, all_y_prof_deriv = gh_profiles(
-        teleloc, mjdloc, chiploc, expidloc; n_sub = 100)
+        teleloc, mjdloc, expnumloc, chiploc; n_sub = 100)
 
     #    trace_params, trace_param_covs = trace_extract(
     #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
     good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
     trace_params,
     trace_param_covs = trace_extract(
-        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc,
+        image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
         ; good_pixels = good_pixels)
 
     safe_jldsave(
         parg["trace_dir"] *
-        "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).h5";
+        "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
-    return trace_plots(
-        "quartz", trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
+    return trace_plots("quartz", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()
