@@ -71,6 +71,9 @@ function parse_commandline()
 end
 
 parg = parse_commandline()
+dirNamePlots = parg["outdir"] * "plots/"
+mkpath(dirNamePlots) # will work even if it already exists
+
 workers_per_node = parg["workers_per_node"]
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
@@ -112,8 +115,10 @@ flush(stdout);
     include(src_dir * "src/fileNameHandling.jl")
     include(src_dir * "src/utils.jl")
     include(src_dir * "src/skyline_peaks.jl")
+    include(src_dir * "src/arclamp_peaks.jl")
     include(src_dir * "src/wavecal.jl")
     include(src_dir * "src/cal_build/traceExtract_GH.jl")
+    include(src_dir * "src/makie_plotutils.jl")
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -300,7 +305,10 @@ all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
 @showprogress pmap(process_1D, all2Dcal)
 
 ## get all OBJECT files (happy to add any other types that see sky?)
+## also get FPI and arclamp files
 list1DexpObject = []
+list1DexpFPI = []
+list1DexpArclamp = []
 for mjd in unique_mjds
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     df = DataFrame(read(f["$(parg["tele"])/$(mjd)/exposures"]))
@@ -312,17 +320,47 @@ for mjd in unique_mjds
             return nothing
         end
     end
+    function get_1d_name_ARCLAMP_partial(expid)
+        if (df.imagetyp[expid] == "ArcLamp") &
+           ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        else
+            return nothing
+        end
+    end
+    function get_1d_name_FPI_partial(expid)
+        if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
+           (df.lampune[expid] == "F")
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        else
+            return nothing
+        end
+    end
     local1D = get_1d_name_partial.(expid_list)
     push!(list1DexpObject, filter(!isnothing, local1D))
+    local1D_fpi = get_1d_name_FPI_partial.(expid_list)
+    push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
+    local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
+    push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
 end
 all1DObjecta = vcat(list1DexpObject...)
+all1DFPIa = vcat(list1DexpFPI...)
+all1DArclampa = vcat(list1DexpArclamp...)
 
 all1DObjectperchip = []
+all1DArclampperchip = []
+all1DFPIperchip = []
 for chip in ["a", "b", "c"]
     all1DObjectchip = replace.(all1DObjecta, "_a_" => "_$(chip)_")
     push!(all1DObjectperchip, all1DObjectchip)
+    all1DArclampchip = replace.(all1DArclampa, "_a_" => "_$(chip)_")
+    push!(all1DArclampperchip, all1DArclampchip)
+    all1DFPIchip = replace.(all1DFPIa, "_a_" => "_$(chip)_")
+    push!(all1DFPIperchip, all1DFPIchip)
 end
 all1DObject = vcat(all1DObjectperchip...)
+all1DArclamp = vcat(all1DArclampperchip...)
+all1DFPI = vcat(all1DFPIperchip...)
 
 ## load rough wave dict and sky lines list
 @everywhere begin
@@ -343,7 +381,47 @@ println("Solving skyline wavelength solution:");
 flush(stdout);
 all1DObjectSkyPeaks = replace(
     replace.(all1DObject, "ar1Dcal" => "skyLine_peaks"), "ar1D" => "skyLine_peaks")
-@showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+
+if size(all1DObjectWavecal, 1) > 0
+    println("Using all skyline wavelength solutions to determine median solution.")
+    flush(stdout)
+    night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(all1DObjectWavecal)
+    sendto(workers(), night_wave_soln = night_wave_soln)
+
+    println("Plotting skyline wavelength solution diagnostic figures.")
+
+    sky_wave_plots(
+        all1DObjectWavecal, night_linParams, night_nlParams, night_wave_soln,
+        dirNamePlots = dirNamePlots,
+        plot_fibers = (1, 50, 100, 150, 200, 250, 300),
+        plot_pixels = (1, 512, 1024, 1536, 2048),
+        chip_names = ("a", "b", "c"))
+else
+    sendto(workers(), night_wave_soln = nothing)
+end
+
+if size(all1DArclamp, 1) > 0
+    ## get (non-fpi) arclamp peaks
+    println("Fitting arclamp peaks:")
+    flush(stdout)
+    try
+        @showprogress pmap(get_and_save_arclamp_peaks, all1DArclamp)
+    catch
+        println("\nFAILED fitting FPI peaks")
+    end
+end
+
+if size(all1DFPI, 1) > 0
+    ## get FPI peaks
+    println("Fitting FPI peaks:")
+    flush(stdout)
+    try
+        @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
+    catch
+        println("\nFAILED fitting FPI peaks")
+    end
+end
 
 ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 ## combine chips for single exposure onto loguniform wavelength grid
@@ -351,11 +429,11 @@ all1DObjectSkyPeaks = replace(
 all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
 println("Reinterpolating exposure spectra:");
 flush(stdout);
-@showprogress pmap(reinterp_spectra, all1Da)
+@everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
+    fname, backupWaveSoln = night_wave_soln)
+@showprogress pmap(reinterp_spectra_partial, all1Da)
 
 all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")
 println("Reinterpolating calibrated exposure spectra:");
 flush(stdout);
-@showprogress pmap(reinterp_spectra, all1Da)
-
-## I should probably add some slack plots from the wavecal skylines
+@showprogress pmap(reinterp_spectra_partial, all1Da)

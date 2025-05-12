@@ -157,6 +157,11 @@ flush(stdout);
             2, "dcs"
         elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
             2, "dcs"
+        elseif (nread_total == 3)
+            #catch some weird cases (like nreads=3 with Darks)
+            #but still reduce them to prevent errors later in pipeline_2d_1d
+            #ULTIMATELY want to make it so these exposures are removed from runlist earlier
+            2, "dcs"
         else
             firstind, extractMethod
         end
@@ -262,6 +267,10 @@ flush(stdout);
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
     function process_2Dcal(fname; chi2perdofcut = 100)
+        if isnothing(fname)
+            return
+        end
+
         sname = split(fname, "_")
         tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
 

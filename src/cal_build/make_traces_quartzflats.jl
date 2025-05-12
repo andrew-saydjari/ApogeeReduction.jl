@@ -80,8 +80,8 @@ end
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
     flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                expid[i], chip, "QUARTZFLAT", use_cal = true)
-                for i in eachindex(mjd), chip in chips]
+                 expid[i], chip, "QUARTZFLAT", use_cal = true)
+             for i in eachindex(mjd), chip in chips]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end
@@ -115,7 +115,8 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
         "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).h5";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
-    return trace_plots("quartz", trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
+    return trace_plots(
+        "quartz", trace_params, teleloc, mjdloc, chiploc, expidloc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()
