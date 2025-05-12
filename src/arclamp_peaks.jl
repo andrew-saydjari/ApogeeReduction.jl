@@ -843,21 +843,3 @@ function get_and_save_arclamp_peaks(fname)
     attrs(f["arclamp_line_cov_mat"])["axis_4"] = "fibers"
 end
 
-#using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
-#using DataFrames, EllipsisNotation, StatsBase
-#using AstroTime # can remove after Adam merges the PR to recast as Float
-#using ParallelDataTransfer, ProgressMeter
-
-#include("./wavecal.jl")
-#include("./utils.jl")
-#include("./fileNameHandling.jl")
-
-#fname = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250424/outdir/apred/60793/ar1Dcal_lco_60793_a_52310008_ARCLAMP.h5"
-#get_and_save_fpi_peaks(fname)
-#fname = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250424/outdir/apred/60793/ar1Dcal_lco_60793_b_52310008_ARCLAMP.h5"
-#get_and_save_fpi_peaks(fname)
-#fname = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250424/outdir/apred/60793/ar1Dcal_lco_60793_c_52310008_ARCLAMP.h5"
-#get_and_save_fpi_peaks(fname)
-
-#fname = "/uufs/chpc.utah.edu/common/home/u6057633/scratch/20250424/outdir/apred/60793/ar1Dcal_lco_60793_b_52310004_ARCLAMP.h5"
-#get_and_save_arclamp_peaks(fname)
