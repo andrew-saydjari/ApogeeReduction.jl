@@ -38,7 +38,8 @@ bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
 
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
+bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
+               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)
