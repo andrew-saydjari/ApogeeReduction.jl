@@ -403,7 +403,7 @@ if size(all1DArclamp, 1) > 0
     try
         @showprogress pmap(get_and_save_arclamp_peaks, all1DArclamp)
     catch
-        println("\nFAILED fitting FPI peaks")
+        println("\nFAILED fitting arclamp peaks")
     end
 end
 
