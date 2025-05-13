@@ -466,7 +466,6 @@ function get_and_save_fpi_wavecal(
         cavity_size, m_offset, initial_linParams, initial_wporder,
         initial_nlParams, initial_cporder, chipPolyParams0;
         cporder = cporder, wporder = wporder)
-    slksjhsjkl
 
     chipWaveSoln = zeros(Float64, 2048, 300, 3)
     x = 1:2048
