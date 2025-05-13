@@ -13,7 +13,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
     scaled_flux_vec = flux_vec ./ med_flux_vec
 
     # Find indices where flux is above 97.5th percentile
-    thresh = percentile(scaled_flux_vec, 97.5)
+    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [97.5])[1]
     #    slope_vec = scaled_flux_vec[(begin+1):end] .- scaled_flux_vec[begin:(end-1)]
     #    above_thresh = findall((scaled_flux_vec[(begin+1):(end-1)] .>= thresh) .& 
     #		         (slope_vec[begin:(end-1)] .>= 0) .& (slope_vec[(begin+1):end] .<= 0) .&
