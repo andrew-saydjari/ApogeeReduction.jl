@@ -10,7 +10,7 @@
 #SBATCH --job-name=ar_flat_cal
 #SBATCH --output=slurm_logs/%x_%j.out
 
-#SBATCH --mail-type=ALL
+#SBATCH --mail-type=NONE
 #SBATCH --mail-user=7155301634@vtext.com
 # ------------------------------------------------------------------------------
 

@@ -10,17 +10,28 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
-#from airflow.providers.slack.notifications.slack import send_slack_notification
 
 # I struggled to move this to sandbox, because the fileloc would not update.
 REPO_DIR = f"{os.path.expandvars('$MWM_SANDBOX')}/airflow/ApogeeReduction.jl/"
-REPO_BRANCH = "airflow"
+REPO_BRANCH = "airflow-prod"
 DAG_NAME = "ApogeeReduction-prod"
 
-def send_slack_notification_partial(text):
-    #return send_slack_notification(text=f"[prod] {text}", channel="#apogee-reduction-jl")
-    print(text)
+# TODO: replace this with a random number generator that is sent with submit_and_with,
+#       and the slack notifications partial
+SLACK_NOTIFICATIONS = False
 
+def send_slack_notification_partial(text):
+    if SLACK_NOTIFICATIONS:
+        # It's good practice to put this import at the top, but it is also not a 
+        # standard airflow import, so I am putting it here for now while we are 
+        # tweaking the notification system.
+        from airflow.providers.slack.notifications.slack import send_slack_notification
+        return send_slack_notification(text=f"[prod] {text}", channel="#apogee-reduction-jl")
+    else:
+        print(text)
+        # Send back a partial function that does nothing.
+        return (lambda *a, **kw: None)
+    
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id):
     while True:
@@ -33,7 +44,10 @@ def wait_for_slurm(job_id):
 def submit_and_wait(bash_command, **context):
     # Set environment variable for the subprocess
     env = os.environ.copy()
-    env["SLACK_CHANNEL"] = "C08B7FKMP16" # apogee-reduction-jl
+    if SLACK_NOTIFICATIONS:
+        env["SLACK_CHANNEL"] = "C08B7FKMP16" # apogee-reduction-jl
+    else:
+        env["SLACK_CHANNEL"] = " dummy "
     
     # Now bash_command comes directly from the arguments
     print(f"Submitting command: {bash_command}")
@@ -63,6 +77,8 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
     -D {REPO_DIR}
 """) 
 
+# Notable dates: https://sdss-wiki.atlassian.net/wiki/spaces/MWM/pages/14659365/Notable+dates
+# - 2024-07-18: New APO/APOGEE blue chip.
 
 with DAG(
     DAG_NAME,
