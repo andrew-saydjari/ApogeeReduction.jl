@@ -19,6 +19,7 @@ DAG_NAME = "ApogeeReduction-prod"
 # TODO: replace this with a random number generator that is sent with submit_and_with,
 #       and the slack notifications partial
 SLACK_NOTIFICATIONS = False
+ANCIENT_MJD_THRESHOLD = 59148
 
 def send_slack_notification_partial(text):
     if SLACK_NOTIFICATIONS:
@@ -88,10 +89,10 @@ def submit_and_wait(bash_command, **context):
 
 class TransferFileSensor(FileSensor):
     def poke(self, context) -> bool:
-        if Time(context["data_interval_start"]).mjd < 59148:
+        if Time(context["data_interval_start"]).mjd < ANCIENT_MJD_THRESHOLD:
             raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
         return super().poke(context)
-        
+
 
 observatories = ("apo", "lco")
 
@@ -180,11 +181,18 @@ with DAG(
             python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
         )
 
-    # Replace the observatory_groups section with this new implementation
-    # Process LCO first, then APO (temporaily, while we are still doing serial reductinos)
     observatory_groups = []
     for observatory in ["lco", "apo"]:  # Changed order to LCO first
         with TaskGroup(group_id=observatory) as group:
+
+            is_recent_or_dir_exists = PythonOperator(
+                task_id="quick_check",
+                python_callable=lambda data_interval_start, **_: (
+                    Time(data_interval_start).mjd >= ANCIENT_MJD_THRESHOLD
+                    or os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{observatory}/{int(Time(data_interval_start).mjd)}/")
+                ),
+            )
+
             initial_notification = PythonOperator(
                 task_id="initial_notification",
                 python_callable=lambda **_: None,  # Simple no-op function
@@ -256,7 +264,7 @@ with DAG(
                     )
                 ]               
             )   
-            initial_notification >> transfer >> darks >> flats >> science
+            is_recent_or_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
             
         observatory_groups.append(group)
 
