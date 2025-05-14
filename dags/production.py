@@ -16,10 +16,10 @@ REPO_DIR = f"{os.path.expandvars('$MWM_SANDBOX')}/airflow/ApogeeReduction.jl/"
 REPO_BRANCH = "airflow-prod"
 DAG_NAME = "ApogeeReduction-prod"
 
-# TODO: replace this with a random number generator that is sent with submit_and_with,
-#       and the slack notifications partial
-SLACK_NOTIFICATIONS = False
-ANCIENT_MJD_THRESHOLD = 59148
+SLACK_NOTIFICATIONS = True
+
+# Data taken before this point is assumed to be on disk already, or not exist (e.g., don't wait for it)
+ANCIENT_MJD_THRESHOLD = 59148 
 
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
