@@ -117,7 +117,7 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
 with DAG(
     DAG_NAME,
     start_date=datetime(2014, 7, 18), 
-    schedule_interval=timedelta(days=8),
+    schedule_interval=timedelta(days=1),
     max_active_runs=1,
     default_args=dict(retries=0),
     catchup=True,
