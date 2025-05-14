@@ -101,7 +101,7 @@ observatories = ("apo", "lco")
 
 def quick_check(data_interval_start, **kwargs):
     sjd = to_sloan_modified_date(data_interval_start) 
-    any_data_dirs = any(os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{obs}/{sjd}/") for obs in observatories))
+    any_data_dirs = any(os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{obs}/{sjd}/") for obs in observatories)
     if not any_data_dirs and sjd < ANCIENT_MJD_THRESHOLD:
         raise AirflowSkipException("No data directories found and SJD is not ancient.")
 
