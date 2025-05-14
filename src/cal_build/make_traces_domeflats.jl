@@ -116,7 +116,11 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
     return trace_plots("dome", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
-thread = SlackThread()
+if !haskey(ENV, "SLACK_CHANNEL")
+    thread = DummyThread()
+else
+    thread = SlackThread()
+end
 thread("DOMEFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 for (filename, heights_widths_path) in zip(flist, plot_paths)
     thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)

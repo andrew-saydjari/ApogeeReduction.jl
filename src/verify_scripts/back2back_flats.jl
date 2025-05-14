@@ -52,7 +52,12 @@ if parg["verify_dir"] == ""
     parg["verify_dir"] = parg["data_dir"]
 end
 
-thread = SlackThread();
+
+if !haskey(ENV, "SLACK_CHANNEL")
+    thread = DummyThread();
+else
+    thread = SlackThread();
+end
 thread("Back2Back flats ivar test for Tele: $(parg["tele"]), MJD: $(parg["mjd"])")
 
 dirNamePlots = joinpath(parg["verify_dir"], "plots/")

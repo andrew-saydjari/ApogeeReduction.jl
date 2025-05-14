@@ -79,7 +79,11 @@ function summarize_fiber_thrpt(flat_type, tele)
     return framePath
 end
 
-thread = SlackThread();
+if !haskey(ENV, "SLACK_CHANNEL")
+    thread = DummyThread();
+else
+    thread = SlackThread();
+end 
 thread("Fiber throughput summary for $(parg["outdir"])")
 
 # Run for both flat types and telescopes
