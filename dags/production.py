@@ -35,7 +35,11 @@ def send_slack_notification_partial(text):
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id):
     while True:
-        result = subprocess.run(['squeue', '-j', str(job_id)], capture_output=True, text=True)
+        result = subprocess.run(
+            ['squeue', '-j', str(job_id), '--noheader'], 
+            capture_output=True, 
+            text=True
+        )
         if "Invalid job id specified" in result.stderr or result.stdout.count('\n') <= 1:
             return  # Job is done
         time.sleep(5)  # Check every minute
