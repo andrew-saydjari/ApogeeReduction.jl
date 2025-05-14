@@ -40,7 +40,6 @@ def wait_for_slurm(job_id, min_rows=0):
             capture_output=True, 
             text=True
         )
-        print(result.stdout, result.stdout.count('\n'))
         if "Invalid job id specified" in result.stderr or result.stdout.count('\n') <= min_rows:
             return  # Job is done
         time.sleep(5)  # Check every minute
