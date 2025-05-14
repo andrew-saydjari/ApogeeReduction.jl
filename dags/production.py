@@ -10,7 +10,7 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
-from airflow.providers.slack.notifications.slack import send_slack_notification
+#from airflow.providers.slack.notifications.slack import send_slack_notification
 
 # I struggled to move this to sandbox, because the fileloc would not update.
 REPO_DIR = f"{os.path.expandvars('$MWM_SANDBOX')}/airflow/ApogeeReduction.jl/"
@@ -18,7 +18,8 @@ REPO_BRANCH = "airflow"
 DAG_NAME = "ApogeeReduction-prod"
 
 def send_slack_notification_partial(text):
-    return send_slack_notification(text=f"[prod] {text}", channel="#apogee-reduction-jl")
+    #return send_slack_notification(text=f"[prod] {text}", channel="#apogee-reduction-jl")
+    print(text)
 
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id):
