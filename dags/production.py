@@ -55,8 +55,11 @@ def submit_and_wait(bash_command, **context):
     
     if result.returncode != 0:
         raise Exception(f"SLURM submission failed: {result.stderr}")
-        
-    job_id = result.stdout.strip().split()[-1]  # Get job ID from "Submitted batch job XXXXX"
+    
+    # Depending on your slurm settings, sbatch might send back something like
+    # - "Submitted batch job XXXXX"
+    # - "Submitted batch job XXXXX on cluster YYYY"
+    job_id = result.stdout.strip().split("job")[1].split()[0]
     print(f"Submitted SLURM job {job_id}")
     
     wait_for_slurm(job_id)
@@ -248,6 +251,4 @@ with DAG(
         dag=dag
     )
     
-    # Modify the final dependencies to chain the observatories sequentially
-    group_git >> group_setup >> observatory_groups[0] >> observatory_groups[1] >> final_notification
-    # group_git >> group_setup >> observatory_groups >> final_notification ## this is the original we want to use during parallel reductions
+    group_git >> group_setup >> observatory_groups >> final_notification
