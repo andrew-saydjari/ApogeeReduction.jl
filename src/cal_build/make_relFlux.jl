@@ -146,7 +146,11 @@ outfnamesa = outfnames[1:length(all1Da)]
 # just going to use chip c for now, can revisit this question if we think it adds stability
 
 # add plotting
-thread = SlackThread()
+if !haskey(ENV, "SLACK_CHANNEL")
+    thread = DummyThread()
+else
+    thread = SlackThread()
+end
 thread("$(cal_type) relFluxing")
 
 @everywhere begin

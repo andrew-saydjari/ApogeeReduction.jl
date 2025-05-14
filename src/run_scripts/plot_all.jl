@@ -71,7 +71,11 @@ else
     [parg["expid"]]
 end
 
-sky_thread = SlackThread()
+if !haskey(ENV, "SLACK_CHANNEL")
+    sky_thread = DummyThread()
+else
+    sky_thread = SlackThread()
+end
 if length(unique_mjds) > 1
     min_mjd, max_mjd = extrema(unique_mjds)
     sky_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
@@ -122,7 +126,11 @@ all2Da = vcat(list2Dexp...)
 for chip in ["a", "b", "c"]
     all2D = replace.(all2Da, "_a_" => "_$(chip)_")
 
-    thread = SlackThread()
+    if !haskey(ENV, "SLACK_CHANNEL")
+        thread = DummyThread()
+    else
+        thread = SlackThread()
+    end
     if length(unique_mjds) > 1
         min_mjd, max_mjd = extrema(unique_mjds)
         thread("Here are some example 2D residuals after 1D extraction on chip $(chip) from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
@@ -277,8 +285,11 @@ for chip in string.(collect(parg["chips"]))
 end
 
 # 1D reinterpolated spectra examples
-
-thread = SlackThread();
+if !haskey(ENV, "SLACK_CHANNEL")
+    thread = DummyThread();
+else
+    thread = SlackThread();
+end
 if length(unique_mjds) > 1
     min_mjd, max_mjd = extrema(unique_mjds)
     thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
