@@ -21,6 +21,10 @@ DAG_NAME = "ApogeeReduction-prod"
 SLACK_NOTIFICATIONS = False
 ANCIENT_MJD_THRESHOLD = 59148
 
+def to_sloan_modified_date(data_interval_start):
+    return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
+
+
 def send_slack_notification_partial(text):
     if SLACK_NOTIFICATIONS:
         # It's good practice to put this import at the top, but it is also not a 
@@ -93,8 +97,13 @@ class TransferFileSensor(FileSensor):
             raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
         return super().poke(context)
 
-
 observatories = ("apo", "lco")
+
+def quick_check(data_interval_start, **kwargs):
+    sjd = to_sloan_modified_date(data_interval_start) 
+    any_data_dirs = any(os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{obs}/{sjd}/") for obs in observatories))
+    if not any_data_dirs and sjd < ANCIENT_MJD_THRESHOLD:
+        raise AirflowSkipException("No data directories found and SJD is not ancient.")
 
 sbatch_prefix = re.sub(r"\s+", " ", f"""
     sbatch 
@@ -118,6 +127,11 @@ with DAG(
         )
     ]    
 ) as dag:
+
+    quick_check = PythonOperator(
+        task_id="quick_check",
+        python_callable=quick_check
+    )
 
     with TaskGroup(group_id="update") as group_git:
         (
@@ -178,20 +192,12 @@ with DAG(
         )
         PythonOperator(
             task_id="mjd",
-            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
+            python_callable=lambda data_interval_start, **_: to_sloan_modified_date(data_interval_start)
         )
 
     observatory_groups = []
-    for observatory in ["lco", "apo"]:  # Changed order to LCO first
+    for observatory in observatories:  # Changed order to LCO first
         with TaskGroup(group_id=observatory) as group:
-
-            is_recent_or_dir_exists = PythonOperator(
-                task_id="quick_check",
-                python_callable=lambda data_interval_start, **_: (
-                    Time(data_interval_start).mjd >= ANCIENT_MJD_THRESHOLD
-                    or os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{observatory}/{int(Time(data_interval_start).mjd)}/")
-                ),
-            )
 
             initial_notification = PythonOperator(
                 task_id="initial_notification",
@@ -264,7 +270,7 @@ with DAG(
                     )
                 ]               
             )   
-            is_recent_or_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
+            initial_notification >> transfer >> darks >> flats >> science
             
         observatory_groups.append(group)
 
@@ -280,4 +286,4 @@ with DAG(
         dag=dag
     )
     
-    group_git >> group_setup >> observatory_groups >> final_notification
+    quick_check >> group_git >> group_setup >> observatory_groups >> final_notification
