@@ -34,6 +34,8 @@ def send_slack_notification_partial(text):
     
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id, min_rows=0):
+    t_init = time.time()
+    state = None
     while True:
         result = subprocess.run(
             ['squeue', '-j', str(job_id), '--noheader'], 
@@ -41,7 +43,20 @@ def wait_for_slurm(job_id, min_rows=0):
             text=True
         )
         if "Invalid job id specified" in result.stderr or result.stdout.count('\n') <= min_rows:
+            print(f"Job {job_id} not in queue after {time.time() - t_init:.0f} seconds")
             return  # Job is done
+        try:
+            this_state = result.strip().split()[4]
+        except:
+            None
+        else:
+            if this_state != state:
+                if state is not None:
+                    print(
+                        f"Job {job_id} state changed from {state} to {this_state} "
+                        f"after {time.time() - t_init:.0f} seconds"
+                    )
+                state = this_state
         time.sleep(5)  # Check every minute
 
 # Modify your BashOperator to capture and wait for the job ID
@@ -49,6 +64,8 @@ def submit_and_wait(bash_command, **context):
     # Set environment variable for the subprocess
     env = os.environ.copy()
     if SLACK_NOTIFICATIONS:
+        # C07KQ7BJY5P # apogee-reduction-jl-dev
+        # C08B7FKMP16 # apogee-reduction-jl
         env["SLACK_CHANNEL"] = "C08B7FKMP16" # apogee-reduction-jl
     else:
         env.pop("SLACK_CHANNEL", None)

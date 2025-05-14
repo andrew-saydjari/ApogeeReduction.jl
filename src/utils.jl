@@ -22,9 +22,9 @@ end
 git_branch, git_commit = initalize_git("./")
 
 # ENV["SLACK_CHANNEL"] = "C08B7FKMP16" #apogee-reduction-jl
-if !haskey(ENV, "SLACK_CHANNEL")
-    ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
-end
+#if !haskey(ENV, "SLACK_CHANNEL")
+#    ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
+#end
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^1 + 2^2 + 2^4
