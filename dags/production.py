@@ -52,7 +52,7 @@ def submit_and_wait(bash_command, **context):
     if SLACK_NOTIFICATIONS:
         env["SLACK_CHANNEL"] = "C08B7FKMP16" # apogee-reduction-jl
     else:
-        env["SLACK_CHANNEL"] = " dummy "
+        env.pop("SLACK_CHANNEL", None)
     
     # Now bash_command comes directly from the arguments
     print(f"Submitting command: {bash_command}")
