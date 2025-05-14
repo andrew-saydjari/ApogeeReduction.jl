@@ -155,6 +155,11 @@ flush(stdout);
             2, "dcs"
         elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
             2, "dcs"
+        elseif (nread_total == 3)
+            #catch some weird cases (like nreads=3 with Darks)
+            #but still reduce them to prevent errors later in pipeline_2d_1d
+            #ULTIMATELY want to make it so these exposures are removed from runlist earlier
+            2, "dcs"
         else
             firstind, extractMethod
         end

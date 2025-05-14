@@ -418,7 +418,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
+function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine", backupWaveSoln = nothing)
     # might need to add in telluric div functionality here?
 
     sname = split(split(split(fname, "/")[end],".h5")[1], "_")
@@ -452,14 +452,21 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
         chipWaveSoln = f["chipWaveSoln"]
         close(f)
     else #this is a terrible global fallback, just so we get something to look at
-        chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
-        for (chipind, chip) in enumerate(["a", "b", "c"])
-            chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
-                1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+        if isnothing(backupWaveSoln)
+            chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
+            for (chipind, chip) in enumerate(["a", "b", "c"])
+                chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
+                    1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+            end
+            println("No wavecal found for $(fname), using rough linear fallback")
+            flush(stdout)
+            wavecal_type = "error_fixed_fallback"
+        else
+            chipWaveSoln = backupWaveSoln
+            println("No wavecal found for $(fname), using nightly average as fallback")
+            flush(stdout)
+            wavecal_type = "error_night_ave_fallback"
         end
-        println("No wavecal found for $(fname), using fallback")
-        flush(stdout)
-        wavecal_type = "error_fixed_fallback"
     end
 
     for (chipind, chip) in enumerate(["a", "b", "c"])

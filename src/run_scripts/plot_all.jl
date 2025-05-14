@@ -71,6 +71,29 @@ else
     [parg["expid"]]
 end
 
+sky_thread = SlackThread()
+if length(unique_mjds) > 1
+    min_mjd, max_mjd = extrema(unique_mjds)
+    sky_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
+else
+    sky_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(unique_mjds[1])")
+end
+
+for mjd_ind in 1:size(unique_mjds, 1)
+    savePath = dirNamePlots * "skywave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    sky_thread(
+        "Sky Line Wavelength Solution Linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
+    savePath = dirNamePlots * "skywave_nlParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    sky_thread(
+        "Sky Line Wavelength Solution Non-linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
+    savePath = dirNamePlots *
+               "skywave_per_fiber_vs_pixel_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    sky_thread("Sky Line Wavelength Solution per fiber: MJD $(unique_mjds[mjd_ind])", savePath)
+    savePath = dirNamePlots *
+               "skywave_per_pixel_vs_fiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    sky_thread("Sky Line Wavelength Solution per pixel: MJD $(unique_mjds[mjd_ind])", savePath)
+end
+
 list2Dexp = []
 for mjd in unique_mjds
     df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
@@ -110,7 +133,7 @@ for chip in ["a", "b", "c"]
 
     # TODO parallelize plotting
     # we should customize this to the exposures we want to see and types of stars we want
-    nsamp = minimum([length(all2D), 20])
+    nsamp = minimum([length(all2D), 10])
     sample_exposures = sample(rng, all2D, nsamp, replace = false)
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     for exp_fname in sample_exposures
