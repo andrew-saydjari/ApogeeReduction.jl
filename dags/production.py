@@ -18,12 +18,8 @@ DAG_NAME = "ApogeeReduction-prod"
 
 SLACK_NOTIFICATIONS = True
 
-# Data taken before this point is assumed to be on disk already, or not exist (e.g., don't wait for it)
-ANCIENT_MJD_THRESHOLD = 59148 
-
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
-
 
 def send_slack_notification_partial(text):
     if SLACK_NOTIFICATIONS:
@@ -93,17 +89,19 @@ def submit_and_wait(bash_command, **context):
 
 class TransferFileSensor(FileSensor):
     def poke(self, context) -> bool:
-        if Time(context["data_interval_start"]).mjd < ANCIENT_MJD_THRESHOLD:
+        if (datetime.now() - Time(context["data_interval_start"])).days > 3:
             raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
         return super().poke(context)
 
 observatories = ("apo", "lco")
 
-def quick_check(data_interval_start, **kwargs):
-    sjd = to_sloan_modified_date(data_interval_start) 
-    any_data_dirs = any(os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{obs}/{sjd}/") for obs in observatories)
-    if not any_data_dirs and sjd < ANCIENT_MJD_THRESHOLD:
-        raise AirflowSkipException("No data directories found and SJD is not ancient.")
+
+is_recent = lambda data_interval_start, **kwargs: (datetime.now() - data_interval_start).days <= 3
+data_dir_exists = lambda observatory, data_interval_start, **kwargs: os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{observatory}/{to_sloan_modified_date(data_interval_start)}/")
+
+def skip_if_not_true(criteria):
+    if not criteria:
+        raise AirflowSkipException("Condition not met for skipping.")
 
 sbatch_prefix = re.sub(r"\s+", " ", f"""
     sbatch 
@@ -128,12 +126,27 @@ with DAG(
     ]    
 ) as dag:
 
-    quick_check = PythonOperator(
-        task_id="quick_check",
-        python_callable=quick_check
-    )
+    with TaskGroup(group_id="check") as group_check:
+        task_is_recent = PythonOperator(
+            task_id="is_recent",
+            python_callable=lambda **k: skip_if_not_true(is_recent(**k)),
+        )
+        task_apo_data_dir_exists = PythonOperator(
+            task_id="apo_data_dir_exists",
+            python_callable=lambda **k: skip_if_not_true(data_dir_exists("apo", **k)),
+        )
+        task_lco_data_dir_exists = PythonOperator(
+            task_id="lco_data_dir_exists",
+            python_callable=lambda **k: skip_if_not_true(data_dir_exists("lco", **k)),
+        )
 
-    with TaskGroup(group_id="update") as group_git:
+    sjd = PythonOperator(
+        task_id="sjd",
+        python_callable=lambda data_interval_start, **_: to_sloan_modified_date(data_interval_start),
+        trigger_rule="one_success"
+    )        
+
+    with TaskGroup(group_id="update") as group_update:
         (
             BashOperator(
                 task_id="repo",
@@ -172,30 +185,24 @@ with DAG(
                 task_id="dag",
                 bash_command="airflow dags report",
             )
-        )
-
-    with TaskGroup(group_id="setup") as group_setup:
-
-        BashOperator(
-            task_id="julia",
-            bash_command=(
-                f'cd {REPO_DIR}; '
-                'juliaup add 1.11.0; '
-                'julia +1.11.0 --project="./" -e \''
-                    'using Pkg; '
-                    'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
-                    'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
-                    'Pkg.resolve(); '
-                    'Pkg.instantiate(); '
-                '\''
+        ) >> (
+            BashOperator(
+                task_id="julia",
+                bash_command=(
+                    f'cd {REPO_DIR}; '
+                    'juliaup add 1.11.0; '
+                    'julia +1.11.0 --project="./" -e \''
+                        'using Pkg; '
+                        'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
+                        'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
+                        'Pkg.resolve(); '
+                        'Pkg.instantiate(); '
+                    '\''
+                )
             )
         )
-        PythonOperator(
-            task_id="mjd",
-            python_callable=lambda data_interval_start, **_: to_sloan_modified_date(data_interval_start)
-        )
 
-    observatory_groups = []
+    group_observatories = []
     for observatory in observatories:  # Changed order to LCO first
         with TaskGroup(group_id=observatory) as group:
 
@@ -204,33 +211,34 @@ with DAG(
                 python_callable=lambda **_: None,  # Simple no-op function
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                        text=f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}} "
                             f"(night of {{{{ ds }}}}). "
                             f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/"
                     )
-                ]
+                ],
+                trigger_rule="all_success"
             )
 
-            filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.done"
+            filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}}.done"
             transfer = TransferFileSensor(
                 task_id="transfer",
                 filepath=filepath,
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
-                             f"(night of {{{{ ds }}}}). Starting reduction pipeline. Exposure list available at https://data.sdss5.org/sas/sdsswork/data/apogee/{observatory}/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}/{{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}}.log.html"
+                        text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}} "
+                             f"(night of {{{{ ds }}}}). Starting reduction pipeline. Exposure list available at https://data.sdss5.org/sas/sdsswork/data/apogee/{observatory}/{{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}}/{{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}}.log.html"
                     )
                 ],
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                        text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}} "
                              f"(night of {{{{ ds }}}}) is incomplete. "
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate."
                     )
                 ],
                 on_skipped_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='setup.mjd') }}}} "
+                        text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='setup.sjd') }}}} "
                              f"(night of {{{{ ds }}}}) assumed to already exist: not awaiting `done` file. Starting reduction pipeline."
                     )
                 ],
@@ -243,36 +251,41 @@ with DAG(
             darks = PythonOperator(
                 task_id="darks",
                 python_callable=submit_and_wait,
-                op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
+                op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}}"},
                 trigger_rule="none_failed" # so this doesn't get skipped if the FileSensor is skipped
             )
 
             flats = PythonOperator(
                 task_id="flats",
                 python_callable=submit_and_wait,
-                op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_flat_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"},
+                op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_flat_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}}"},
             )
             
             science = PythonOperator(
                 task_id="science",
                 python_callable=submit_and_wait,
                 op_kwargs={
-                    'bash_command': f"{sbatch_prefix} --job-name=ar_all_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}}"
+                    'bash_command': f"{sbatch_prefix} --job-name=ar_all_{observatory}_{{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}}"
                 },
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}).",
+                        text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} (night of {{{{ ds }}}}).",
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}). :picard_facepalm:",
+                        text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} (night of {{{{ ds }}}}). :picard_facepalm:",
                     )
                 ]               
             )   
-            initial_notification >> transfer >> darks >> flats >> science
+            if observatory == "apo":
+                task_apo_data_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
+            elif observatory == "lco":
+                task_lco_data_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
+            else:
+                raise ValueError(f"Unknown observatory: {observatory}")
             
-        observatory_groups.append(group)
+        group_observatories.append(group)
 
     # Add final notification task
     final_notification = PythonOperator(
@@ -280,10 +293,10 @@ with DAG(
         python_callable=lambda **_: None,  # dummy function that does nothing
         on_success_callback=[
             send_slack_notification_partial(
-                text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.mjd') }}}} (night of {{{{ ds }}}}). Both observatories processed."
+                text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='setup.sjd') }}}} (night of {{{{ ds }}}}). Both observatories processed."
             )
         ],
         dag=dag
     )
     
-    quick_check >> group_git >> group_setup >> observatory_groups >> final_notification
+    group_check >> sjd >> group_update >> group_observatories >> final_notification
