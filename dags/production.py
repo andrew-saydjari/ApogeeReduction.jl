@@ -89,7 +89,7 @@ def submit_and_wait(bash_command, **context):
 
 class TransferFileSensor(FileSensor):
     def poke(self, context) -> bool:
-        if (datetime.now() - Time(context["data_interval_start"])).days > 3:
+        if (datetime.now(context["data_interval_start"].tzinfo) - context["data_interval_start"]).days > 3:
             raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
         return super().poke(context)
 
