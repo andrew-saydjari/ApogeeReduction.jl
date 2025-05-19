@@ -42,9 +42,9 @@ class TransferFileSensor(FileSensor):
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
-def send_slack_notification_partial(text, silent=False):
+def send_slack_notification_partial(text, silenced=False):
     print(text)
-    if not silent:
+    if not silenced:
         return send_slack_notification(text=text, channel=SLACK_CHANNEL)
     return (lambda *a, **kw: None) # A partial that does nothing.
     
@@ -75,16 +75,16 @@ def wait_for_slurm(job_id, min_rows=0):
                 state = this_state
         time.sleep(5)
 
-def submit_and_wait(bash_command, silent=False, **context):
+def submit_and_wait(bash_command, silenced=False, **context):
     # Set environment variable for the subprocess
     env = os.environ.copy()
-    if silent:
+    if silenced:
         env.pop("SLACK_CHANNEL", None)
     else:
         env["SLACK_CHANNEL"] = SLACK_CHANNEL_KEYS[SLACK_CHANNEL]
     
     # Now bash_command comes directly from the arguments
-    print(f"Submitting command (silenced={silent}): {bash_command}")
+    print(f"Submitting command (silenced={silenced}): {bash_command}")
     result = subprocess.run(bash_command.split(), capture_output=True, text=True, env=env)
     
     if result.returncode != 0:
@@ -115,7 +115,7 @@ with DAG(
     DAG_NAME,
     start_date=datetime(2014, 7, 18), 
     schedule_interval=timedelta(days=1),
-    max_active_runs=1,
+    max_active_runs=2,
     default_args=dict(retries=1, retry_delay=timedelta(minutes=5)),
     catchup=True,
     on_failure_callback=[
@@ -144,10 +144,10 @@ with DAG(
         python_callable=lambda data_interval_start, **_: to_sloan_modified_date(data_interval_start),
         trigger_rule="one_success"
     )
-    silent = PythonOperator(
-        task_id="silent",
-        # Every 10 days, notify. Otherwise silent.
-        python_callable=lambda ti, **k: skip_if_not_true((ti.xcom_pull(task_ids='sjd') % nth_day_verbose) == 0),
+    silenced = PythonOperator(
+        task_id="silenced",
+        # Every 10 days, notify. Otherwise silenced.
+        python_callable=lambda ti, **k: skip_if_not_true((ti.xcom_pull(task_ids='sjd') % nth_day_verbose) > 0),
     )
 
     with TaskGroup(group_id="update") as group_update:
@@ -224,7 +224,7 @@ with DAG(
                         text=f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                             f"(night of {{{{ ds }}}}). "
                             f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/",
-                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
             )
@@ -237,7 +237,7 @@ with DAG(
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}). Starting reduction pipeline. Exposure list available at https://data.sdss5.org/sas/sdsswork/data/apogee/{observatory}/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}.log.html",
-                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
                 on_failure_callback=[
@@ -245,14 +245,14 @@ with DAG(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}) is incomplete. "
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
-                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
                 on_skipped_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}) assumed to already exist: not awaiting `done` file. Starting reduction pipeline.",
-                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
                 timeout=60*60*18, # 18 hours: midnight ET
@@ -266,7 +266,7 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                    silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                 ),
                 trigger_rule="none_failed_min_one_success" # requires one success from initial notification or file sensor
             )
@@ -276,7 +276,7 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_flat_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                    silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                 ),
             )
             
@@ -285,18 +285,18 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_all_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                    silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                 ),
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}).",
-                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). :picard_facepalm:",
-                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ]               
             )   
@@ -316,10 +316,10 @@ with DAG(
         on_success_callback=[
             send_slack_notification_partial(
                 text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). Both observatories processed.",
-                #silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                #silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
             )
         ],
         trigger_rule="none_failed_min_one_success"
     )
     
-    group_check >> sjd >> (silent, group_update) >> branch >> group_observatories >> final_notification
+    group_check >> sjd >> (silenced, group_update) >> branch >> group_observatories >> final_notification
