@@ -116,7 +116,7 @@ with DAG(
     DAG_NAME,
     start_date=datetime(2014, 7, 18), 
     schedule_interval=timedelta(days=1),
-    max_active_runs=2,
+    max_active_runs=5,
     default_args=dict(retries=1, retry_delay=timedelta(minutes=5)),
     catchup=True,
     on_failure_callback=[
