@@ -221,7 +221,6 @@ with DAG(
                             f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/"
                     )
                 ],
-                trigger_rule="all_success"
             )
 
             filepath = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/staging/{observatory}/log/mos/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}/transfer-{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}.done"
@@ -257,7 +256,7 @@ with DAG(
                 task_id="darks",
                 python_callable=submit_and_wait,
                 op_kwargs={'bash_command': f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}"},
-                trigger_rule="none_failed" # so this doesn't get skipped if the FileSensor is skipped
+                trigger_rule="none_failed_min_one_success" # requires one success from initial notification or file sensor
             )
 
             flats = PythonOperator(
@@ -283,6 +282,7 @@ with DAG(
                     )
                 ]               
             )   
+            initial_notification >> darks # if initial notification is skipped, darks will skip too
             initial_notification >> transfer >> darks >> flats >> science
             #elif observatory == "lco":
             #    task_lco_data_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
