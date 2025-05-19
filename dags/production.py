@@ -301,7 +301,7 @@ with DAG(
             )
         ],
         dag=dag,
-        trigger_rule="one_success"
+        trigger_rule="none_failed_min_one_success"
     )
     
     group_check >> (sjd, group_update) >> branch >> group_observatories >> final_notification
