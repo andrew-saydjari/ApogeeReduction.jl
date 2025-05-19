@@ -43,7 +43,8 @@ def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
 def send_slack_notification_partial(text, silenced=False):
-    print(text)
+    print("SLACK NOTIFY")
+    print(text, silenced)
     if not silenced:
         return send_slack_notification(text=text, channel=SLACK_CHANNEL)
     return (lambda *a, **kw: None) # A partial that does nothing.
