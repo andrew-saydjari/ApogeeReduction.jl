@@ -54,8 +54,8 @@ def send_slack_notification_partial(text, silenced=False):
         print(f"foobar called with {k}")
         return None
     
-    return foo
-    
+    return foobar
+
     print("checking slack notification partial")
     #silenced = parse_silenced(silenced)
 
@@ -93,7 +93,7 @@ def wait_for_slurm(job_id, min_rows=0):
         time.sleep(5)
 
 def submit_and_wait(bash_command, **context):
-    silenced = context["ti"].xcom_pull(task_ids="silenced")
+    silenced = bool(context["ti"].xcom_pull(task_ids="silenced"))
 
     # Set environment variable for the subprocess
     env = os.environ.copy()
