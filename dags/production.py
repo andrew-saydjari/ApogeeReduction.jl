@@ -23,11 +23,27 @@ SLACK_CHANNEL_KEYS = {
     "#apogee-reduction-jl-dev": "C07KQ7BJY5P"
 }
 
+n_days_recency = 3
+nth_day_verbose = 10
+observatories = ("apo", "lco")
+sbatch_prefix = re.sub(r"\s+", " ", f"""
+    sbatch 
+    -vvv
+    -D {REPO_DIR}
+""") 
+
+
+class TransferFileSensor(FileSensor):
+    def poke(self, context) -> bool:
+        if (datetime.now(context["data_interval_start"].tzinfo) - context["data_interval_start"]).days > n_days_recency:
+            raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
+        return super().poke(context)
+
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
-def send_slack_notification_partial(text, notify=True):
-    if notify:
+def send_slack_notification_partial(text, silent=False):
+    if not silent:
         return send_slack_notification(text=f"[prod] {text}", channel=SLACK_CHANNEL)
     else:
         print(text)
@@ -86,27 +102,15 @@ def submit_and_wait(bash_command, notify, **context):
     wait_for_slurm(job_id)
     return job_id
 
-class TransferFileSensor(FileSensor):
-    def poke(self, context) -> bool:
-        if (datetime.now(context["data_interval_start"].tzinfo) - context["data_interval_start"]).days > 3:
-            raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
-        return super().poke(context)
+def is_recent(data_interval_start, **kwargs):
+    return (datetime.now(data_interval_start.tzinfo) - data_interval_start).days <= n_days_recency
 
-observatories = ("apo", "lco")
-
-
-is_recent = lambda data_interval_start, **kwargs: (datetime.now(data_interval_start.tzinfo) - data_interval_start).days <= 3
-data_dir_exists = lambda observatory, data_interval_start, **kwargs: os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{observatory}/{to_sloan_modified_date(data_interval_start)}/")
+def data_dir_exists(observatory, data_interval_start, **kwargs):
+    return os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{observatory}/{to_sloan_modified_date(data_interval_start)}/")
 
 def skip_if_not_true(criteria):
     if not criteria:
         raise AirflowSkipException("Condition not met for skipping.")
-
-sbatch_prefix = re.sub(r"\s+", " ", f"""
-    sbatch 
-    -vvv
-    -D {REPO_DIR}
-""") 
 
 # Notable dates: https://sdss-wiki.atlassian.net/wiki/spaces/MWM/pages/14659365/Notable+dates
 # - 2024-07-18: New APO/APOGEE blue chip.
@@ -116,7 +120,7 @@ with DAG(
     start_date=datetime(2014, 7, 18), 
     schedule_interval=timedelta(days=1),
     max_active_runs=1,
-    default_args=dict(retries=0),
+    default_args=dict(retries=1, retry_delay=timedelta(minutes=5)),
     catchup=True,
     on_failure_callback=[
         send_slack_notification_partial(
@@ -144,10 +148,10 @@ with DAG(
         python_callable=lambda data_interval_start, **_: to_sloan_modified_date(data_interval_start),
         trigger_rule="one_success"
     )
-    notify = PythonOperator(
-        task_id="notify",
-        # Every 10 days, notify.
-        python_callable=lambda ti, **k: (ti.xcom_pull(task_ids='sjd') % 10) == 0,
+    silent = PythonOperator(
+        task_id="silent",
+        # Every 10 days, notify. Otherwise silent.
+        python_callable=lambda ti, **k: (ti.xcom_pull(task_ids='sjd') % nth_day_verbose) > 0,
     )
 
     with TaskGroup(group_id="update") as group_update:
@@ -223,7 +227,7 @@ with DAG(
                         text=f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                             f"(night of {{{{ ds }}}}). "
                             f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/",
-                        notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                     )
                 ],
             )
@@ -236,7 +240,7 @@ with DAG(
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}). Starting reduction pipeline. Exposure list available at https://data.sdss5.org/sas/sdsswork/data/apogee/{observatory}/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}.log.html",
-                        notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                     )
                 ],
                 on_failure_callback=[
@@ -244,14 +248,14 @@ with DAG(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}) is incomplete. "
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
-                        notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                     )
                 ],
                 on_skipped_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}) assumed to already exist: not awaiting `done` file. Starting reduction pipeline.",
-                        notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                     )
                 ],
                 timeout=60*60*18, # 18 hours: midnight ET
@@ -265,7 +269,7 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                    silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                 ),
                 trigger_rule="none_failed_min_one_success" # requires one success from initial notification or file sensor
             )
@@ -275,7 +279,7 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_flat_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                    silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                 ),
             )
             
@@ -284,18 +288,18 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_all_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                    silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                 ),
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}).",
-                        notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). :picard_facepalm:",
-                        notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                        silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
                     )
                 ]               
             )   
@@ -315,7 +319,7 @@ with DAG(
         on_success_callback=[
             send_slack_notification_partial(
                 text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). Both observatories processed.",
-                notify="{{ task_instance.xcom_pull(task_ids='notify') }}"
+                silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
             )
         ],
         trigger_rule="none_failed_min_one_success"
