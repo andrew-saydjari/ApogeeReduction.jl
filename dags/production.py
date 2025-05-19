@@ -17,14 +17,18 @@ REPO_DIR = f"{os.path.expandvars('$MWM_SANDBOX')}/airflow/ApogeeReduction.jl/"
 REPO_BRANCH = "airflow-prod"
 DAG_NAME = "ApogeeReduction-prod"
 
-SLACK_NOTIFICATIONS = True
+SLACK_CHANNEL = "#apogee-reduction-jl"
+SLACK_CHANNEL_KEYS = {
+    "#apogee-reduction-jl": "C08B7FKMP16",
+    "#apogee-reduction-jl-dev": "C07KQ7BJY5P"
+}
 
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
 def send_slack_notification_partial(text, notify=True):
     if notify:
-        return send_slack_notification(text=f"[prod] {text}", channel="#apogee-reduction-jl")
+        return send_slack_notification(text=f"[prod] {text}", channel=SLACK_CHANNEL)
     else:
         print(text)
         # Send back a partial function that does nothing.
@@ -61,9 +65,7 @@ def submit_and_wait(bash_command, notify, **context):
     # Set environment variable for the subprocess
     env = os.environ.copy()
     if notify:
-        # C07KQ7BJY5P # apogee-reduction-jl-dev
-        # C08B7FKMP16 # apogee-reduction-jl
-        env["SLACK_CHANNEL"] = "C08B7FKMP16" # apogee-reduction-jl
+        env["SLACK_CHANNEL"] = SLACK_CHANNEL_KEYS[SLACK_CHANNEL]
     else:
         env.pop("SLACK_CHANNEL", None)
     
