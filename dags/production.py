@@ -90,7 +90,6 @@ def submit_and_wait(bash_command, **context):
 class TransferFileSensor(FileSensor):
     def poke(self, context) -> bool:
         if (datetime.now(context["data_interval_start"].tzinfo) - context["data_interval_start"]).days > 3:
-            time.sleep(60)
             raise AirflowSkipException("Data interval range is ancient, assuming transfer is complete.")
         return super().poke(context)
 
@@ -301,7 +300,8 @@ with DAG(
                 text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). Both observatories processed."
             )
         ],
-        dag=dag
+        dag=dag,
+        trigger_rule="one_success"
     )
     
-    group_check >> sjd >> group_update >> branch >> group_observatories >> final_notification
+    group_check >> (sjd, group_update) >> branch >> group_observatories >> final_notification
