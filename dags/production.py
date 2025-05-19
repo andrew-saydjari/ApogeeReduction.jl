@@ -321,4 +321,4 @@ with DAG(
         trigger_rule="none_failed_min_one_success"
     )
     
-    group_check >> sjd >> (notify, group_update) >> branch >> group_observatories >> final_notification
+    group_check >> sjd >> (silent, group_update) >> branch >> group_observatories >> final_notification
