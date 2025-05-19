@@ -209,6 +209,7 @@ with DAG(
     branch = BranchPythonOperator(
         task_id="branch",
         python_callable=lambda **k: [o for o in observatories if data_dir_exists(o, **k)],
+        trigger_rule="none_failed_min_one_success"
     )
 
     group_observatories = []
