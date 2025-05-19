@@ -49,9 +49,10 @@ def parse_silenced(v):
 
 def send_slack_notification_partial(text, silenced=False):
 
-    def foobar(**k):
+    def foobar(*args, **k):
         print(f"Text: {text} (silenced = {silenced}, {type(silenced)})")
-        print(f"foobar called with {k}")
+        print(f"foobar called with {args}")
+        print(f"foobar kwargs: {k}")
         return None
     
     return foobar
