@@ -7,7 +7,7 @@ from astropy.time import Time
 from airflow import DAG
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.exceptions import AirflowSkipException
 
@@ -96,7 +96,7 @@ class TransferFileSensor(FileSensor):
 observatories = ("apo", "lco")
 
 
-is_recent = lambda data_interval_start, **kwargs: (datetime.now() - data_interval_start).days <= 3
+is_recent = lambda data_interval_start, **kwargs: (datetime.now(data_interval_start.tzinfo) - data_interval_start).days <= 3
 data_dir_exists = lambda observatory, data_interval_start, **kwargs: os.path.exists(f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/data/apogee/{observatory}/{to_sloan_modified_date(data_interval_start)}/")
 
 def skip_if_not_true(criteria):
@@ -202,6 +202,11 @@ with DAG(
             )
         )
 
+    branch = BranchPythonOperator(
+        task_id="branch",
+        python_callable=lambda **k: [o for o in observatories if data_dir_exists(o, **k)],
+    )
+
     group_observatories = []
     for observatory in observatories:  # Changed order to LCO first
         with TaskGroup(group_id=observatory) as group:
@@ -278,12 +283,11 @@ with DAG(
                     )
                 ]               
             )   
-            if observatory == "apo":
-                task_apo_data_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
-            elif observatory == "lco":
-                task_lco_data_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
-            else:
-                raise ValueError(f"Unknown observatory: {observatory}")
+            initial_notification >> transfer >> darks >> flats >> science
+            #elif observatory == "lco":
+            #    task_lco_data_dir_exists >> initial_notification >> transfer >> darks >> flats >> science
+            #else:
+            #    raise ValueError(f"Unknown observatory: {observatory}")
             
         group_observatories.append(group)
 
@@ -299,4 +303,4 @@ with DAG(
         dag=dag
     )
     
-    group_check >> sjd >> group_update >> group_observatories >> final_notification
+    group_check >> sjd >> group_update >> branch >> group_observatories >> final_notification
