@@ -43,12 +43,10 @@ def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
 def send_slack_notification_partial(text, silent=False):
+    print(text)
     if not silent:
         return send_slack_notification(text=f"[prod] {text}", channel=SLACK_CHANNEL)
-    else:
-        print(text)
-        # Send back a partial function that does nothing.
-        return (lambda *a, **kw: None)
+    return (lambda *a, **kw: None) # A partial that does nothing.
     
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id, min_rows=0):
@@ -77,17 +75,16 @@ def wait_for_slurm(job_id, min_rows=0):
                 state = this_state
         time.sleep(5)
 
-def submit_and_wait(bash_command, notify, **context):
+def submit_and_wait(bash_command, silent, **context):
     # Set environment variable for the subprocess
     env = os.environ.copy()
-    if notify:
-        env["SLACK_CHANNEL"] = SLACK_CHANNEL_KEYS[SLACK_CHANNEL]
-    else:
+    if silent:
         env.pop("SLACK_CHANNEL", None)
+    else:
+        env["SLACK_CHANNEL"] = SLACK_CHANNEL_KEYS[SLACK_CHANNEL]
     
     # Now bash_command comes directly from the arguments
-    print(f"Notifications: {notify}")
-    print(f"Submitting command: {bash_command}")
+    print(f"Submitting command (silenced={silent}): {bash_command}")
     result = subprocess.run(bash_command.split(), capture_output=True, text=True, env=env)
     
     if result.returncode != 0:
@@ -98,7 +95,6 @@ def submit_and_wait(bash_command, notify, **context):
     # - "Submitted batch job XXXXX on cluster YYYY"
     job_id = result.stdout.strip().split("job")[1].split()[0]
     print(f"Submitted SLURM job {job_id}")
-    
     wait_for_slurm(job_id)
     return job_id
 
