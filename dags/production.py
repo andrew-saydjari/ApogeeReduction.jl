@@ -42,7 +42,14 @@ class TransferFileSensor(FileSensor):
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
+def parse_silenced(silenced):
+    if isinstance(silenced, str):
+        return bool(eval(silenced))
+    return silenced
+
 def send_slack_notification_partial(text, silenced=False):
+    silenced = parse_silenced(silenced)
+
     print("SLACK NOTIFY")
     print(text, silenced)
     if not silenced:
@@ -77,11 +84,16 @@ def wait_for_slurm(job_id, min_rows=0):
         time.sleep(5)
 
 def submit_and_wait(bash_command, silenced=False, **context):
+    silenced = parse_silenced(silenced)
+
     # Set environment variable for the subprocess
     env = os.environ.copy()
+    print(f"silenced {silenced} ({type(silenced)})")
     if silenced:
+        print("silencing")
         env.pop("SLACK_CHANNEL", None)
     else:
+        print("not silencing")
         env["SLACK_CHANNEL"] = SLACK_CHANNEL_KEYS[SLACK_CHANNEL]
     
     # Now bash_command comes directly from the arguments
