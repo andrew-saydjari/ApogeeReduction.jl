@@ -42,10 +42,10 @@ class TransferFileSensor(FileSensor):
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
-def parse_silenced(silenced):
-    if isinstance(silenced, str):
-        return bool(eval(silenced))
-    return silenced
+def parse_silenced(v):
+    if isinstance(v, str):
+        return bool(eval(v))
+    return v
 
 def send_slack_notification_partial(text, silenced=False):
     silenced = parse_silenced(silenced)
