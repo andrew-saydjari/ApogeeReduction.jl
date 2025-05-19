@@ -47,7 +47,7 @@ def send_slack_notification_partial(text):
         silenced = bool(context["ti"].xcom_pull(task_ids="silenced"))
         print(f"Text (silenced={silenced}): {text}")
         if not silenced:
-            return send_slack_notification(text=text, channel=SLACK_CHANNEL)
+            return send_slack_notification(text=text, channel=SLACK_CHANNEL)(context)
     return f
     
 # Add this function to check SLURM job status
