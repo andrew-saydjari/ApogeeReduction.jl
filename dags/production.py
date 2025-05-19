@@ -107,6 +107,7 @@ def data_dir_exists(observatory, data_interval_start, **kwargs):
 def skip_if_not_true(criteria):
     if not criteria:
         raise AirflowSkipException("Condition not met for skipping.")
+    return criteria
 
 # Notable dates: https://sdss-wiki.atlassian.net/wiki/spaces/MWM/pages/14659365/Notable+dates
 # - 2024-07-18: New APO/APOGEE blue chip.
