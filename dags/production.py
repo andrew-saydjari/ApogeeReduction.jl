@@ -42,29 +42,13 @@ class TransferFileSensor(FileSensor):
 def to_sloan_modified_date(data_interval_start):
     return int(Time(data_interval_start).mjd) + 1 # +1 offset to get the most recent day
 
-def parse_silenced(v):
-    if isinstance(v, str):
-        return bool(eval(v))
-    return v
-
-def send_slack_notification_partial(text, silenced=False):
-
-    def foobar(*args, **k):
-        print(f"Text: {text} (silenced = {silenced}, {type(silenced)})")
-        print(f"foobar called with {args}")
-        print(f"foobar kwargs: {k}")
-        return None
-    
-    return foobar
-
-    print("checking slack notification partial")
-    #silenced = parse_silenced(silenced)
-
-    print("SLACK NOTIFY")
-    print(text, silenced)
-    if not silenced:
-        return send_slack_notification(text=text, channel=SLACK_CHANNEL)
-    return (lambda *a, **kw: None) # A partial that does nothing.
+def send_slack_notification_partial(text):
+    def f(context, **k):
+        silenced = bool(context["ti"].xcom_pull(task_ids="silenced"))
+        print(f"Text (silenced={silenced}): {text}")
+        if not silenced:
+            return send_slack_notification(text=text, channel=SLACK_CHANNEL)
+    return f
     
 # Add this function to check SLURM job status
 def wait_for_slurm(job_id, min_rows=0):
@@ -245,7 +229,6 @@ with DAG(
                         text=f"Waiting for {observatory.upper()} data transfer for SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                             f"(night of {{{{ ds }}}}). "
                             f"Check here for transfer status: https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/",
-                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
             )
@@ -258,7 +241,6 @@ with DAG(
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data transfer complete for SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}). Starting reduction pipeline. Exposure list available at https://data.sdss5.org/sas/sdsswork/data/apogee/{observatory}/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}/{{{{ task_instance.xcom_pull(task_ids='sjd') }}}}.log.html",
-                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
                 on_failure_callback=[
@@ -266,14 +248,12 @@ with DAG(
                         text=f"{observatory.upper()} data transfer on SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}) is incomplete. "
                              f"Please check https://data.sdss5.org/sas/sdsswork/data/staging/{observatory}/log/mos/ and investigate.",
-                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
                 on_skipped_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} data on SJD {{{{ task_instance.xcom_pull(task_ids='sjd') }}}} "
                              f"(night of {{{{ ds }}}}) assumed to already exist: not awaiting `done` file. Starting reduction pipeline.",
-                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],
                 timeout=60*60*18, # 18 hours: midnight ET
@@ -308,13 +288,11 @@ with DAG(
                 on_success_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frames reduced for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}).",
-                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
                         text=f"{observatory.upper()} science frame reduction failed for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). :picard_facepalm:",
-                        silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                     )
                 ]               
             )   
@@ -334,7 +312,6 @@ with DAG(
         on_success_callback=[
             send_slack_notification_partial(
                 text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). Both observatories processed.",
-                #silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
             )
         ],
         trigger_rule="none_failed_min_one_success"
