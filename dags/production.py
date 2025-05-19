@@ -48,7 +48,16 @@ def parse_silenced(v):
     return v
 
 def send_slack_notification_partial(text, silenced=False):
-    silenced = parse_silenced(silenced)
+
+    def foobar(**k):
+        print(f"Text: {text} (silenced = {silenced}, {type(silenced)})")
+        print(f"foobar called with {k}")
+        return None
+    
+    return foo
+    
+    print("checking slack notification partial")
+    #silenced = parse_silenced(silenced)
 
     print("SLACK NOTIFY")
     print(text, silenced)
@@ -83,17 +92,14 @@ def wait_for_slurm(job_id, min_rows=0):
                 state = this_state
         time.sleep(5)
 
-def submit_and_wait(bash_command, silenced=False, **context):
-    silenced = parse_silenced(silenced)
+def submit_and_wait(bash_command, **context):
+    silenced = context["ti"].xcom_pull(task_ids="silenced")
 
     # Set environment variable for the subprocess
     env = os.environ.copy()
-    print(f"silenced {silenced} ({type(silenced)})")
     if silenced:
-        print("silencing")
         env.pop("SLACK_CHANNEL", None)
     else:
-        print("not silencing")
         env["SLACK_CHANNEL"] = SLACK_CHANNEL_KEYS[SLACK_CHANNEL]
     
     # Now bash_command comes directly from the arguments
@@ -280,7 +286,6 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_dark_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_dark_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                 ),
                 trigger_rule="none_failed_min_one_success" # requires one success from initial notification or file sensor
             )
@@ -290,7 +295,6 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_flat_cal_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/cal_build/run_flat_cal.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                 ),
             )
             
@@ -299,7 +303,6 @@ with DAG(
                 python_callable=submit_and_wait,
                 op_kwargs=dict(
                     bash_command=f"{sbatch_prefix} --job-name=ar_all_{observatory}_{{{{ ti.xcom_pull(task_ids='sjd') }}}} src/run_scripts/run_all.sh {observatory} {{{{ ti.xcom_pull(task_ids='sjd') }}}}",
-                    silenced="{{ task_instance.xcom_pull(task_ids='silenced') }}"
                 ),
                 on_success_callback=[
                     send_slack_notification_partial(
