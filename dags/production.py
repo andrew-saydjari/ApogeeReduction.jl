@@ -75,7 +75,7 @@ def wait_for_slurm(job_id, min_rows=0):
                 state = this_state
         time.sleep(5)
 
-def submit_and_wait(bash_command, silent, **context):
+def submit_and_wait(bash_command, silent=False, **context):
     # Set environment variable for the subprocess
     env = os.environ.copy()
     if silent:
@@ -147,7 +147,7 @@ with DAG(
     silent = PythonOperator(
         task_id="silent",
         # Every 10 days, notify. Otherwise silent.
-        python_callable=lambda ti, **k: (ti.xcom_pull(task_ids='sjd') % nth_day_verbose) > 0,
+        python_callable=lambda ti, **k: skip_if_not_true((ti.xcom_pull(task_ids='sjd') % nth_day_verbose) == 0),
     )
 
     with TaskGroup(group_id="update") as group_update:
