@@ -45,7 +45,7 @@ def to_sloan_modified_date(data_interval_start):
 def send_slack_notification_partial(text, silent=False):
     print(text)
     if not silent:
-        return send_slack_notification(text=f"[prod] {text}", channel=SLACK_CHANNEL)
+        return send_slack_notification(text=text, channel=SLACK_CHANNEL)
     return (lambda *a, **kw: None) # A partial that does nothing.
     
 # Add this function to check SLURM job status
@@ -315,7 +315,7 @@ with DAG(
         on_success_callback=[
             send_slack_notification_partial(
                 text=f"ApogeeReduction pipeline completed successfully for SJD {{{{ ti.xcom_pull(task_ids='sjd') }}}} (night of {{{{ ds }}}}). Both observatories processed.",
-                silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
+                #silent="{{ task_instance.xcom_pull(task_ids='silent') }}"
             )
         ],
         trigger_rule="none_failed_min_one_success"
