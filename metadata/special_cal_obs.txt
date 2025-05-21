@@ -2,10 +2,27 @@
 #tele  mjd      expid_range          cal_type    description
 apo    60356    47940110-47940123    b2b         "back-to-back flat exposures"
 lco    60425    48630077-48630084    b2b         "back-to-back flat exposures"
+
 apo    59549    39870034-39870043    spQF        "sparsePak quartz flat"
 lco    60044    44820002-44820024    spQF        "sparsePak quartz flat"
+
+lco    60755    51930001-51930005    sat         "saturation internal flats, 170 reads"
+
+apo    57126    15640002-15640021    uD          "ultra dark, 100 reads"
+apo    57581    20190002-20190030    uD          "ultra dark, 100 reads"
+apo    57949    23870002-23870031    uD          "ultra dark, 100 reads"
+apo    57951    23890002-23890030    uD          "ultra dark, 100 reads"
+apo    58304    27420002-27420030    uD          "ultra dark, 100 reads"
+apo    58718    31560002-31560030    uD          "ultra dark, 100 reads"
+apo    58939    33770002-33770030    uD          "ultra dark, 100 reads"
+apo    59095    35330002-35330030    uD          "ultra dark, 100 reads"
 apo    59145    35830008-35830037    uD          "ultra dark, 100 reads"
+lco    57824    22620002-22620030    uD          "ultra dark, 100 reads"
+lco    58047    24850003-24850031    uD          "ultra dark, 100 reads"
+lco    58233    26710002-26710027    uD          "ultra dark, 100 reads"
+lco    58311    27490002-27490030    uD          "ultra dark, 100 reads"
+lco    58926    33640002-33640030    uD          "ultra dark, 100 reads"
 lco    59142    35800002-35800031    uD          "ultra dark, 100 reads"
+
 apo    57951    23890032-23890060    uF          "ultra flat, 60 reads"
 lco    58926    33640032-33640061    uF          "ultra flat, 30 reads"
-lco    60755    51930001-51930005    sat         "saturation internal flats, 170 reads"
