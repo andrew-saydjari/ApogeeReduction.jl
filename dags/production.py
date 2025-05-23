@@ -37,7 +37,7 @@ nth_day_verbose = 10
 
 # now let's scale it to actually do 3 active runs and we will use what's available
 schedule_interval = timedelta(days=12)
-max_active_runs = 3
+max_active_runs = 6 # reduce to 3 when LCO is up and running
 
 observatories = ("apo", "lco")
 sbatch_prefix = re.sub(r"\s+", " ", f"""
