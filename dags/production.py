@@ -25,6 +25,20 @@ SLACK_CHANNEL_KEYS = {
 
 n_days_recency = 3
 nth_day_verbose = 10
+
+# ~3736 days since 2025-03-01
+# ~1.5 node-hr per calendar day
+
+
+# Want to complete within 10 days, using 2 active runs (so 4 nodes per day).
+# -> 2 nodes * 24 hrs * 10 days = 480 node-hrs
+# -> 480 node-hrs / 1.5 node-hr per calendar day = 320 calendar days
+# -> 3736 days / 320 days = ~12 days
+
+# now let's scale it to actually do 3 active runs and we will use what's available
+schedule_interval = timedelta(days=12)
+max_active_runs = 3
+
 observatories = ("apo", "lco")
 sbatch_prefix = re.sub(r"\s+", " ", f"""
     sbatch 
@@ -116,11 +130,12 @@ def skip_if_not_true(criteria):
 # Notable dates: https://sdss-wiki.atlassian.net/wiki/spaces/MWM/pages/14659365/Notable+dates
 # - 2024-07-18: New APO/APOGEE blue chip.
 
+
 with DAG(
     DAG_NAME,
     start_date=datetime(2014, 7, 18), 
-    schedule_interval=timedelta(days=1),
-    max_active_runs=2,
+    schedule_interval=schedule_interval,
+    max_active_runs=max_active_runs,
     default_args=dict(retries=1, retry_delay=timedelta(minutes=5)),
     catchup=True,
     on_failure_callback=[
