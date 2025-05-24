@@ -2,7 +2,7 @@
 using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean
 using TimerOutputs
-using FITSIO
+using FITSIO, EllipsisNotation
 
 function apz2cube(fname)
     f = FITS(fname)
@@ -228,7 +228,7 @@ function load_gain_maps(gainReadCalDir, tele, chips)
             gainMatDict[chip] = gainView
         else
             #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error
-            @warn "Gain calibration file not found for chip $chip"
+            @warn "Gain calibration file not found for chip $chip at $gainMatPath"
             gainMatDict[chip] = 1.9 * ones(Float64, 2560, 2048) # electrons/DN
         end
     end
