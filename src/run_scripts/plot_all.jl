@@ -54,6 +54,11 @@ end
 
 parg = parse_commandline()
 
+CHIP_LIST = split(parg["chips"],"")
+FIRST_CHIP = CHIP_LIST[1]
+N_CHIPS = size(CHIP_LIST,1)
+N_FIBERS = 300
+
 dirNamePlots = parg["outdir"] * "plots/"
 mkpath(dirNamePlots) # will work even if it already exists
 
@@ -532,8 +537,8 @@ end
 all2Da = vcat(list2Dexp...)
 
 # per chip example 2D flux residuals from 1D extraction
-for chip in ["a", "b", "c"]
-    all2D = replace.(all2Da, "_a_" => "_$(chip)_")
+for chip in CHIP_LIST
+    all2D = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
     thread = SlackThread()
     if length(unique_mjds) > 1
