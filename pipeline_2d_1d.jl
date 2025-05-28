@@ -132,7 +132,7 @@ flush(stdout);
 ##### 1D stage
 @everywhere begin
     function process_1D(fname)
-        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         # how worried should I be about loading this every time?
@@ -250,7 +250,8 @@ end
 
 list2Dexp = []
 for mjd in unique_mjds
-    df = read_almanac_exp_df(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+    df = read_almanac_exp_df(
+        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
@@ -307,7 +308,8 @@ list1DexpObject = []
 list1DexpFPI = []
 list1DexpArclamp = []
 for mjd in unique_mjds
-    df = read_almanac_exp_df(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+    df = read_almanac_exp_df(
+        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
     function get_1d_name_partial(expid)
         if df.imagetyp[expid] == "Object"
             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
@@ -374,15 +376,26 @@ flush(stdout);
 ## get wavecal from sky line peaks
 println("Solving skyline wavelength solution:");
 flush(stdout);
+#only need to give one chip's list because internal
+#logic handles finding other chips when ingesting data
 all1DObjectSkyPeaks = replace.(
-    replace.(all1DObject, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+    replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
 all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
 
 if size(all1DObjectWavecal, 1) > 0
     println("Using all skyline wavelength solutions to determine median solution.")
     flush(stdout)
-    night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(all1DObjectWavecal)
+    night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
+        all1DObjectWavecal, fit_dither = true)
     sendto(workers(), night_wave_soln = night_wave_soln)
+    sendto(workers(), night_linParams = night_linParams)
+    sendto(workers(), night_nlParams = night_nlParams)
+
+    println("Using skylines to measure dither offsets from nightly skyline average wavelength solution")
+    @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
+        fname, night_linParams, night_nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
+
+    @showprogress pmap(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks)
 
     println("Plotting skyline wavelength solution diagnostic figures.")
 
@@ -390,10 +403,11 @@ if size(all1DObjectWavecal, 1) > 0
         all1DObjectWavecal, night_linParams, night_nlParams, night_wave_soln,
         dirNamePlots = dirNamePlots,
         plot_fibers = (1, 50, 100, 150, 200, 250, 300),
-        plot_pixels = (1, 512, 1024, 1536, 2048),
-        chip_names = ("a", "b", "c"))
+        plot_pixels = (1, 512, 1024, 1536, 2048))
 else
     sendto(workers(), night_wave_soln = nothing)
+    sendto(workers(), night_nlParams = nothing)
+    sendto(workers(), night_linParams = nothing)
 end
 
 if size(all1DArclamp, 1) > 0
@@ -411,10 +425,23 @@ if size(all1DFPI, 1) > 0
     ## get FPI peaks
     println("Fitting FPI peaks:")
     flush(stdout)
-    try
-        @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
-    catch
-        println("\nFAILED fitting FPI peaks")
+    all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
+    #change the condition once there are wavelength 
+    #solutions from the ARCLAMPs as well
+    if (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)
+        println("Using $(size(all1DfpiPeaks_a,1)) FPI exposures to measure high-precision nightly wavelength solution")
+        outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
+            all1DfpiPeaks_a, night_linParams, night_nlParams, cporder = 1, wporder = 4, dporder = 2)
+        sendto(workers(), night_wave_soln = night_wave_soln)
+        sendto(workers(), night_linParams = night_linParams)
+        sendto(workers(), night_nlParams = night_nlParams)
+
+        println("Using skylines to measure dither offsets from FPI-defined wavelength solution")
+        @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
+            fname, night_linParams, night_nlParams; dporder = 2, wavetype = "fpi", max_offset = 1.0)
+
+        @showprogress pmap(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks)
     end
 end
 

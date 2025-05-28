@@ -732,15 +732,6 @@ function get_and_save_fpi_peaks(fname)
     flux_1d[.!good_pix] .= 0.0
     x = collect(1:n_pixels)
 
-#    j = 280
-#    println("fiber ",j)
-#    get_initial_fpi_peaks(flux_1d[:,j], ivar_1d[:,j])
-#    sjkshjskjh
-#    for j in 1:n_fibers
-#        println("fiber ",j)
-#        get_initial_fpi_peaks(flux_1d[:,j], ivar_1d[:,j])
-#    end
-
     function get_peaks_partial(intup)
         flux_1d, ivar_1d = intup
         get_initial_fpi_peaks(flux_1d, ivar_1d)
@@ -770,7 +761,7 @@ function get_and_save_fpi_peaks(fname)
         end
     end
 
-    outname = replace(replace(fname, "ar1Dcal" => "fpi_peaks"), "ar1D" => "fpi_peaks")
+    outname = replace(replace(fname, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
     f = h5open(outname, "w")
 
     # Write original data
@@ -784,6 +775,9 @@ function get_and_save_fpi_peaks(fname)
     attrs(f["fpi_line_cov_mat"])["axis_2"] = "fit_info"
     attrs(f["fpi_line_cov_mat"])["axis_3"] = "fit_info"
     attrs(f["fpi_line_cov_mat"])["axis_4"] = "fibers"
+    close(f)
+
+    return outname
 end
 
 function get_and_save_arclamp_peaks(fname)
@@ -849,6 +843,9 @@ function get_and_save_arclamp_peaks(fname)
     attrs(f["arclamp_line_cov_mat"])["axis_2"] = "fit_info"
     attrs(f["arclamp_line_cov_mat"])["axis_3"] = "fit_info"
     attrs(f["arclamp_line_cov_mat"])["axis_4"] = "fibers"
+    close(f)
+
+    return outname
 end
 
 #using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
@@ -863,5 +860,3 @@ end
 ##fname = "../outdir//apred/60807/ar1Dcal_apo_60807_0009_b_ARCLAMP.h5"
 #fname = "../outdir//apred/60807/ar1Dcal_apo_60807_0063_a_ARCLAMP.h5"
 #get_and_save_fpi_peaks(fname)
-
-
