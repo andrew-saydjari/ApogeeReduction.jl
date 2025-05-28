@@ -1,3 +1,16 @@
+
+chipRaw2Redux = Dict(
+    "a" => "R",
+    "b" => "G",
+    "c" => "B",
+)
+
+chipRedux2Raw = Dict(
+    "R" => "a",
+    "G" => "b",
+    "B" => "c",
+)
+
 function getUtahBase(release_dir, redux_ver)
     if occursin("dr", release_dir)
         dr_number = parse(Int, match(r"dr(\d+)", release_dir).captures[1])
@@ -17,9 +30,9 @@ end
 function build_raw_path(tele, chip, mjd, exposure_id)
     base = "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
     fname = if tele == "apo"
-        "apR-$chip-$exposure_id.apz"
+        "apR-$(chipRedux2Raw[chip])-$exposure_id.apz"
     elseif tele == "lco"
-        "asR-$chip-$exposure_id.apz"
+        "asR-$(chipRedux2Raw[chip])-$exposure_id.apz"
     else
         error("Unknown telescope")
     end

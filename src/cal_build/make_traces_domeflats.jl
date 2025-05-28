@@ -6,8 +6,8 @@ function parse_commandline()
     @add_arg_table s begin
         "--chips"
         required = false
-        help = "chip names, i.e. abc"
-        default = "abc"
+        help = "chip names, i.e. RGB"
+        default = "RGB"
         arg_type = String
         "--tele"
         required = true

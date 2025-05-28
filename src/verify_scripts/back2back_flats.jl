@@ -92,6 +92,7 @@ function get_IQR(x, y; cnts_cut = 100, nbin_med = 100)
 end
 
 # why not also ar2Dcal?
+# sorting might be reverse compared to normal because of abc to RGB (come back to this next b2b run)
 flist = glob("ar2D_*.h5", joinpath(parg["data_dir"], "apred/$(parg["mjd"])/"));
 expnum_v = map(x -> parse(Int, split(basename(x), "_")[end - 1][(end - 3):end]), flist)
 chip_v = map(x -> split(basename(x), "_")[end - 2], flist);
@@ -103,7 +104,7 @@ p = sortperm(expnum_v[mskCal])
     fig = Figure(size = (2000, 600), fontsize = 22)
 
     expid1 = expnum_v[mskCal][p][1 + 6 * indoff]
-    for (ind, chipn) in enumerate(["a", "b", "c"])
+    for (ind, chipn) in enumerate(CHIP_LST)
         ax = Axis(fig[1, ind], title = "Tele: $(parg["tele"]), Chip: $chipn",
             xlabel = "Z-Score", ylabel = "Log Average Flux")
 

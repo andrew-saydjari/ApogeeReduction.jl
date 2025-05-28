@@ -256,8 +256,8 @@ end
 all2Da = vcat(list2Dexp...)
 
 all2Dperchip = []
-for chip in ["a", "b", "c"]
-    all2Dchip = replace.(all2Da, "_a_" => "_$(chip)_")
+for chip in CHIP_LST
+    all2Dchip = replace.(all2Da, "_$(CHIP_LST[1])_" => "_$(chip)_")
     push!(all2Dperchip, all2Dchip)
 end
 all2D = vcat(all2Dperchip...)
@@ -267,7 +267,7 @@ all2D = vcat(all2Dperchip...)
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
-    for chip in ["a", "b", "c"]
+    for chip in CHIP_LST
         traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
             parg["outdir"] * "$(trace_type)_flats/"))
         if length(traceList) > 1
@@ -313,8 +313,8 @@ end
 all1DObjecta = vcat(list1DexpObject...)
 
 all1DObjectperchip = []
-for chip in ["a", "b", "c"]
-    all1DObjectchip = replace.(all1DObjecta, "_a_" => "_$(chip)_")
+for chip in CHIP_LST
+    all1DObjectchip = replace.(all1DObjecta, "_$(CHIP_LST[1])_" => "_$(chip)_")
     push!(all1DObjectperchip, all1DObjectchip)
 end
 all1DObject = vcat(all1DObjectperchip...)

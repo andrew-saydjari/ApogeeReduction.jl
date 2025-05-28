@@ -237,7 +237,7 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
     interp_chipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, 3)
     x = 1:N_XPIX
     ximport = (x .- (N_XPIX ÷ 2)) ./ N_XPIX
-    for chip in ["a", "b", "c"]
+    for chip in CHIP_LST
         chipIndx = getChipIndx(chip)
         for fibIndx in 1:N_FIBERS
             params2ChipPolyParams!(chipPolyParams0[fibIndx, :, :], nlParams[fibIndx, :], cporder)
@@ -385,13 +385,13 @@ function ingest_skyLines_file(fileName)
 end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)
-function ingest_skyLines_exp(fname; chip_lst = ["a", "b", "c"])
+function ingest_skyLines_exp(fname; chip_lst = CHIP_LST)
     # println("Ingesting sky lines for $fname")
     sky_line_uxlst = Matrix{Float64}[]
     sky_line_fwlst = Matrix{Float64}[]
     sky_line_chipInt = Matrix{Int}[]
     for chip in chip_lst
-        fnameloc = replace(fname, "_a_" => "_$(chip)_")
+        fnameloc = replace(fname, "_$(CHIP_LST[1])_" => "_$(chip)_")
         if isfile(fnameloc)
             sky_line_xlst, sky_line_wlst = ingest_skyLines_file(fnameloc)
             chipIndx = getChipIndx(chip)
