@@ -1662,8 +1662,3 @@ function sky_wave_plots(
     sky_wave_pixel_vs_fiber_Path
 end
 
-CHIP_LIST = ["a", "b", "c"]
-FIRST_CHIP = CHIP_LIST[1]
-N_FIBERS = 300
-N_CHIPS = 3
-N_XPIX = 2048

@@ -71,12 +71,6 @@ else
     [parg["expid"]]
 end
 
-N_FIBERS = 300
-N_XPIX = 2048
-CHIP_LIST = ["a", "b", "c"]
-FIRST_CHIP = CHIP_LIST[1]
-N_CHIPS = size(CHIP_LIST, 1)
-
 list1DexpObject = []
 list1DexpFPI = []
 list1DexpArclamp = []
@@ -512,7 +506,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
             fpiPeakResiduals_Path)
     end
 end
-akjshjskjh
 
 list2Dexp = []
 for mjd in unique_mjds
