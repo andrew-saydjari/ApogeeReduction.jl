@@ -129,7 +129,7 @@ flush(stdout);
 @everywhere begin
     # firstind overriden for APO dome flats
     function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = true, extractMethod = "sutr_wood")
+            cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
         dirName = joinpath(outdir, "apred/$(mjd)/")
         if !ispath(dirName)
             mkpath(dirName)
@@ -218,6 +218,7 @@ flush(stdout);
             outdat = Float64.(tdat)
         end
 
+
         ## should this be done on the difference cube, or is this enough?
         # vert_ref_edge_corr!(outdat)
         refarray_zpt!(outdat)
@@ -226,6 +227,11 @@ flush(stdout);
         # ADD? reference array-based masking/correction
 
         # ADD? nonlinearity correction
+
+        if save3dcal
+            #make copy before it is adjusted
+            outdat_cal = copy(outdat)
+        end
 
         # extraction 3D -> 2D
         dimage, ivarimage,
@@ -260,6 +266,16 @@ flush(stdout);
         )
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
         safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
+        if save3dcal
+            outfname3d = join(
+                ["ar3Dcal", df.observatory[expid], df.mjd[expid],
+                    last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+                "_")
+            fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
+            safe_jldsave(fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image, 
+    			      outdat = orig_outdat, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip])
+	end
+
         return fname
     end
 
