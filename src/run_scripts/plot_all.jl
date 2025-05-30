@@ -474,8 +474,10 @@ for mjd_ind in 1:size(unique_mjds, 1)
     wave_thread("FPI Wavelength Solution Dither Parameters: MJD $(unique_mjds[mjd_ind])",
         sky_wave_ditherParams_Path)
 
+    n_fnames = maximum(resid_exp_ints)
+    fpi_resid_per_exp_per_fiber = zeros(Float64, (n_fnames,N_FIBERS))
     y_vals = 301 .- fiber_inds
-    for fname_ind in 1:maximum(resid_exp_ints)
+    for fname_ind in 1:n_fnames
         fig = Figure(size = (1200, 1200), fontsize = 22)
         x, y, z = Vector{Float64}(), Vector{Float64}(), Vector{Float64}()
         for fibIndx in 1:N_FIBERS
@@ -485,6 +487,8 @@ for mjd_ind in 1:size(unique_mjds, 1)
             x = vcat(x, resid_xt[fibIndx, in_exp[msk]])
             y = vcat(y, y_vals[fibIndx] .* ones(sum(msk)))
             z = vcat(z, resid_vec[fibIndx, in_exp[msk]] .* 1000)
+	    curr_resid_summary = nanzeropercentile(resid_vec[fibIndx, in_exp[msk]] .* 1000, percent_vec = [16, 84])
+	    fpi_resid_per_exp_per_fiber[fname_ind,fibIndx] = 0.5 * (curr_resid_summary[2] - curr_resid_summary[1])
         end
 
         resid_summary = nanzeropercentile(z, percent_vec = [16, 84])
@@ -510,6 +514,64 @@ for mjd_ind in 1:size(unique_mjds, 1)
             "FPI Peak Residuals: MJD $(unique_mjds[mjd_ind]), ExpID $(fname_expid_strings[fname_ind])",
             fpiPeakResiduals_Path)
     end
+
+    fig = Figure(size = (1200, 400), fontsize = 22)
+    clims = (1,n_fnames)
+    n_sigma = 8
+    summary = nanzeropercentile(fpi_resid_per_exp_per_fiber, percent_vec = [16, 50, 84], dims = (1, 2))
+    med_val = summary[2]
+    ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+           summary[2] + n_sigma * (summary[3] - summary[2]))
+    outside_limits = (fpi_resid_per_exp_per_fiber .< ylim[1]) .| (fpi_resid_per_exp_per_fiber .> ylim[2])
+    if sum(outside_limits) == 0
+        ylim = nothing
+    end
+    limits = (nothing, ylim)
+    ax = Axis(fig[1, 1],
+                xlabel = "FIBERID",
+                ylabel = "Residual Scatter (mÅ)",
+                limits = limits,
+                title = "FPI Peak Residual Scatter Per Fiber\nTele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind])")
+
+    for fname_ind in 1:n_fnames
+        scatter!(ax, 301 .- fiber_inds, fpi_resid_per_exp_per_fiber[fname_ind,:], color = fname_ind * ones(N_FIBERS), colorrange = clims)
+    end
+    hlines!(ax, med_val, linestyle = :dash)
+
+    fpiResidual_scatter_Path = dirNamePlots *
+                                "fpiPeakResidualScatterPerFiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(fpiResidual_scatter_Path, fig)
+    wave_thread("FPI peak residual scatter per fiber: MJD $(unique_mjds[mjd_ind])",
+        fpiResidual_scatter_Path)
+
+    vel_mult = 3e8 / 1000 / 16000
+    fig = Figure(size = (1200, 400), fontsize = 22)
+    n_sigma = 8
+    summary = nanzeropercentile(fpi_resid_per_exp_per_fiber .* vel_mult, percent_vec = [16, 50, 84], dims = (1, 2))
+    med_val = summary[2]
+    ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+           summary[2] + n_sigma * (summary[3] - summary[2]))
+    outside_limits = (fpi_resid_per_exp_per_fiber .* vel_mult .< ylim[1]) .| (fpi_resid_per_exp_per_fiber .* vel_mult .> ylim[2])
+    if sum(outside_limits) == 0
+        ylim = nothing
+    end
+    limits = (nothing, ylim)
+    ax = Axis(fig[1, 1],
+                xlabel = "FIBERID",
+                ylabel = "Approx. Velocity Uncertainty (m/s)",
+                limits = limits,
+                title = "FPI Peak Residual Scatter Per Fiber\nTele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind])")
+
+    for fname_ind in 1:n_fnames
+        scatter!(ax, 301 .- fiber_inds, fpi_resid_per_exp_per_fiber[fname_ind,:] .* vel_mult, color = fname_ind * ones(N_FIBERS), colorrange = clims)
+    end
+    hlines!(ax, med_val, linestyle = :dash)
+
+    fpiResidual_scatter_Path = dirNamePlots *
+                                "fpiPeakResidualVelErrPerFiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(fpiResidual_scatter_Path, fig)
+    wave_thread("FPI residual scatter as approximate velocity uncertainty (at 16000 Å) per fiber: MJD $(unique_mjds[mjd_ind])",
+        fpiResidual_scatter_Path)
 end
 
 list2Dexp = []

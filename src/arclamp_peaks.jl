@@ -4,6 +4,21 @@ using Polynomials: fit
 using SpecialFunctions: erf
 using Interpolations: linear_interpolation, Line
 
+function read_fpiPeakLoc_coeffs(tele, chip;
+        data_path = "./data/")
+
+    fname = joinpath(data_path,"fpiPeakSpacingParams_$(tele)_$(chip).h5")
+
+    # opening the file with a "do" closure guarantees that the file is closed
+    # (analogous to "with open() as f:" in Python)
+    coeffs_peak_ind_to_x,
+    coeffs_x_to_peak_ind = jldopen(fname) do params
+        (params["coeffs_peak_ind_to_x"], params["coeffs_x_to_peak_ind"])
+    end
+
+    return coeffs_peak_ind_to_x,coeffs_x_to_peak_ind
+end
+
 function gaussian_int_pdf(x_vals, params; return_deriv = false)
     #calculate the integrated gaussian probabilities
 
@@ -332,21 +347,27 @@ Fits Gaussians and Bias function to flux,ivar data
 Arguments:
 - `flux`: size (n_pixels)
 - `ivar`: size (n_pixels)
+- `coeffs_peak_ind_to_x`: size (n_params), coefficients to estimate peak locations from integers
+- `coeffs_x_to_peak_ind`: size (n_params), coefficients to estimate peak integers from locations
 """
-function get_initial_fpi_peaks(flux, ivar)
+function get_initial_fpi_peaks(flux, ivar,
+		coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
     #smooth the fluxes, then find local maxima
     #fit Gaussians to those local maxima
     #use the positions of those Gaussians to infer the positions of missing peaks
     #do a second pass on fitting 
     #return bias polynomial coefficients and peak (width,height,center)
 
+    peak_to_x_func = Polynomial(coeffs_peak_ind_to_x)
+    x_to_peak_func = Polynomial(coeffs_x_to_peak_ind)
+
     n_pixels = size(flux, 1)
     x = collect(1:n_pixels)
 
     good_ivars = (ivar .> 0)
-    if !any(good_ivars)
-        return [], zeros((0, 4)), zeros((0, 4, 4))
-    end
+#    if !any(good_ivars)
+#        return [], zeros((0, 4)), zeros((0, 4, 4))
+#    end
 
     sigma = 1.0 # smoothing length, pixels
     n_smooth_pix = max(5, round(Int, 3 * sigma) + 1)
@@ -434,6 +455,17 @@ function get_initial_fpi_peaks(flux, ivar)
                     (local_max_waves .<= n_pixels - (n_offset + 1))
 
     good_y_vals = local_max_waves[good_max_inds]
+
+    peak_int_guess = ceil.(Int,round.(x_to_peak_func.(good_y_vals)))
+    peak_x_guess = peak_to_x_func.(peak_int_guess)
+    curr_offset = nanmedian(peak_x_guess .- good_y_vals)
+    min_max_peak_ints = ceil.(Int,round.(x_to_peak_func.([1,2048])))
+    peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
+    good_y_vals = ceil.(Int,round.(peak_to_x_func.(peak_ints) .- curr_offset)) 
+
+    good_max_inds = (good_y_vals .>= (n_offset + 1)) .&
+                    (good_y_vals .<= n_pixels - (n_offset + 1))
+    good_y_vals = good_y_vals[good_max_inds]
 
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
     offset_inds = range(start = -4, stop = 4, step = 1)
@@ -580,13 +612,22 @@ function get_initial_fpi_peaks(flux, ivar)
                       (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
     end
 
-    peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
+#    peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
+#
+#    all_peak_ints = range(
+#        start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
+#    all_peak_locs = peak_func.(all_peak_ints)
+#    keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
+#    all_peak_ints = all_peak_ints[keep_peak_ints]
+#    all_peak_locs = all_peak_locs[keep_peak_ints]
 
-    all_peak_ints = range(
-        start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
-    all_peak_locs = peak_func.(all_peak_ints)
+    peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
+    peak_int_guess = ceil.(Int,round.(x_to_peak_func.(new_params[:, 2])))
+    peak_x_guess = peak_to_x_func.(peak_int_guess)
+    curr_offset = nanmedian(peak_x_guess .- new_params[:, 2])
+    all_peak_locs = peak_to_x_func.(peak_ints) .- curr_offset 
     keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
-    all_peak_ints = all_peak_ints[keep_peak_ints]
+    all_peak_ints = peak_ints[keep_peak_ints]
     all_peak_locs = all_peak_locs[keep_peak_ints]
 
     offset_inds = range(start = -7, stop = 7, step = 1)
@@ -715,7 +756,7 @@ end
 
 function get_and_save_fpi_peaks(fname)
     sname = split(fname, "_")
-    tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
+    tele, mjd, expid, chip = sname[(end - 4):(end - 1)]
     f = jldopen(fname, "r+")
     flux_1d = f["flux_1d"]
     ivar_1d = f["ivar_1d"]
@@ -732,11 +773,24 @@ function get_and_save_fpi_peaks(fname)
     flux_1d[.!good_pix] .= 0.0
     x = collect(1:n_pixels)
 
+    coeffs_peak_ind_to_x,
+    coeffs_x_to_peak_ind = read_fpiPeakLoc_coeffs(
+	tele, chip; data_path = "./data/")
+
     function get_peaks_partial(intup)
-        flux_1d, ivar_1d = intup
-        get_initial_fpi_peaks(flux_1d, ivar_1d)
+        flux_1d, ivar_1d, 
+	coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = intup
+        get_initial_fpi_peaks(flux_1d, ivar_1d, 
+	    coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
+#	try
+#            get_initial_fpi_peaks(flux_1d, ivar_1d, 
+#		coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
+#	catch
+#            return [], zeros((0, 4)), zeros((0, 4, 4))
+#	end
     end
-    in2do = Iterators.zip(eachcol(flux_1d), eachcol(ivar_1d))
+    in2do = Iterators.zip(eachcol(flux_1d), eachcol(ivar_1d), 
+		eachcol(coeffs_peak_ind_to_x), eachcol(coeffs_x_to_peak_ind))
     pout = map(get_peaks_partial, in2do)
 
     max_peaks = 0
@@ -849,7 +903,7 @@ function get_and_save_arclamp_peaks(fname)
 end
 
 #using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
-#using DataFrames, EllipsisNotation
+#using DataFrames, EllipsisNotation, StatsBase
 #using ParallelDataTransfer, ProgressMeter
 
 #src_dir = "../"
@@ -857,6 +911,20 @@ end
 #include(src_dir * "src/spectraInterpolation.jl")
 #include(src_dir * "src/fileNameHandling.jl")
 #include(src_dir * "src/utils.jl")
-##fname = "../outdir//apred/60807/ar1Dcal_apo_60807_0009_b_ARCLAMP.h5"
-#fname = "../outdir//apred/60807/ar1Dcal_apo_60807_0063_a_ARCLAMP.h5"
+#fname = "../outdir//apred/60816/ar1Dcal_lco_60816_0008_a_ARCLAMP.h5"
+#fname = "../outdir//apred/60816/ar1Dcal_apo_60816_0009_a_ARCLAMP.h5"
+
 #get_and_save_fpi_peaks(fname)
+
+#mjd = 60816
+#tele = "apo"
+#expids = ["0008","0009","0073","0074"]
+#for expid in expids
+#    for chip in ["a","b","c"]
+#        fname = "../outdir//apred/60816/ar1Dcal_$(tele)_$(mjd)_$(expid)_$(chip)_ARCLAMP.h5"
+#	println(fname)
+#        get_and_save_fpi_peaks(fname)
+#    end
+#end
+
+

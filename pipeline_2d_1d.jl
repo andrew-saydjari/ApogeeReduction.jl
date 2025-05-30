@@ -421,18 +421,26 @@ if size(all1DArclamp, 1) > 0
     end
 end
 
+
 if size(all1DFPI, 1) > 0
     ## get FPI peaks
     println("Fitting FPI peaks:")
     flush(stdout)
     all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-    all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
+    fit_all_fpi = true
+    try
+        all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
+    catch
+        fit_all_fpi = false
+        println("\nFAILED fitting FPI peaks")
+    end
     #change the condition once there are wavelength 
     #solutions from the ARCLAMPs as well
-    if (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)
+    if fit_all_fpi & (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)
         println("Using $(size(all1DfpiPeaks_a,1)) FPI exposures to measure high-precision nightly wavelength solution")
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a, night_linParams, night_nlParams, cporder = 1, wporder = 4, dporder = 2)
+            all1DfpiPeaks_a, night_linParams, night_nlParams, cporder = 1, wporder = 4, dporder = 2,
+	    n_sigma = 4, max_ang_sigma = 0.2, max_iter = 3)
         sendto(workers(), night_wave_soln = night_wave_soln)
         sendto(workers(), night_linParams = night_linParams)
         sendto(workers(), night_nlParams = night_nlParams)

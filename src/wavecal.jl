@@ -770,21 +770,36 @@ function comb_exp_get_and_save_fpi_wavecal(
                 params2ChipPolyParams!(
                     chipPolyParams, initial_nlParams[fibIndx, :], initial_cporder)
                 chipPolyParams0[fibIndx, :, :] .= chipPolyParams
+		if size(on_chip,1) == 0
+                    continue
+		end
+
                 xt = transform_x_chips(
                     fpi_ximport[on_chip, fibIndx], chipPolyParams[chipIndx, :])
                 Ax = positional_poly_mat(xt, porder = initial_wporder)
                 yt = Ax * initial_linParams[fibIndx, :]
                 peak_waves[on_chip, fibIndx] .= yt
 
-                peak_ints[on_chip, fibIndx] .+= round(nanmedian(2 * cavity_size ./
+		if size(on_chip,1) == 1
+                    peak_ints[on_chip, fibIndx] += round(nanmedian(2 * cavity_size ./
                                                                 peak_waves[on_chip, fibIndx] .-
                                                                 (peak_ints[on_chip, fibIndx] .+
                                                                  m_offset)))
+		else
+                    peak_ints[on_chip, fibIndx] .+= round(nanmedian(2 * cavity_size ./
+                                                                peak_waves[on_chip, fibIndx] .-
+                                                                (peak_ints[on_chip, fibIndx] .+
+                                                                 m_offset)))
+		end
             end
         end
 
         for fibIndx in 1:N_FIBERS
             in_exp = findall(fpi_line_expInt[:, fibIndx] .== fname_ind)
+	    if size(in_exp,1) == 0
+                exp_m0s[fname_ind, fibIndx] = NaN
+		continue
+	    end
             exp_m0s[fname_ind, fibIndx] = minimum(peak_ints[in_exp, fibIndx])
         end
     end
@@ -858,7 +873,7 @@ function comb_exp_get_and_save_fpi_wavecal(
         println("ind   num_good_peaks/num_total   m_offset   cavity_size   delta_from_init_cavity_size   resid_summary_[16,50,84]")
     verbose && println(
         "$(r_ind) $(sum(good_peaks))/$(length(good_peaks)) $(m_offset) $(cavity_size) $(cavity_size-init_cavity_size) ",
-        nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 64]))
+        nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 84]))
 
     for r_ind in 1:max_iter
 
@@ -870,11 +885,13 @@ function comb_exp_get_and_save_fpi_wavecal(
                 for i in 1:N_FIBERS
                     on_chip = findall((fpi_line_chipInt[:, i] .== chipIndx) .&
                                       (fpi_line_expInt[:, i] .== fname_ind))
-                    if .!any(good_peaks[on_chip, i])
+		    if size(on_chip,1) == 0
+		        continue
+                    elseif .!any(good_peaks[on_chip, i])
                         continue
                     end
                     resid_summary = nanzeropercentile(
-                        resids[on_chip, i][good_peaks[on_chip, i]], percent_vec = [16, 50, 64])
+                        resids[on_chip, i][good_peaks[on_chip, i]], percent_vec = [16, 50, 84])
                     resid_summary = [resid_summary[2],
                         min(max_ang_sigma, 0.5 * (resid_summary[3] - resid_summary[1])),
                         min(max_ang_sigma, 0.5 * (resid_summary[3] - resid_summary[1]))]
@@ -1059,10 +1076,11 @@ function comb_exp_get_and_save_fpi_wavecal(
 
         #outlier rejection
         resids .= (peak_waves .- expect_peak_waves)
+	resid_vec .= resids'
 
         verbose && println(
             "$(r_ind) $(sum(good_peaks))/$(length(good_peaks)) $(m_offset) $(cavity_size) $(cavity_size-init_cavity_size) ",
-            nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 64]))
+            nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 84]))
     end
 
     chipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
@@ -1370,7 +1388,7 @@ function ingest_fpiLines_exp(fname)
             push!(fpi_line_chipInt, chipIndx .* ones(Int, size(fpi_line_xlst)))
         else
             push!(fpi_line_uxlst, [])
-            push!(fpi_line_fwlst, [])
+            push!(fpi_line_uxlst_errs, [])
             push!(fpi_line_chipInt, [])
         end
     end
