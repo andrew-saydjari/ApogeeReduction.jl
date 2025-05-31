@@ -7,6 +7,7 @@ include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
 include(src_dir * "/ar1D.jl")
+include(src_dir * "/ApogeeReduction.jl")
 
 ## TODO add sky flux relFlux consistency check plots
 
@@ -54,10 +55,10 @@ end
 
 parg = parse_commandline()
 
-CHIP_LIST = split(parg["chips"],"")
-FIRST_CHIP = CHIP_LIST[1]
-N_CHIPS = size(CHIP_LIST,1)
-N_FIBERS = 300
+CHIP_LIST = ApogeeReduction.CHIP_LIST
+FIRST_CHIP = ApogeeReduction.FIRST_CHIP
+N_CHIPS = ApogeeReduction.N_CHIPS
+N_FIBERS = ApogeeReduction.N_FIBERS
 
 dirNamePlots = parg["outdir"] * "plots/"
 mkpath(dirNamePlots) # will work even if it already exists
