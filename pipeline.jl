@@ -129,14 +129,14 @@ flush(stdout);
 @everywhere begin
     # firstind overriden for APO dome flats
     function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = true, extractMethod = "sutr_wood")
+            cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
         dirName = joinpath(outdir, "apred/$(mjd)/")
         if !ispath(dirName)
             mkpath(dirName)
         end
 
         df = read_almanac_exp_df(joinpath(outdir, "almanac/$(runname).h5"), parg["tele"], mjd)
-
+        #        println(expid,chip,size(df.observatory),size(df.mjd),size(df.exposure_int))
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
             df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
@@ -218,6 +218,7 @@ flush(stdout);
             outdat = Float64.(tdat)
         end
 
+
         ## should this be done on the difference cube, or is this enough?
         # vert_ref_edge_corr!(outdat)
         refarray_zpt!(outdat)
@@ -226,6 +227,11 @@ flush(stdout);
         # ADD? reference array-based masking/correction
 
         # ADD? nonlinearity correction
+
+        if save3dcal
+            #make copy before it is adjusted
+            outdat_cal = copy(outdat)
+        end
 
         # extraction 3D -> 2D
         dimage, ivarimage,
@@ -245,7 +251,7 @@ flush(stdout);
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(
             ["ar2D", df.observatory[expid], df.mjd[expid],
-                last(df.exposure_str[expid],4), chip, df.exptype[expid]],
+                last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
 
@@ -260,12 +266,22 @@ flush(stdout);
         )
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
         safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
+        if save3dcal
+            outfname3d = join(
+                ["ar3Dcal", df.observatory[expid], df.mjd[expid],
+                    last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+                "_")
+            fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
+            safe_jldsave(fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image, 
+    			      outdat = orig_outdat, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip])
+	end
+
         return fname
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
     function process_2Dcal(fname; chi2perdofcut = 100)
-        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         dimage = load(fname, "dimage")
@@ -338,6 +354,7 @@ gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 if parg["runlist"] != ""
     subDic = load(parg["runlist"])
+
     subiter = Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))

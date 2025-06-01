@@ -7,6 +7,7 @@ include(src_dir * "/fileNameHandling.jl")
 include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
 include(src_dir * "/ar1D.jl")
+include(src_dir * "/ApogeeReduction.jl")
 
 ## TODO add sky flux relFlux consistency check plots
 
@@ -54,6 +55,11 @@ end
 
 parg = parse_commandline()
 
+CHIP_LIST = ApogeeReduction.CHIP_LIST
+FIRST_CHIP = ApogeeReduction.FIRST_CHIP
+N_CHIPS = ApogeeReduction.N_CHIPS
+N_FIBERS = ApogeeReduction.N_FIBERS
+
 dirNamePlots = parg["outdir"] * "plots/"
 mkpath(dirNamePlots) # will work even if it already exists
 
@@ -71,27 +77,502 @@ else
     [parg["expid"]]
 end
 
-sky_thread = SlackThread()
-if length(unique_mjds) > 1
-    min_mjd, max_mjd = extrema(unique_mjds)
-    sky_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
-else
-    sky_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(unique_mjds[1])")
+list1DexpObject = []
+list1DexpFPI = []
+list1DexpArclamp = []
+for mjd in unique_mjds
+    df = read_almanac_exp_df(
+        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+    function get_1d_name_partial(expid)
+        if df.imagetyp[expid] == "Object"
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        else
+            return nothing
+        end
+    end
+    function get_1d_name_ARCLAMP_partial(expid)
+        if (df.imagetyp[expid] == "ArcLamp") &
+           ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        else
+            return nothing
+        end
+    end
+    function get_1d_name_FPI_partial(expid)
+        if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
+           (df.lampune[expid] == "F")
+            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        else
+            return nothing
+        end
+    end
+    local1D = get_1d_name_partial.(expid_list)
+    push!(list1DexpObject, filter(!isnothing, local1D))
+    local1D_fpi = get_1d_name_FPI_partial.(expid_list)
+    push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
+    local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
+    push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
+end
+all1DObjecta = vcat(list1DexpObject...)
+all1DFPIa = vcat(list1DexpFPI...)
+all1DArclampa = vcat(list1DexpArclamp...)
+
+all1DObjectSkyPeaks = replace.(
+    replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+all1DObjectSkyDither = replace.(
+    replace.(all1DObjectSkyPeaks, "skyLinePeaks" => "waveCalNightskyDither"), "_$(FIRST_CHIP)_" => "_")
+all1DObjectFPIDither = replace.(
+    replace.(all1DObjectSkyPeaks, "skyLinePeaks" => "waveCalNightfpiDither"), "_$(FIRST_CHIP)_" => "_")
+
+all1DObject_expid_strings = map(x -> x[end - 1], split.(all1DObjectSkyDither, "_"))
+all1DObject_expids = map(x -> parse(Int, x), all1DObject_expid_strings)
+
+function dither_plotter(
+        fname_list, fname_expid_strings, mjd, tele; dirNamePlots = parg["outdir"] * "plots/")
+    n_fnames = size(fname_list, 1)
+    fname_ind = 1
+    fname = fname_list[fname_ind]
+
+    f = h5open(fname, "r+")
+
+    linParams, nlParams, ditherParams, resid_vec, resid_xt = try
+        read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]),
+        read(f["resid_xt"])
+    catch
+        println(fname)
+        read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]),
+        read(f["resid_xt"])
+    end
+
+    close(f)
+
+    n_dither_coeffs = size(ditherParams, 2)
+    all_ditherParams = zeros(Float64, (n_fnames, N_FIBERS, n_dither_coeffs))
+    fill!(all_ditherParams, NaN)
+    all_ditherParams[fname_ind, :, :] .= ditherParams
+
+    resid_plot_fnames = copy(fname_list)
+
+    fiber_inds = collect(1:N_FIBERS)
+    y_vals = 301 .- fiber_inds
+    for (fname_ind, fname) in enumerate(fname_list)
+        f = h5open(fname, "r+")
+
+        linParams, nlParams, ditherParams, resid_vec, resid_xt = try
+            read(f["linParams"]),
+            read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]), read(f["resid_xt"])
+        catch
+            println(fname)
+            read(f["linParams"]),
+            read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]), read(f["resid_xt"])
+        end
+
+        close(f)
+
+        all_ditherParams[fname_ind, :, :] .= ditherParams
+
+        fig = Figure(size = (1200, 1200), fontsize = 22)
+        x, y, z = Vector{Float64}(), Vector{Float64}(), Vector{Float64}()
+        for fibIndx in 1:N_FIBERS
+            x = vcat(x, resid_xt[fibIndx, :])
+            y = vcat(y, y_vals[fibIndx] .* ones(size(resid_xt[fibIndx, :], 1)))
+            z = vcat(z, resid_vec[fibIndx, :] .* 1000)
+        end
+
+        resid_summary = nanzeropercentile(z, percent_vec = [16, 84])
+        resid_sigma = 0.5 * (resid_summary[2] - resid_summary[1])
+        ax = Axis(fig[1, 1],
+            ylabel = "FIBERID",
+            xlabel = "Transformed X Peak Position",
+            limits = ((-1.8, 1.8), (-10 + 1, 300 + 10)),
+            title = "Sky Peak Residuals, σ = $(round(resid_sigma; digits = 3)) mÅ\nTele: $(tele), MJD: $(mjd), ExpID: $(fname_expid_strings[fname_ind])")
+
+        clim = (-10.0, 10.0)
+        z .= clamp.(z, clim[1], clim[2])
+        cmap = :diverging_bkr_55_10_c35_n256
+        scatter!(ax, x, y, color = z,
+            markersize = 3, colorrange = clim,
+            colormap = cmap)
+        Colorbar(fig[1, 2], colorrange = clim, colormap = cmap,
+            width = 20, height = Relative(1.0), label = "data - model (mÅ)")
+        fpiPeakResiduals_Path = dirNamePlots *
+                                "skyPeakResiduals_$(tele)_$(mjd)_$(fname_expid_strings[fname_ind]).png"
+        save(fpiPeakResiduals_Path, fig)
+        resid_plot_fnames[fname_ind] = fpiPeakResiduals_Path
+    end
+    all_ditherParams[:, :, 1] .*= 2048
+
+    fig = Figure(size = (1200, 400 * n_dither_coeffs), fontsize = 22)
+
+    for pind in 1:n_dither_coeffs
+        yvals = @view all_ditherParams[:, :, pind]
+        summary = nanzeropercentile(yvals, percent_vec = [16, 50, 84], dims = (1, 2))
+        n_sigma = 8
+        ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+            summary[2] + n_sigma * (summary[3] - summary[2]))
+        outside_limits = (yvals .< ylim[1]) .| (yvals .> ylim[2])
+        if sum(outside_limits) == 0
+            ylim = nothing
+        end
+        limits = (nothing, ylim)
+
+        if pind == 1
+            ax = Axis(fig[pind, 1],
+                ylabel = "Dither Parameter $(pind)",
+                title = "Tele: $(tele), MJD: $(mjd), Wave. Soln. Dither Params",
+                limits = limits)
+        elseif pind == n_dither_coeffs
+            ax = Axis(fig[pind, 1],
+                xlabel = "FIBERID",
+                limits = limits,
+                ylabel = "Dither Parameter $(pind)")
+        else
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                ylabel = "Dither Parameter $(pind)")
+        end
+
+        for fname_ind in 1:n_fnames
+            scatter!(ax, 301 .- fiber_inds, all_ditherParams[fname_ind, :, pind],
+                color = fname_ind .* ones(N_FIBERS), colorrange = (1, n_fnames))
+        end
+        if pind == 1
+        end
+    end
+    ditherParams_Path = dirNamePlots *
+                        "nightSkywave_ditherParams_$(tele)_$(mjd).png"
+    save(ditherParams_Path, fig)
+
+    return ditherParams_Path, resid_plot_fnames
 end
 
+wave_thread = SlackThread()
+if length(unique_mjds) > 1
+    min_mjd, max_mjd = extrema(unique_mjds)
+    wave_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
+else
+    wave_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(unique_mjds[1])")
+end
+
+wave_thread("Found $(size(all1DObjecta,1)) OBJECT exposures")
+wave_thread("Found $(size(all1DArclampa,1)) ARCLAMP exposures")
+wave_thread("Found $(size(all1DFPIa,1)) FPI exposures")
+
 for mjd_ind in 1:size(unique_mjds, 1)
-    savePath = dirNamePlots * "skywave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-    sky_thread(
-        "Sky Line Wavelength Solution Linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
-    savePath = dirNamePlots * "skywave_nlParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-    sky_thread(
-        "Sky Line Wavelength Solution Non-linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
-    savePath = dirNamePlots *
-               "skywave_per_fiber_vs_pixel_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-    sky_thread("Sky Line Wavelength Solution per fiber: MJD $(unique_mjds[mjd_ind])", savePath)
-    savePath = dirNamePlots *
-               "skywave_per_pixel_vs_fiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-    sky_thread("Sky Line Wavelength Solution per pixel: MJD $(unique_mjds[mjd_ind])", savePath)
+    tele = parg["tele"]
+    mjd = unique_mjds[mjd_ind]
+    waveSoln_labels = ["Sky Line"]
+    waveSoln_types = ["sky"]
+
+    for j in 1:size(waveSoln_labels, 1)
+        savePath = dirNamePlots *
+                   "$(waveSoln_types[j])wave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+        if !isfile(savePath)
+            wave_thread("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures.")
+            continue
+        end
+        wave_thread(
+            "$(waveSoln_labels[j]) Wavelength Solution Linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
+        savePath = dirNamePlots *
+                   "$(waveSoln_types[j])wave_nlParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+        wave_thread(
+            "$(waveSoln_labels[j]) Wavelength Solution Non-linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
+        savePath = dirNamePlots *
+                   "$(waveSoln_types[j])wave_per_fiber_vs_pixel_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+        wave_thread(
+            "$(waveSoln_labels[j]) Wavelength Solution per fiber: MJD $(unique_mjds[mjd_ind])",
+            savePath)
+        savePath = dirNamePlots *
+                   "$(waveSoln_types[j])wave_per_pixel_vs_fiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+        wave_thread(
+            "$(waveSoln_labels[j]) Wavelength Solution per pixel: MJD $(unique_mjds[mjd_ind])",
+            savePath)
+    end
+
+    ditherParams_Path, resid_plot_fnames = dither_plotter(
+        all1DObjectSkyDither, all1DObject_expid_strings, mjd, tele; dirNamePlots = dirNamePlots)
+    wave_thread(
+        "Skyline Solution Dither Parameters before FPI solution: MJD $(unique_mjds[mjd_ind])",
+        ditherParams_Path)
+
+    outname = parg["outdir"] *
+              "/apred/$(unique_mjds[mjd_ind])/waveCalFPI_$(parg["tele"])_$(unique_mjds[mjd_ind])_ARCLAMP.h5"
+    if !isfile(outname)
+        for fname_ind in 1:size(resid_plot_fnames, 1)
+            wave_thread(
+                "Sky Peak Residuals after Dither Fit (no FPI soln.): MJD $(unique_mjds[mjd_ind]), ExpID $(all1DObject_expid_strings[fname_ind])",
+                resid_plot_fnames[fname_ind])
+        end
+        wave_thread("Could not find nightly FPI wavelength solution at $(outname)")
+        continue
+    end
+
+    ditherParams_Path, resid_plot_fnames = dither_plotter(
+        all1DObjectFPIDither, all1DObject_expid_strings, mjd, tele; dirNamePlots = dirNamePlots)
+    wave_thread(
+        "Skyline Solution Dither Parameters after FPI solution: MJD $(unique_mjds[mjd_ind])",
+        ditherParams_Path)
+    for fname_ind in 1:size(resid_plot_fnames, 1)
+        wave_thread(
+            "Sky Peak Residuals after Dither Fit (using FPI soln.): MJD $(unique_mjds[mjd_ind]), ExpID $(all1DObject_expid_strings[fname_ind])",
+            resid_plot_fnames[fname_ind])
+    end
+
+    #outname file should have the following data
+    #linParams, nlParams, ditherParams
+    #exposure_names, resid_vec, resid_chipInts, 
+    #resid_peak_ints, resid_exp_ints, resid_used_in_fit, 
+    #chipWaveSoln, chipWaveSoln_xt,
+    #fpi_m0, fpi_m0_offset, fpi_cavity_size
+
+    f = h5open(outname, "r+")
+
+    linParams, nlParams, ditherParams, exposure_names = try
+        read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]),
+        read(f["exposure_names"])
+    catch
+        println(outname)
+        read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]),
+        read(f["exposure_names"])
+    end
+
+    resid_vec, resid_chipInts, resid_exp_ints, resid_peak_ints,
+    resid_used_in_fit, resid_xt = try
+        read(f["resid_vec"]), read(f["resid_chipInts"]), read(f["resid_exp_ints"]),
+        read(f["resid_peak_ints"]), read(f["resid_used_in_fit"]), read(f["resid_xt"])
+    catch
+        println(outname)
+        read(f["resid_vec"]), read(f["resid_chipInts"]), read(f["resid_exp_ints"]),
+        read(f["resid_peak_ints"]), read(f["resid_used_in_fit"]), read(f["resid_xt"])
+    end
+
+    close(f)
+
+    n_fnames = size(exposure_names, 1)
+    n_lin_coeffs = size(linParams, 2)
+    n_nl_coeffs = size(nlParams, 2)
+    n_dither_coeffs = size(ditherParams, 2)
+    fiber_inds = 1:N_FIBERS
+
+    fname_expid_strings = map(x -> x[end - 2], split.(exposure_names, "_"))
+    fname_expids = map(x -> parse(Int, x), fname_expid_strings)
+
+    #    clims = (minimum(fname_expids), maximum(fname_expids))
+    clims = (1, n_fnames)
+
+    fig = Figure(size = (1200, 400 * n_lin_coeffs), fontsize = 22)
+
+    for pind in 1:n_lin_coeffs
+        yvals = @view linParams[:, pind]
+        summary = nanzeropercentile(yvals, percent_vec = [16, 50, 84])
+        n_sigma = 5
+        ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+            summary[2] + n_sigma * (summary[3] - summary[2]))
+        outside_limits = (yvals .< ylim[1]) .| (yvals .> ylim[2])
+        if sum(outside_limits) == 0
+            ylim = nothing
+        end
+        limits = (nothing, ylim)
+
+        if pind == 1
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                ylabel = "Linear Parameter $(pind)",
+                title = "Tele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind]), Wave. Soln. Linear Params")
+        elseif pind == n_lin_coeffs
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                xlabel = "FIBERID",
+                ylabel = "Linear Parameter $(pind)")
+        else
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                ylabel = "Linear Parameter $(pind)")
+        end
+
+        scatter!(ax, 301 .- fiber_inds, linParams[:, pind])
+    end
+
+    sky_wave_linParams_Path = dirNamePlots *
+                              "nightFPIwave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(sky_wave_linParams_Path, fig)
+    wave_thread("FPI Wavelength Solution Linear Parameters: MJD $(unique_mjds[mjd_ind])",
+        sky_wave_linParams_Path)
+
+    fig = Figure(size = (1200, 400 * n_nl_coeffs), fontsize = 22)
+
+    for pind in 1:n_nl_coeffs
+        yvals = @view nlParams[:, pind]
+        summary = nanzeropercentile(yvals, percent_vec = [16, 50, 84])
+        n_sigma = 5
+        ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+            summary[2] + n_sigma * (summary[3] - summary[2]))
+        outside_limits = (yvals .< ylim[1]) .| (yvals .> ylim[2])
+        if sum(outside_limits) == 0
+            ylim = nothing
+        end
+        limits = (nothing, ylim)
+
+        if pind == 1
+            ax = Axis(fig[pind, 1],
+                ylabel = "Non-Linear Parameter $(pind)",
+                limits = limits,
+                title = "Tele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind]), Wave. Soln. Non-Linear Params")
+        elseif pind == n_nl_coeffs
+            ax = Axis(fig[pind, 1],
+                xlabel = "FIBERID",
+                limits = limits,
+                ylabel = "Non-Linear Parameter $(pind)")
+        else
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                ylabel = "Non-Linear Parameter $(pind)")
+        end
+
+        scatter!(ax, 301 .- fiber_inds, nlParams[:, pind])
+    end
+    sky_wave_nlParams_Path = dirNamePlots *
+                             "nightFPIwave_nlParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(sky_wave_nlParams_Path, fig)
+    wave_thread("FPI Wavelength Solution Non-Linear Parameters: MJD $(unique_mjds[mjd_ind])",
+        sky_wave_nlParams_Path)
+
+    fig = Figure(size = (1200, 400 * n_dither_coeffs), fontsize = 22)
+
+    for pind in 1:n_dither_coeffs
+        yvals = @view ditherParams[:, pind]
+        summary = nanzeropercentile(yvals, percent_vec = [16, 50, 84])
+        n_sigma = 5
+        ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+            summary[2] + n_sigma * (summary[3] - summary[2]))
+        outside_limits = (yvals .< ylim[1]) .| (yvals .> ylim[2])
+        if sum(outside_limits) == 0
+            ylim = nothing
+        end
+        limits = (nothing, ylim)
+
+        if pind == 1
+            ax = Axis(fig[pind, 1],
+                ylabel = "Dither Parameter $(pind)",
+                limits = limits,
+                title = "Tele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind]), Wave. Soln. Dither Params")
+        elseif pind == n_dither_coeffs
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                xlabel = "FIBERID",
+                ylabel = "Dither Parameter $(pind)")
+        else
+            ax = Axis(fig[pind, 1],
+                limits = limits,
+                ylabel = "Dither Parameter $(pind)")
+        end
+
+        scatter!(ax, 301 .- fiber_inds, ditherParams[:, pind])
+    end
+    sky_wave_ditherParams_Path = dirNamePlots *
+                                 "nightFPIwave_ditherParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(sky_wave_ditherParams_Path, fig)
+    wave_thread("FPI Wavelength Solution Dither Parameters: MJD $(unique_mjds[mjd_ind])",
+        sky_wave_ditherParams_Path)
+
+    n_fnames = maximum(resid_exp_ints)
+    fpi_resid_per_exp_per_fiber = zeros(Float64, (n_fnames,N_FIBERS))
+    y_vals = 301 .- fiber_inds
+    for fname_ind in 1:n_fnames
+        fig = Figure(size = (1200, 1200), fontsize = 22)
+        x, y, z = Vector{Float64}(), Vector{Float64}(), Vector{Float64}()
+        for fibIndx in 1:N_FIBERS
+            in_exp = findall(resid_exp_ints[:, fibIndx] .== fname_ind)
+            msk = resid_used_in_fit[in_exp, fibIndx]
+            #            x = vcat(x,resid_peak_ints[in_exp[msk],fibIndx])
+            x = vcat(x, resid_xt[fibIndx, in_exp[msk]])
+            y = vcat(y, y_vals[fibIndx] .* ones(sum(msk)))
+            z = vcat(z, resid_vec[fibIndx, in_exp[msk]] .* 1000)
+	    curr_resid_summary = nanzeropercentile(resid_vec[fibIndx, in_exp[msk]] .* 1000, percent_vec = [16, 84])
+	    fpi_resid_per_exp_per_fiber[fname_ind,fibIndx] = 0.5 * (curr_resid_summary[2] - curr_resid_summary[1])
+        end
+
+        resid_summary = nanzeropercentile(z, percent_vec = [16, 84])
+        resid_sigma = 0.5 * (resid_summary[2] - resid_summary[1])
+        ax = Axis(fig[1, 1],
+            ylabel = "FIBERID",
+            limits = ((-1.8, 1.8), (-10 + 1, 300 + 10)),
+            xlabel = "Transformed X Peak Position",
+            title = "FPI Peak Residuals, σ = $(round(resid_sigma; digits = 3)) mÅ\nTele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind]), ExpID: $(fname_expid_strings[fname_ind])")
+
+        clim = (-10.0, 10.0)
+        z .= clamp.(z, clim[1], clim[2])
+        cmap = :diverging_bkr_55_10_c35_n256
+        scatter!(ax, x, y, color = z,
+            markersize = 3, colorrange = clim,
+            colormap = cmap)
+        Colorbar(fig[1, 2], colorrange = clim, colormap = cmap,
+            width = 20, height = Relative(1.0), label = "data - model (mÅ)")
+        fpiPeakResiduals_Path = dirNamePlots *
+                                "fpiPeakResiduals_$(parg["tele"])_$(unique_mjds[mjd_ind])_$(fname_expid_strings[fname_ind]).png"
+        save(fpiPeakResiduals_Path, fig)
+        wave_thread(
+            "FPI Peak Residuals: MJD $(unique_mjds[mjd_ind]), ExpID $(fname_expid_strings[fname_ind])",
+            fpiPeakResiduals_Path)
+    end
+
+    fig = Figure(size = (1200, 400), fontsize = 22)
+    clims = (1,n_fnames)
+    n_sigma = 8
+    summary = nanzeropercentile(fpi_resid_per_exp_per_fiber, percent_vec = [16, 50, 84], dims = (1, 2))
+    med_val = summary[2]
+    ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+           summary[2] + n_sigma * (summary[3] - summary[2]))
+    outside_limits = (fpi_resid_per_exp_per_fiber .< ylim[1]) .| (fpi_resid_per_exp_per_fiber .> ylim[2])
+    if sum(outside_limits) == 0
+        ylim = nothing
+    end
+    limits = (nothing, ylim)
+    ax = Axis(fig[1, 1],
+                xlabel = "FIBERID",
+                ylabel = "Residual Scatter (mÅ)",
+                limits = limits,
+                title = "FPI Peak Residual Scatter Per Fiber\nTele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind])")
+
+    for fname_ind in 1:n_fnames
+        scatter!(ax, 301 .- fiber_inds, fpi_resid_per_exp_per_fiber[fname_ind,:], color = fname_ind * ones(N_FIBERS), colorrange = clims)
+    end
+    hlines!(ax, med_val, linestyle = :dash)
+
+    fpiResidual_scatter_Path = dirNamePlots *
+                                "fpiPeakResidualScatterPerFiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(fpiResidual_scatter_Path, fig)
+    wave_thread("FPI peak residual scatter per fiber: MJD $(unique_mjds[mjd_ind])",
+        fpiResidual_scatter_Path)
+
+    vel_mult = 3e8 / 1000 / 16000
+    fig = Figure(size = (1200, 400), fontsize = 22)
+    n_sigma = 8
+    summary = nanzeropercentile(fpi_resid_per_exp_per_fiber .* vel_mult, percent_vec = [16, 50, 84], dims = (1, 2))
+    med_val = summary[2]
+    ylim = (summary[2] - n_sigma * (summary[2] - summary[1]),
+           summary[2] + n_sigma * (summary[3] - summary[2]))
+    outside_limits = (fpi_resid_per_exp_per_fiber .* vel_mult .< ylim[1]) .| (fpi_resid_per_exp_per_fiber .* vel_mult .> ylim[2])
+    if sum(outside_limits) == 0
+        ylim = nothing
+    end
+    limits = (nothing, ylim)
+    ax = Axis(fig[1, 1],
+                xlabel = "FIBERID",
+                ylabel = "Approx. Velocity Uncertainty (m/s)",
+                limits = limits,
+                title = "FPI Peak Residual Scatter Per Fiber\nTele: $(parg["tele"]), MJD: $(unique_mjds[mjd_ind])")
+
+    for fname_ind in 1:n_fnames
+        scatter!(ax, 301 .- fiber_inds, fpi_resid_per_exp_per_fiber[fname_ind,:] .* vel_mult, color = fname_ind * ones(N_FIBERS), colorrange = clims)
+    end
+    hlines!(ax, med_val, linestyle = :dash)
+
+    fpiResidual_scatter_Path = dirNamePlots *
+                                "fpiPeakResidualVelErrPerFiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
+    save(fpiResidual_scatter_Path, fig)
+    wave_thread("FPI residual scatter as approximate velocity uncertainty (at 16000 Å) per fiber: MJD $(unique_mjds[mjd_ind])",
+        fpiResidual_scatter_Path)
 end
 
 list2Dexp = []
@@ -119,8 +600,8 @@ end
 all2Da = vcat(list2Dexp...)
 
 # per chip example 2D flux residuals from 1D extraction
-for chip in ["a", "b", "c"]
-    all2D = replace.(all2Da, "_a_" => "_$(chip)_")
+for chip in CHIP_LIST
+    all2D = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
     thread = SlackThread()
     if length(unique_mjds) > 1
@@ -137,7 +618,7 @@ for chip in ["a", "b", "c"]
     sample_exposures = sample(rng, all2D, nsamp, replace = false)
     f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
     for exp_fname in sample_exposures
-        sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+        sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
         fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
 
         flux_2d = load(exp_fname, "resid_flux")
@@ -225,7 +706,7 @@ for chip in string.(collect(parg["chips"]))
 
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
             for exp_fname in sample_exposures
-                sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+                sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
                 fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
 
                 flux_1d = load(exp_fname, "flux_1d")
@@ -428,7 +909,7 @@ for exptype2plot in sorted_exptypes
         sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
         for exp_fname in sample_exposures
-            sname = split(split(split(exp_fname, "/")[end],".h5")[1], "_")
+            sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
             fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
             expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
             outflux = load(expuni_fname, "flux_1d")
