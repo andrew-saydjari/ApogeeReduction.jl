@@ -311,7 +311,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
     end
 
     df_exp = read_almanac_exp_df(f, tele, mjd)
-    
+
     if !(exposure_id in df_exp.exposure_str)
         @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
@@ -382,8 +382,10 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
     expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
     cartId = df_mjd.cartidInt[expIndex]
     # this needs to have cuts that match those in make_runlist_dome_flats.jl
-    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .< exposure_id) .& (df_mjd.nreadInt .> 3))
-    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .> exposure_id) .& (df_mjd.nreadInt .> 3))
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .&
+                               (df_mjd.exposure_int .< exposure_id) .& (df_mjd.nreadInt .> 3))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .&
+                               (df_mjd.exposure_int .> exposure_id) .& (df_mjd.nreadInt .> 3))
     valid_before = if !isnothing(expIndex_before)
         all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
     elseif !isnothing(expIndex_before)
@@ -418,10 +420,10 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine", backupWaveSoln = nothing)
+function reinterp_spectra(fname; backupWaveSoln = nothing)
     # might need to add in telluric div functionality here?
 
-    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
     # could shift this to a preallocation step
@@ -446,12 +448,22 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine", backupWaveSoln
     # outdir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_12_05/outdir/"
     # fname = outdir * "apred/$(mjd)/" * get_1d_name(parse(Int, last(expid,4)), df) * ".h5"
 
-    wavefname = replace(replace(fname, fnameType => wavecal_type), "_a_" => "_")
-    if isfile(wavefname)
-        f = jldopen(wavefname)
-        chipWaveSoln = f["chipWaveSoln"]
-        close(f)
-    else #this is a terrible global fallback, just so we get something to look at
+    wavetype_order = ["fpi", "sky"]
+    found_soln = false
+    wavecal_type = ""
+    for wavetype in wavetype_order
+        wavecal_type = "waveCalNight$(wavetype)Dither"
+        wavefname = replace(replace(fname, fnameType => wavecal_type), "_a_" => "_")
+        if isfile(wavefname)
+            f = jldopen(wavefname)
+            chipWaveSoln = f["chipWaveSoln"]
+            close(f)
+            found_soln = true
+            break
+        end
+    end
+    if !found_soln
+        #this is not a great global fallback, but it works so we get something to look at
         if isnothing(backupWaveSoln)
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(["a", "b", "c"])
