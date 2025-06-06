@@ -20,37 +20,36 @@ function apz2cube(fname)
     return cubedat, hdr_dict
 end
 
-# feeling against this sort of subtraction, but we do see why one might want to do it in the darks
-function refcorr(dcubedat)
-    # subtracts reference array with proper read ordering
-    dcubedat_out = copy(dcubedat[1:2048, 1:2048, ..])
-    dcubedat_out[1:512, :, ..] .-= dcubedat[2049:end, ..]
-    dcubedat_out[513:1024, :, ..] .-= dcubedat[end:-1:2049, ..]
-    dcubedat_out[1025:1536, :, ..] .-= dcubedat[2049:end, ..]
-    dcubedat_out[1537:2048, :, ..] .-= dcubedat[end:-1:2049, ..]
-    return dcubedat_out
-end
+function zeropoint_read_dcube!(dcube)
+    ref_zpt_vec = mean(dcube[2049:end, :, :], dims = (1, 2))
+    sci_zpt_vec = mean(dcube[1:4, :, :], dims = (1, 2)) + mean(dcube[end-3:end, :, :],dims=(1,2));
 
-function refarray_zpt!(dcubedat)
-    mean_ref_vec = mean(dcubedat[2049:end, :, ..], dims = (1, 2))
-    dcubedat .-= mean_ref_vec
-    mean_ref_val = mean(dcubedat[2049:end, ..])
-    dcubedat .-= mean_ref_val
-    return
-end
+    ref_zpt_out = dropdims(ref_zpt_vec, dims=(1,2))
+    sci_zpt_out = dropdims(sci_zpt_vec, dims=(1,2));
+    
+    dcube[1:2048,:,:].-=sci_zpt_vec
+    dcube[2049:end,:,:].-=ref_zpt_vec;
+    
+    amp_ranges = [1:512, 513:1024, 1025:1536, 1537:2048]
+    ref_bot = zeros(4,length(ref_zpt_out))
+    for (aindx, amp) in enumerate(amp_ranges)
+        ref_bot[aindx,:] .= dropdims(mean(dcube[amp, 1:4, :],dims=(1,2)),dims=(1,2))
+    end
+    ref_top = zeros(4,length(ref_zpt_out))
+    for (aindx, amp) in enumerate(amp_ranges)
+        ref_top[aindx,:] .= dropdims(mean(dcube[amp, 2045:2048, :],dims=(1,2)),dims=(1,2))
+    end
+    
+    amp_off = (diff(ref_bot,dims=1) .+ diff(ref_top,dims=1))./2
+    amp_off_vec = vcat(zeros(1,size(amp_off,2)),amp_off)
+    amp_off_vec .-= mean(amp_off_vec,dims=1)
 
-function vert_ref_edge_corr_amp!(dcubedat_out)
-    dcubedat_out[1:512, ..] .-= mean([mean(dcubedat_out[1:512, 1:4, ..]),
-        mean(dcubedat_out[1:512, (end - 3):(end - 1), ..])])
-    dcubedat_out[513:1024, ..] .-= mean([mean(dcubedat_out[513:1024, 1:4, ..]),
-        mean(dcubedat_out[513:1024, (end - 3):(end - 1), ..])])
-    dcubedat_out[1025:1536, ..] .-= mean([mean(dcubedat_out[1025:1536, 1:4, ..]),
-        mean(dcubedat_out[1025:1536, (end - 3):(end - 1), ..])])
-    dcubedat_out[1537:2048, ..] .-= mean([mean(dcubedat_out[1537:2048, 1:4, ..]),
-        mean(dcubedat_out[1537:2048, (end - 3):(end - 1), ..])])
-    dcubedat_out[2049:end, ..] .-= mean([mean(dcubedat_out[2049:end, 1:4, ..]),
-        mean(dcubedat_out[2049:end, (end - 3):(end - 1), ..])])
-    return
+    dcube[1:512,:,:].-=reshape(amp_off_vec[1,:],1,1,:)
+    dcube[513:1024,:,:].-=reshape(amp_off_vec[2,:],1,1,:)
+    dcube[1025:1536,:,:].-=reshape(amp_off_vec[3,:],1,1,:)
+    dcube[1537:2048,:,:].-=reshape(amp_off_vec[4,:],1,1,:);
+
+    return ref_zpt_out, sci_zpt_out, amp_off_vec
 end
 
 function dcs(dcubedat, gainMat, readVarMat; firstind = 1)

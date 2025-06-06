@@ -31,7 +31,6 @@ Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 ParallelDataTransfer = "2dcacdae-9679-587a-88bb-8b444fb7085b"
 Polynomials = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
-SIRS = "40ae95f3-0455-409b-a0fb-071cca222575"
 SlackThreads = "a271ce43-5be6-465b-b549-2328063b090f"
 SlurmClusterManager = "c82cd089-7bf7-41d7-976b-6b5d413cbe0a"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
@@ -40,7 +39,6 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [sources]
-SIRS = {rev = "main", url = "https://github.com/nasa/SIRS.git"}
 SlackThreads = {rev = "main", url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"}
 
 [compat]
@@ -69,7 +67,6 @@ Optim = "1.10.0"
 ParallelDataTransfer = "0.5"
 Polynomials = "4.0.11"
 ProgressMeter = "1"
-SIRS = "3.5.2"
 SlackThreads = "0.1.5"
 SlurmClusterManager = "0.1, 1"
 SpecialFunctions = "2.4.0"
