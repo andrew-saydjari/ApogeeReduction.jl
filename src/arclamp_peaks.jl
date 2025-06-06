@@ -761,6 +761,7 @@ function get_and_save_fpi_peaks(fname)
     flux_1d = f["flux_1d"]
     ivar_1d = f["ivar_1d"]
     mask_1d = f["mask_1d"]
+    extract_trace_centers = f["extract_trace_centers"]
     close(f)
 
     n_pixels = size(flux_1d, 1)
@@ -782,12 +783,6 @@ function get_and_save_fpi_peaks(fname)
 	coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = intup
         get_initial_fpi_peaks(flux_1d, ivar_1d, 
 	    coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
-#	try
-#            get_initial_fpi_peaks(flux_1d, ivar_1d, 
-#		coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
-#	catch
-#            return [], zeros((0, 4)), zeros((0, 4, 4))
-#	end
     end
     in2do = Iterators.zip(eachcol(flux_1d), eachcol(ivar_1d), 
 		eachcol(coeffs_peak_ind_to_x), eachcol(coeffs_x_to_peak_ind))
@@ -798,6 +793,8 @@ function get_and_save_fpi_peaks(fname)
         max_peaks = max(max_peaks, length(pout[j][1]))
     end
     n_params = size(pout[1][2], 2)
+    fpi_trace_centers = zeros(
+        Float64, max_peaks, n_fibers)
     fpi_line_mat = zeros(
         Float64, max_peaks, n_params, n_fibers)
     fpi_line_cov_mat = zeros(
@@ -805,6 +802,7 @@ function get_and_save_fpi_peaks(fname)
     fill!(fpi_line_mat, NaN)
     fill!(fpi_line_cov_mat, NaN)
 
+    x_pixels = collect(1:N_XPIX)
     for i in fib_inds
         if size(pout[i][1], 1) == 0
             continue
@@ -813,6 +811,7 @@ function get_and_save_fpi_peaks(fname)
             fpi_line_mat[peak_ind, :, i] .= pout[i][2][peak_ind, :]
             fpi_line_cov_mat[peak_ind, :, :, i] .= pout[i][3][peak_ind, :, :]
         end
+	fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(fpi_line_mat[:,2,i])
     end
 
     outname = replace(replace(fname, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
@@ -829,6 +828,10 @@ function get_and_save_fpi_peaks(fname)
     attrs(f["fpi_line_cov_mat"])["axis_2"] = "fit_info"
     attrs(f["fpi_line_cov_mat"])["axis_3"] = "fit_info"
     attrs(f["fpi_line_cov_mat"])["axis_4"] = "fibers"
+
+    write(f, "fpi_line_trace_centers", fpi_trace_centers)
+    attrs(f["fpi_line_trace_centers"])["axis_1"] = "peak_index"
+    attrs(f["fpi_line_trace_centers"])["axis_2"] = "fibers"
     close(f)
 
     return outname
@@ -841,6 +844,7 @@ function get_and_save_arclamp_peaks(fname)
     flux_1d = f["flux_1d"]
     ivar_1d = f["ivar_1d"]
     mask_1d = f["mask_1d"]
+    extract_trace_centers = f["extract_trace_centers"]
     close(f)
 
     n_pixels = size(flux_1d, 1)
@@ -866,6 +870,8 @@ function get_and_save_arclamp_peaks(fname)
     end
 
     n_params = size(pout[1][2], 2)
+    fpi_trace_centers = zeros(
+        Float64, max_peaks, n_fibers)
     fpi_line_mat = zeros(
         Float64, max_peaks, n_params, n_fibers)
     fpi_line_cov_mat = zeros(
@@ -873,6 +879,7 @@ function get_and_save_arclamp_peaks(fname)
     fill!(fpi_line_mat, NaN)
     fill!(fpi_line_cov_mat, NaN)
 
+    x_pixels = collect(1:N_XPIX)
     for i in fib_inds
         if size(pout[i][1], 1) == 0
             continue
@@ -881,6 +888,7 @@ function get_and_save_arclamp_peaks(fname)
             fpi_line_mat[peak_ind, :, i] .= pout[i][2][peak_ind, :]
             fpi_line_cov_mat[peak_ind, :, :, i] .= pout[i][3][peak_ind, :, :]
         end
+	fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(fpi_line_mat[:,2,i])
     end
 
     outname = replace(replace(fname, "ar1Dcal" => "arclamp_peaks"), "ar1D" => "arclamp_peaks")
@@ -897,6 +905,10 @@ function get_and_save_arclamp_peaks(fname)
     attrs(f["arclamp_line_cov_mat"])["axis_2"] = "fit_info"
     attrs(f["arclamp_line_cov_mat"])["axis_3"] = "fit_info"
     attrs(f["arclamp_line_cov_mat"])["axis_4"] = "fibers"
+
+    write(f, "arclamp_line_trace_centers", fpi_trace_centers)
+    attrs(f["arclamp_line_trace_centers"])["axis_1"] = "peak_index"
+    attrs(f["arclamp_line_trace_centers"])["axis_2"] = "fibers"
     close(f)
 
     return outname
