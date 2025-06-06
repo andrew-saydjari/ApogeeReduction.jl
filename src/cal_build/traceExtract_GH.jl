@@ -880,6 +880,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         else
             right_cut_ind = size(new_params, 1)
         end
+    else
+        left_cut_ind = 1
+        right_cut_ind = size(new_params, 1)
     end
 
     #identify which fibers should be kept using the prior_center_to_fiber_func

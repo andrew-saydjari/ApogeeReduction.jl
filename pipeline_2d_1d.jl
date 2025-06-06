@@ -216,10 +216,12 @@ flush(stdout);
             end
 
             # we probably want to append info from the fiber dictionary from alamanac into the file name
-            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d,
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, 
+		extract_trace_centers = regularized_trace_params[:, :, 2],
                 relthrpt, bitmsk_relthrpt, fiberTypeList)
         else
-            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d)
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d,
+		extract_trace_centers = regularized_trace_params[:, :, 2])
         end
         close(falm)
     end
@@ -343,6 +345,7 @@ end
 all1DObjecta = vcat(list1DexpObject...)
 all1DFPIa = vcat(list1DexpFPI...)
 all1DArclampa = vcat(list1DexpArclamp...)
+all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
 
 all1DObjectperchip = []
 all1DArclampperchip = []
