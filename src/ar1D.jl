@@ -1,5 +1,6 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
+using Interpolations: linear_interpolation, Line
 
 include("./wavecal.jl")
 include("./skyline_peaks.jl")
@@ -430,6 +431,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
+    outtrace = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     cntvec = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
 
     pixvec = 1:(N_CHIPS * N_XPIX)
@@ -437,6 +439,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     ivar_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     wave_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
+    trace_center_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
 
     ingestBit = zeros(Int, N_FIBERS)
@@ -487,12 +490,14 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         flux_1d = f["flux_1d"]
         ivar_1d = f["ivar_1d"]
         mask_1d = f["mask_1d"]
+	extract_trace_centers = f["extract_trace_centers"]
         close(f)
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
+        trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
     end
 
@@ -510,6 +515,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         flux_fiber = flux_stack[good_pix_fiber, fiberindx]
         ivar_fiber = ivar_stack[good_pix_fiber, fiberindx]
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
+        trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
 
@@ -522,6 +528,10 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         outvar[msk_inter, fiberindx] .+= ((Rinv .^ 2) * (1 ./ ivar_fiber))[msk_inter]
         cntvec[:, fiberindx] .+= msk_inter
 
+	#right now, only works for a single exposure
+	outtrace[:, fiberindx] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+#        outtrace[msk_inter, fiberindx] .+= (Rinv * trace_center_fiber)[msk_inter]
+
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)
         elseif all(.!((chipBit_fiber .& 2^4) .== 0)) && ((ingestBit[fiberindx] & 2^2) == 0)
@@ -533,6 +543,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
 
     framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
     outflux ./= framecnts
+#    outtrace ./= framecnts #don't do this step if using linear_interpolation
     outvar ./= (framecnts .^ 2)
     # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
     outmsk = (cntvec .== framecnts)
@@ -540,7 +551,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_a_" => "_")
     safe_jldsave(
-        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, wavecal_type)
+        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, wavecal_type)
     return
 end
 
