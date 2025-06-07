@@ -201,7 +201,7 @@ flush(stdout);
         ## zero pointing per read and for ref, sci, and relative for sci amp
         ## defer 1/f correction to 2D stage
         outdat = Float64.(tdat)
-        zeropoint_read_dcube!(outdat)
+        ref_zpt_out, sci_zpt_out, amp_off_vec = zeropoint_read_dcube!(outdat)
 
         # ADD? reference array-based masking/correction
 
@@ -252,7 +252,8 @@ flush(stdout);
                 "_")
             fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
             safe_jldsave(fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image, 
-    			      outdat = orig_outdat, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip])
+    			      outdat = orig_outdat, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip],
+                      ref_zpt_out = ref_zpt_out, sci_zpt_out = sci_zpt_out, amp_off_vec = amp_off_vec)
 	end
 
         return fname

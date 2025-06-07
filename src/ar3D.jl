@@ -40,9 +40,10 @@ function zeropoint_read_dcube!(dcube)
         ref_top[aindx,:] .= dropdims(mean(dcube[amp, 2045:2048, :],dims=(1,2)),dims=(1,2))
     end
     
-    amp_off = (diff(ref_bot,dims=1) .+ diff(ref_top,dims=1))./2
-    amp_off_vec = vcat(zeros(1,size(amp_off,2)),amp_off)
-    amp_off_vec .-= mean(amp_off_vec,dims=1)
+    amp_off_vec = ref_bot .- reshape((ref_bot[1,:].+ref_bot[4,:])./2,1,:)
+    amp_off_vec .+= ref_top .- .- reshape((ref_top[1,:].+ref_bot[4,:])./2,1,:)
+    amp_off_vec ./=2
+    amp_off_vec .-= reshape((amp_off_vec[1,:].+amp_off_vec[4,:])./2,1,:)
 
     dcube[1:512,:,:].-=reshape(amp_off_vec[1,:],1,1,:)
     dcube[513:1024,:,:].-=reshape(amp_off_vec[2,:],1,1,:)
