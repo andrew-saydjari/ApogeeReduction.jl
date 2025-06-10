@@ -11,7 +11,7 @@ The pipeline produces files at many stages of reduction.
 - `ar2Dresiduals`: Residuals from 2D extraction process
 - `ar1D`: Extracted 1D spectra for each fiber, in detector pixel units (before wavelength calibration and resampling)
 - `ar1Duni`: 1D spectra resampled onto a uniform wavelength grid
-- `ar1Dunical`: Flux (realtive) calibrated 1D spectra on the uniform wavelength grid
+- `ar1Dunical`: Flux (relative) calibrated 1D spectra on the uniform wavelength grid
 
 ## Structure
 
