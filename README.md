@@ -3,6 +3,16 @@
 [![Build Status](https://github.com/andrew-saydjari/ApogeeReduction.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/andrew-saydjari/ApogeeReduction.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/andrew-saydjari/ApogeeReduction.jl/branch/main/graph/badge.svg?branch=main)](https://codecov.io/gh/andrew-saydjari/ApogeeReduction.jl)
 
+## Files
+The pipeline produces files at many stages of reduction.
+- `ar3Dcal`: Raw 3D datacubes. These are a reformatted version of the raw inputs and are not always created.
+- `ar2D`: 2D images after 3D→2D extraction, before calibration
+- `ar2Dcal`: 2D calibrated images after dark subtraction and flat fielding
+- `ar2Dresiduals`: Residuals from 2D extraction process
+- `ar1D`: Extracted 1D spectra for each fiber, before wavelength calibration and resampling
+- `ar1Duni`: 1D spectra resampled onto a uniform wavelength grid
+- `ar1Dunical`: Flux calibrated 1D spectra on the uniform wavelength grid
+
 ## Structure
 
 There are four main types of files in this repository:
