@@ -16,23 +16,36 @@ function parse_commandline()
 end
 
 function get_plot_categories(plot_files)
-    categories = Dict{String, Vector{String}}()
+    # Define the main categories and their patterns in the desired order
+    # TODO think harder about these categories
+    category_patterns = [
+        ("ar1Dunical", r"ar1Dunical_.*\.png$"),
+        ("ar1Duni", r"ar1Duni_.*\.png$"),
+        ("wave", r".*wave_.*\.png$"),
+        ("night wave", r"night.*wave_.*\.png$"),
+        ("skyPeakResiduals", r"skyPeakResiduals_.*\.png$"),
+        ("ar1D", r"ar1D_.*\.png$"),
+        ("ar2Dresidualscal", r"ar2Dresidualscal_.*\.png$"),
+        ("fpi", r"fpi.*\.png$"),
+        ("Parameters", r".*Params_.*\.png$")
+    ]
 
-    # Define the main categories and their patterns
-    category_patterns = Dict(
-        "Final Calibrated Spectra" => r"ar1Dunical_.*\.png$",
-        "Uncalibrated Spectra" => r"ar1Duni_.*\.png$",
-        "2D Residuals" => r"ar2Dresidualscal_.*\.png$",
-        "Wavelength Solution" => r".*wave_.*\.png$",
-        "Parameters" => r".*Params_.*\.png$"
-    )
+    # Create ordered categories
+    categories = Vector{Tuple{String, Vector{String}}}()
 
     # Sort files into categories
     for (category, pattern) in category_patterns
         matching_files = filter(f -> occursin(pattern, f), plot_files)
         if !isempty(matching_files)
-            categories[category] = sort(matching_files)
+            push!(categories, (category, sort(matching_files)))
         end
+    end
+
+    # put files that don't match any category in "other" and print a warning
+    other_files = setdiff(plot_files, [f for (_, files) in categories for f in files])
+    if !isempty(other_files)
+        println("Warning: $(length(other_files)) files don't match any category. (Adding to 'other' category)")
+        push!(categories, ("other", sort(other_files)))
     end
 
     return categories
@@ -43,7 +56,7 @@ function generate_html(mjd, outdir, categories)
     <!DOCTYPE html>
     <html>
     <head>
-        <title>APOGEE Reduction Dashboard - MJD $mjd</title>
+        <title>ApogeeReduction.jl diagnostic plots - MJD $mjd</title>
         <style>
             body {
                 background-color: #000000;
@@ -66,7 +79,7 @@ function generate_html(mjd, outdir, categories)
             }
             .plot-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
                 gap: 20px;
                 margin-top: 20px;
             }
@@ -74,17 +87,61 @@ function generate_html(mjd, outdir, categories)
                 background-color: #1a1a1a;
                 padding: 10px;
                 border-radius: 5px;
+                cursor: pointer;
             }
             .plot-item img {
                 width: 100%;
                 height: auto;
                 border-radius: 3px;
+                transition: transform 0.2s;
+                display: block;
+                object-fit: contain;
             }
             .plot-title {
                 margin-top: 10px;
                 font-size: 0.9em;
                 color: #cccccc;
                 word-break: break-word;
+            }
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1000;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.7);
+                padding: 20px;
+                box-sizing: border-box;
+            }
+            .modal-content {
+                max-width: 90%;
+                max-height: 80vh;
+                margin: auto;
+                display: block;
+            }
+            .modal-filename {
+                color: #ffffff;
+                text-align: center;
+                margin-top: 15px;
+                font-size: 1.2em;
+            }
+            .modal-hint {
+                color: #888888;
+                text-align: center;
+                margin-top: 10px;
+                font-size: 0.9em;
+                font-style: italic;
+            }
+            .close {
+                position: absolute;
+                top: 15px;
+                right: 35px;
+                color: #f1f1f1;
+                font-size: 40px;
+                font-weight: bold;
+                cursor: pointer;
             }
             .nav {
                 position: sticky;
@@ -112,7 +169,7 @@ function generate_html(mjd, outdir, categories)
     </head>
     <body>
         <div class="container">
-            <h1>APOGEE Reduction Dashboard - MJD $mjd</h1>
+            <h1>ApogeeReduction.jl diagnostic plots - MJD $mjd</h1>
 
             <div class="nav">
     """
@@ -139,7 +196,7 @@ function generate_html(mjd, outdir, categories)
         for file in files
             filename = basename(file)
             html *= """
-                    <div class="plot-item">
+                    <div class="plot-item" onclick="openModal(this)">
                         <img src="$filename" alt="$filename">
                         <div class="plot-title">$filename</div>
                     </div>
@@ -153,6 +210,12 @@ function generate_html(mjd, outdir, categories)
     end
 
     html *= """
+        </div>
+        <div id="imageModal" class="modal" onclick="closeModal()">
+            <span class="close">&times;</span>
+            <img class="modal-content" id="modalImage">
+            <div class="modal-filename" id="modalFilename"></div>
+            <div class="modal-hint">Use &larr; and &rarr; arrow keys to navigate between plots</div>
         </div>
         <script>
             // Add active class to current section in nav
@@ -174,6 +237,54 @@ function generate_html(mjd, outdir, categories)
                         link.classList.add('active');
                     }
                 });
+            });
+
+            // Modal functionality
+            let currentIndex = 0;
+            let allPlotItems = [];
+
+            function openModal(element) {
+                const modal = document.getElementById('imageModal');
+                const modalImg = document.getElementById('modalImage');
+                const modalFilename = document.getElementById('modalFilename');
+
+                // Get all plot items if we haven't already
+                if (allPlotItems.length === 0) {
+                    allPlotItems = Array.from(document.querySelectorAll('.plot-item'));
+                }
+
+                // Find the current index
+                currentIndex = allPlotItems.indexOf(element);
+
+                modal.style.display = "block";
+                modalImg.src = element.querySelector('img').src;
+                modalFilename.textContent = element.querySelector('.plot-title').textContent;
+            }
+
+            function closeModal() {
+                document.getElementById('imageModal').style.display = "none";
+            }
+
+            // Close modal when clicking the close button
+            document.querySelector('.close').onclick = function(event) {
+                event.stopPropagation();
+                closeModal();
+            }
+
+            // Add keyboard navigation
+            document.addEventListener('keydown', function(event) {
+                const modal = document.getElementById('imageModal');
+                if (modal.style.display === "block") {
+                    if (event.key === "ArrowLeft" || event.key === "Left") {
+                        event.preventDefault();
+                        currentIndex = (currentIndex - 1 + allPlotItems.length) % allPlotItems.length;
+                        openModal(allPlotItems[currentIndex]);
+                    } else if (event.key === "ArrowRight" || event.key === "Right") {
+                        event.preventDefault();
+                        currentIndex = (currentIndex + 1) % allPlotItems.length;
+                        openModal(allPlotItems[currentIndex]);
+                    }
+                }
             });
         </script>
     </body>
