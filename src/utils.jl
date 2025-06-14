@@ -206,7 +206,8 @@ function check_type_for_jld2(value)
         if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
             UInt16, UInt8, Float64, Float32, String])
             #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
-            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+            # @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+                    @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, will result in a hard-to-read HDF5 file."
         end
         value
     end
