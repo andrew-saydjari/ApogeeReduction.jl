@@ -93,16 +93,16 @@ end
 
 # why not also ar2Dcal?
 flist = glob("ar2D_*.h5", joinpath(parg["data_dir"], "apred/$(parg["mjd"])/"));
-expnum_v = map(x -> parse(Int, split(basename(x), "_")[end - 1][(end - 3):end]), flist)
-chip_v = map(x -> split(basename(x), "_")[end - 2], flist);
-mskCal = parg["expid-start"] .<= expnum_v .<= parg["expid-end"];
+expnum_v = map(x -> parse(Int, split(basename(x), "_")[end - 2]), flist)
+chip_v = map(x -> split(basename(x), "_")[end - 1], flist);
+mskCal = (parg["expid-start"] % 10000) .<= expnum_v .<= (parg["expid-end"] % 10000);
 
 p = sortperm(expnum_v[mskCal])
 
 @showprogress for indoff in 1:(length(flist[mskCal][p]) ÷ 6 - 1)
-    fig = Figure(size = (2000, 600), fontsize = 22)
+    fig = Figure(size = (2000, 800), fontsize = 32)
 
-    expid1 = expnum_v[mskCal][p][1 + 6 * indoff]
+    expid1 = expnum_v[mskCal][p][1 + 6 * indoff] # this is very brittle
     for (ind, chipn) in enumerate(["a", "b", "c"])
         ax = Axis(fig[1, ind], title = "Tele: $(parg["tele"]), Chip: $chipn",
             xlabel = "Z-Score", ylabel = "Log Average Flux")
@@ -145,5 +145,5 @@ p = sortperm(expnum_v[mskCal])
     # need a better naming scheme that keeps the exposure ids
     plot_name = "back2backFlat_$(parg["tele"])_$(parg["mjd"])_$(expid1).png"
     save(joinpath(dirNamePlots, plot_name), fig, px_per_unit = 3)
-    thread("back2backFlat_$(parg["tele"])_$(parg["mjd"])_$(expid1)", plot_name)
+    thread("back2backFlat_$(parg["tele"])_$(parg["mjd"])_$(expid1)", joinpath(dirNamePlots, plot_name))
 end

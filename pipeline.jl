@@ -311,7 +311,7 @@ t_then = t_now;
 flush(stdout);
 
 @passobj 1 workers() parg
-@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
+@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_06_03/pass_clean/"
 
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
