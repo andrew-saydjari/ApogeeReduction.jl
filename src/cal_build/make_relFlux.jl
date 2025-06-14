@@ -166,7 +166,7 @@ thread("$(cal_type) relFluxing")
         bitmsk_relthrpt = zeros(Int, 300, length(chips))
         cartid = Int(read_metadata(fname)["cartid"])
         for (cindx, chip) in enumerate(chips)
-            local_fname = replace(fname, "_a_" => "_$(chiploc)_")
+            local_fname = replace(fname, "_$(chiploc)_" => "_$(chip)_")
             f = jldopen(local_fname)
             absthrpt[:, cindx] = f["absthrpt"]
             relthrpt[:, cindx] = f["relthrpt"]
@@ -180,7 +180,7 @@ thread("$(cal_type) relFluxing")
         # plot the relFlux
         fig = Figure(size = (1200, 400))
         for (cindx, chip) in enumerate(chips)
-            ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chiploc)")
+            ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chip)")
             msk = bitmsk_relthrpt[:, cindx] .== 0
             broken_msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
             warn_msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
@@ -192,14 +192,14 @@ thread("$(cal_type) relFluxing")
             scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
             broken_fibers = xvec[broken_msk]
             if !isempty(broken_fibers) && (chip == "c") # hardcoded for now
-                status_str *= "\nChip $(chiploc) Broken Fibers:\n    $(join(broken_fibers, "\n    "))"
+                status_str *= "\nChip $(chip) Broken Fibers:\n    $(join(broken_fibers, "\n    "))"
             end
 
             # Warn fibers
             scatter!(ax, xvec[warn_only_msk], relthrpt[warn_only_msk, cindx], color = "orange")
             warn_fibers = xvec[warn_only_msk]
             if !isempty(warn_fibers) && (chip == "c") # hardcoded for now
-                status_str *= "\nChip $(chiploc) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
+                status_str *= "\nChip $(chip) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
             end
         end
 

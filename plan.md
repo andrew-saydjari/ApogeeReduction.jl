@@ -83,5 +83,5 @@
 - persistence modelling
 - nonlinearity correction
 - absolute fluxing
-  
+- average gain from 1D extraction
 
