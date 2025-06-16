@@ -24,7 +24,6 @@ jobs:
       matrix:
         version:
           - '1.11' # could do back to 1.8, after all of our deps are registered
-          - 'nightly'
         os:
           - ubuntu-latest
         arch:
