@@ -9,6 +9,7 @@ apo    59549    39870034-39870043    spQF        "sparsePak quartz flat"
 lco    60044    44820002-44820024    spQF        "sparsePak quartz flat"
 
 lco    60755    51930001-51930005    sat         "saturation internal flats, 170 reads"
+apo    60823    52610012-52610015    sat         "saturation internal flats, 450 reads"
 
 apo    57126    15640002-15640021    uD          "ultra dark, 100 reads"
 apo    57581    20190002-20190030    uD          "ultra dark, 100 reads"
