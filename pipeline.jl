@@ -112,7 +112,7 @@ flush(stdout);
     BLAS.set_num_threads(1)
     using FITSIO, HDF5, FileIO, JLD2, Glob
     using DataFrames, EllipsisNotation, StatsBase
-    using ParallelDataTransfer, SIRS, ProgressMeter
+    using ParallelDataTransfer, ProgressMeter
     using AstroTime: TAIEpoch, modified_julian, days, value
 
     src_dir = "./"
@@ -128,15 +128,15 @@ flush(stdout);
 ##### 3D stage
 @everywhere begin
     # firstind overriden for APO dome flats
-    function process_3D(outdir, sirscaldir, runname, mjd, expid, chip; firstind = 3,
-            cor1fnoise = true, extractMethod = "sutr_wood")
+    function process_3D(outdir, runname, mjd, expid, chip; firstind = 3,
+            cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
         dirName = joinpath(outdir, "apred/$(mjd)/")
         if !ispath(dirName)
             mkpath(dirName)
         end
 
         df = read_almanac_exp_df(joinpath(outdir, "almanac/$(runname).h5"), parg["tele"], mjd)
-
+        #        println(expid,chip,size(df.observatory),size(df.mjd),size(df.exposure_int))
         # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
         rawpath = build_raw_path(
             df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
@@ -154,6 +154,11 @@ flush(stdout);
                                 (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
             2, "dcs"
         elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
+            2, "dcs"
+        elseif (nread_total == 3)
+            #catch some weird cases (like nreads=3 with Darks)
+            #but still reduce them to prevent errors later in pipeline_2d_1d
+            #ULTIMATELY want to make it so these exposures are removed from runlist earlier
             2, "dcs"
         else
             firstind, extractMethod
@@ -193,34 +198,19 @@ flush(stdout);
                                                    (last_image_start_time - first_image_start_time))
         mjd_mid_exposure = mjd_mid_exposure_precise
 
-        ## remove 1/f correlated noise (using SIRS.jl) [some preallocs would be helpful]
-        if cor1fnoise
-            in_data = Float64.(tdat[1:2048, :, :])
-            # sirsub! modifies in_data, but make a copy so that it's faster the second time.
-            # better not to need to do this at all
-            copied_in_data = copy(in_data)
-            outdat = zeros(
-                Float64, size(tdat, 1), size(tdat, 2), size(in_data, 3)) #obviously prealloc...
-            sirssub!(sirs4amps, in_data, f_max = 95.0)
-            outdat[1:2048, :, :] .= in_data
-
-            # fixing the 1/f in the reference array is a bit of a hack right now (IRRC might fix)
-            in_data = copied_in_data
-            in_data[513:1024, :, :] .= tdat[2049:end, :, :]
-            sirssub!(sirsrefas2, in_data, f_max = 95.0)
-            outdat[2049:end, :, :] .= in_data[513:1024, :, :]
-        else
-            outdat = Float64.(tdat)
-        end
-
-        ## should this be done on the difference cube, or is this enough?
-        # vert_ref_edge_corr!(outdat)
-        refarray_zpt!(outdat)
-        vert_ref_edge_corr_amp!(outdat)
+        ## zero pointing per read and for ref, sci, and relative for sci amp
+        ## defer 1/f correction to 2D stage
+        outdat = Float64.(tdat)
+        ref_zpt_out, sci_zpt_out, amp_off_vec = zeropoint_read_dcube!(outdat)
 
         # ADD? reference array-based masking/correction
 
         # ADD? nonlinearity correction
+
+        if save3dcal
+            #make copy before it is adjusted
+            outdat_cal = copy(outdat)
+        end
 
         # extraction 3D -> 2D
         dimage, ivarimage,
@@ -240,7 +230,7 @@ flush(stdout);
         # need to clean up exptype to account for FPI versus ARCLAMP
         outfname = join(
             ["ar2D", df.observatory[expid], df.mjd[expid],
-                last(df.exposure_str[expid],4), chip, df.exptype[expid]],
+                last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
             "_")
         # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
 
@@ -255,12 +245,23 @@ flush(stdout);
         )
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
         safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
+        if save3dcal
+            outfname3d = join(
+                ["ar3Dcal", df.observatory[expid], df.mjd[expid],
+                    last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+                "_")
+            fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
+            safe_jldsave(fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image, 
+    			      outdat = outdat_cal, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip],
+                      ref_zpt_out = ref_zpt_out, sci_zpt_out = sci_zpt_out, amp_off_vec = amp_off_vec)
+	end
+
         return fname
     end
 
     # come back to tuning the chi2perdofcut once more rigorously establish noise model
     function process_2Dcal(fname; chi2perdofcut = 100)
-        sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+        sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
         dimage = load(fname, "dimage")
@@ -310,8 +311,7 @@ t_then = t_now;
 flush(stdout);
 
 @passobj 1 workers() parg
-@everywhere sirscaldir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_08_14/outdir/cal/" # hard coded for now
-@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_02_03/"
+@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_06_03/pass_clean/"
 
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
@@ -323,26 +323,23 @@ readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
 gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
 @passobj 1 workers() gainMatDict
 
-# ADD load the dark currrent map
-# load SIRS.jl models
-@everywhere sirs4amps = SIRS.restore(sirscaldir * "sirs_test_d12_r60_n15.jld"); # these really are too big... we need to work on reducing their size
-@everywhere sirsrefas2 = SIRS.restore(sirscaldir * "sirs_test_ref2_d12_r60_n15.jld");
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
 # clean up this statement to have less replication
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 if parg["runlist"] != ""
     subDic = load(parg["runlist"])
+
     subiter = Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-        parg["outdir"], sirscaldir, parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
+        parg["outdir"], parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else
     subiter = string.(collect(parg["chips"]))
     @everywhere process_3D_partial(chip) = process_3D(
-        parg["outdir"], sirscaldir, parg["runname"], parg["mjd"], parg["expid"], chip)
+        parg["outdir"], parg["runname"], parg["mjd"], parg["expid"], chip)
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 end
 

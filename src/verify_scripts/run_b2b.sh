@@ -53,7 +53,7 @@ while read -r line; do
         expid_start=$(echo $expid_range | cut -d'-' -f1 | sed 's/^[0-9]\{4\}//')
         expid_end=$(echo $expid_range | cut -d'-' -f2 | sed 's/^[0-9]\{4\}//')
 
-        # print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
+        print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
         sbatchCustom --job-name=b2b_${tele}_${mjd} ./src/run_scripts/run_all.sh ${tele} ${mjd} true ${data_dir}
 
         # Store job ID and associated information
@@ -62,13 +62,14 @@ while read -r line; do
     fi
 done < "metadata/special_cal_obs.txt"
 
-# Wait for all jobs to complete
+Wait for all jobs to complete
 print_elapsed_time "Waiting for all reduction jobs to complete"
 for job_id in "${job_ids[@]}"; do
-    squeue -h -j $job_id > /dev/null 2>&1
+    # Check if job exists and starts with b2b
+    squeue -h -j $job_id -n "b2b*" > /dev/null 2>&1
     while [ $? -eq 0 ]; do
         sleep 1
-        squeue -h -j $job_id > /dev/null 2>&1
+        squeue -h -j $job_id -n "b2b*" > /dev/null 2>&1
     done
 done
 

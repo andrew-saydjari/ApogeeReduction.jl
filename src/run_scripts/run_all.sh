@@ -63,25 +63,26 @@ almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_fil
 print_elapsed_time "Building Runlist"
 julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
-# Run the reduction pipeline to 2D/2Dcal and stop
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
 # --workers_per_node 28 ## sometimes have to adjust this, could programmatically set based on the average or max read number in the exposures for that night
 julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --workers_per_node 28
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
-    # Extract traces from dome flats
     print_elapsed_time "Extracting Traces from Dome and Quartz Flats"
     ./src/cal_build/run_trace_cal.sh $tele $mjd $mjd $caldir_darks $caldir_flats
 
-    # Run pipeline 1D only
     print_elapsed_time "Running 2D->1D Pipeline"
     julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 32
 
-    # End of night plotting script
     print_elapsed_time "Making Plots"
     julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
+
+    print_elapsed_time "Generating plot page for web viewing"
+    julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir
+
+    print_elapsed_time "Generating plot page for web viewing"
+    julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir
 fi
 
-# Clean up logs and Report Timing
 print_elapsed_time "Job Completed"

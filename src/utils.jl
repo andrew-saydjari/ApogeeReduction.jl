@@ -6,16 +6,24 @@ using Distributed: myid
 # used to record git branch and commit in safe_jldsave
 using LibGit2
 function initalize_git(git_dir)
-    git_commit = LibGit2.head(git_dir)
-    git_repo = LibGit2.GitRepo(git_dir)
-    git_head = LibGit2.head(git_repo)
-    git_branch = LibGit2.shortname(git_head)
+    try
+        git_commit = LibGit2.head(git_dir)
+        git_repo = LibGit2.GitRepo(git_dir)
+        git_head = LibGit2.head(git_repo)
+        git_branch = LibGit2.shortname(git_head)
 
-    if myid() == 1
-        println("Running on branch: $git_branch, commit: $git_commit")
-        flush(stdout)
+        if myid() == 1
+            println("Running on branch: $git_branch, commit: $git_commit")
+            flush(stdout)
+        end
+        return git_branch, git_commit
+    catch e
+        if myid() == 1
+            println("Local folder is not a git repository. Not recording git branch and commit.")
+            flush(stdout)
+        end
+        return "", ""
     end
-    return git_branch, git_commit
 end
 # this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
 # but it is a symptom of the fact that the include situation is a bit tangled
@@ -38,7 +46,8 @@ bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
 
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
+bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
+               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)
@@ -205,7 +214,8 @@ function check_type_for_jld2(value)
         if !(t in [Bool, Int, Int64, Int32, Int16, Int8, UInt, UInt64, UInt32,
             UInt16, UInt8, Float64, Float32, String])
             #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
-            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+            # @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
+                    @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, will result in a hard-to-read HDF5 file."
         end
         value
     end

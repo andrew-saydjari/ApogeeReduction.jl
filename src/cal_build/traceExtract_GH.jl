@@ -466,7 +466,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     smoothed_fluxes ./= nansum(good_ivars[all_smooth_inds]' .* smooth_weights, 1)'
 
     # find local maxima and minima
-    slopes = smoothed_fluxes[(begin + 1):end] - smoothed_fluxes[begin:(end - 1)]
+    slopes = smoothed_fluxes[(begin + 1):end] .- smoothed_fluxes[begin:(end - 1)]
     local_max_inds = findall((slopes[1:(end - 1)] .>= 0) .& (slopes[2:end] .<= 0) .&
                              .!((slopes[1:(end - 1)] .== 0) .& (slopes[2:end] .== 0))) .+ 1
     local_min_inds = findall((slopes[1:(end - 1)] .<= 0) .& (slopes[2:end] .>= 0)) .+ 1
@@ -668,7 +668,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
             ((new_params[:, 3] .* keep_widths)[all_smooth_inds])' .* smooth_weights, 1)'
         smoothed_widths ./= nansum(keep_widths[all_smooth_inds]' .* smooth_weights, 1)'
 
-        resids = new_params[:, 2] .- smoothed_heights
+        resids = new_params[:, 1] .- smoothed_heights
         resid_summary = quantile(resids[keep_heights], [0.16, 0.5, 0.84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
@@ -827,7 +827,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
             ((new_params[:, 3] .* keep_widths)[all_smooth_inds])' .* smooth_weights, 1)'
         smoothed_widths ./= nansum(keep_widths[all_smooth_inds]' .* smooth_weights, 1)'
 
-        resids = new_params[:, 2] .- smoothed_heights
+        resids = new_params[:, 1] .- smoothed_heights
         resid_summary = quantile(resids[keep_heights], [0.16, 0.5, 0.84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
@@ -880,6 +880,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         else
             right_cut_ind = size(new_params, 1)
         end
+    else
+        left_cut_ind = 1
+        right_cut_ind = size(new_params, 1)
     end
 
     #identify which fibers should be kept using the prior_center_to_fiber_func

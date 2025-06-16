@@ -2,9 +2,24 @@ import FastRunningMedian: running_median
 using Optim, HDF5
 
 function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
-    # Find indices where flux is above 99th percentile
-    thresh = percentile(flux_vec, 97.5)
-    above_thresh = findall(x -> x > thresh, flux_vec)
+
+    #use running median to help identify skyline peaks in data
+    #(especially for bright stars)
+    med_flux_vec = running_median(
+        flux_vec, 101, :asym_trunc, nan = :ignore)
+    #    println(size(flux_vec)," ",size(med_flux_vec)," ",nanzeropercentile(med_flux_vec))
+
+    med_flux_vec[med_flux_vec .== 0.0] .= 1.0
+    scaled_flux_vec = flux_vec ./ med_flux_vec
+
+    # Find indices where flux is above 97.5th percentile
+    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [97.5])[1]
+    #    slope_vec = scaled_flux_vec[(begin+1):end] .- scaled_flux_vec[begin:(end-1)]
+    #    above_thresh = findall((scaled_flux_vec[(begin+1):(end-1)] .>= thresh) .& 
+    #		         (slope_vec[begin:(end-1)] .>= 0) .& (slope_vec[(begin+1):end] .<= 0) .&
+    #			 .!((slope_vec[begin:(end-1)] .== 0) .& (slope_vec[(begin+1):end] .== 0))) .+ 1
+    above_thresh = findall(x -> x > thresh, scaled_flux_vec)
+    #    above_thresh = findall(x -> x > thresh, flux_vec)
 
     # Group indices into segments, combining those less than 10 pixels apart
     segments = []
@@ -236,6 +251,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
 
     f = jldopen(fname, "r+")
     flux_1d = f["flux_1d"]
+    extract_trace_centers = f["extract_trace_centers"]
     close(f)
     function get_sky_peaks_partial(flux_1d)
         get_sky_peaks(flux_1d, tele, chip, roughwave_dict, df_sky_lines)
@@ -253,7 +269,10 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
     end
     sky_line_mat = zeros(
         Float64, length(unique_skyline_inds), size(pout[first_valid_idx][1], 1), N_FIBERS)
+    sky_trace_centers = zeros(
+        Float64, length(unique_skyline_inds), N_FIBERS)
     fill!(sky_line_mat, NaN)
+    x_pixels = collect(1:N_XPIX)
     for i in 1:N_FIBERS
         for (eindx, skyindx) in enumerate(unique_skyline_inds)
             if !isnothing(pout[i][1])
@@ -263,6 +282,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
                 end
             end
         end
+	sky_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(sky_line_mat[:,1,i])
     end
 
     medx_detect = running_median.(eachrow(sky_line_mat[:, 1, :]), 31, :asym_trunc, nan = :ignore)
@@ -287,6 +307,10 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
     attrs(f["sky_line_mat"])["axis_1"] = "skylineID"
     attrs(f["sky_line_mat"])["axis_2"] = "fit_info"
     attrs(f["sky_line_mat"])["axis_3"] = "fibers"
+
+    write(f, "sky_line_trace_centers", sky_trace_centers)
+    attrs(f["sky_line_trace_centers"])["axis_1"] = "skylineID"
+    attrs(f["sky_line_trace_centers"])["axis_2"] = "fibers"
 
     # Write boff data
     write(f, "boff", boff)

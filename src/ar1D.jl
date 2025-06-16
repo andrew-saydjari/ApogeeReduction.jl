@@ -1,5 +1,6 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
+using Interpolations: linear_interpolation, Line
 
 include("./wavecal.jl")
 include("./skyline_peaks.jl")
@@ -311,7 +312,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
     end
 
     df_exp = read_almanac_exp_df(f, tele, mjd)
-    
+
     if !(exposure_id in df_exp.exposure_str)
         @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
@@ -382,8 +383,10 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
     expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
     cartId = df_mjd.cartidInt[expIndex]
     # this needs to have cuts that match those in make_runlist_dome_flats.jl
-    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .< exposure_id) .& (df_mjd.nreadInt .> 3))
-    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .& (df_mjd.exposure_int .> exposure_id) .& (df_mjd.nreadInt .> 3))
+    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .&
+                               (df_mjd.exposure_int .< exposure_id) .& (df_mjd.nreadInt .> 3))
+    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .&
+                               (df_mjd.exposure_int .> exposure_id) .& (df_mjd.nreadInt .> 3))
     valid_before = if !isnothing(expIndex_before)
         all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
     elseif !isnothing(expIndex_before)
@@ -418,16 +421,17 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
+function reinterp_spectra(fname; backupWaveSoln = nothing)
     # might need to add in telluric div functionality here?
 
-    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
     # could shift this to a preallocation step
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
+    outtrace = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     cntvec = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
 
     pixvec = 1:(N_CHIPS * N_XPIX)
@@ -435,6 +439,7 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
     ivar_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     wave_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
+    trace_center_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
 
     ingestBit = zeros(Int, N_FIBERS)
@@ -446,34 +451,53 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
     # outdir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_12_05/outdir/"
     # fname = outdir * "apred/$(mjd)/" * get_1d_name(parse(Int, last(expid,4)), df) * ".h5"
 
-    wavefname = replace(replace(fname, fnameType => wavecal_type), "_$(CHIP_LST[1])_" => "_")
-    if isfile(wavefname)
-        f = jldopen(wavefname)
-        chipWaveSoln = f["chipWaveSoln"]
-        close(f)
-    else #this is a terrible global fallback, just so we get something to look at
-        chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
-        for (chipind, chip) in enumerate(CHIP_LST)
-            chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
-                1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+    wavetype_order = ["fpi", "sky"]
+    found_soln = false
+    wavecal_type = ""
+    for wavetype in wavetype_order
+        wavecal_type = "waveCalNight$(wavetype)Dither"
+        wavefname = replace(replace(fname, fnameType => wavecal_type), "_$(FIRST_CHIP)_" => "_")
+        if isfile(wavefname)
+            f = jldopen(wavefname)
+            chipWaveSoln = f["chipWaveSoln"]
+            close(f)
+            found_soln = true
+            break
         end
-        println("No wavecal found for $(fname), using fallback")
-        flush(stdout)
-        wavecal_type = "error_fixed_fallback"
+    end
+    if !found_soln
+        #this is not a great global fallback, but it works so we get something to look at
+        if isnothing(backupWaveSoln)
+            chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
+            for (chipind, chip) in enumerate(CHIP_LST)
+                chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
+                    1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+            end
+            println("No wavecal found for $(fname), using rough linear fallback")
+            flush(stdout)
+            wavecal_type = "error_fixed_fallback"
+        else
+            chipWaveSoln = backupWaveSoln
+            println("No wavecal found for $(fname), using nightly average as fallback")
+            flush(stdout)
+            wavecal_type = "error_night_ave_fallback"
+        end
     end
 
     for (chipind, chip) in enumerate(CHIP_LST) # This needs to be the in abc RGB order, changing that will break this section
-        fnameloc = replace(fname, "_$(CHIP_LST[1])_" => "_$(chip)_")
+        fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
         f = jldopen(fnameloc)
         flux_1d = f["flux_1d"]
         ivar_1d = f["ivar_1d"]
         mask_1d = f["mask_1d"]
+	extract_trace_centers = f["extract_trace_centers"]
         close(f)
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
+        trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
     end
 
@@ -491,6 +515,7 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
         flux_fiber = flux_stack[good_pix_fiber, fiberindx]
         ivar_fiber = ivar_stack[good_pix_fiber, fiberindx]
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
+        trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
 
@@ -503,6 +528,10 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
         outvar[msk_inter, fiberindx] .+= ((Rinv .^ 2) * (1 ./ ivar_fiber))[msk_inter]
         cntvec[:, fiberindx] .+= msk_inter
 
+	#right now, only works for a single exposure
+	outtrace[:, fiberindx] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+#        outtrace[msk_inter, fiberindx] .+= (Rinv * trace_center_fiber)[msk_inter]
+
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)
         elseif all(.!((chipBit_fiber .& 2^4) .== 0)) && ((ingestBit[fiberindx] & 2^2) == 0)
@@ -514,6 +543,7 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
 
     framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
     outflux ./= framecnts
+#    outtrace ./= framecnts #don't do this step if using linear_interpolation
     outvar ./= (framecnts .^ 2)
     # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
     outmsk = (cntvec .== framecnts)
@@ -521,7 +551,7 @@ function reinterp_spectra(fname; wavecal_type = "waveCalSkyLine")
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(CHIP_LST[1])_" => "_")
     safe_jldsave(
-        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, wavecal_type)
+        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, wavecal_type)
     return
 end
 
