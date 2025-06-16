@@ -1342,7 +1342,7 @@ function ingest_skyLines_file(fileName)
 end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)
-function ingest_skyLines_exp(fname; chip_lst = CHIP_LST)
+function ingest_skyLines_exp(fname; chip_lst = CHIP_LIST)
     # println("Ingesting sky lines for $fname")
     sky_line_uxlst = Matrix{Float64}[]
     sky_line_fwlst = Matrix{Float64}[]

@@ -104,7 +104,7 @@ p = sortperm(expnum_v[mskCal])
     fig = Figure(size = (2000, 800), fontsize = 32)
 
     expid1 = expnum_v[mskCal][p][1 + 6 * indoff]
-    for (ind, chipn) in enumerate(CHIP_LST)
+    for (ind, chipn) in enumerate(CHIP_LIST)
         ax = Axis(fig[1, ind], title = "Tele: $(parg["tele"]), Chip: $chipn",
             xlabel = "Z-Score", ylabel = "Log Average Flux")
 

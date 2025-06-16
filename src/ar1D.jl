@@ -469,7 +469,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         #this is not a great global fallback, but it works so we get something to look at
         if isnothing(backupWaveSoln)
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
-            for (chipind, chip) in enumerate(CHIP_LST)
+            for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
                     1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
             end
@@ -484,7 +484,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         end
     end
 
-    for (chipind, chip) in enumerate(CHIP_LST) # This needs to be the in abc RGB order, changing that will break this section
+    for (chipind, chip) in enumerate(CHIP_LIST) # This needs to be the in abc RGB order, changing that will break this section
         fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
         f = jldopen(fnameloc)
         flux_1d = f["flux_1d"]
@@ -549,7 +549,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     outmsk = (cntvec .== framecnts)
 
     # Write reinterpolated data
-    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(CHIP_LST[1])_" => "_")
+    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
         outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, wavecal_type)
     return
