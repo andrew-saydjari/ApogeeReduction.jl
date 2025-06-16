@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>APOGEE Log Viewer</title>
+    <style>
+        body {
+            margin: 10px;
+            height: 100vh;
+        }
+
+        iframe {
+            width: 100%;
+            height: 95%;
+            border: none;
+        }
+    </style>
+</head>
+
+<body>
+    <span id="currentSJD">SJD: 60705</span>
+    <select id="site" onchange="updateURL()">
+        <option value="apo">APO</option>
+        <option value="lco">LCO</option>
+    </select>
+    <input type="date" id="calendar" onchange="updateFromDate()">
+    <button onclick="changeDay(-1)">Previous</button>
+    <button onclick="changeDay(1)">Next</button>
+    <div id="currentURL"></div>
+    <iframe id="logFrame" src="https://data.sdss5.org/sas/sdsswork/data/apogee/apo/60705/60705.log.html"></iframe>
+
+    <script>
+        const REFERENCE_DATE = new Date('2025-01-30');
+        const REFERENCE_SJD = 60705;
+
+        // Get initial values from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const initialSJD = urlParams.get('sjd') || REFERENCE_SJD;
+        const initialSite = urlParams.get('site') || 'apo';
+
+        // Set initial values
+        document.getElementById('currentSJD').textContent = `SJD: ${initialSJD}`;
+        document.getElementById('site').value = initialSite;
+        updateCalendarFromSJD(parseInt(initialSJD));
+        updateURL();
+
+        function updateURL() {
+            const site = document.getElementById('site').value;
+            const sjd = document.getElementById('currentSJD').textContent.split(': ')[1];
+            const url = `https://data.sdss5.org/sas/sdsswork/data/apogee/${site}/${sjd}/${sjd}.log.html`;
+            document.getElementById('logFrame').src = url;
+            document.getElementById('currentURL').textContent = url;
+
+            // Update URL parameters without reloading the page
+            const newUrl = new URL(window.location);
+            newUrl.searchParams.set('sjd', sjd);
+            newUrl.searchParams.set('site', site);
+            window.history.pushState({}, '', newUrl);
+        }
+
+        function changeDay(delta) {
+            const currentSJD = parseInt(document.getElementById('currentSJD').textContent.split(': ')[1]);
+            const newSJD = currentSJD + delta;
+            document.getElementById('currentSJD').textContent = `SJD: ${newSJD}`;
+            updateURL();
+            updateCalendarFromSJD(newSJD);
+        }
+
+        function updateCalendarFromSJD(sjd) {
+            const daysDiff = sjd - REFERENCE_SJD;
+            const date = new Date(REFERENCE_DATE);
+            date.setDate(date.getDate() + daysDiff);
+            document.getElementById('calendar').value = date.toISOString().split('T')[0];
+        }
+
+        function updateFromDate() {
+            const selectedDate = new Date(document.getElementById('calendar').value);
+            const daysDiff = Math.round((selectedDate - REFERENCE_DATE) / (1000 * 60 * 60 * 24));
+            const newSJD = REFERENCE_SJD + daysDiff;
+            document.getElementById('currentSJD').textContent = `SJD: ${newSJD}`;
+            updateURL();
+        }
+
+        document.getElementById('calendar').value = REFERENCE_DATE.toISOString().split('T')[0];
+    </script>
+</body>
+
+</html>
