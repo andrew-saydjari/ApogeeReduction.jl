@@ -7,8 +7,8 @@ function parse_commandline()
     @add_arg_table s begin
         "--chips"
         required = false
-        help = "chip names, i.e. abc"
-        default = "abc"
+        help = "chip names, i.e. RGB"
+        default = "RGB"
         arg_type = String
         "--tele"
         required = true
@@ -63,6 +63,7 @@ end
     include(src_dir * "/utils.jl")
     include(src_dir * "/fileNameHandling.jl")
     include(src_dir * "/ar1D.jl")
+    using ApogeeReduction
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -113,7 +114,7 @@ cal_type = lowercase(unique_exp_lst[1])
 
 flist_chips = []
 for chip in chips
-    push!(flist_chips, replace.(all1Da, "_a_" => "_$(chip)_"))
+    push!(flist_chips, replace.(all1Da, "_$(FIRST_CHIP)_" => "_$(chip)_"))
 end
 all1D = vcat(flist_chips...)
 

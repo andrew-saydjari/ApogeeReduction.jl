@@ -11,7 +11,7 @@ function parse_commandline()
     @add_arg_table s begin
         "--chip"
         required = false
-        help = "chip name (a, b, c)"
+        help = "chip name (R, G, B)"
         arg_type = String
         "--tele"
         required = true
