@@ -1387,6 +1387,7 @@ function ingest_fpiLines_exp(fname)
             push!(fpi_line_uxlst_errs, fpi_line_xlst_errs)
             push!(fpi_line_chipInt, chipIndx .* ones(Int, size(fpi_line_xlst)))
         else
+            println("$(fnameloc) is not a file")
             push!(fpi_line_uxlst, [])
             push!(fpi_line_uxlst_errs, [])
             push!(fpi_line_chipInt, [])

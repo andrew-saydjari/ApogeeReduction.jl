@@ -70,7 +70,7 @@ function get_1d_name(expid, df; cal = false)
     else
         "ar1D"
     end
-    return join([fnameType, df.observatory[expid], df.mjd[expid], last(df.exposure_str[expid],4), df.chip[expid], df.exptype[expid]], "_")
+    return join([fnameType, df.observatory[expid], df.mjd[expid], last(df.exposure_str[expid],4), chipRaw2Redux[df.chip[expid]], df.exptype[expid]], "_")
 end
 
 function fiberIndx2fiberID(fibindx)

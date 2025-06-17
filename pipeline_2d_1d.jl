@@ -185,7 +185,7 @@ flush(stdout);
             # this is the path to the underlying fluxing file.
             # it is symlinked below to an exposure-specific file (linkPath).
             calPath = get_fluxing_file(
-                dfalmanac, parg["outdir"], tele, mjd, expnum, fluxing_chip = "c")
+                dfalmanac, parg["outdir"], tele, mjd, expnum, fluxing_chip = CHIP_LIST[end])
             expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
             fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
             fiberTypeList = map(x -> fibtargDict[x], 1:300)
@@ -264,8 +264,8 @@ end
 all2Da = vcat(list2Dexp...)
 
 all2Dperchip = []
-for chip in CHIP_LST
-    all2Dchip = replace.(all2Da, "_$(CHIP_LST[1])_" => "_$(chip)_")
+for chip in CHIP_LIST
+    all2Dchip = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
     push!(all2Dperchip, all2Dchip)
 end
 all2D = vcat(all2Dperchip...)
@@ -275,7 +275,7 @@ all2D = vcat(all2Dperchip...)
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
 for mjd in unique_mjds
-    for chip in CHIP_LST
+    for chip in CHIP_LIST
         traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
             parg["outdir"] * "$(trace_type)_flats/"))
         if length(traceList) > 1
@@ -434,7 +434,7 @@ if size(all1DFPI, 1) > 0
     try
         all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
     catch
-        fit_all_fpi = false
+        global fit_all_fpi = false
         println("\nFAILED fitting FPI peaks")
     end
     #change the condition once there are wavelength 
