@@ -375,7 +375,7 @@ end
 # hardcoded to use chip c only for now
 # must use dome flats, not quartz flats (need fiber runs to telescope)
 # use full exposure_id
-function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip = "c")
+function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip = "B")
     exposure_id = parse(Int, short_expid_to_long(mjd, expnum))
     df_mjd = sort(
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
@@ -456,7 +456,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     wavecal_type = ""
     for wavetype in wavetype_order
         wavecal_type = "waveCalNight$(wavetype)Dither"
-        wavefname = replace(replace(fname, fnameType => wavecal_type), "_a_" => "_")
+        wavefname = replace(replace(fname, fnameType => wavecal_type), "_$(FIRST_CHIP)_" => "_")
         if isfile(wavefname)
             f = jldopen(wavefname)
             chipWaveSoln = f["chipWaveSoln"]
@@ -469,9 +469,9 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         #this is not a great global fallback, but it works so we get something to look at
         if isnothing(backupWaveSoln)
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
-            for (chipind, chip) in enumerate(["a", "b", "c"])
+            for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
-                    1:2048, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+                    1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
             end
             println("No wavecal found for $(fname), using rough linear fallback")
             flush(stdout)
@@ -484,8 +484,8 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         end
     end
 
-    for (chipind, chip) in enumerate(["a", "b", "c"])
-        fnameloc = replace(fname, "_a_" => "_$(chip)_")
+    for (chipind, chip) in enumerate(CHIP_LIST) # This needs to be the in abc RGB order, changing that will break this section
+        fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
         f = jldopen(fnameloc)
         flux_1d = f["flux_1d"]
         ivar_1d = f["ivar_1d"]
@@ -549,7 +549,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     outmsk = (cntvec .== framecnts)
 
     # Write reinterpolated data
-    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_a_" => "_")
+    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
         outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, wavecal_type)
     return

@@ -1342,7 +1342,7 @@ function ingest_skyLines_file(fileName)
 end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)
-function ingest_skyLines_exp(fname)
+function ingest_skyLines_exp(fname; chip_lst = CHIP_LIST)
     # println("Ingesting sky lines for $fname")
     sky_line_uxlst = Matrix{Float64}[]
     sky_line_fwlst = Matrix{Float64}[]
@@ -1387,6 +1387,7 @@ function ingest_fpiLines_exp(fname)
             push!(fpi_line_uxlst_errs, fpi_line_xlst_errs)
             push!(fpi_line_chipInt, chipIndx .* ones(Int, size(fpi_line_xlst)))
         else
+            println("$(fnameloc) is not a file")
             push!(fpi_line_uxlst, [])
             push!(fpi_line_uxlst_errs, [])
             push!(fpi_line_chipInt, [])

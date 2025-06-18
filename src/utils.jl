@@ -162,11 +162,11 @@ function gen_design_mat(nx, ny, fx, fy, X, Y)
 end
 
 function getChipIndx(chip)
-    if chip == "a"
+    if chip == "R"
         return 1
-    elseif chip == "b"
+    elseif chip == "G"
         return 2
-    elseif chip == "c"
+    elseif chip == "B"
         return 3
     end
 end

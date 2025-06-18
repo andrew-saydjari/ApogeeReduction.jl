@@ -42,13 +42,13 @@ julia +1.11.0 --project="./" src/cal_build/make_runlist_darks.jl --tele $tele --
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 ## 100 read darks require fewer workers per node (a problem for the ultra darks)
-julia +1.11.0 --project="./" pipeline.jl --workers_per_node 28 --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "abc" --doCal2d false
+julia +1.11.0 --project="./" pipeline.jl --workers_per_node 28 --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "RGB" --doCal2d false
 
 # make the stacked darks
 mkdir -p ${outdir}darks
-julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "a" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
-julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "b" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
-julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "c" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "R" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "G" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
+julia +1.11.0 --project="./" src/cal_build/make_stack_darks.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "B" --dropfirstn $dropfirstn --dark_dir ${doutdir} --runlist $runlist
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

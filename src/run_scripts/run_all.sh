@@ -34,8 +34,8 @@ tele=$1
 mjd=$2
 run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
 outdir=${4:-"../outdir/"}  # Fourth argument, defaults to "../../outdir/" if not provided
-caldir_darks=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
-caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
+caldir_darks=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
+caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
 
 runname="objects_${mjd}"
 almanac_file=${outdir}/almanac/${runname}.h5
@@ -65,7 +65,7 @@ julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --
 
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
 # --workers_per_node 28 ## sometimes have to adjust this, could programmatically set based on the average or max read number in the exposures for that night
-julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --workers_per_node 28
+julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --workers_per_node 28
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
@@ -76,7 +76,7 @@ if [ "$run_2d_only" != "true" ]; then
     julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 32
 
     print_elapsed_time "Making Plots"
-    julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "abc"
+    julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
 
     print_elapsed_time "Generating plot page for web viewing"
     julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir

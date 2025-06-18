@@ -37,9 +37,9 @@ function parse_commandline()
         default = 1
         "--chips"
         required = false
-        help = "chip(s) to run, usually a, b, or c"
+        help = "chip(s) to run, usually R, G, or B"
         arg_type = String
-        default = "abc"
+        default = "RGB"
         "--runlist"
         required = false
         help = "path name to hdf5 file with keys specifying list of exposures to run"

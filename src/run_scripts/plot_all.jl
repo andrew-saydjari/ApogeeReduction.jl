@@ -714,7 +714,7 @@ sorted_exptypes = sort(unique(allExptype), by = get_exptype_priority)
 # per chip example spectra
 for chip in string.(collect(parg["chips"]))
     println("\nGenerating example spectra plots for chip $chip")
-    all1D = replace.(all1Da, "_a_" => "_$(chip)_")
+    all1D = replace.(all1Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
     thread = SlackThread()
     if length(unique_mjds) > 1
@@ -942,10 +942,10 @@ for exptype2plot in sorted_exptypes
         for exp_fname in sample_exposures
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
             fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
-            expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_a_" => "_")
+            expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
             outflux = load(expuni_fname, "flux_1d")
             outmsk = load(expuni_fname, "mask_1d")
-            expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dunical"), "_a_" => "_")
+            expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dunical"), "_$(FIRST_CHIP)_" => "_")
             outfluxcal = load(expunical_fname, "flux_1d")
             outmskcal = load(expunical_fname, "mask_1d")
             # need to switch this back when the masking is updated
