@@ -14,6 +14,10 @@
 #SBATCH --mail-user=7155301634@vtext.com
 # ------------------------------------------------------------------------------
 
+# exit immediately if any of the steps returns a non-zero exit code
+set -e
+set -o pipefail
+
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
 module load sdssdb/main almanac/main sdsstools postgresql ffmpeg
