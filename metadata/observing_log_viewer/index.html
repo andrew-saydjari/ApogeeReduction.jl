@@ -18,7 +18,8 @@
 </head>
 
 <body>
-    <span id="currentSJD">SJD: 60705</span>
+    <label for="currentSJD">SJD:</label>
+    <input type="text" id="currentSJD" value="" onchange="updateFromSJD()" style="width: 80px;" pattern="[0-9]*">
     <select id="site" onchange="updateURL()">
         <option value="apo">APO</option>
         <option value="lco">LCO</option>
@@ -39,14 +40,14 @@
         const initialSite = urlParams.get('site') || 'apo';
 
         // Set initial values
-        document.getElementById('currentSJD').textContent = `SJD: ${initialSJD}`;
+        document.getElementById('currentSJD').value = initialSJD;
         document.getElementById('site').value = initialSite;
         updateCalendarFromSJD(parseInt(initialSJD));
         updateURL();
 
         function updateURL() {
             const site = document.getElementById('site').value;
-            const sjd = document.getElementById('currentSJD').textContent.split(': ')[1];
+            const sjd = document.getElementById('currentSJD').value;
             const url = `https://data.sdss5.org/sas/sdsswork/data/apogee/${site}/${sjd}/${sjd}.log.html`;
             document.getElementById('logFrame').src = url;
             document.getElementById('currentURL').textContent = url;
@@ -59,9 +60,9 @@
         }
 
         function changeDay(delta) {
-            const currentSJD = parseInt(document.getElementById('currentSJD').textContent.split(': ')[1]);
+            const currentSJD = parseInt(document.getElementById('currentSJD').value);
             const newSJD = currentSJD + delta;
-            document.getElementById('currentSJD').textContent = `SJD: ${newSJD}`;
+            document.getElementById('currentSJD').value = newSJD;
             updateURL();
             updateCalendarFromSJD(newSJD);
         }
@@ -77,7 +78,13 @@
             const selectedDate = new Date(document.getElementById('calendar').value);
             const daysDiff = Math.round((selectedDate - REFERENCE_DATE) / (1000 * 60 * 60 * 24));
             const newSJD = REFERENCE_SJD + daysDiff;
-            document.getElementById('currentSJD').textContent = `SJD: ${newSJD}`;
+            document.getElementById('currentSJD').value = newSJD;
+            updateURL();
+        }
+
+        function updateFromSJD() {
+            const sjd = parseInt(document.getElementById('currentSJD').value);
+            updateCalendarFromSJD(sjd);
             updateURL();
         }
 
