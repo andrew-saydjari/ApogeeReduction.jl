@@ -1,3 +1,7 @@
+# This script generates a dashboard of diagnostic plots for a given MJD.
+# Example usage (from the root of the ApogeeReduction.jl repository):
+# julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
+
 using ArgParse, Glob
 
 function parse_commandline()
@@ -58,9 +62,18 @@ function generate_html(mjd, outdir, categories)
     <head>
         <title>ApogeeReduction.jl diagnostic plots - MJD $mjd</title>
         <style>
+            :root {
+                --primary-color: #00ff00;
+                --background-color: #000000;
+                --secondary-bg: #1a1a1a;
+                --text-color: #ffffff;
+                --secondary-text: #cccccc;
+                --border-color: #333;
+            }
+
             body {
-                background-color: #000000;
-                color: #ffffff;
+                background-color: var(--background-color);
+                color: var(--text-color);
                 font-family: Arial, sans-serif;
                 margin: 0;
                 padding: 20px;
@@ -73,8 +86,8 @@ function generate_html(mjd, outdir, categories)
                 margin-bottom: 30px;
             }
             .category h2 {
-                color: #00ff00;
-                border-bottom: 1px solid #00ff00;
+                color: var(--primary-color);
+                border-bottom: 1px solid var(--primary-color);
                 padding-bottom: 10px;
             }
             .plot-grid {
@@ -84,7 +97,7 @@ function generate_html(mjd, outdir, categories)
                 margin-top: 20px;
             }
             .plot-item {
-                background-color: #1a1a1a;
+                background-color: var(--secondary-bg);
                 padding: 10px;
                 border-radius: 5px;
                 cursor: pointer;
@@ -100,7 +113,7 @@ function generate_html(mjd, outdir, categories)
             .plot-title {
                 margin-top: 10px;
                 font-size: 0.9em;
-                color: #cccccc;
+                color: var(--secondary-text);
                 word-break: break-word;
             }
             .modal {
@@ -122,7 +135,7 @@ function generate_html(mjd, outdir, categories)
                 display: block;
             }
             .modal-filename {
-                color: #ffffff;
+                color: var(--text-color);
                 text-align: center;
                 margin-top: 15px;
                 font-size: 1.2em;
@@ -146,31 +159,40 @@ function generate_html(mjd, outdir, categories)
             .nav {
                 position: sticky;
                 top: 0;
-                background-color: #000000;
+                background-color: var(--background-color);
                 padding: 10px 0;
                 margin-bottom: 20px;
-                border-bottom: 1px solid #333;
+                border-bottom: 1px solid var(--border-color);
             }
             .nav a {
-                color: #00ff00;
+                color: var(--primary-color);
                 text-decoration: none;
                 margin-right: 20px;
                 padding: 5px 10px;
                 border-radius: 3px;
             }
             .nav a:hover {
-                background-color: #1a1a1a;
+                background-color: var(--secondary-bg);
             }
             .nav a.active {
-                background-color: #1a1a1a;
-                border: 1px solid #00ff00;
+                background-color: var(--secondary-bg);
+                border: 1px solid var(--primary-color);
+            }
+            .log-links a {
+                color: var(--primary-color);
+                text-decoration: none;
+                margin-right: 20px;
+                padding: 5px 10px;
             }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>ApogeeReduction.jl diagnostic plots - MJD $mjd</h1>
-
+                <h1>ApogeeReduction.jl diagnostic plots - MJD $mjd</h1>
+                <div class="log-links">
+                    <a href="https://data.sdss5.org/sas/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/daily/ApogeeReduction.jl/metadata/observing_log_viewer/?sjd=$mjd&site=apo" target="_blank">APO Observing Log</a>
+                    <a href="https://data.sdss5.org/sas/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/daily/ApogeeReduction.jl/metadata/observing_log_viewer/?sjd=$mjd&site=lco" target="_blank">LCO Observing Log</a>
+                </div>
             <div class="nav">
     """
 
