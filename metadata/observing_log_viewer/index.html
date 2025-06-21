@@ -27,6 +27,8 @@
     <input type="date" id="calendar" onchange="updateFromDate()">
     <button onclick="changeDay(-1)">Previous</button>
     <button onclick="changeDay(1)">Next</button>
+    <a id="plotsLink" href="" target="_blank" style="float: right;">ApogeeReduction.jl daily diagnostic plots (may not
+        exist for all SJD)</a>
     <div id="currentURL"></div>
     <iframe id="logFrame" src="https://data.sdss5.org/sas/sdsswork/data/apogee/apo/60705/60705.log.html"></iframe>
 
@@ -51,6 +53,11 @@
             const url = `https://data.sdss5.org/sas/sdsswork/data/apogee/${site}/${sjd}/${sjd}.log.html`;
             document.getElementById('logFrame').src = url;
             document.getElementById('currentURL').textContent = url;
+
+            // Update plots link
+            const plotsUrl = `https://data.sdss5.org/sas/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/daily/outdir/plots/${sjd}/dashboard.html`;
+            const plotsLink = document.getElementById('plotsLink');
+            plotsLink.href = plotsUrl;
 
             // Update URL parameters without reloading the page
             const newUrl = new URL(window.location);
