@@ -89,15 +89,15 @@ This is good practice before asserting a PR with substantial changes is ready fo
 
 ## Nomenclature
 ### SJD
-SJD is an "SDSS Julian day," which is adjusted to roll-over 0.3 days earlier than the usual MJD (modified Julian day) The motivation for this is so that the day roll-over does not collide with evening calibrations and preparations (defined in https://ui.adsabs.harvard.edu/abs/2015PASP..127..397W/abstract, updated for LCO in https://github.com/sdss/sdsstools/blob/main/src/sdsstools/time.py#L21).
+SJD is an "SDSS Julian day," which is adjusted to roll-over earlier than the usual MJD (modified Julian day) so that the day roll-over does not collide with evening calibrations and preparations (defined in https://ui.adsabs.harvard.edu/abs/2015PASP..127..397W/abstract, updated for LCO see for example https://github.com/sdss/sdsstools/blob/main/src/sdsstools/time.py#L21).
+
+The two APOGEE instruments are at two different observatories: APO (north) and LCO (south)
 
 ```
 MJD = JD - 2400000.5
 SJD = MJD + 0.3 # at APO
 SJD = MJD + 0.4 # at LCO
 ```
-
-The two APOGEE instruments are at two different observatories: APO (north) and LCO (south)
 - APO is MST/MDT. This means that a new SJD occurs at 10:48 AM MST (UTC-7), instead of 5:00 PM MST (UTC-7).
 - LCO is CLT/CLST. This means that a new SJD occurs at 12:48 PM CLT (UTC-4), instead of 7:00 PM CLT (UTC-4).
 
