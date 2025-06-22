@@ -799,7 +799,7 @@ else
 end
 
 function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
-        tele, mjd, expnum, chiploc, exptype, expuni_fname)
+        tele, mjd, expnum, exptype, expuni_fname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
@@ -923,7 +923,7 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     resize_to_layout!(fig)
 
     savePath = get_save_dir(mjd) *
-               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
+               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(fib)_$(fibType)_$(exptype).png"
     save(savePath, fig)
 
     thread("Fiberindex: $(fib) $(fibType), $(expuni_fname)", savePath)
@@ -955,9 +955,9 @@ for exptype2plot in sorted_exptypes
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
-                    tele, mjd, expnum, chiploc, exptype, expuni_fname)
+                    tele, mjd, expnum, exptype, expuni_fname)
                 plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical",
-                    tele, mjd, expnum, chiploc, exptype, expunical_fname)
+                    tele, mjd, expnum, exptype, expunical_fname)
             end
         end
     end
