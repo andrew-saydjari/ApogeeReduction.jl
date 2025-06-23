@@ -308,6 +308,10 @@ for mjd_ind in 1:size(unique_mjds, 1)
             savePath)
     end
 
+    if size(all1DObjectSkyDither,1) == 0
+        continue
+    end
+
     ditherParams_Path, resid_plot_fnames = dither_plotter(
         all1DObjectSkyDither, all1DObject_expid_strings, mjd, tele)
     wave_thread(
