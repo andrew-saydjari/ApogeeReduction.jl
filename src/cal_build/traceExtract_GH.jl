@@ -1103,7 +1103,7 @@ function trace_plots(
     hlines!(ax, med_val, linestyle = :dash)
 
     tracePlot_heights_widths_Path = dirNamePlots *
-                                    "$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+                                    "$(mjdloc)/$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
     save(tracePlot_heights_widths_Path, fig)
 
     return tracePlot_heights_widths_Path

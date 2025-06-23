@@ -384,6 +384,7 @@ flush(stdout);
 all1DObjectSkyPeaks = replace.(
     replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
 all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
 if size(all1DObjectWavecal, 1) > 0
     println("Using all skyline wavelength solutions to determine median solution.")

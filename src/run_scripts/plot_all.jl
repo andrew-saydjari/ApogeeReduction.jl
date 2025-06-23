@@ -287,7 +287,7 @@ for mjd_ind in 1:size(unique_mjds, 1)
         savePath = get_save_dir(unique_mjds[mjd_ind]) *
                    "$(waveSoln_types[j])wave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
         if !isfile(savePath)
-            wave_thread("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures.")
+            wave_thread("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures. Checked for file at $(savePath)")
             continue
         end
         wave_thread(

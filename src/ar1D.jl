@@ -432,6 +432,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
     outtrace = zeros(length(logUniWaveAPOGEE), N_FIBERS)
+    outChipInt = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     cntvec = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
 
     pixvec = 1:(N_CHIPS * N_XPIX)
@@ -440,6 +441,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     wave_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     trace_center_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
+    chipInt_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
 
     ingestBit = zeros(Int, N_FIBERS)
@@ -499,6 +501,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
+        chipInt_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipind
     end
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
@@ -517,6 +520,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
         trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
+	chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
 
         Rinv = generateInterpMatrix_sparse_inv(
@@ -530,6 +534,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
 
 	#right now, only works for a single exposure
 	outtrace[:, fiberindx] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+	outChipInt[:, fiberindx] .= linear_interpolation(wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
 #        outtrace[msk_inter, fiberindx] .+= (Rinv * trace_center_fiber)[msk_inter]
 
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
@@ -551,7 +556,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
-        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, wavecal_type)
+        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, chipInt_1d = outChipInt, wavecal_type)
     return
 end
 
