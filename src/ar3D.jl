@@ -1,6 +1,6 @@
 # Handling the 3D data cube
 using LinearAlgebra: SymTridiagonal, Diagonal, mul!
-using Statistics: mean
+using Statistics: mean, median
 using TimerOutputs
 using FITSIO, EllipsisNotation
 
@@ -84,7 +84,9 @@ function outlier_mask(dimages; clip_threshold = 20)
     for i in axes(dimages, 1), j in axes(dimages, 2)
         @views μ = mean(dimages[i, j, :])
         @views σ = iqr(dimages[i, j, :]) / 1.34896
-        @views @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
+	if σ > 0
+            @views @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
+	end
     end
     mask
 end
@@ -102,9 +104,9 @@ In practice solving against this covariance matrix is a bit tricky.  This functi
 matrix identity to solve the system of equations.
 
 # Arguments
-- `datacube` has shape (npix_x,npix_y,n_reads)
-- `gainMat`: The gain for each pixel (npix_x,npix_y)
-- `read_var_mat`: the read noise (as a variance) for each pixel (npix_x,npix_y)
+- `datacube` has shape (npix_x,npix_y,n_reads), in units of DN
+- `gainMat`: The gain for each pixel (npix_x,npix_y), in units of e-/DN
+- `readVarMat`: the read noise (as a variance) for each pixel (npix_x,npix_y), in units of DN/read
 
 # Keyword Arguments
 - firstind: the index of the first read that should be used.
@@ -143,7 +145,8 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
     not_cosmic_ray[sat_mask, :] .= true
     CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
 
-    rates = dropdims(mean(dimages; dims = 3), dims = 3)
+#    rates = dropdims(mean(dimages; dims = 3), dims = 3)
+    rates = dropdims(median(dimages; dims = 3), dims = 3)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
 
@@ -208,6 +211,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
                 @views chi2s[pixel_ind] = (dimages[pixel_ind, good_diffs]' *
                                            (C \ dimages[pixel_ind, good_diffs])) /
                                           ivars[pixel_ind] - rates[pixel_ind]^2 * ivars[pixel_ind]
+
             end
         end
     end
@@ -242,7 +246,8 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
         if isfile(readVarMatPath)
             f = FITS(readVarMatPath)
             # TODO: Tim and I need to sort out this factor of 2
-            dat = (read(f[1]) .^ 2) ./ 2
+#            dat = (read(f[1]) .^ 2) ./ 2
+            dat = (read(f[1]) .^ 2)
             close(f)
             refval = nanzeromedian(dat)
             readVarView = refval .* ones(Float64, 2560, 2048)

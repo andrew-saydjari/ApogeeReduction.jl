@@ -21,6 +21,10 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
     above_thresh = findall(x -> x > thresh, scaled_flux_vec)
     #    above_thresh = findall(x -> x > thresh, flux_vec)
 
+    if size(above_thresh,1) < 1
+        return nothing, nothing, nothing
+    end
+
     # Group indices into segments, combining those less than 10 pixels apart
     segments = []
     current_segment = [above_thresh[1]]

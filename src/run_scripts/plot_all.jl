@@ -287,7 +287,7 @@ for mjd_ind in 1:size(unique_mjds, 1)
         savePath = get_save_dir(unique_mjds[mjd_ind]) *
                    "$(waveSoln_types[j])wave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
         if !isfile(savePath)
-            wave_thread("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures.")
+            wave_thread("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures. Checked for file at $(savePath)")
             continue
         end
         wave_thread(
@@ -306,6 +306,10 @@ for mjd_ind in 1:size(unique_mjds, 1)
         wave_thread(
             "$(waveSoln_labels[j]) Wavelength Solution per pixel: MJD $(unique_mjds[mjd_ind])",
             savePath)
+    end
+
+    if size(all1DObjectSkyDither,1) == 0
+        continue
     end
 
     ditherParams_Path, resid_plot_fnames = dither_plotter(

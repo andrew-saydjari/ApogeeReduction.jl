@@ -331,6 +331,9 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
 
     outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
+    if size(sky_line_uxlst,1) < 1
+        return nothing
+    end
     linParams, nlParams,
     resid_vec = get_sky_wavecal(
         sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
@@ -460,6 +463,7 @@ function get_ave_night_wave_soln(
     if dporder > 0
         all_ditherParams[:, 2, :] .= 1.0
     end
+    fill!(all_ditherParams, NaN)
     fill!(all_linParams, NaN)
     fill!(all_nlParams, NaN)
 
@@ -498,6 +502,7 @@ function get_ave_night_wave_soln(
         #to put all linParams on the same scale
         #to get a better median solution
         updated_linParams = zeros(Float64, size(all_linParams))
+        fill!(updated_linParams, NaN)
 
         #repeat a second time with better median
         for r_ind in 1:2
@@ -507,8 +512,12 @@ function get_ave_night_wave_soln(
                     split(split(unique_fname_list[fname_ind], "/")[end], ".h5")[1], "_")[(end - 3):end]
                 curr_peak_fname = "$(curr_path)/$(wavetype)LinePeaks_$(curr_tele)_$(curr_mjd)_$(curr_expid)_$(FIRST_CHIP)_$(curr_exptype).h5"
 
-                all_ditherParams[:, :, fname_ind] .= get_sky_dither_per_fiber(
-                    curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)[1]
+		dither_outputs = get_sky_dither_per_fiber(
+                    curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)
+		if isnothing(dither_outputs)
+		    continue
+		end
+                all_ditherParams[:, :, fname_ind] .= dither_outputs[1]
 
                 for fibIndx in 1:N_FIBERS
                     med_wave_poly = Polynomial(all_linParams[fibIndx, :, fname_ind])
@@ -556,8 +565,12 @@ end
 
 function get_and_save_sky_dither_per_fiber(
         fname, linParams, nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
-    ditherParams, resid_vec, chipWaveSoln, resid_xt = get_sky_dither_per_fiber(
+    dither_outputs = get_sky_dither_per_fiber(
         fname, linParams, nlParams; dporder = dporder, return_waveSoln = true, max_offset = max_offset)
+    if isnothing(dither_outputs)
+        return nothing
+    end
+    ditherParams, resid_vec, chipWaveSoln, resid_xt = dither_outputs
 
     outname = replace(
         replace(fname, "skyLinePeaks" => "waveCalNight$(wavetype)Dither"), "_$(FIRST_CHIP)_" => "_")
@@ -595,6 +608,10 @@ function get_sky_dither_per_fiber(
     resid_vec = zeros(Float64, N_FIBERS, size(sky_line_uxlst, 1))
     resid_xt = zeros(Float64, N_FIBERS, size(sky_line_uxlst, 1))
     fill!(resid_vec, NaN)
+
+    if size(sky_line_uxlst,1) == 0
+        return nothing
+    end
 
     good_fibers = ones(Bool, N_FIBERS)
 
@@ -643,6 +660,10 @@ function get_sky_dither_per_fiber(
     #extrapolate from nearby good fibers for bad ones
     bad_fibers = findall(.!good_fibers)
     good_fibers = findall(good_fibers)
+
+    if size(good_fibers,1) == 0
+        return nothing
+    end
 
     for j in 1:size(bad_fibers, 1)
         nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
@@ -1366,9 +1387,11 @@ function ingest_skyLines_exp(fname; chip_lst = CHIP_LIST)
     sky_line_fwlst = vcat(sky_line_fwlst...)
     sky_line_chipInt = vcat(sky_line_chipInt...)
 
-    msk_large_scatter = dropdims(nanzeroiqr(sky_line_uxlst, 2) .> 0.002, dims = 2)
-    sky_line_uxlst[msk_large_scatter, :] .= NaN
-    sky_line_fwlst[msk_large_scatter, :] .= NaN
+    if size(sky_line_uxlst,1) > 1
+        msk_large_scatter = dropdims(nanzeroiqr(sky_line_uxlst, 2) .> 0.002, dims = 2)
+        sky_line_uxlst[msk_large_scatter, :] .= NaN
+        sky_line_fwlst[msk_large_scatter, :] .= NaN
+    end
     # dims are num_sky_lines x num_fibers
     return sky_line_uxlst, sky_line_fwlst, sky_line_chipInt
 end
@@ -1484,7 +1507,7 @@ function sky_wave_plots(
     end
 
     sky_wave_linParams_Path = dirNamePlots *
-                              "$(wavetype)wave_linParams_$(tele)_$(mjd).png"
+                              "$(mjd)/$(wavetype)wave_linParams_$(tele)_$(mjd).png"
     save(sky_wave_linParams_Path, fig)
 
     fig = Figure(size = (1200, 400 * n_nl_coeffs), fontsize = 22)
@@ -1524,7 +1547,7 @@ function sky_wave_plots(
     end
 
     sky_wave_nlParams_Path = dirNamePlots *
-                             "$(wavetype)wave_nlParams_$(tele)_$(mjd).png"
+                             "$(mjd)/$(wavetype)wave_nlParams_$(tele)_$(mjd).png"
     save(sky_wave_nlParams_Path, fig)
 
     n_plot_fibers = size(plot_fibers, 1)
@@ -1601,7 +1624,7 @@ function sky_wave_plots(
     end
 
     sky_wave_fiber_vs_pixel_Path = dirNamePlots *
-                                   "$(wavetype)wave_per_fiber_vs_pixel_$(tele)_$(mjd).png"
+                                   "$(mjd)/$(wavetype)wave_per_fiber_vs_pixel_$(tele)_$(mjd).png"
     save(sky_wave_fiber_vs_pixel_Path, fig)
 
     n_plot_pixels = size(plot_pixels, 1)
@@ -1674,7 +1697,7 @@ function sky_wave_plots(
     end
 
     sky_wave_pixel_vs_fiber_Path = dirNamePlots *
-                                   "$(wavetype)wave_per_pixel_vs_fiber_$(tele)_$(mjd).png"
+                                   "$(mjd)/$(wavetype)wave_per_pixel_vs_fiber_$(tele)_$(mjd).png"
     save(sky_wave_pixel_vs_fiber_Path, fig)
 
     return sky_wave_linParams_Path, sky_wave_nlParams_Path, sky_wave_fiber_vs_pixel_Path,

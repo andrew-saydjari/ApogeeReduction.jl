@@ -891,7 +891,7 @@ function get_and_save_arclamp_peaks(fname)
 	fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(fpi_line_mat[:,2,i])
     end
 
-    outname = replace(replace(fname, "ar1Dcal" => "arclamp_peaks"), "ar1D" => "arclamp_peaks")
+    outname = replace(replace(fname, "ar1Dcal" => "arclampPeaks"), "ar1D" => "arclampPeaks")
     f = h5open(outname, "w")
 
     # Write original data
