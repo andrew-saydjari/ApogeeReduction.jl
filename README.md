@@ -78,13 +78,30 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 
 ## Testing
 
-To test the pipeline, run the `run_all.sh` script with the desired tele and MJD. For example:
+To test the pipeline, run the `run_all.sh` script with the desired tele and SJD. For example:
 
 ```bash
 ./src/run_scripts/run_all.sh apo 60639
 ```
 
 This is good practice before asserting a PR with substantial changes is ready for a merge (in the absence of a CI pipeline, which is still in progress).
+
+
+## Nomenclature
+### SJD
+SJD is an "SDSS Julian day," which is adjusted to roll-over earlier than the usual MJD (modified Julian day) so that the day roll-over does not collide with evening calibrations and preparations (defined in https://ui.adsabs.harvard.edu/abs/2015PASP..127..397W/abstract, updated for LCO see for example https://github.com/sdss/sdsstools/blob/main/src/sdsstools/time.py#L21).
+
+The two APOGEE instruments are at two different observatories: APO (north) and LCO (south)
+
+```
+MJD = JD - 2400000.5
+SJD = MJD + 0.3 # at APO
+SJD = MJD + 0.4 # at LCO
+```
+- APO is MST/MDT. This means that a new SJD occurs at 10:48 AM MST (UTC-7), instead of 5:00 PM MST (UTC-7).
+- LCO is CLT/CLST. This means that a new SJD occurs at 12:48 PM CLT (UTC-4), instead of 7:00 PM CLT (UTC-4).
+
+SJD is only ever used for rough definitions of a "day" (taking only the integer part), used mostly for foldering and grouping nightly calibrations with observations. However, long daytime calibration runs can sometimes be broken up by the SJD switch. In call cases, when precise timing is necessary, we convert from TAI to JD, storing at Float64 precision.
 
 ## Contributing
 

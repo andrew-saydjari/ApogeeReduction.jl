@@ -17,6 +17,10 @@
 #SBATCH --mail-user=7155301634@vtext.com
 # ------------------------------------------------------------------------------
 
+# exit the script immediately if a command fails
+set -e
+set -o pipefail
+
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated
 # TODO switch to almanac/default once that's working.
