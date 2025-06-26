@@ -744,7 +744,7 @@ function comb_exp_get_and_save_fpi_wavecal(
         init_cavity_size = 3.73610e7
         init_m_offset = 0.20
     elseif occursin("_apo_", fname)
-        init_cavity_size = 3.736125e7
+        init_cavity_size = 3.7363125e7
         init_m_offset = 0.225
     else
         println("ERROR: No initial cavity size determined for filename $(fname)")
