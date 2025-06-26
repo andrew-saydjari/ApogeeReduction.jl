@@ -234,7 +234,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
         opt_prob = Optim.optimize(gfit_excl, lb, ub, p0, Fminbox(NelderMead()))
         fitparams = Optim.minimizer(opt_prob)
 
-        outpix = [fitparams[2] - fitparams[5] / 2, fitparams[2] + fitparams[5] / 2]' *
+        outpix = [fitparams[2] - fitparams[4] / 2, fitparams[2] + fitparams[4] / 2]' *
                  subLine_weight
         outwave = bright_lines[ref_indx, :wav] * 10
         return [outpix, outwave, fitparams..., bright_lines.linindx[ref_indx]]
