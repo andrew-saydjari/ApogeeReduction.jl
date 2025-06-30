@@ -235,7 +235,7 @@ flush(stdout);
 
         metadata = Dict(
             "cartid" => cartid,
-            "nread_used" => nread_used,
+            "ndiff_used" => nread_used,
             "nread_total" => nread_total,
             "mjd_mid_exposure_old" => value(mjd_mid_exposure_old),
             "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
@@ -271,7 +271,7 @@ flush(stdout);
         last_unsaturated = load(fname, "last_unsaturated")
 
         metadata = read_metadata(fname)
-        nread_used = metadata["nread_used"]
+        ndiff_used = metadata["ndiff_used"]
 
         ### dark current subtraction
         darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*.h5", dirname(fname)))
@@ -297,9 +297,12 @@ flush(stdout);
 
         pix_bitmask .|= (CRimage .== 1) * 2^7
         pix_bitmask .|= (CRimage .> 1) * 2^8
-        pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
-        pix_bitmask .|= (last_unsaturated .<= 0) * 2^13
-        pix_bitmask .|= (last_unsaturated .<= size(dimage, 3)) * 2^14
+        pix_bitmask .|= ((chisqimage ./ ndiff_used) .> chi2perdofcut) * 2^9
+        # these values are only defined for real pixels, not the reference array
+        @show size(pix_bitmask)
+        @show size(last_unsaturated)
+        @views pix_bitmask[1:2048, :] .|= (last_unsaturated .<= 0) * 2^13
+        @views pix_bitmask[1:2048, :] .|= (last_unsaturated .< ndiff_used) * 2^14
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
