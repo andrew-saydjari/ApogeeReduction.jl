@@ -308,4 +308,5 @@ function load_saturation_maps(tel, chips; datadir = "data/saturation_maps")
         saturationMatPath = joinpath(datadir, "saturation_map_$(tel)_chip$(chip).h5")
         saturationMatDict[chip] = JLD2.load(saturationMatPath, "saturation_values")
     end
+    return saturationMatDict
 end
