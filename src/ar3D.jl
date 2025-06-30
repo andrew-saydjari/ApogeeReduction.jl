@@ -299,3 +299,13 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
     end
     return readVarMatDict
 end
+
+function load_saturation_maps(tel, chips; datadir = "data/saturation_maps")
+    chips = replace(chips, "a" => "R", "b" => "G", "c" => "B")
+    tel = lowercase(tel)
+    saturationMatDict = Dict{String, Array{Float64, 2}}()
+    for chip in string.(collect(chips))
+        saturationMatPath = joinpath(datadir, "saturation_map_$(tel)_chip$(chip).h5")
+        saturationMatDict[chip] = JLD2.load(saturationMatPath, "saturation_values")
+    end
+end

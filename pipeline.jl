@@ -171,7 +171,6 @@ flush(stdout);
         tdat = @view cubedat[:, :, firstind_loc:lastind_loc]
         nread_used = size(tdat, 3) - 1 #this is actually nread_used-1 (ie it is truly ndiff_used)
 
-        n_read_dropped = firstind_loc - 1
         first_image_start_time = TAIEpoch(hdr_dict[firstind_loc]["DATE-OBS"])
         last_image_start_time = TAIEpoch(hdr_dict[lastind_loc]["DATE-OBS"])
         dtime_read = (hdr_dict[firstind_loc]["INTOFF"] / 1000 / 3600 / 24)days #dt_read, orig in ms, convert to days
@@ -216,13 +215,13 @@ flush(stdout);
         dimage, ivarimage,
         chisqimage,
         CRimage,
-        saturation_image = if extractMethod_loc == "dcs"
+        last_unsaturated = if extractMethod_loc == "dcs"
             # TODO some kind of outlier rejection, this just keeps all diffs
             images = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
             images..., zeros(Int, size(images[1])), zeros(Int, size(images[1]))
         elseif extractMethod_loc == "sutr_wood"
             # n.b. this will mutate outdat
-            sutr_wood!(outdat, gainMatDict[chip], readVarMatDict[chip])
+            sutr_wood!(outdat, gainMatDict[chip], readVarMatDict[chip], saturationMatDict[chip])
         else
             error("Extraction method not recognized")
         end
@@ -244,17 +243,18 @@ flush(stdout);
             "mjd_mid_exposure" => value(mjd_mid_exposure)
         )
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
-        safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image)
+        safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated)
         if save3dcal
             outfname3d = join(
                 ["ar3Dcal", df.observatory[expid], df.mjd[expid],
                     last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
                 "_")
             fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
-            safe_jldsave(fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, saturation_image, 
-    			      outdat = outdat_cal, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip],
-                      ref_zpt_out = ref_zpt_out, sci_zpt_out = sci_zpt_out, amp_off_vec = amp_off_vec)
-	end
+            safe_jldsave(
+                fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated,
+                outdat = outdat_cal, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip],
+                ref_zpt_out = ref_zpt_out, sci_zpt_out = sci_zpt_out, amp_off_vec = amp_off_vec)
+        end
 
         return fname
     end
@@ -268,7 +268,7 @@ flush(stdout);
         ivarimage = load(fname, "ivarimage")
         CRimage = load(fname, "CRimage")
         chisqimage = load(fname, "chisqimage")
-        saturation_image = load(fname, "saturation_image")
+        last_unsaturated = load(fname, "last_unsaturated")
 
         metadata = read_metadata(fname)
         nread_used = metadata["nread_used"]
@@ -298,7 +298,8 @@ flush(stdout);
         pix_bitmask .|= (CRimage .== 1) * 2^7
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ nread_used) .> chi2perdofcut) * 2^9
-        pix_bitmask .|= saturation_image * 2^13
+        pix_bitmask .|= (last_unsaturated .<= 0) * 2^13
+        pix_bitmask .|= (last_unsaturated .<= size(dimage, 3)) * 2^14
 
         outfname = replace(fname, "ar2D" => "ar2Dcal")
         safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
@@ -322,6 +323,8 @@ readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
 # gain is e-/DN
 gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
 @passobj 1 workers() gainMatDict
+saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
+@passobj 1 workers() saturationMatDict
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
