@@ -1,6 +1,8 @@
 #!/bin/bash
+# Run all the data for a given night and telescope.
 
-# run all the data for a given night. Arguments documented below
+# Arguments documented below, but for example (from the repo root dir):
+# sbatch ./src/run_scripts/run_all.sh apo 60855 --mail-type=NONE
 
 #SBATCH --account=sdss-np
 #SBATCH --partition=sdss-shared-np
