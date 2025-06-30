@@ -66,48 +66,44 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
 end
 
 """
-    saturation_readmask(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 2)
+    get_last_unsaturated_read(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 2)
 
 Find pixels that are saturated in the datacube and return a mask of which reads to keep for each
 pixel.  This uses a saturation map that specifies the saturation level for each pixel.
 
-It finds the first read that is saturated, meaning `>= fudge_factor * saturation_map`, then
-flags all reads starting from the `n_cutoff` before that.
+It finds the last read that is unsaturated, meaning `<= fudge_factor * saturation_map`, then
+returns the index of the read before it.
 """
-function saturation_readmask(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 2)
-    readmask = ones(Bool, size(datacube))
-    for i in axes(datacube, 1), j in axes(datacube, 2)
-        @views first_saturated_read = findfirst(
-            x -> x > saturation_map[i, j] * fudge_factor,
+function get_last_unsaturated_read(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 1)
+    # don't bother with the reference array, just do the 2048x2048 real pixels
+    read_nums = zeros(Int, 2048, 2048)
+    for i in 1:2048, j in 1:2048
+        read_num = findlast(
+            x -> x <= saturation_map[i, j] * fudge_factor,
             datacube[i, j, :])
-        if !isnothing(first_saturated_read)
-            first_to_drop = max(1, first_saturated_read - n_cutoff)
-            readmask[i, j, first_to_drop:end] .= false
+
+        read_nums[i, j] = if isnothing(read_num)
+            0
+        else
+            read_num
         end
     end
-    readmask
+    read_nums
 end
 
-function outlier_mask(dimages, sat_readmask; clip_threshold = 20)
-    @timeit "alloc" mask=copy(sat_readmask)
+function outlier_mask(dimages, last_unsaturated; clip_threshold = 20)
+    @timeit "alloc" mask=ones(Bool, size(dimages))
 
     read_buffer = zeros(eltype(dimages), size(dimages, 3))
 
-    @timeit "loop" for i in axes(dimages, 1), j in axes(dimages, 2)
-        # it's easier to write a nonallocating loop that some combo of views and broadcasting
-        # this loop puts all the non-saturated reads into read_buffer
-        # and counts them in n
-        n = 1
-        for k in axes(dimages, 3)
-            if sat_readmask[i, j, k]
-                read_buffer[k] = dimages[i, j, k]
-                n += 1
-            end
-        end
+    # skip the reference array, just do the 2048x2048 real pixels
+    @timeit "loop" for i in 1:2048, j in 1:2048
+        # TODO make sure this is nonallocating. Put things in a buffer for faster calculations.
+        @views read_buffer[1:last_unsaturated[i, j]] .= dimages[
+            i, j, 1:last_unsaturated[i, j]]
 
-        # if there's 3 of fewer unsaturated reads, mask all b/c we can't assess outliers
-        if n <= 4
-            mask[i, j, :] .= false
+        # if there's 3 or fewer unsaturated reads, we can't assess outliers
+        if last_unsaturated[i, j] <= 2
             continue
         end
 
@@ -119,14 +115,13 @@ function outlier_mask(dimages, sat_readmask; clip_threshold = 20)
         #second_smallest = partialsortperm(read_buffer, 2)
         #second_largest = partialsortperm(read_buffer, n - 1)
 
-        @timeit "masked diffs view" diffs=@views read_buffer[1:(n - 1)]
+        @timeit "masked diffs view" diffs=@views read_buffer[1:last_unsaturated[i, j]]
         @timeit "mean" @views μ = mean(diffs)
         @timeit "iqr" @views σ = iqr(diffs) / 1.34896
 
         # same here, it's easier to write performant code as a loop
-        @timeit "mask" for k in axes(dimages, 3)
+        @timeit "mask" for k in 1:last_unsaturated[i, j]
             mask[i, j, k] = (read_buffer[k] - μ) < (clip_threshold * σ)
-            mask[i, j, k] &= sat_readmask[i, j, k]
         end
     end
     mask
@@ -173,9 +168,8 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
 
     # identify saturated pixels
-    @timeit "new sat mask" sat_readmask=saturation_readmask(datacube, sat_mat) # TODO use
-    @show mean(sat_readmask)
-    sat_mask = ones(Bool, size(datacube)[1:2]) # TODO remove
+    @timeit "new sat mask" last_unsaturated=get_last_unsaturated_read(datacube, sat_mat) # TODO use
+    sat_mask = ones(Bool, size(datacube)[1:2]) # TODO remove, also sat_readmask
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
@@ -184,10 +178,11 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
     @timeit "setup views" begin
         # this view is to minimize indexing headaches
         dimages = @views datacube[:, :, (firstind + 1):end]
-        sat_readmask = @views sat_readmask[:, :, (firstind + 1):end]
+        # modify the last_unsaturated_read accordingly.  It now refers to diffs, not reads
+        last_unsaturated .-= 1
     end
 
-    @timeit "CR mask" not_cosmic_ray=outlier_mask(dimages, sat_readmask)
+    @timeit "CR mask" not_cosmic_ray=outlier_mask(dimages, last_unsaturated)
     # don't try to do CR rejection on saturated pixels
     not_cosmic_ray[sat_mask, :] .= true
     CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
@@ -262,7 +257,7 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
         end
     end
     # return rates .* gainMat, ivars ./ (gainMat .^ 2), chi2s, CRimage # outputs in electrons/read
-    return rates, ivars, chi2s, CRimage, sat_readmask # outputs in DN/read
+    return rates, ivars, chi2s, CRimage, last_unsaturated # outputs in DN/read
 end
 
 function load_gain_maps(gainReadCalDir, tele, chips)
