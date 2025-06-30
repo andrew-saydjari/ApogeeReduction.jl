@@ -2,7 +2,7 @@
 # Example usage (from the root of the ApogeeReduction.jl repository):
 # julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
 
-using ArgParse, Glob
+using ArgParse, Glob, SlackThreads
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -338,6 +338,10 @@ function main()
     write(output_file, html)
 
     println("Dashboard generated at: $output_file")
+
+    thread = SlackThread()
+    url = "https://data.sdss5.org/sas/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/daily/outdir/plots/$(mjd)/dashboard.html"
+    thread("The reduction plots dashboard for SJD $(mjd) has been generated and is available at: $url")
 end
 
 main()
