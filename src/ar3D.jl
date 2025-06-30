@@ -155,7 +155,7 @@ A tuple of:
 - `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
 - `chi2s` is the chi squared value for each pixel
 - `CRimage` is the cosmic ray count image
-- `sat_mask` is the mask of saturated pixels
+- `last_unsaturated` is the index of the last unsaturated read for each pixel
 
 !!! warning
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
@@ -169,7 +169,6 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
 
     # identify saturated pixels
     @timeit "new sat mask" last_unsaturated=get_last_unsaturated_read(datacube, sat_mat) # TODO use
-    sat_mask = ones(Bool, size(datacube)[1:2]) # TODO remove, also sat_readmask
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
@@ -183,8 +182,6 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
     end
 
     @timeit "CR mask" not_cosmic_ray=outlier_mask(dimages, last_unsaturated)
-    # don't try to do CR rejection on saturated pixels
-    not_cosmic_ray[sat_mask, :] .= true
     CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
 
     rates = dropdims(mean(dimages; dims = 3), dims = 3)
