@@ -1,6 +1,7 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
 using Interpolations: linear_interpolation, Line
+using DataFrames
 
 include("./wavecal.jl")
 include("./skyline_peaks.jl")
