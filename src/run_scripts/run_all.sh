@@ -86,9 +86,6 @@ if [ "$run_2d_only" != "true" ]; then
 
     print_elapsed_time "Generating plot page for web viewing"
     julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir
-
-    print_elapsed_time "Generating plot page for web viewing"
-    julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir
 fi
 
 print_elapsed_time "Job Completed"

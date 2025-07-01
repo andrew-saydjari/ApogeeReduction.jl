@@ -3,6 +3,7 @@
 # julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
 
 using ArgParse, Glob, SlackThreads
+include("../utils.jl") # for the slack environment variables
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -339,8 +340,11 @@ function main()
 
     println("Dashboard generated at: $output_file")
 
+    # post a link to slack
+    # the link to the dashboard is relative to the current directory
+    dir = abspath(joinpath(pwd(), "..", "outdir", "plots", string(mjd), "dashboard.html"))
+    url = replace(dir, "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/")
     thread = SlackThread()
-    url = "https://data.sdss5.org/sas/sdsswork/mwm/sandbox/airflow-ApogeeReduction.jl/daily/outdir/plots/$(mjd)/dashboard.html"
     thread("The reduction plots dashboard for SJD $(mjd) has been generated and is available at: $url")
 end
 
