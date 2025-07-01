@@ -213,26 +213,18 @@ flush(stdout);
         end
 
         # extraction 3D -> 2D
-        dimage, ivarimage,
-        chisqimage,
-        CRimage,
-        last_unsaturated = if extractMethod == "dcs"
+        if extractMethod == "dcs"
             # TODO some kind of outlier rejection, this just keeps all diffs
-            images = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
-            CRimage = zeros(Int, size(images[1]))
+            dimage, ivarimage, chisqimage = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
+            CRimage = zeros(Int, size(dimage))
             last_unsaturated = fill(ndiff_used, 2048, 2048) # exclude the reference array
-            images..., CRimage, last_unsaturated
         elseif extractMethod == "sutr_wood"
             # n.b. this will mutate outdat
-            sutr_wood!(outdat, gainMatDict[chip], readVarMatDict[chip], saturationMatDict[chip])
-
+            dimage, ivarimage, chisqimage, CRimage, last_unsaturated = sutr_wood!(
+                outdat, gainMatDict[chip], readVarMatDict[chip], saturationMatDict[chip])
         else
             error("Extraction method not recognized")
         end
-
-        @show extractMethod
-        @show size(last_unsaturated)
-        println()
 
         # write ar2D file
         metadata = Dict(
@@ -308,8 +300,6 @@ flush(stdout);
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ ndiff_used) .> chi2perdofcut) * 2^9
         # these values are only defined for real pixels, not the reference array
-        @show size(pix_bitmask[1:2048, :])
-        @show size((last_unsaturated .<= 0) * 2^13)
         @views pix_bitmask[1:2048, :] .|= (last_unsaturated .<= 0) * 2^13
         @views pix_bitmask[1:2048, :] .|= (last_unsaturated .< ndiff_used) * 2^14
 
