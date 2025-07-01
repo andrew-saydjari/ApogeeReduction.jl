@@ -2,6 +2,7 @@ using StatsBase: iqr, percentile
 using Jackknife
 using JLD2, HDF5 # for safe_jldsave and read_metadata
 using Distributed: myid
+using DataFrames
 
 # used to record git branch and commit in safe_jldsave
 using LibGit2
