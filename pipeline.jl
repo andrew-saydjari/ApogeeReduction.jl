@@ -147,11 +147,12 @@ flush(stdout);
         nread_total = size(cubedat, 3)
 
         # ADD? reset anomaly fix (currently just drop first ind or two as our "fix")
-        # REMOVES FIRST READ (as a view)
-        # might need to adjust for the few read cases (2,3,4,5)
-        firstind_loc,
-        extractMethod_loc = if ((df.exptype[expid] == "DOMEFLAT") &
-                                (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+
+        # override the firstind and extractMethod in special cases
+        # we drop the first read, but might need to adjust for the few read cases (2,3,4,5)
+        firstind,
+        extractMethod = if ((df.exptype[expid] == "DOMEFLAT") &
+                            (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
             2, "dcs"
         elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
             2, "dcs"
@@ -168,14 +169,14 @@ flush(stdout);
         # saturated (important for calculating the exposure mid time)
         lastind_loc = size(cubedat, 3)
 
-        tdat = @view cubedat[:, :, firstind_loc:lastind_loc]
-        nread_used = size(tdat, 3) - 1 #this is actually nread_used-1 (ie it is truly ndiff_used)
+        tdat = @view cubedat[:, :, firstind:lastind_loc]
+        ndiff_used = size(tdat, 3) + 1 - firstind # nread_used-1
 
-        first_image_start_time = TAIEpoch(hdr_dict[firstind_loc]["DATE-OBS"])
+        first_image_start_time = TAIEpoch(hdr_dict[firstind]["DATE-OBS"])
         last_image_start_time = TAIEpoch(hdr_dict[lastind_loc]["DATE-OBS"])
-        dtime_read = (hdr_dict[firstind_loc]["INTOFF"] / 1000 / 3600 / 24)days #dt_read, orig in ms, convert to days
-        dtime_delay = (hdr_dict[firstind_loc]["INTDELAY"] / 3600 / 24)days #orig in seconds, convert to days
-        exptime_est = (hdr_dict[firstind_loc]["EXPTIME"] / 3600 / 24)days
+        dtime_read = (hdr_dict[firstind]["INTOFF"] / 1000 / 3600 / 24)days #dt_read, orig in ms, convert to days
+        dtime_delay = (hdr_dict[firstind]["INTDELAY"] / 3600 / 24)days #orig in seconds, convert to days
+        exptime_est = (hdr_dict[firstind]["EXPTIME"] / 3600 / 24)days
 
         # NOT using dtime_delay because we start directly at first_image_start_time
         # (though we might need to think about this more: not sure what dtime_delay does)
@@ -185,7 +186,7 @@ flush(stdout);
         mjd_mid_exposure_old = modified_julian(first_image_start_time
                                                +
                                                0.5 * exptime_est * size(tdat, 3) / nread_total)
-        # Using dread_time*nread_USED
+        # Using dread_time*ndiff_USED
         mjd_mid_exposure_rough = modified_julian(first_image_start_time
                                                  +
                                                  dtime_read *
@@ -215,35 +216,43 @@ flush(stdout);
         dimage, ivarimage,
         chisqimage,
         CRimage,
-        last_unsaturated = if extractMethod_loc == "dcs"
+        last_unsaturated = if extractMethod == "dcs"
             # TODO some kind of outlier rejection, this just keeps all diffs
             images = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
-            images..., zeros(Int, size(images[1])), zeros(Int, size(images[1]))
-        elseif extractMethod_loc == "sutr_wood"
+            CRimage = zeros(Int, size(images[1]))
+            last_unsaturated = fill(ndiff_used, 2048, 2048) # exclude the reference array
+            images..., CRimage, last_unsaturated
+        elseif extractMethod == "sutr_wood"
             # n.b. this will mutate outdat
             sutr_wood!(outdat, gainMatDict[chip], readVarMatDict[chip], saturationMatDict[chip])
+
         else
             error("Extraction method not recognized")
         end
 
-        # need to clean up exptype to account for FPI versus ARCLAMP
-        outfname = join(
-            ["ar2D", df.observatory[expid], df.mjd[expid],
-                last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
-            "_")
-        # probably change to FITS to make astronomers happy (this JLD2, which is HDF5, is just for debugging)
+        @show extractMethod
+        @show size(last_unsaturated)
+        println()
 
+        # write ar2D file
         metadata = Dict(
             "cartid" => cartid,
-            "ndiff_used" => nread_used,
+            "ndiff_used" => ndiff_used,
             "nread_total" => nread_total,
+            "extraction_method" => extractMethod,
             "mjd_mid_exposure_old" => value(mjd_mid_exposure_old),
             "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
             "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
             "mjd_mid_exposure" => value(mjd_mid_exposure)
         )
+        # need to clean up exptype to account for FPI versus ARCLAMP
+        outfname = join(
+            ["ar2D", df.observatory[expid], df.mjd[expid],
+                last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+            "_")
         fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
         safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated)
+
         if save3dcal
             outfname3d = join(
                 ["ar3Dcal", df.observatory[expid], df.mjd[expid],
@@ -299,8 +308,8 @@ flush(stdout);
         pix_bitmask .|= (CRimage .> 1) * 2^8
         pix_bitmask .|= ((chisqimage ./ ndiff_used) .> chi2perdofcut) * 2^9
         # these values are only defined for real pixels, not the reference array
-        @show size(pix_bitmask)
-        @show size(last_unsaturated)
+        @show size(pix_bitmask[1:2048, :])
+        @show size((last_unsaturated .<= 0) * 2^13)
         @views pix_bitmask[1:2048, :] .|= (last_unsaturated .<= 0) * 2^13
         @views pix_bitmask[1:2048, :] .|= (last_unsaturated .< ndiff_used) * 2^14
 
