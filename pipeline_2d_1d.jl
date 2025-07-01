@@ -384,6 +384,7 @@ flush(stdout);
 all1DObjectSkyPeaks = replace.(
     replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
 all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
 if size(all1DObjectWavecal, 1) > 0
     println("Using all skyline wavelength solutions to determine median solution.")
@@ -408,9 +409,10 @@ if size(all1DObjectWavecal, 1) > 0
         plot_fibers = (1, 50, 100, 150, 200, 250, 300),
         plot_pixels = (1, 512, 1024, 1536, 2048))
 else
-    sendto(workers(), night_wave_soln = nothing)
-    sendto(workers(), night_nlParams = nothing)
-    sendto(workers(), night_linParams = nothing)
+    night_wave_soln,night_nlParams,night_linParams = nothing,nothing,nothing
+    sendto(workers(), night_wave_soln = night_wave_soln)
+    sendto(workers(), night_linParams = night_linParams)
+    sendto(workers(), night_nlParams = night_nlParams)
 end
 
 if size(all1DArclamp, 1) > 0

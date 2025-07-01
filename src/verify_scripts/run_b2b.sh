@@ -62,7 +62,7 @@ while read -r line; do
     fi
 done < "metadata/special_cal_obs.txt"
 
-Wait for all jobs to complete
+#Wait for all jobs to complete
 print_elapsed_time "Waiting for all reduction jobs to complete"
 for job_id in "${job_ids[@]}"; do
     # Check if job exists and starts with b2b

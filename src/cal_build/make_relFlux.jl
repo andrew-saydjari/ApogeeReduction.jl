@@ -149,7 +149,7 @@ if length(all1Da)>0
 
     # add plotting
     thread = SlackThread()
-    thread("$(cal_type) relFluxing")
+    thread("$(cal_type) relFluxing for $(parg["tele"]) from $(unique_mjds[begin]) to $(unique_mjds[end])")
 
     @everywhere begin
         function plot_relFlux(fname)
@@ -206,7 +206,7 @@ if length(all1Da)>0
             end
 
             # we should be more uniform about the naming convention
-            savePath = dirNamePlots * "relFlux_$(cal_type)_$(tele)_$(mjd)_$(expnum)_$(cartid).png"
+            savePath = dirNamePlots * "$(mjd)/relFlux_$(cal_type)_$(tele)_$(mjd)_$(expnum)_$(cartid).png"
             save(savePath, fig)
 
             return savePath, status_str

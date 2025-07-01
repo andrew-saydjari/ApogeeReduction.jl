@@ -134,6 +134,10 @@ flush(stdout);
         if !ispath(dirName)
             mkpath(dirName)
         end
+        plotdirName = joinpath(outdir, "plots/$(mjd)/")
+        if !ispath(plotdirName)
+            mkpath(plotdirName)
+        end
 
         df = read_almanac_exp_df(joinpath(outdir, "almanac/$(runname).h5"), parg["tele"], mjd)
         #        println(expid,chip,size(df.observatory),size(df.mjd),size(df.exposure_int))
