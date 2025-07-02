@@ -239,8 +239,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 end
 
                 if curr_neff > neff_thresh
-                    new_flux_1d[fib] = 0.0
-                    ivar_1d[xpix, fib] = 0.0
+#                    new_flux_1d[fib] = 0.0
+#                    ivar_1d[xpix, fib] = 0.0
                     mask_1d[xpix, fib] |= bad_1d_neff
                 end
 
@@ -526,9 +526,9 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
         trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
-	    chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
+	chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
-	xpix_fiber = xpix_stack[good_pix_fiber, fiberindx]
+	xpix_fiber = xpix_stack[good_pix_fiber]
 
         Rinv = generateInterpMatrix_sparse_inv(
             wave_fiber, chipBit_fiber, logUniWaveAPOGEE, pixindx_fiber)

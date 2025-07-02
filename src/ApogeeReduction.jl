@@ -7,7 +7,7 @@ const N_CHIPS = 3
 const CHIP_LIST = ["R", "G", "B"]
 const FIRST_CHIP = CHIP_LIST[1]
 
-include("utils.jl")
+#include("utils.jl")
 include("ar3D.jl")
 include("ar1D.jl")
 include("fileNameHandling.jl")
