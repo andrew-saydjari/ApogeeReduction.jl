@@ -290,12 +290,6 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4)
         scale_func_chip3 = Polynomial([9.87857338e-01, 1.09350510e-06])
 
         #don't use the polynomials above for now...
-        offset_func_chip1 = Polynomial([-1.0716, 0.0])
-        scale_func_chip1 = Polynomial([1.00111, 0.0])
-        offset_func_chip3 = Polynomial([1.07009, 0.0])
-        scale_func_chip3 = Polynomial([0.98803, 0.0])
-
-
         offset_func_chip1 = Polynomial([-1.070, 0.0])
         scale_func_chip1 = Polynomial([1.0, 0.0])
         offset_func_chip3 = Polynomial([1.0755, 0.0])
@@ -310,11 +304,6 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4)
         scale_func_chip3 = Polynomial([9.87968936e-01, -2.76150881e-07])
 
         #don't use the polynomials above for now...
-        offset_func_chip1 = Polynomial([-1.0748, 0.0])
-        scale_func_chip1 = Polynomial([1.00168, 0.0])
-        offset_func_chip3 = Polynomial([1.07089, 0.0])
-        scale_func_chip3 = Polynomial([0.98763, 0.0])
-
         offset_func_chip1 = Polynomial([-1.07295, 0.0])
         scale_func_chip1 = Polynomial([1.0, 0.0])
         offset_func_chip3 = Polynomial([1.076, 0.0])
@@ -1032,9 +1021,6 @@ function comb_exp_get_and_save_fpi_wavecal(
     #the non-integer offset to m0 integer
     #(should be smaller than 1 in size)
 
-#    println(nanmedian(2.0 * cavity_size ./ peak_waves[good_peaks] .- peak_ints[good_peaks]))
-#    println(nanmedian(peak_waves[good_peaks] .* (peak_ints[good_peaks] .+ m_offset) ./ 2.0))
-
 #    #estimate non-integer offset to m0
 #    m_offset = nanmedian(2.0 * cavity_size ./ peak_waves[good_peaks] .- peak_ints[good_peaks])
 #    #update cavity size guess
@@ -1045,74 +1031,10 @@ function comb_exp_get_and_save_fpi_wavecal(
     expect_peak_waves .= 2 .* cavity_size ./ (peak_ints .+ m_offset)
     resids = (peak_waves .- expect_peak_waves)
 
-    for fname_ind in 1:n_fnames
-        #estimate non-integer offset to m0
-        curr_use = good_peaks .& (fpi_line_expInt .== fname_ind)
-        new_cavity_size = nanmedian(peak_waves[curr_use] .* (peak_ints[curr_use] .+ m_offset) ./ 2.0)
-        new_m_offset = nanmedian(2.0 * new_cavity_size ./ peak_waves[curr_use] .- peak_ints[curr_use])
-        verbose && println("$(fname_ind) $(new_m_offset) $(new_cavity_size) $(new_cavity_size-init_cavity_size)")
-        mults = [1.0e3, 1.0]
-        expparams0 = [0.0, m_offset] ./ mults
-        function nonlinear_expparams_fit_test(expparams)
-            return nansum((peak_waves[curr_use] .-
-                           (2.0 * (cavity_size + expparams[1] * mults[1])) ./ (peak_ints[curr_use] .+ expparams[2] * mults[2])) .^ 2)
-        end
-        res = optimize(
-            nonlinear_expparams_fit_test, expparams0, LBFGS(), Optim.Options(show_trace = false))
-        expparamsOpt = Optim.minimizer(res) .* mults
-        new_cavity_size = cavity_size + expparamsOpt[1]
-        new_m_offset = expparamsOpt[2]
-
-        #expected wavelengths
-        expect_peak_waves .= 2 * new_cavity_size ./ (peak_ints .+ new_m_offset)
-
-        #outlier rejection
-        resids .= (peak_waves .- expect_peak_waves)
-        resid_vec .= resids'
-
-        verbose && println(
-            "$(fname_ind) $(sum(good_peaks))/$(length(good_peaks)) $(new_m_offset) $(new_cavity_size) $(new_cavity_size-init_cavity_size) ",
-            nanzeropercentile(resids[curr_use], percent_vec = [16, 50, 84]))
-    end
-
-#    offsets = -1:0.05:1
-#
-#    for offset in offsets
-#        test_resid = (peak_waves .- (2 .* cavity_size ./ (peak_ints .+ m_offset .+ offset)))
-#        println(offset,nanzeropercentile(test_resid[good_peaks], percent_vec = [16, 50, 84]))
-#    end
-
     r_ind = 0
     verbose && println("Fitting FPI peaks for best wavelength solutions")
     verbose &&
         println("ind   num_good_peaks/num_total   m_offset   cavity_size   delta_from_init_cavity_size   resid_summary_[16,50,84]")
-    verbose && println(
-        "$(r_ind) $(sum(good_peaks))/$(length(good_peaks)) $(m_offset) $(cavity_size) $(cavity_size-init_cavity_size) ",
-        nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 84]))
-
-    mults = [1.0e3, 1.0]
-    expparams0 = [0.0, m_offset] ./ mults
-    curr_good = good_peaks .& (fpi_line_expInt .== 1)
-    function nonlinear_expparams_fit_first(expparams)
-        return nansum((peak_waves[curr_good] .-
-                       (2.0 * (cavity_size + expparams[1] * mults[1])) ./ (peak_ints[curr_good] .+ expparams[2] * mults[2])) .^ 2)
-#        return nansum((peak_waves[good_peaks] .-
-#                       (2.0 * (cavity_size + expparams[1] * mults[1])) ./ (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
-    end
-    res = optimize(
-        nonlinear_expparams_fit_first, expparams0, LBFGS(), Optim.Options(show_trace = false))
-    expparamsOpt = Optim.minimizer(res) .* mults
-##    cavity_size = expparamsOpt[1]
-#    cavity_size += expparamsOpt[1]
-#    m_offset = expparamsOpt[2]
-
-    #expected wavelengths
-    expect_peak_waves .= 2 * cavity_size ./ (peak_ints .+ m_offset)
-
-    #outlier rejection
-    resids .= (peak_waves .- expect_peak_waves)
-    resid_vec .= resids'
-
     verbose && println(
         "$(r_ind) $(sum(good_peaks))/$(length(good_peaks)) $(m_offset) $(cavity_size) $(cavity_size-init_cavity_size) ",
         nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 84]))
@@ -1145,31 +1067,6 @@ function comb_exp_get_and_save_fpi_wavecal(
                 end
             end
         end
-
-#	mults = [1.0e3, 1.0]
-#        expparams0 = [cavity_size, m_offset] ./ mults
-#        function nonlinear_expparams_fit_first(expparams)
-#            return nansum((peak_waves[good_peaks] .-
-#                           (2.0 * (cavity_size + expparams[1] * mults[1])) ./ (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
-#        end
-#        res = optimize(
-#            nonlinear_expparams_fit_first, expparams0, LBFGS(), Optim.Options(show_trace = false))
-#        expparamsOpt = Optim.minimizer(res) .* mults
-###        cavity_size = expparamsOpt[1]
-#        cavity_size += expparamsOpt[1]
-#        m_offset = expparamsOpt[2]
-#
-#        #expected wavelengths
-#        expect_peak_waves .= 2 * cavity_size ./ (peak_ints .+ m_offset)
-#
-#        #outlier rejection
-#        resids .= (peak_waves .- expect_peak_waves)
-#	resid_vec .= resids'
-#
-#        verbose && println(
-#            "$(r_ind) $(sum(good_peaks))/$(length(good_peaks)) $(m_offset) $(cavity_size) $(cavity_size-init_cavity_size) ",
-#            nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 84]))
-
 
         good_fibers = any(good_peaks, dims = 1)[1, :]
         bad_fibers = .!good_fibers
@@ -1336,11 +1233,6 @@ function comb_exp_get_and_save_fpi_wavecal(
         peak_waves .= expect_peak_waves .- resid_vec'
 
 	mults = [1.0e3, 1.0]
-#        expparams0 = [cavity_size, m_offset] ./ mults
-#        function nonlinear_expparams_fit(expparams)
-#            return nansum((peak_waves[good_peaks] .-
-#                           (2.0 * expparams[1] * mults[1]) ./ (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
-#        end
         expparams0 = [0.0, m_offset] ./ mults
         function nonlinear_expparams_fit(expparams)
             return nansum((peak_waves[good_peaks] .-
@@ -1349,7 +1241,6 @@ function comb_exp_get_and_save_fpi_wavecal(
         res = optimize(
             nonlinear_expparams_fit, expparams0, LBFGS(), Optim.Options(show_trace = false))
         expparamsOpt = Optim.minimizer(res) .* mults
-#        cavity_size = expparamsOpt[1]
         cavity_size += expparamsOpt[1]
         m_offset = expparamsOpt[2]
 
