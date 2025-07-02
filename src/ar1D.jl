@@ -1,6 +1,7 @@
 using FastRunningMedian: running_median
 using Distributions: cdf, Normal
 using Interpolations: linear_interpolation, Line
+using DataFrames
 
 include("./wavecal.jl")
 include("./skyline_peaks.jl")
@@ -486,14 +487,16 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         end
     end
 
+    metadata_lst = []
     for (chipind, chip) in enumerate(CHIP_LIST) # This needs to be the in abc RGB order, changing that will break this section
         fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
         f = jldopen(fnameloc)
         flux_1d = f["flux_1d"]
         ivar_1d = f["ivar_1d"]
         mask_1d = f["mask_1d"]
-	extract_trace_centers = f["extract_trace_centers"]
+	    extract_trace_centers = f["extract_trace_centers"]
         close(f)
+        push!(metadata_lst,read_metadata(fnameloc))
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
@@ -503,6 +506,9 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
         chipInt_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipind
     end
+
+    # should add a check all entries of metadata_lst to be equal
+    metadata = metadata_lst[1]
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
     chipBit_stack[.!(noBadBits)] .+= 2^4 # call pixels with bad bits thrown bad
@@ -520,7 +526,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
         trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
-	chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
+	    chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
 
         Rinv = generateInterpMatrix_sparse_inv(
@@ -532,10 +538,10 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         outvar[msk_inter, fiberindx] .+= ((Rinv .^ 2) * (1 ./ ivar_fiber))[msk_inter]
         cntvec[:, fiberindx] .+= msk_inter
 
-	#right now, only works for a single exposure
-	outtrace[:, fiberindx] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-	outChipInt[:, fiberindx] .= linear_interpolation(wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-#        outtrace[msk_inter, fiberindx] .+= (Rinv * trace_center_fiber)[msk_inter]
+        #right now, only works for a single exposure
+        outtrace[:, fiberindx] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        outChipInt[:, fiberindx] .= linear_interpolation(wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        # outtrace[msk_inter, fiberindx] .+= (Rinv * trace_center_fiber)[msk_inter]
 
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)
@@ -556,7 +562,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
-        outname; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, chipInt_1d = outChipInt, wavecal_type)
+        outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, chipInt_1d = outChipInt, wavecal_type)
     return
 end
 
