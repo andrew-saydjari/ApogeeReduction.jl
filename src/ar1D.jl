@@ -59,11 +59,12 @@ function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params;
     var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params, boxcar_halfwidth)
     ivar_1d = 1.0 ./ var_1d
     mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params, boxcar_halfwidth)
+    dropped_pixel_mask_1d = zeros(Int64, N_XPIX, N_FIBERS)
 
     if return_resids
-        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d, resid_fluxes_2d, resid_ivars_2d
     else
-        return flux_1d, ivar_1d, mask_1d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d
     end
 end
 
@@ -145,6 +146,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     flux_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     ivar_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
+    dropped_pixel_mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
 
     good_pixels = ((pix_bitmask .& bad_pix_bits) .== 0) .& (ivarimage .> 0)
 
@@ -227,6 +229,9 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 elseif any(curr_good_fluxes)
                     curr_neff = sqrt(1 / sum(model_vals[curr_good_fluxes] .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[curr_good_fluxes]])
+		    if any(.!curr_good_fluxes)
+                        dropped_pixel_mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[.!curr_good_fluxes]])
+		    end
                 else
                     curr_neff = sqrt(1 / sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
@@ -273,9 +278,9 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     end
 
     if return_resids
-        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d, resid_fluxes_2d, resid_ivars_2d
     else
-        return flux_1d, ivar_1d, mask_1d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d
     end
 end
 
@@ -432,6 +437,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
+    outDropMsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
     outTraceCoords = zeros(length(logUniWaveAPOGEE), N_FIBERS, 3) #(x,y,chipInt)
     cntvec = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
 
@@ -440,6 +446,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     flux_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     ivar_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
+    dropped_mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     wave_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     trace_center_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipInt_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
@@ -494,13 +501,15 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         flux_1d = f["flux_1d"]
         ivar_1d = f["ivar_1d"]
         mask_1d = f["mask_1d"]
-	    extract_trace_centers = f["extract_trace_centers"]
+        dropped_pixels_mask_1d = f["dropped_pixels_mask_1d"]
+        extract_trace_centers = f["extract_trace_centers"]
         close(f)
         push!(metadata_lst,read_metadata(fnameloc))
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
+        dropped_mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= dropped_pixels_mask_1d[end:-1:1, :]
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
