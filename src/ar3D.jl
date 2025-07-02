@@ -372,7 +372,7 @@ function process_3D(outdir, runname, mjd, expid, chip; firstind = 3,
     lastind_loc = size(cubedat, 3)
 
     tdat = @view cubedat[:, :, firstind:lastind_loc]
-    ndiff_used = size(tdat, 3) + 1 - firstind # nread_used-1
+    ndiff_used = size(tdat, 3) - 1 # nread_used-1
 
     first_image_start_time = TAIEpoch(hdr_dict[firstind]["DATE-OBS"])
     last_image_start_time = TAIEpoch(hdr_dict[lastind_loc]["DATE-OBS"])
