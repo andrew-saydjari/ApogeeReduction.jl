@@ -164,6 +164,7 @@ flush(stdout);
 
         flux_1d, ivar_1d,
         mask_1d,
+	dropped_pixels_mask_1d,
         resid_flux,
         resid_ivar = if parg["extraction"] == "boxcar"
             extract_boxcar(
@@ -216,11 +217,11 @@ flush(stdout);
             end
 
             # we probably want to append info from the fiber dictionary from alamanac into the file name
-            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, 
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d, 
 		extract_trace_centers = regularized_trace_params[:, :, 2],
                 relthrpt, bitmsk_relthrpt, fiberTypeList)
         else
-            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d,
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
 		extract_trace_centers = regularized_trace_params[:, :, 2])
         end
         close(falm)

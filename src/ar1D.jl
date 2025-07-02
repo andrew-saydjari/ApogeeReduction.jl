@@ -59,11 +59,12 @@ function extract_boxcar(dimage, ivarimage, pix_bitmask, trace_params;
     var_1d = extract_boxcar_core(1 ./ ivarimage, trace_params, boxcar_halfwidth)
     ivar_1d = 1.0 ./ var_1d
     mask_1d = extract_boxcar_bitmask(pix_bitmask, trace_params, boxcar_halfwidth)
+    dropped_pixel_mask_1d = zeros(Int64, N_XPIX, N_FIBERS)
 
     if return_resids
-        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d, resid_fluxes_2d, resid_ivars_2d
     else
-        return flux_1d, ivar_1d, mask_1d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d
     end
 end
 
@@ -145,6 +146,7 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     flux_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     ivar_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
+    dropped_pixel_mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
 
     good_pixels = ((pix_bitmask .& bad_pix_bits) .== 0) .& (ivarimage .> 0)
 
@@ -223,10 +225,13 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 if !good_flux_1d
                     curr_neff = sqrt(1 / sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
-                    mask_1d[xpix, fib] += bad_1d_no_good_pix
+                    mask_1d[xpix, fib] |= bad_1d_no_good_pix
                 elseif any(curr_good_fluxes)
                     curr_neff = sqrt(1 / sum(model_vals[curr_good_fluxes] .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[curr_good_fluxes]])
+		    if any(.!curr_good_fluxes)
+                        dropped_pixel_mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[.!curr_good_fluxes]])
+		    end
                 else
                     curr_neff = sqrt(1 / sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
@@ -235,13 +240,13 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 if (!isfinite(new_flux_1d[fib])) | (ivar_1d[xpix, fib] == 0.0)
                     new_flux_1d[fib] = 0.0
                     ivar_1d[xpix, fib] = 0.0
-                    mask_1d[xpix, fib] += bad_1d_failed_extract
+                    mask_1d[xpix, fib] |= bad_1d_failed_extract
                 end
 
                 if curr_neff > neff_thresh
-                    new_flux_1d[fib] = 0.0
-                    ivar_1d[xpix, fib] = 0.0
-                    mask_1d[xpix, fib] += bad_1d_neff
+#                    new_flux_1d[fib] = 0.0
+#                    ivar_1d[xpix, fib] = 0.0
+                    mask_1d[xpix, fib] |= bad_1d_neff
                 end
 
                 if good_flux_1d
@@ -273,9 +278,9 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     end
 
     if return_resids
-        return flux_1d, ivar_1d, mask_1d, resid_fluxes_2d, resid_ivars_2d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d, resid_fluxes_2d, resid_ivars_2d
     else
-        return flux_1d, ivar_1d, mask_1d
+        return flux_1d, ivar_1d, mask_1d, dropped_pixel_mask_1d
     end
 end
 
@@ -432,14 +437,16 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
-    outtrace = zeros(length(logUniWaveAPOGEE), N_FIBERS)
-    outChipInt = zeros(length(logUniWaveAPOGEE), N_FIBERS)
+    outDropMsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
+    outTraceCoords = zeros(length(logUniWaveAPOGEE), N_FIBERS, 3) #(x,y,chipInt)
     cntvec = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
 
     pixvec = 1:(N_CHIPS * N_XPIX)
+    xpix_stack = ((pixvec .- 1) .% N_XPIX) .+ 1
     flux_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     ivar_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
+    dropped_mask_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     wave_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     trace_center_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipInt_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
@@ -494,13 +501,15 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         flux_1d = f["flux_1d"]
         ivar_1d = f["ivar_1d"]
         mask_1d = f["mask_1d"]
-	    extract_trace_centers = f["extract_trace_centers"]
+        dropped_pixels_mask_1d = f["dropped_pixels_mask_1d"]
+        extract_trace_centers = f["extract_trace_centers"]
         close(f)
         push!(metadata_lst,read_metadata(fnameloc))
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
+        dropped_mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= dropped_pixels_mask_1d[end:-1:1, :]
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
@@ -526,8 +535,9 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
         trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
-	    chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
+	chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
+	xpix_fiber = xpix_stack[good_pix_fiber]
 
         Rinv = generateInterpMatrix_sparse_inv(
             wave_fiber, chipBit_fiber, logUniWaveAPOGEE, pixindx_fiber)
@@ -539,9 +549,9 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
         cntvec[:, fiberindx] .+= msk_inter
 
         #right now, only works for a single exposure
-        outtrace[:, fiberindx] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-        outChipInt[:, fiberindx] .= linear_interpolation(wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-        # outtrace[msk_inter, fiberindx] .+= (Rinv * trace_center_fiber)[msk_inter]
+	outTraceCoords[:, fiberindx, 1] .= linear_interpolation(wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+	outTraceCoords[:, fiberindx, 2] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+	outTraceCoords[:, fiberindx, 3] .= linear_interpolation(wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
 
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)
@@ -554,7 +564,6 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
 
     framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
     outflux ./= framecnts
-#    outtrace ./= framecnts #don't do this step if using linear_interpolation
     outvar ./= (framecnts .^ 2)
     # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
     outmsk = (cntvec .== framecnts)
@@ -562,7 +571,7 @@ function reinterp_spectra(fname; backupWaveSoln = nothing)
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
-        outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_centers = outtrace, chipInt_1d = outChipInt, wavecal_type)
+        outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_coords = outTraceCoords, wavecal_type)
     return
 end
 
