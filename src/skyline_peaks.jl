@@ -1,35 +1,25 @@
 import FastRunningMedian: running_median
 using Optim, HDF5
 
-function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
+function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines; 
+				 med_flux_window = 31, flux_thresh = 97,
+				 max_pix_sep = 5, n_pad = 5, min_seg_lenth = 2)
 
     #use running median to help identify skyline peaks in data
     #(especially for bright stars)
-#    med_flux_vec = running_median(
-#        flux_vec, 101, :asym_trunc, nan = :ignore)
     med_flux_vec = running_median(
-        flux_vec, 31, :asym_trunc, nan = :ignore)
-    #    println(size(flux_vec)," ",size(med_flux_vec)," ",nanzeropercentile(med_flux_vec))
-
+        flux_vec, med_flux_window, :asym_trunc, nan = :ignore)
     med_flux_vec[med_flux_vec .== 0.0] .= 1.0
     scaled_flux_vec = flux_vec ./ med_flux_vec
 
-    # Find indices where flux is above 97.5th percentile
-#    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [97.5])[1]
-    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [97])[1]
-#    slope_vec = scaled_flux_vec[(begin+1):end] .- scaled_flux_vec[begin:(end-1)]
-#    above_thresh = findall((scaled_flux_vec[(begin+1):(end-1)] .>= thresh) .& 
-#    		         (slope_vec[begin:(end-1)] .>= 0) .& (slope_vec[(begin+1):end] .<= 0) .&
-#    			 .!((slope_vec[begin:(end-1)] .== 0) .& (slope_vec[(begin+1):end] .== 0))) .+ 1
+    # Find indices where flux is above flux_thresh percentile
+    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [flux_thresh])[1]
     above_thresh = findall(x -> x > thresh, scaled_flux_vec)
-#    above_thresh = findall(x -> x > thresh, flux_vec)
 
     if size(above_thresh,1) < 1
         return nothing, nothing, nothing
     end
 
-    max_pix_sep = 10
-    max_pix_sep = 5
     # Group indices into segments, combining those less than max_pix_sep pixels apart
     segments = []
     current_segment = [above_thresh[1]]
@@ -44,15 +34,12 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
     push!(segments, current_segment)
     mean_x = mean.(segments)
     length_segs = length.(segments)
-#    segments = segments[(mean_x .> 64) .& (mean_x .< 1984) .& (length_segs .> 2)]
-    segments = segments[(mean_x .> 64) .& (mean_x .< 1984) .& (length_segs .> 1)]
+    segments = segments[(mean_x .> 64) .& (mean_x .< 1984) .& (length_segs .>= min_seg_length)]
 
     # Preallocate array for segment fluxes
     segment_fluxes = zeros(length(segments))
 
-    n_pad = 10
-    n_pad = 5
-    # For each segment, compute flux in padded range after subtracting median
+    # For each segment, compute flux in padded range (using n_pad) after subtracting median
     for (i, segment) in enumerate(segments)
         # Get range with n_pad pixel padding on each side
         start_idx = maximum([1, minimum(segment) - n_pad])
