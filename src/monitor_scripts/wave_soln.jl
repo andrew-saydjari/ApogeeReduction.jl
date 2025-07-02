@@ -25,11 +25,15 @@ parg = parse_commandline()
 
 function dither_from_params_loss(dither_params,orig_poly,target_params;
 				  return_new=false)
-    new_coeffs = orig_poly(Polynomial(dither_params)).coeffs[begin:min(end,size(target_params,1))]
+    new_coeffs = orig_poly(Polynomial(dither_params)).coeffs
     if return_new
         return new_coeffs
     else
-        return sum((new_coeffs .- target_params).^2)
+        l2 = sum((new_coeffs[begin:size(target_params,1)] .- target_params) .^ 2)
+        if size(new_coeffs,1) > size(target_params,1)
+            l2 += sum((new_coeffs[size(target_params,1)+1:end]) .^ 2)
+        end
+        return l2
     end
 end
 
@@ -102,7 +106,7 @@ function summarize_wave_solns(tele_loc,mjd_list,plotdir;
             all_ditherCorrParams[mjd_ind,fiber_ind,:] .= ditherParamsOpt
             all_ditherCorr_linParams[mjd_ind,fiber_ind,:] .= dither_from_params_loss(
      						ditherParamsOpt,orig_poly,
-						comp_linParams[fiber_ind,:],return_new=true)
+						comp_linParams[fiber_ind,:],return_new=true)[begin:n_linParams]
         end
     end
 
