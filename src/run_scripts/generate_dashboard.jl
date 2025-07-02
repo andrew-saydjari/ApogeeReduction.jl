@@ -20,9 +20,13 @@ function parse_commandline()
     return parse_args(s)
 end
 
+########################################################
+# Categorize the plots
+# edit here to categorize new plot types
+########################################################
 function get_plot_categories(plot_files)
     # Define the main categories and their patterns in the desired order
-    # TODO think harder about these categories
+    # Each of these is a section name and a regex pattern for what should be in that section
     category_patterns = [
         ("ar1Dunical", r"ar1Dunical_.*\.png$"),
         ("ar1Duni", r"ar1Duni_.*\.png$"),
