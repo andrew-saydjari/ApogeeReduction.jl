@@ -144,22 +144,30 @@ saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
-# clean up this statement to have less replication
-desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
-if parg["runlist"] != ""
+# setup the (sjd, expid, chip) tuples to iterate over
+# if we have a runlist, we iterate over the mjd and expid in the runlist
+# otherwise we iterate over the mjd, expid, and chips specified on the command line
+subiter = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
 
-    subiter = Iterators.product(
+    Iterators.product(
         Iterators.zip(subDic["mjd"], subDic["expid"]),
-        string.(collect(parg["chips"])))
-    @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-        parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip) # does Julia LRU cache this?
-    ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
+        string.(collect(parg["chips"]))
+    )
 else
-    subiter = string.(collect(parg["chips"]))
-    @everywhere process_3D_partial(chip) = process_3D(
-        parg["outdir"], parg["runname"], parg["tele"], parg["mjd"], parg["expid"], chip)
-    ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
+    # set up an iterator with the same shape as the runlist iterator
+    Iterators.product(
+        Iterators.repeated((parg["mjd"], parg["expid"])),
+        string.(collect(parg["chips"]))
+    )
+end
+
+# partially apply the process_3D function to everything except the (sjd, expid, chip) values
+desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
+ap2dnamelist = @showprogress desc=desc pmap(subiter) do ((mjd, expid), chip)
+    process_3D(
+        parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
+        gainMatDict, readVarMatDict, saturationMatDict)
 end
 
 # Find the 2D calibration files for the relevant MJDs

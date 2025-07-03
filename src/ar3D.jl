@@ -319,8 +319,9 @@ function load_saturation_maps(tel, chips; datadir = "data/saturation_maps")
 end
 
 # firstind overriden for APO dome flats
-function process_3D(outdir, runname, tel, mjd, expid, chip; firstind = 3,
-        cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
+function process_3D(outdir, runname, tel, mjd, expid, chip,
+        gainMatDict, readVarMatDict, saturationMatDict;
+        firstind = 3, cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
     dirName = joinpath(outdir, "apred/$(mjd)/")
     if !ispath(dirName)
         mkpath(dirName)
