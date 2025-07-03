@@ -1,35 +1,30 @@
 import FastRunningMedian: running_median
 using Optim, HDF5
 
-function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
+function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines; 
+				 med_flux_window = 31, flux_thresh = 97,
+				 max_pix_sep = 5, n_pad = 5, min_seg_length = 2)
 
     #use running median to help identify skyline peaks in data
     #(especially for bright stars)
     med_flux_vec = running_median(
-        flux_vec, 101, :asym_trunc, nan = :ignore)
-    #    println(size(flux_vec)," ",size(med_flux_vec)," ",nanzeropercentile(med_flux_vec))
-
+        flux_vec, med_flux_window, :asym_trunc, nan = :ignore)
     med_flux_vec[med_flux_vec .== 0.0] .= 1.0
     scaled_flux_vec = flux_vec ./ med_flux_vec
 
-    # Find indices where flux is above 97.5th percentile
-    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [97.5])[1]
-    #    slope_vec = scaled_flux_vec[(begin+1):end] .- scaled_flux_vec[begin:(end-1)]
-    #    above_thresh = findall((scaled_flux_vec[(begin+1):(end-1)] .>= thresh) .& 
-    #		         (slope_vec[begin:(end-1)] .>= 0) .& (slope_vec[(begin+1):end] .<= 0) .&
-    #			 .!((slope_vec[begin:(end-1)] .== 0) .& (slope_vec[(begin+1):end] .== 0))) .+ 1
+    # Find indices where flux is above flux_thresh percentile
+    thresh = nanzeropercentile(scaled_flux_vec, percent_vec = [flux_thresh])[1]
     above_thresh = findall(x -> x > thresh, scaled_flux_vec)
-    #    above_thresh = findall(x -> x > thresh, flux_vec)
 
     if size(above_thresh,1) < 1
         return nothing, nothing, nothing
     end
 
-    # Group indices into segments, combining those less than 10 pixels apart
+    # Group indices into segments, combining those less than max_pix_sep pixels apart
     segments = []
     current_segment = [above_thresh[1]]
     for i in 2:length(above_thresh)
-        if above_thresh[i] - above_thresh[i - 1] <= 10
+        if above_thresh[i] - above_thresh[i - 1] <= max_pix_sep
             push!(current_segment, above_thresh[i])
         else
             push!(segments, current_segment)
@@ -39,16 +34,16 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
     push!(segments, current_segment)
     mean_x = mean.(segments)
     length_segs = length.(segments)
-    segments = segments[(mean_x .> 64) .& (mean_x .< 1984) .& (length_segs .> 2)]
+    segments = segments[(mean_x .> 64) .& (mean_x .< 1984) .& (length_segs .>= min_seg_length)]
 
     # Preallocate array for segment fluxes
     segment_fluxes = zeros(length(segments))
 
-    # For each segment, compute flux in padded range after subtracting median
+    # For each segment, compute flux in padded range (using n_pad) after subtracting median
     for (i, segment) in enumerate(segments)
-        # Get range with 10 pixel padding on each side
-        start_idx = maximum([1, minimum(segment) - 10])
-        end_idx = minimum([length(flux_vec), maximum(segment) + 10])
+        # Get range with n_pad pixel padding on each side
+        start_idx = maximum([1, minimum(segment) - n_pad])
+        end_idx = minimum([length(flux_vec), maximum(segment) + n_pad])
 
         # Get flux in range
         flux_range = flux_vec[start_idx:end_idx]
@@ -76,7 +71,8 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
             df_sky_lines),
         :intensity,
         rev = true
-    )[1:8, :]
+    )
+    bright_lines0 = bright_lines0[findall((bright_lines0.clean .== true) .& (bright_lines0.number_of_lines .> 1))[1:8], :]
     rescale_int = maximum(bright_lines0.intensity)
     bright_lines0.norm_intensity .= (bright_lines0.intensity ./ rescale_int)
     bright_lines0.norm_sigma_intensity .= (bright_lines0.sigma_intensity ./ rescale_int)
@@ -119,6 +115,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
 
     # Try range of offsets around 0
     offsets = -10:0.1:10
+    offsets = -15:0.1:15
     n_good_diffs = zeros(Int, length(offsets))
     total_diffs = zeros(Float64, length(offsets))
 
@@ -135,6 +132,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
     # Among those, find the one with minimum total difference
     best_idx = max_good_indices[argmin(total_diffs[max_good_indices])]
     best_offset = offsets[best_idx]
+#    println(best_offset,chip,tele)
 
     # println("Best offset: $best_offset Å with $(max_good) good differences")
 
@@ -179,26 +177,39 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
         cpix = cen_pixs[lindx]
         ref_indx = nearest_idx[msk2use][lindx]
 
-        subline_wav_diffs = (parse.(Float64,
-            split(
-                replace(replace(bright_lines[ref_indx, :subline_wav][2:(end - 1)], "  " => ","),
-                    " " => ","),
-                ",")[1:2]) .- bright_lines[ref_indx, :wav]) .* 10
-        subline_wav_pix_diffs = subline_wav_diffs ./ (roughwave_dict[tele][chip][2])
         subLine_weight = parse.(Float64,
             split(replace(bright_lines[ref_indx, :subline_I][2:(end - 1)], " " => ","), ","))
+	subline_wavs = parse.(Float64,
+            filter(!isempty,split(
+                replace(replace(bright_lines[ref_indx, :subline_wav][2:(end - 1)], "  " => ","),
+                    " " => ","),
+                ",")))
+	sort_inds = sortperm(subLine_weight,rev=true)[1:2]
+	subLine_weight = subLine_weight[sort_inds] ./ sum(subLine_weight[sort_inds])
+	subline_wavs = subline_wavs[sort_inds]
+	sort_inds = sortperm(subline_wavs)
+	subLine_weight = subLine_weight[sort_inds]
+	subline_wavs = subline_wavs[sort_inds]
+
+#        outwave = bright_lines[ref_indx, :wav] * 10
+	outwave = (subline_wavs' * subLine_weight) * 10
+
+        subline_wav_diffs = (subline_wavs .* 10 .- outwave)
+        subline_wav_pix_diffs = subline_wav_diffs ./ (roughwave_dict[tele][chip][2])
         subLine_ratio = subLine_weight[2] / subLine_weight[1]
 
         peak_range = collect(Int(floor(cpix - 10)):Int(floor(cpix + 10)))
         x = peak_range
+        x_edges = [peak_range .- 0.5; peak_range[end] + 0.5]
         y = flux_vec[peak_range]
         yamp = abs(maximum(y)) / sqrt(2 * pi)
 
         function gfit(p; exclude_idx = nothing)
             lam1 = p[2] - p[4] / 2
             lam2 = p[2] + p[4] / 2
-            model = p[1] * subLine_weight[1] * normal_pdf.(x .- lam1, p[3]) .+
-                    p[1] * subLine_weight[2] * normal_pdf.(x .- lam2, p[3]) .+
+
+            model = p[1] * subLine_weight[1] * diff(normal_cdf.(x_edges .- lam1, p[3])) .+
+                    p[1] * subLine_weight[2] * diff(normal_cdf.(x_edges .- lam2, p[3])) .+
                     p[5] .* (x .- cpix) .+ p[6]
             residuals = (y .- model) .^ 2
             if !isnothing(exclude_idx)
@@ -211,15 +222,15 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
         function gfit2(p)
             lam1 = p[2] - p[4] / 2
             lam2 = p[2] + p[4] / 2
-            model = p[1] * subLine_weight[1] * normal_pdf.(x .- lam1, p[3]) .+
-                    p[1] * subLine_weight[2] * normal_pdf.(x .- lam2, p[3]) .+
+            model = p[1] * subLine_weight[1] * diff(normal_cdf.(x_edges .- lam1, p[3])) .+
+                    p[1] * subLine_weight[2] * diff(normal_cdf.(x_edges .- lam2, p[3])) .+
                     p[5] .* (x .- cpix) .+ p[6]
             return model
         end
 
-        sepd = subline_wav_pix_diffs[2] - subline_wav_pix_diffs[1]
+        sepd = abs(subline_wav_pix_diffs[2] - subline_wav_pix_diffs[1])
         yoffset = abs(nanzeromedian(y))
-        p0 = [yamp, cpix, 1, sepd, 0.0, yoffset]
+        p0 = [max(yamp,0.01), cpix, 1, sepd, 0.0, yoffset]
         lb = [0.0, cpix - 10, 0.3, 0.8 * sepd, -5, 0]
         ub = [20 * yamp, cpix + 10, 3.0, 1.5 * sepd, 5, 2 * yoffset]
 
@@ -236,7 +247,6 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines)
 
         outpix = [fitparams[2] - fitparams[4] / 2, fitparams[2] + fitparams[4] / 2]' *
                  subLine_weight
-        outwave = bright_lines[ref_indx, :wav] * 10
         return [outpix, outwave, fitparams..., bright_lines.linindx[ref_indx]]
     end
 

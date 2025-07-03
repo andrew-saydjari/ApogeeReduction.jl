@@ -2,6 +2,7 @@ using StatsBase: iqr, percentile
 using Jackknife
 using JLD2, HDF5 # for safe_jldsave and read_metadata
 using Distributed: myid
+using SpecialFunctions: erf
 using DataFrames
 
 # used to record git branch and commit in safe_jldsave
@@ -199,6 +200,7 @@ function jack_std(x)
 end
 
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
+normal_cdf(Δ, σ) = 0.5 * (1 + erf((Δ / σ) / √(2))) 
 
 # used by safe_jldsave
 function check_type_for_jld2(value)

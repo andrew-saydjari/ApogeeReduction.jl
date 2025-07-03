@@ -1,6 +1,7 @@
 # Handling the 3D data cube
 using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean, median
+using StatsBase: iqr
 using TimerOutputs
 using FITSIO, EllipsisNotation
 

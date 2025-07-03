@@ -10,5 +10,6 @@ const FIRST_CHIP = CHIP_LIST[1]
 include("utils.jl")
 include("ar3D.jl")
 include("ar1D.jl")
-export get_fibTargDict, fiberID2fiberIndx
+#include("fileNameHandling.jl")
+#export get_fibTargDict, fiberID2fiberIndx
 end

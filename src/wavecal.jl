@@ -277,7 +277,8 @@ function ChipPolyParams2Params(chipPolyParams)
 end
 
 # Sky line wavecal
-function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
+#function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
+function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4)
     # initial guess for the (low-order)chip polynomial parameters
     if occursin("_apo_", fname)
         # chipPolyParams0 = [-1.0716 1.00111
@@ -289,11 +290,10 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         scale_func_chip3 = Polynomial([9.87857338e-01, 1.09350510e-06])
 
         #don't use the polynomials above for now...
-        offset_func_chip1 = Polynomial([-1.0716, 0.0])
-        scale_func_chip1 = Polynomial([1.00111, 0.0])
-        offset_func_chip3 = Polynomial([1.07009, 0.0])
-        scale_func_chip3 = Polynomial([0.98803, 0.0])
-
+        offset_func_chip1 = Polynomial([-1.070, 0.0])
+        scale_func_chip1 = Polynomial([1.0, 0.0])
+        offset_func_chip3 = Polynomial([1.0755, 0.0])
+        scale_func_chip3 = Polynomial([1.0, 0.0])
     elseif occursin("_lco_", fname)
         # chipPolyParams0 = [-1.0748 1.00168
         #                    0 1
@@ -304,10 +304,10 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         scale_func_chip3 = Polynomial([9.87968936e-01, -2.76150881e-07])
 
         #don't use the polynomials above for now...
-        offset_func_chip1 = Polynomial([-1.0748, 0.0])
-        scale_func_chip1 = Polynomial([1.00168, 0.0])
-        offset_func_chip3 = Polynomial([1.07089, 0.0])
-        scale_func_chip3 = Polynomial([0.98763, 0.0])
+        offset_func_chip1 = Polynomial([-1.07295, 0.0])
+        scale_func_chip1 = Polynomial([1.0, 0.0])
+        offset_func_chip3 = Polynomial([1.076, 0.0])
+        scale_func_chip3 = Polynomial([1.0, 0.0])
     else
         # chipPolyParams0 = [-1.070 1
         #                    0 1
@@ -406,13 +406,13 @@ function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
         for fibIndx in 1:N_FIBERS
             params2ChipPolyParams!(chipPolyParams0, nlParams, cporder, fibIndx = fibIndx)
             xt = transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
-            Ax = positional_poly_mat(xt, porder = 2)
+            Ax = positional_poly_mat(xt, porder = wporder)
             yt = Ax * linParams[fibIndx, :]
             chipWaveSoln[:, fibIndx, chipIndx] .= yt
 
             params2ChipPolyParams!(chipPolyParams0, interp_nlParams, cporder, fibIndx = fibIndx)
             xt = transform_x_chips(ximport, chipPolyParams0[fibIndx, chipIndx, :])
-            Ax = positional_poly_mat(xt, porder = 2)
+            Ax = positional_poly_mat(xt, porder = wporder)
             yt = Ax * interp_linParams[fibIndx, :]
             interp_chipWaveSoln[:, fibIndx, chipIndx] .= yt
         end
@@ -835,6 +835,8 @@ function comb_exp_get_and_save_fpi_wavecal(
     #    bad_peaks = isnan.(fpi_ximport)
     verbose &&
         println("Found $(sum(bad_peaks)) bad peaks (out of a total $(length(bad_peaks)) peaks) that are too offset from the expected peak positions")
+    good_peaks = (.!isnan.(fpi_ximport)) .& (.!bad_peaks)
+
 
     linParams = zeros(Float64, N_FIBERS, wporder + 1)
     #every image but the first will have an offset and scaling for dithers
@@ -854,23 +856,163 @@ function comb_exp_get_and_save_fpi_wavecal(
         ditherPolyParams[:, :, 2] .= 1.0
     end
 
+    first_dither_offsets = zeros(N_FIBERS)
+    for i in 1:N_FIBERS
+        on_first = findall((fpi_line_expInt[:, i] .== 1))
+        if size(on_first,1) == 0
+            continue
+        elseif .!any(good_peaks[on_first, i])
+            continue
+        end
+	dlam = (expect_peak_waves[on_first,i] .- peak_waves[on_first,i])[begin+1:end]
+	dlam_dx = diff(peak_waves[on_first,i]) ./ diff(fpi_ximport[on_first,i])
+	dx = nanmedian(dlam ./ dlam_dx)
+	first_dither_offsets[i] = dx
+#	println(i," ",dx," ",dx * 2048)
+    end
+#    println(nanmedian(first_dither_offsets)," ",nanmedian(first_dither_offsets)*2048)
+    first_dither_offset = nanmedian(first_dither_offsets)
+    dither_poly = Polynomial([first_dither_offset,1])
+
+    fname_ind = 1
+    for i in 1:N_FIBERS
+        #change wavelength solution to account for first dither offset
+        linParams[i,:] .= Polynomial(linParams[i,:])(dither_poly).coeffs
+        for chip in CHIP_LIST
+            chipIndx = getChipIndx(chip)
+            on_chip = findall((fpi_line_chipInt[:, i] .== chipIndx) .&
+                              (fpi_line_expInt[:, i] .== fname_ind))
+            chipPolyParams = copy(chipPolyParams0[i, :, :])
+            params2ChipPolyParams!(
+                chipPolyParams, initial_nlParams[i, :], initial_cporder)
+            chipPolyParams0[i, :, :] .= chipPolyParams
+	    if size(on_chip,1) == 0
+                continue
+            end
+
+            xt = transform_x_chips(
+                fpi_ximport[on_chip, i], chipPolyParams[chipIndx, :])
+            Ax = positional_poly_mat(xt, porder = wporder)
+            yt = Ax * linParams[i, :]
+            peak_waves[on_chip, i] .= yt
+        end
+    end
+
+#    first_dither_offsets = zeros(N_FIBERS)
+#    for i in 1:N_FIBERS
+#        on_first = findall((fpi_line_expInt[:, i] .== 1))
+#        if size(on_first,1) == 0
+#            continue
+#        elseif .!any(good_peaks[on_first, i])
+#            continue
+#        end
+#	dlam = (expect_peak_waves[on_first,i] .- peak_waves[on_first,i])[begin+1:end]
+#	dlam_dx = diff(peak_waves[on_first,i]) ./ diff(fpi_ximport[on_first,i])
+#	dx = nanmedian(dlam ./ dlam_dx)
+#	first_dither_offsets[i] = dx
+#	println(i," ",dx," ",dx * 2048)
+#    end
+#    println(nanmedian(first_dither_offsets)," ",nanmedian(first_dither_offsets)*2048)
+#    first_dither_offset = nanmedian(first_dither_offsets)
+
+
+    #measure dither offset from first observation
+    dither_offsets = zeros(Float64, (N_FIBERS, N_CHIPS, n_fnames))
+    fill!(dither_offsets, NaN)
+    dither_offsets[:,:,1] .= 0.0
+
+    for i in 1:N_FIBERS
+        for chip in CHIP_LIST
+            chipIndx = getChipIndx(chip)
+            on_first = findall((fpi_line_chipInt[:, i] .== chipIndx) .& 
+				(fpi_line_expInt[:, i] .== 1))
+	    if size(on_first,1) == 0
+                continue
+            elseif .!any(good_peaks[on_first, i])
+                continue
+            end
+
+	    n_first = sum(good_peaks[on_first, i])
+            for fname_ind in 2:n_fnames
+	        on_other = findall((fpi_line_chipInt[:, i] .== chipIndx) .&
+				   (fpi_line_expInt[:, i] .== fname_ind))
+	        if size(on_other,1) == 0
+  	            continue
+                elseif .!any(good_peaks[on_other, i])
+                    continue
+                end
+	        n_other = sum(good_peaks[on_other, i])
+
+	        n_use = min(n_first,n_other)
+	        peak_ints[on_first,i][begin:n_use]
+
+		peak_offset = ceil(Int,nanmedian(peak_ints[on_first,i][begin:n_use]-peak_ints[on_other,i][begin:n_use]))
+		if peak_offset >= 0
+    		    new_peak_offset = ceil(Int,nanmedian(peak_ints[on_first,i][begin:n_use-peak_offset]-peak_ints[on_other,i][begin+peak_offset:n_use]))
+                    pix_offset = nanmedian(fpi_ximport[on_first,i][begin:n_use-peak_offset]-fpi_ximport[on_other,i][begin+peak_offset:n_use])
+		else
+		    peak_offset = abs(peak_offset)
+    		    new_peak_offset = ceil(Int,nanmedian(peak_ints[on_first,i][begin+peak_offset:n_use]-peak_ints[on_other,i][begin:n_use-peak_offset]))
+                    pix_offset = nanmedian(fpi_ximport[on_first,i][begin+peak_offset:n_use]-fpi_ximport[on_other,i][begin:n_use-peak_offset])
+		    peak_offset *= -1
+		end
+#		println(i," ",chipIndx," ",fname_ind," ",peak_offset," ",new_peak_offset," ",pix_offset," ",pix_offset * 2048)
+
+	        dither_offsets[i,chipIndx,fname_ind] = pix_offset 
+	    end
+        end
+    end
+    exp_med_dithers = nanmedian(nanmedian(dither_offsets,2),1)[1,1,:]
+#    println("dithers ",size(exp_med_dithers),exp_med_dithers,exp_med_dithers .* 2048)
+
     for i in 1:N_FIBERS
         start = 1
         if cporder > 0
             nlParams[i, start:(start + (initial_cporder + 1) - 1)] .= chipPolyParams0[i, 1, :]
             start = 1 + (cporder + 1)
             nlParams[i, start:(start + (initial_cporder + 1) - 1)] .= chipPolyParams0[i, 3, :]
+	    if initial_cporder == 0
+	        start = 1
+                nlParams[i, (start + (initial_cporder + 1) - 1) + 1] = 1.0
+                start = 1 + (cporder + 1)
+                nlParams[i, (start + (initial_cporder + 1) - 1) + 1] = 1.0
+	    end
         else
             nlParams[i, 1] = chipPolyParams0[i, 1, 1]
             nlParams[i, 2] = chipPolyParams0[i, 3, 1]
         end
+	ditherPolyParams[:,i,1] .= exp_med_dithers
         ditherParams[i, :] .= comb_exp_DitherPolyParams2Params(ditherPolyParams[:, i, :])
     end
 
-    good_peaks = (.!isnan.(fpi_ximport)) .& (.!bad_peaks)
     chipPolyParams0 = zeros(Float64, (N_FIBERS, N_CHIPS, cporder + 1))
     if cporder > 0
         chipPolyParams0[:, 2, 2] .= 1.0 #chip b scaling
+    end
+
+    for fname_ind in 2:n_fnames
+        for fibIndx in 1:N_FIBERS
+            for chip in CHIP_LIST
+                chipIndx = getChipIndx(chip)
+                on_chip = findall((fpi_line_chipInt[:, fibIndx] .== chipIndx) .&
+                                  (fpi_line_expInt[:, fibIndx] .== fname_ind))
+                chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
+                params2ChipPolyParams!(
+		    chipPolyParams, nlParams[fibIndx, :], cporder)
+                chipPolyParams0[fibIndx, :, :] .= chipPolyParams
+    	        if size(on_chip,1) == 0
+                    continue
+                end
+
+                xt = transform_x_chips(
+                    fpi_ximport[on_chip, fibIndx], chipPolyParams[chipIndx, :])
+#		println(fname_ind,chip,fibIndx,size(xt),ditherPolyParams[fname_ind, fibIndx, :],chipPolyParams[chipIndx,:])
+		xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
+                Ax = positional_poly_mat(xt, porder = wporder)
+                yt = Ax * linParams[fibIndx, :]
+                peak_waves[on_chip, fibIndx] .= yt
+            end
+        end
     end
 
     #need to fit additional parameters
@@ -879,10 +1021,11 @@ function comb_exp_get_and_save_fpi_wavecal(
     #the non-integer offset to m0 integer
     #(should be smaller than 1 in size)
 
-    #    #estimate non-integer offset to m0
-    #    m_offset = nanmedian(2.0 * cavity_size ./ peak_waves[good_peaks] .- peak_ints[good_peaks])
-    #    #update cavity size guess
-    #    cavity_size = nanmedian(peak_waves[good_peaks] .* (peak_ints[good_peaks] .+ m_offset) ./ 2.0)
+#    #estimate non-integer offset to m0
+#    m_offset = nanmedian(2.0 * cavity_size ./ peak_waves[good_peaks] .- peak_ints[good_peaks])
+#    #update cavity size guess
+#    cavity_size = nanmedian(peak_waves[good_peaks] .* (peak_ints[good_peaks] .+ m_offset) ./ 2.0)
+#    verbose && println("$(m_offset) $(cavity_size) $(cavity_size-init_cavity_size)")
 
     #mask outliers
     expect_peak_waves .= 2 .* cavity_size ./ (peak_ints .+ m_offset)
@@ -1009,6 +1152,18 @@ function comb_exp_get_and_save_fpi_wavecal(
                     dither_nonlinear_loss_fit_partial, curr_ditherPolyParams[e_ind, :], LBFGS(), Optim.Options(show_trace = false))
                 curr_ditherParamsOpt = Optim.minimizer(res)
                 curr_ditherPolyParams[e_ind, :] .= curr_ditherParamsOpt
+		if e_ind == 1
+		    #push first exposure dither params onto the wavelength solution
+#		    println(i," ",curr_ditherParamsOpt," poly ",Polynomial(curr_ditherParamsOpt))
+#		    new_coeffs = Polynomial(linParams[i,:])(Polynomial(curr_ditherParamsOpt)).coeffs
+#		    println(linParams[i,:],new_coeffs)
+		    linParams[i,:] .= (Polynomial(linParams[i,:])(Polynomial(curr_ditherParamsOpt))).coeffs[begin:n_lin_coeffs]
+		    curr_ditherPolyParams[e_ind, :] .= 0.0
+		    if dporder > 0
+    		        curr_ditherPolyParams[e_ind, 2] = 1.0
+		    end
+		    curr_ditherParamsOpt .= curr_ditherPolyParams[e_ind, :]
+		end
                 resid_vec[i, in_exp[curr_msk]] .= dither_nonlinear_loss_fit(
                     curr_ditherParamsOpt, curr_xt[curr_msk], curr_y[curr_msk], linParams[i, :];
                     wporder = wporder, returnL2only = false)
@@ -1077,15 +1232,16 @@ function comb_exp_get_and_save_fpi_wavecal(
         #change peak_waves to be measured peak wavelengths (not expected)
         peak_waves .= expect_peak_waves .- resid_vec'
 
-        expparams0 = [cavity_size, m_offset]
+	mults = [1.0e3, 1.0]
+        expparams0 = [0.0, m_offset] ./ mults
         function nonlinear_expparams_fit(expparams)
             return nansum((peak_waves[good_peaks] .-
-                           (2.0 * expparams[1]) ./ (peak_ints[good_peaks] .+ expparams[2])) .^ 2)
+                           (2.0 * (cavity_size + expparams[1] * mults[1])) ./ (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
         end
         res = optimize(
             nonlinear_expparams_fit, expparams0, LBFGS(), Optim.Options(show_trace = false))
-        expparamsOpt = Optim.minimizer(res)
-        cavity_size = expparamsOpt[1]
+        expparamsOpt = Optim.minimizer(res) .* mults
+        cavity_size += expparamsOpt[1]
         m_offset = expparamsOpt[2]
 
         #        #EM definition

@@ -164,6 +164,7 @@ flush(stdout);
 
         flux_1d, ivar_1d,
         mask_1d,
+	dropped_pixels_mask_1d,
         resid_flux,
         resid_ivar = if parg["extraction"] == "boxcar"
             extract_boxcar(
@@ -216,11 +217,11 @@ flush(stdout);
             end
 
             # we probably want to append info from the fiber dictionary from alamanac into the file name
-            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, 
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d, 
 		extract_trace_centers = regularized_trace_params[:, :, 2],
                 relthrpt, bitmsk_relthrpt, fiberTypeList)
         else
-            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d,
+            safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
 		extract_trace_centers = regularized_trace_params[:, :, 2])
         end
         close(falm)
@@ -445,7 +446,7 @@ if size(all1DFPI, 1) > 0
         println("Using $(size(all1DfpiPeaks_a,1)) FPI exposures to measure high-precision nightly wavelength solution")
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
             all1DfpiPeaks_a, night_linParams, night_nlParams, cporder = 1, wporder = 4, dporder = 2,
-	    n_sigma = 4, max_ang_sigma = 0.2, max_iter = 3)
+	    n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2)
         sendto(workers(), night_wave_soln = night_wave_soln)
         sendto(workers(), night_linParams = night_linParams)
         sendto(workers(), night_nlParams = night_nlParams)
