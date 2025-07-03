@@ -3,7 +3,7 @@ using Optim, HDF5
 
 function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines; 
 				 med_flux_window = 31, flux_thresh = 97,
-				 max_pix_sep = 5, n_pad = 5, min_seg_lenth = 2)
+				 max_pix_sep = 5, n_pad = 5, min_seg_length = 2)
 
     #use running median to help identify skyline peaks in data
     #(especially for bright stars)
