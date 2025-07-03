@@ -153,12 +153,12 @@ if parg["runlist"] != ""
         Iterators.zip(subDic["mjd"], subDic["expid"]),
         string.(collect(parg["chips"])))
     @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-        parg["outdir"], parg["runname"], mjd, expid, chip) # does Julia LRU cache this?
+        parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip) # does Julia LRU cache this?
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 else
     subiter = string.(collect(parg["chips"]))
     @everywhere process_3D_partial(chip) = process_3D(
-        parg["outdir"], parg["runname"], parg["mjd"], parg["expid"], chip)
+        parg["outdir"], parg["runname"], parg["tele"], parg["mjd"], parg["expid"], chip)
     ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 end
 
