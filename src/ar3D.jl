@@ -116,14 +116,6 @@ function outlier_mask(dimages, last_unsaturated; clip_threshold = 20)
             continue
         end
 
-        # TODO
-        #smallest = minimum(read_buffer)
-        #largest = maximum(read_buffer)
-        ## efficiently find the second smallest and second largest values
-        ## these are allocating-ish
-        #second_smallest = partialsortperm(read_buffer, 2)
-        #second_largest = partialsortperm(read_buffer, n - 1)
-
         @timeit "masked diffs view" diffs=@views read_buffer[1:last_unsaturated[i, j]]
         @timeit "mean" @views μ = mean(diffs)
         @timeit "iqr" @views σ = iqr(diffs) / 1.34896
