@@ -157,18 +157,17 @@ subiter = if parg["runlist"] != ""
 else
     # set up an iterator with the same shape as the runlist iterator
     Iterators.product(
-        Iterators.repeated((parg["mjd"], parg["expid"])),
+        [(parg["mjd"], parg["expid"])],
         string.(collect(parg["chips"]))
     )
 end
 
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
+@everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
+    parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
+    gainMatDict, readVarMatDict, saturationMatDict)
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
-ap2dnamelist = @showprogress desc=desc pmap(subiter) do ((mjd, expid), chip)
-    process_3D(
-        parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
-        gainMatDict, readVarMatDict, saturationMatDict)
-end
+ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 
 # Find the 2D calibration files for the relevant MJDs
 unique_mjds = if parg["runlist"] != ""
