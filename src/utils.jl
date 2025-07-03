@@ -218,7 +218,7 @@ function check_type_for_jld2(value)
             UInt16, UInt8, Float64, Float32, String])
             #throw(ArgumentError("When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."))
             # @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, which is being used for key $k, will result in a hard-to-read HDF5 file."
-                    @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, will result in a hard-to-read HDF5 file."
+            @warn "When saving to JLD, only types Strings and standard numerical types are supported. Type $t, will result in a hard-to-read HDF5 file."
         end
         value
     end
@@ -238,14 +238,10 @@ function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; k
     to_save = Dict{Symbol, Any}()
     for (k, v) in kwargs
         if (k == :metadata || k == :meta_data)
-            throw(ArgumentError("The metadata dictionary is passed as the second positional argument to safe_jldsave, not as a keyword argument. Example: safe_jldsave(\"filename.h5\", metadata; data1, data2)"))
+            throw(ArgumentError("The metadata dictionary should be passed as the second positional argument to safe_jldsave, not as a keyword argument. Example: safe_jldsave(\"filename.h5\", metadata; data1, data2)"))
         end
         to_save[k] = check_type_for_jld2(v)
     end
-
-    # record git branch and commit
-    #to_save[:git_branch] = git_branch
-    #to_save[:git_commit] = git_commit
 
     JLD2.jldsave(filename; to_save...)
 
@@ -257,7 +253,10 @@ function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; k
         end
     end
 end
-function safe_jldsave(filename::AbstractString; kwargs...)
+function safe_jldsave(filename::AbstractString; no_metadata = false, kwargs...)
+    if !no_metadata
+        @warn "safe_jldsave is being called without a metadata dictionary. This is not recommended. pass no_metadata = true to suppress this warning."
+    end
     safe_jldsave(filename, Dict{String, Any}(); kwargs...)
 end
 

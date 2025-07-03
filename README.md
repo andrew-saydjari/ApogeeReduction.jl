@@ -57,23 +57,24 @@ Bulk reprocessing workflow is still TBD, but the massive parallelization we have
 
 Certain pixels are entirely masked or have data of questionable quality. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
 
-| Value         | Bit         | Meaning     |
-| ----------- | ----------- | ----------- |
-| 0     | -     | No problems       |
-| 1     | 0     | reference array pixels |
-| 2     | 1     | reference pixels |
-| 4     | 2     | bad reference pixels |
-| 8     | 3     | pixels not dark corrected |
-| 16    | 4     | pixels with negative dark current |
-| 32    | 5     | pixels with large dark current |
-| 64    | 6     | flat response too low |
-| 128   | 7     | reads dropped for CR rejection = 1 |
-| 256   | 8     | reads dropped for CR rejection > 1 |
-| 512   | 9     | bad linear SUTR chi2 |
-| 1024  | 10    | failed 1D extraction |
-| 2048  | 11    | no nearby good pixels in 1D extraction |
-| 4096  | 12    | neff>10 in 1D extraction |
-| 8192  | 13    | pixel likely saturated |
+| Bit   | Value     | Meaning     |
+| ----- | --------- | ----------- |
+| -     | 0         | No problems       |
+| 0     | 1         | reference array pixels |
+| 1     | 2         | reference pixels |
+| 2     | 4         | bad reference pixels |
+| 3     | 8         | pixels not dark corrected |
+| 4     | 16        | pixels with negative dark current |
+| 5     | 32        | pixels with large dark current |
+| 6     | 64        | flat response too low |
+| 7     | 128       | reads dropped for CR rejection = 1 |
+| 8     | 256       | reads dropped for CR rejection > 1 |
+| 9     | 512       | bad linear SUTR chi2 |
+| 10    | 1024      | failed 1D extraction |
+| 11    | 2048      | no nearby good pixels in 1D extraction |
+| 12    | 4096      | neff>10 in 1D extraction |
+| 13    | 8192      | pixel partially saturated |
+| 14    | 16384     | pixel fully saturated |
 
 
 ## Testing

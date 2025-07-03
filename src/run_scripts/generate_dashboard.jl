@@ -2,7 +2,8 @@
 # Example usage (from the root of the ApogeeReduction.jl repository):
 # julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
 
-using ArgParse, Glob
+using ArgParse, Glob, SlackThreads
+include("../utils.jl") # for the slack environment variables
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -19,9 +20,13 @@ function parse_commandline()
     return parse_args(s)
 end
 
+########################################################
+# Categorize the plots
+# edit here to categorize new plot types
+########################################################
 function get_plot_categories(plot_files)
     # Define the main categories and their patterns in the desired order
-    # TODO think harder about these categories
+    # Each of these is a section name and a regex pattern for what should be in that section
     category_patterns = [
         ("ar1Dunical", r"ar1Dunical_.*\.png$"),
         ("ar1Duni", r"ar1Duni_.*\.png$"),
@@ -338,6 +343,13 @@ function main()
     write(output_file, html)
 
     println("Dashboard generated at: $output_file")
+
+    # post a link to slack
+    # the link to the dashboard is relative to the current directory
+    dir = abspath(joinpath(pwd(), "..", "outdir", "plots", string(mjd), "dashboard.html"))
+    url = replace(dir, "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/")
+    thread = SlackThread()
+    thread("The reduction plots dashboard for SJD $(mjd) has been generated and is available at: $url")
 end
 
 main()

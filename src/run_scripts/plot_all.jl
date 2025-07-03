@@ -1,7 +1,7 @@
 # This is a script that makes the plots for a nightly processing and posts them to the slack channel.
 # called by run_all.sh
 ## TODO add sky flux relFlux consistency check plots
-using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Random, HDF5, DataFrames
+using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
 src_dir = "../"
 include(src_dir * "/fileNameHandling.jl")
@@ -263,19 +263,12 @@ function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
     return ditherParams_Path, resid_plot_fnames
 end
 
-wave_thread = SlackThread()
 if length(unique_mjds) > 1
     min_mjd, max_mjd = extrema(unique_mjds)
     println("\nGenerating wavelength solution stability plots for MJDs $min_mjd to $max_mjd")
-    wave_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
 else
     println("\nGenerating wavelength solution stability plots for MJD $(unique_mjds[1])")
-    wave_thread("Here are the wavelength solution stability plots from $(parg["tele"]) for SJD $(unique_mjds[1])")
 end
-
-wave_thread("Found $(size(all1DObjecta,1)) OBJECT exposures")
-wave_thread("Found $(size(all1DArclampa,1)) ARCLAMP exposures")
-wave_thread("Found $(size(all1DFPIa,1)) FPI exposures")
 
 for mjd_ind in 1:size(unique_mjds, 1)
     tele = parg["tele"]
@@ -287,66 +280,27 @@ for mjd_ind in 1:size(unique_mjds, 1)
         savePath = get_save_dir(unique_mjds[mjd_ind]) *
                    "$(waveSoln_types[j])wave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
         if !isfile(savePath)
-            wave_thread("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures. Checked for file at $(savePath)")
+            println("Could not find any $(waveSoln_labels[j]) wavelength solution summary figures. Checked for file at $(savePath)")
             continue
         end
-        wave_thread(
-            "$(waveSoln_labels[j]) Wavelength Solution Linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
-        savePath = get_save_dir(unique_mjds[mjd_ind]) *
-                   "$(waveSoln_types[j])wave_nlParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-        wave_thread(
-            "$(waveSoln_labels[j]) Wavelength Solution Non-linear Parameters: MJD $(unique_mjds[mjd_ind])", savePath)
-        savePath = get_save_dir(unique_mjds[mjd_ind]) *
-                   "$(waveSoln_types[j])wave_per_fiber_vs_pixel_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-        wave_thread(
-            "$(waveSoln_labels[j]) Wavelength Solution per fiber: MJD $(unique_mjds[mjd_ind])",
-            savePath)
-        savePath = get_save_dir(unique_mjds[mjd_ind]) *
-                   "$(waveSoln_types[j])wave_per_pixel_vs_fiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
-        wave_thread(
-            "$(waveSoln_labels[j]) Wavelength Solution per pixel: MJD $(unique_mjds[mjd_ind])",
-            savePath)
     end
 
-    if size(all1DObjectSkyDither,1) == 0
+    if size(all1DObjectSkyDither, 1) == 0
         continue
     end
 
     ditherParams_Path, resid_plot_fnames = dither_plotter(
         all1DObjectSkyDither, all1DObject_expid_strings, mjd, tele)
-    wave_thread(
-        "Skyline Solution Dither Parameters before FPI solution: MJD $(unique_mjds[mjd_ind])",
-        ditherParams_Path)
 
     outname = parg["outdir"] *
               "/apred/$(unique_mjds[mjd_ind])/waveCalFPI_$(parg["tele"])_$(unique_mjds[mjd_ind])_ARCLAMP.h5"
     if !isfile(outname)
-        for fname_ind in 1:size(resid_plot_fnames, 1)
-            wave_thread(
-                "Sky Peak Residuals after Dither Fit (no FPI soln.): MJD $(unique_mjds[mjd_ind]), ExpID $(all1DObject_expid_strings[fname_ind])",
-                resid_plot_fnames[fname_ind])
-        end
-        wave_thread("Could not find nightly FPI wavelength solution at $(outname)")
+        println("Could not find nightly FPI wavelength solution at $(outname)")
         continue
     end
 
     ditherParams_Path, resid_plot_fnames = dither_plotter(
         all1DObjectFPIDither, all1DObject_expid_strings, mjd, tele)
-    wave_thread(
-        "Skyline Solution Dither Parameters after FPI solution: MJD $(unique_mjds[mjd_ind])",
-        ditherParams_Path)
-    for fname_ind in 1:size(resid_plot_fnames, 1)
-        wave_thread(
-            "Sky Peak Residuals after Dither Fit (using FPI soln.): MJD $(unique_mjds[mjd_ind]), ExpID $(all1DObject_expid_strings[fname_ind])",
-            resid_plot_fnames[fname_ind])
-    end
-
-    #outname file should have the following data
-    #linParams, nlParams, ditherParams
-    #exposure_names, resid_vec, resid_chipInts,
-    #resid_peak_ints, resid_exp_ints, resid_used_in_fit,
-    #chipWaveSoln, chipWaveSoln_xt,
-    #fpi_m0, fpi_m0_offset, fpi_cavity_size
 
     f = h5open(outname, "r+")
 
@@ -419,8 +373,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
     sky_wave_linParams_Path = get_save_dir(unique_mjds[mjd_ind]) *
                               "nightFPIwave_linParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
     save(sky_wave_linParams_Path, fig)
-    wave_thread("FPI Wavelength Solution Linear Parameters: MJD $(unique_mjds[mjd_ind])",
-        sky_wave_linParams_Path)
 
     fig = Figure(size = (1200, 400 * n_nl_coeffs), fontsize = 22)
 
@@ -457,8 +409,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
     sky_wave_nlParams_Path = get_save_dir(unique_mjds[mjd_ind]) *
                              "nightFPIwave_nlParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
     save(sky_wave_nlParams_Path, fig)
-    wave_thread("FPI Wavelength Solution Non-Linear Parameters: MJD $(unique_mjds[mjd_ind])",
-        sky_wave_nlParams_Path)
 
     fig = Figure(size = (1200, 400 * n_dither_coeffs), fontsize = 22)
 
@@ -495,8 +445,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
     sky_wave_ditherParams_Path = get_save_dir(unique_mjds[mjd_ind]) *
                                  "nightFPIwave_ditherParams_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
     save(sky_wave_ditherParams_Path, fig)
-    wave_thread("FPI Wavelength Solution Dither Parameters: MJD $(unique_mjds[mjd_ind])",
-        sky_wave_ditherParams_Path)
 
     n_fnames = maximum(resid_exp_ints)
     fpi_resid_per_exp_per_fiber = zeros(Float64, (n_fnames, N_FIBERS))
@@ -536,9 +484,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
         fpiPeakResiduals_Path = get_save_dir(unique_mjds[mjd_ind]) *
                                 "fpiPeakResiduals_$(parg["tele"])_$(unique_mjds[mjd_ind])_$(fname_expid_strings[fname_ind]).png"
         save(fpiPeakResiduals_Path, fig)
-        wave_thread(
-            "FPI Peak Residuals: MJD $(unique_mjds[mjd_ind]), ExpID $(fname_expid_strings[fname_ind])",
-            fpiPeakResiduals_Path)
     end
 
     fig = Figure(size = (1200, 400), fontsize = 22)
@@ -570,8 +515,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
     fpiResidual_scatter_Path = get_save_dir(unique_mjds[mjd_ind]) *
                                "fpiPeakResidualScatterPerFiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
     save(fpiResidual_scatter_Path, fig)
-    wave_thread("FPI peak residual scatter per fiber: MJD $(unique_mjds[mjd_ind])",
-        fpiResidual_scatter_Path)
 
     vel_mult = 3e8 / 1000 / 16000
     fig = Figure(size = (1200, 400), fontsize = 22)
@@ -602,9 +545,6 @@ for mjd_ind in 1:size(unique_mjds, 1)
     fpiResidual_scatter_Path = get_save_dir(unique_mjds[mjd_ind]) *
                                "fpiPeakResidualVelErrPerFiber_$(parg["tele"])_$(unique_mjds[mjd_ind]).png"
     save(fpiResidual_scatter_Path, fig)
-    wave_thread(
-        "FPI residual scatter as approximate velocity uncertainty (at 16000 Å) per fiber: MJD $(unique_mjds[mjd_ind])",
-        fpiResidual_scatter_Path)
 end
 
 list2Dexp = []
@@ -636,13 +576,6 @@ for chip in CHIP_LIST
     println("\nGenerating 2D residual plots for chip $chip")
     all2D = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
-    thread = SlackThread()
-    if length(unique_mjds) > 1
-        min_mjd, max_mjd = extrema(unique_mjds)
-        thread("Here are some example 2D residuals after 1D extraction on chip $(chip) from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
-    else
-        thread("Here are some example 2D residuals after 1D extraction on chip $(chip) from $(parg["tele"]) for SJD $(unique_mjds[1])")
-    end
     rng = MersenneTwister(351 + unique_mjds[1])
 
     # TODO parallelize plotting
@@ -682,7 +615,6 @@ for chip in CHIP_LIST
         savePath = get_save_dir(mjd) *
                    "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(exptype).png"
         save(savePath, fig, px_per_unit = 3)
-        thread("$(exp_fname)", savePath)
     end
 end
 
@@ -720,13 +652,6 @@ for chip in string.(collect(parg["chips"]))
     println("\nGenerating example spectra plots for chip $chip")
     all1D = replace.(all1Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
-    thread = SlackThread()
-    if length(unique_mjds) > 1
-        min_mjd, max_mjd = extrema(unique_mjds)
-        thread("Here are some example spectra on chip $(chip) from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
-    else
-        thread("Here are some example spectra on chip $(chip) from $(parg["tele"]) for SJD $(unique_mjds[1])")
-    end
     rng = MersenneTwister(351 + unique_mjds[1])
 
     # TODO parallelize plotting
@@ -783,8 +708,6 @@ for chip in string.(collect(parg["chips"]))
                     savePath = get_save_dir(mjd) *
                                "ar1D_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
                     save(savePath, fig)
-
-                    thread("Fiberindex: $(fib) $(fibType), $(exp_fname)", savePath)
                 end
             end
         end
@@ -794,16 +717,9 @@ end
 # 1D reinterpolated spectra examples
 
 println("\nGenerating reinterpolated spectra examples")
-thread = SlackThread();
-if length(unique_mjds) > 1
-    min_mjd, max_mjd = extrema(unique_mjds)
-    thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(min_mjd) to $(max_mjd)")
-else
-    thread("Here are some example reinterpolated spectra from $(parg["tele"]) for SJD $(unique_mjds[1])")
-end
 
-function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
-        tele, mjd, expnum, exptype, expuni_fname)
+function plot_1d_uni(
+        fib, fibtargDict, outflux, outmsk, bname, tele, mjd, expnum, exptype, expuni_fname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
@@ -929,8 +845,6 @@ function plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, bname,
     savePath = get_save_dir(mjd) *
                "$(bname)_$(tele)_$(mjd)_$(expnum)_$(fib)_$(fibType)_$(exptype).png"
     save(savePath, fig)
-
-    thread("Fiberindex: $(fib) $(fibType), $(expuni_fname)", savePath)
     return
 end
 
@@ -946,10 +860,12 @@ for exptype2plot in sorted_exptypes
         for exp_fname in sample_exposures
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
             fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
-            expuni_fname = replace(replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
+            expuni_fname = replace(
+                replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
             outflux = load(expuni_fname, "flux_1d")
             outmsk = load(expuni_fname, "mask_1d")
-            expunical_fname = replace(replace(exp_fname, "ar1D" => "ar1Dunical"), "_$(FIRST_CHIP)_" => "_")
+            expunical_fname = replace(
+                replace(exp_fname, "ar1D" => "ar1Dunical"), "_$(FIRST_CHIP)_" => "_")
             outfluxcal = load(expunical_fname, "flux_1d")
             outmskcal = load(expunical_fname, "mask_1d")
             # need to switch this back when the masking is updated
@@ -958,9 +874,9 @@ for exptype2plot in sorted_exptypes
             fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
-                plot_1d_uni(fib, fibtargDict, outflux, outmsk, thread, "ar1Duni",
+                plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",
                     tele, mjd, expnum, exptype, expuni_fname)
-                plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, thread, "ar1Dunical",
+                plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, "ar1Dunical",
                     tele, mjd, expnum, exptype, expunical_fname)
             end
         end

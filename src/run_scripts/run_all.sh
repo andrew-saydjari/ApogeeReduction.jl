@@ -1,6 +1,8 @@
 #!/bin/bash
+# Run all the data for a given night and telescope.
 
-# run all the data for a given night. Arguments documented below
+# Arguments documented below, but for example (from the repo root dir):
+# sbatch ./src/run_scripts/run_all.sh apo 60855 --mail-type=NONE
 
 #SBATCH --account=sdss-np
 #SBATCH --partition=sdss-shared-np
@@ -81,9 +83,6 @@ if [ "$run_2d_only" != "true" ]; then
 
     print_elapsed_time "Making Plots"
     julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
-
-    print_elapsed_time "Generating plot page for web viewing"
-    julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir
 
     print_elapsed_time "Generating plot page for web viewing"
     julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir

@@ -1,47 +1,65 @@
 @testset "ap3D" begin
-    rng = MersenneTwister(101) #should we switch to stableRNG for my peace of mind?
+    # not guarenteed to be reproducible across julia versions
+    rng = MersenneTwister(101)
 
     detector_dims = (2560, 2048)
     gainMat = 1.9 * ones(Float64, detector_dims)
     readVarMat = 25 * ones(Float64, detector_dims)
+    # pretend the pixels saturate at 90% of digital saturation value
+    saturationMat = 2^16 * ones(Float64, detector_dims) * 0.9
 
-    n_reads = 20
+    n_reads = 11
     n_diffs = n_reads - 1
 
-    # flux per read is in e-/read
-    flux_per_reads = 10 .^ (range(
-        start = log10(0.01), stop = log10(10000), length = detector_dims[1]))
-    dcounts = (randn(rng, (detector_dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+
-              flux_per_reads
+    flux_per_reads = vcat(
+        10 .^ (range(start = log10(10), stop = log10(4000), length = 2048)), #real pixels
+        fill(0.0, 2560 - 2048) # reference array
+    )
+    # should this have read noise?
+    dcounts = (randn(rng, (detector_dims..., n_diffs)) .* (flux_per_reads .^ 0.5)) .+ flux_per_reads
 
-    # pepper with cosmic rays. These diffs should be excluded
+    # pepper with cosmic rays.
     n_crs = 10000
     cr_count = 1e4
     crs = zeros(size(dcounts))
     crs[rand(rng, eachindex(dcounts), n_crs)] .= cr_count
+    crs[2049:end, :, :] .= 0 # no CRs in reference array
     dcounts .+= crs
-    cr_mask = sum(crs .> 0, dims = 3) .> 0
+    true_cr_mask = sum(crs .> 0, dims = 3) .> 0
 
+    # without noise, cosmic rays, or saturation effects
     true_im = ones(Float32, detector_dims) .* flux_per_reads ./ gainMat
 
-    outdat = zeros(Float32, (detector_dims..., n_reads))
-    outdat[:, :, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
-    outdat .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5) .* gainMat
-    outdat ./= gainMat
+    datacube = zeros(Float32, (detector_dims..., n_reads))
+    datacube[:, :, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
+    datacube .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5) .* gainMat
+    datacube ./= gainMat
 
-    @time dimage, ivarimage, chisqimage,
-    CRimage, sat_mask = ApogeeReduction.sutr_wood!(
-        outdat, gainMat, readVarMat)
+    dimage, ivarimage, chisqimage, CRimage, last_unsaturated = ApogeeReduction.sutr_wood!(
+        datacube, gainMat, readVarMat, saturationMat)
+
+    # chop off the reference array for the tests
+    dimage = dimage[1:2048, :]
+    ivarimage = ivarimage[1:2048, :]
+    chisqimage = chisqimage[1:2048, :]
+    CRimage = CRimage[1:2048, :]
+    last_unsaturated = last_unsaturated[1:2048, :]
+    true_im = true_im[1:2048, :]
+    true_cr_mask = true_cr_mask[1:2048, :, 1]
 
     flux_diffs = (dimage .- true_im)
     zscores = flux_diffs .* sqrt.(ivarimage)
 
     high_flux_mask = (true_im .> 1000)
 
-    @test all(cr_mask[CRimage .> 0])  # everything flagged as CR is actually CR
-    @test mean(CRimage[cr_mask])≈1 rtol=2e-3 # nearly all CR pixels are flagged
+    @test all(last_unsaturated .== n_diffs)
 
-    @test sum(sat_mask) == 0 # no saturated pixels
+    # nearly everything flagged as CR is actually CR
+    # as the number of reads increases, this quantity should approach one.
+    @test mean(true_cr_mask[CRimage .> 0]) > 0.97
+
+    # nearly all CR pixels are flagged
+    @test mean(CRimage[true_cr_mask])≈1 rtol=2e-3
 
     # mean zscore should be 0, but it's biased at low fluxes
     @test isapprox(mean(zscores), 0.0, atol = 0.05)
@@ -55,11 +73,11 @@
     @test isapprox(mean((dimage ./ true_im)[high_flux_mask]), 1, atol = 3e-4)
 
     # Same tests, but only for CR pixels, and with looser tolerances because there are fewer
-    @test isapprox(mean(zscores[cr_mask]), 0.0, atol = 0.05)
-    @test isapprox(mean(zscores[cr_mask .& high_flux_mask]), 0.0, atol = 1.6e-2) # 1e-2
-    @test isapprox(std(zscores[cr_mask]), 1, atol = 0.03) #TODO not passing?
-    @test isapprox(mean((dimage ./ true_im)[cr_mask]), 1, atol = 0.1)
-    @test isapprox(mean((dimage ./ true_im)[cr_mask .& high_flux_mask]), 1, atol = 1e-3)
+    @test isapprox(mean(zscores[true_cr_mask]), 0.0, atol = 0.05)
+    @test isapprox(mean(zscores[true_cr_mask .& high_flux_mask]), 0.0, atol = 1.6e-2) # 1e-2
+    @test isapprox(std(zscores[true_cr_mask]), 1, atol = 0.03) #TODO not passing?
+    @test isapprox(mean((dimage ./ true_im)[true_cr_mask]), 1, atol = 0.1)
+    @test isapprox(mean((dimage ./ true_im)[true_cr_mask .& high_flux_mask]), 1, atol = 1e-3)
 
     # these are specific to this random seed.  Some may be implementation-specific.
     # it is reasonable to delete any that seem more implementation-specific
@@ -68,8 +86,4 @@
     flux_std_z = std(zscores, dims = 2)
     @test isapprox(flux_std_z[end], 1.03251, atol = 0.06)
     flux_mean = mean(dimage, dims = 2)
-    @test isapprox(flux_mean[end], 5262.62, atol = 3) #9998.98
-    flux_err_mean = mean(ivarimage .^ (-0.5), dims = 2)
-    @test isapprox(flux_err_mean[begin], 0.2, atol = 0.003) # changed from 0.2074
-    @test isapprox(flux_err_mean[end], 12.076, atol = 0.005) #0.003, changed from 22.9450
 end

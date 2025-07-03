@@ -23,33 +23,34 @@ end
 
 function zeropoint_read_dcube!(dcube)
     ref_zpt_vec = mean(dcube[2049:end, :, :], dims = (1, 2))
-    sci_zpt_vec = mean(dcube[1:4, :, :], dims = (1, 2)) + mean(dcube[end-3:end, :, :],dims=(1,2));
+    sci_zpt_vec = mean(dcube[1:4, :, :], dims = (1, 2)) +
+                  mean(dcube[(end - 3):end, :, :], dims = (1, 2))
 
-    ref_zpt_out = dropdims(ref_zpt_vec, dims=(1,2))
-    sci_zpt_out = dropdims(sci_zpt_vec, dims=(1,2));
-    
-    dcube[1:2048,:,:].-=sci_zpt_vec
-    dcube[2049:end,:,:].-=ref_zpt_vec;
-    
+    ref_zpt_out = dropdims(ref_zpt_vec, dims = (1, 2))
+    sci_zpt_out = dropdims(sci_zpt_vec, dims = (1, 2))
+
+    dcube[1:2048, :, :] .-= sci_zpt_vec
+    dcube[2049:end, :, :] .-= ref_zpt_vec
+
     amp_ranges = [1:512, 513:1024, 1025:1536, 1537:2048]
-    ref_bot = zeros(4,length(ref_zpt_out))
+    ref_bot = zeros(4, length(ref_zpt_out))
     for (aindx, amp) in enumerate(amp_ranges)
-        ref_bot[aindx,:] .= dropdims(mean(dcube[amp, 1:4, :],dims=(1,2)),dims=(1,2))
+        ref_bot[aindx, :] .= dropdims(mean(dcube[amp, 1:4, :], dims = (1, 2)), dims = (1, 2))
     end
-    ref_top = zeros(4,length(ref_zpt_out))
+    ref_top = zeros(4, length(ref_zpt_out))
     for (aindx, amp) in enumerate(amp_ranges)
-        ref_top[aindx,:] .= dropdims(mean(dcube[amp, 2045:2048, :],dims=(1,2)),dims=(1,2))
+        ref_top[aindx, :] .= dropdims(mean(dcube[amp, 2045:2048, :], dims = (1, 2)), dims = (1, 2))
     end
-    
-    amp_off_vec = ref_bot .- reshape((ref_bot[1,:].+ref_bot[4,:])./2,1,:)
-    amp_off_vec .+= ref_top .- .- reshape((ref_top[1,:].+ref_bot[4,:])./2,1,:)
-    amp_off_vec ./=2
-    amp_off_vec .-= reshape((amp_off_vec[1,:].+amp_off_vec[4,:])./2,1,:)
 
-    dcube[1:512,:,:].-=reshape(amp_off_vec[1,:],1,1,:)
-    dcube[513:1024,:,:].-=reshape(amp_off_vec[2,:],1,1,:)
-    dcube[1025:1536,:,:].-=reshape(amp_off_vec[3,:],1,1,:)
-    dcube[1537:2048,:,:].-=reshape(amp_off_vec[4,:],1,1,:);
+    amp_off_vec = ref_bot .- reshape((ref_bot[1, :] .+ ref_bot[4, :]) ./ 2, 1, :)
+    amp_off_vec .+= ref_top .- .-reshape((ref_top[1, :] .+ ref_bot[4, :]) ./ 2, 1, :)
+    amp_off_vec ./= 2
+    amp_off_vec .-= reshape((amp_off_vec[1, :] .+ amp_off_vec[4, :]) ./ 2, 1, :)
+
+    dcube[1:512, :, :] .-= reshape(amp_off_vec[1, :], 1, 1, :)
+    dcube[513:1024, :, :] .-= reshape(amp_off_vec[2, :], 1, 1, :)
+    dcube[1025:1536, :, :] .-= reshape(amp_off_vec[3, :], 1, 1, :)
+    dcube[1537:2048, :, :] .-= reshape(amp_off_vec[4, :], 1, 1, :)
 
     return ref_zpt_out, sci_zpt_out, amp_off_vec
 end
@@ -66,28 +67,67 @@ function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
 end
 
 """
-Find pixels that are saturated in the datacube. This must be called before the datacube is
-overwritten with the difference images. Returns a mask of the saturated pixels (not reads).
+    get_last_unsaturated_read(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 2)
+
+Find pixels that are saturated in the datacube and return a mask of which reads to keep for each
+pixel.  This uses a saturation map that specifies the saturation level for each pixel.
+
+It finds the last read that is unsaturated, meaning `<= fudge_factor * saturation_map`, then
+returns the index of the read before it.
+
+For the reference array (rows 2049:end), we set all pixels to use the full number of reads
+since we don't do saturation detection on them.
 """
-function saturation_mask(datacube; high_ADU_threshold = 35000, flat_read_threshold = 200)
-    mask = zeros(Bool, size(datacube)[1:2])
-    for i in axes(datacube, 1), j in axes(datacube, 2)
-        if (datacube[i, j, end] > high_ADU_threshold) &&
-           (datacube[i, j, end] - datacube[i, j, end - 1] < flat_read_threshold)
-            mask[i, j] = true
+function get_last_unsaturated_read(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 1)
+    read_nums = zeros(Int, size(datacube, 1), size(datacube, 2))
+
+    # do saturation detection on the real pixels only
+    for i in 1:2048, j in 1:2048
+        read_num = findlast(
+            x -> x <= saturation_map[i, j] * fudge_factor,
+            datacube[i, j, :])
+
+        read_nums[i, j] = if isnothing(read_num)
+            0
+        else
+            read_num
         end
     end
-    mask
+
+    # for the reference array, set all pixels to use the full number of reads
+    read_nums[2049:end, :] .= size(datacube, 3)
+
+    read_nums
 end
 
-function outlier_mask(dimages; clip_threshold = 20)
-    mask = ones(Bool, size(dimages))
-    for i in axes(dimages, 1), j in axes(dimages, 2)
-        @views μ = mean(dimages[i, j, :])
-        @views σ = iqr(dimages[i, j, :]) / 1.34896
-	if σ > 0
-            @views @. mask[i, j, :] &= (dimages[i, j, :] - μ) < (clip_threshold * σ)
-	end
+function outlier_mask(dimages, last_unsaturated; clip_threshold = 20)
+    @timeit "alloc" mask=ones(Bool, size(dimages))
+
+    read_buffer = zeros(eltype(dimages), size(dimages, 3))
+
+    # skip the reference array, just do the 2048x2048 real pixels
+    @timeit "loop" for i in 1:2048, j in 1:2048
+        # TODO make sure this is nonallocating. Put things in a buffer for faster calculations.
+        @views read_buffer[1:last_unsaturated[i, j]] .= dimages[
+            i, j, 1:last_unsaturated[i, j]]
+
+        # if there's 3 or fewer unsaturated reads, we can't assess outliers
+        if last_unsaturated[i, j] <= 2
+            continue
+        end
+
+        @timeit "masked diffs view" diffs=@views read_buffer[1:last_unsaturated[i, j]]
+        @timeit "mean" @views μ = mean(diffs)
+        @timeit "iqr" @views σ = iqr(diffs) / 1.34896
+
+        if σ == 0
+            continue
+        end
+
+        # same here, it's easier to write performant code as a loop
+        @timeit "mask" for k in 1:last_unsaturated[i, j]
+            mask[i, j, k] = (read_buffer[k] - μ) < (clip_threshold * σ)
+        end
     end
     mask
 end
@@ -108,6 +148,7 @@ matrix identity to solve the system of equations.
 - `datacube` has shape (npix_x,npix_y,n_reads), in units of DN
 - `gainMat`: The gain for each pixel (npix_x,npix_y), in units of e-/DN
 - `readVarMat`: the read noise (as a variance) for each pixel (npix_x,npix_y), in units of DN/read
+- `sat_mat`: the saturation level for each pixel (npix_x,npix_y), in units of DN
 
 # Keyword Arguments
 - firstind: the index of the first read that should be used.
@@ -119,7 +160,7 @@ A tuple of:
 - `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
 - `chi2s` is the chi squared value for each pixel
 - `CRimage` is the cosmic ray count image
-- `sat_mask` is the mask of saturated pixels
+- `last_unsaturated` is the index of the last unsaturated read for each pixel
 
 !!! warning
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
@@ -127,53 +168,56 @@ A tuple of:
 Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler.
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
-function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
+function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_repeat = 2)
     # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
 
     # identify saturated pixels
-    sat_mask = saturation_mask(datacube)
+    @timeit "new sat mask" last_unsaturated=get_last_unsaturated_read(datacube, sat_mat) # TODO use
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
         @views datacube[:, :, i] .= (datacube[:, :, i] .- datacube[:, :, i - 1])
     end
-    # this view is to minimize indexing headaches
-    dimages = view(datacube, :, :, ((firstind + 1):size(datacube, 3)))
+    @timeit "setup views" begin
+        # this view is to minimize indexing headaches
+        dimages = @views datacube[:, :, (firstind + 1):end]
+        # modify the last_unsaturated_read accordingly.  It now refers to diffs, not reads
+        last_unsaturated .-= 1
+    end
 
-    not_cosmic_ray = outlier_mask(dimages)
-    # don't try to do CR rejection on saturated pixels
-    not_cosmic_ray[sat_mask, :] .= true
+    @timeit "CR mask" not_cosmic_ray=outlier_mask(dimages, last_unsaturated)
     CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
 
-#    rates = dropdims(mean(dimages; dims = 3), dims = 3)
+    #    rates = dropdims(mean(dimages; dims = 3), dims = 3)
     rates = dropdims(median(dimages; dims = 3), dims = 3)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
 
-    ndiffs = size(dimages, 3)
-    # working arrays
-    ones_vec = ones(ndiffs)
-    KinvQones = zeros(ndiffs)
-    KinvQdata = zeros(ndiffs)
-    Kinv = zeros(ndiffs)
+    @timeit "allocs" begin
+        ndiffs = size(dimages, 3)
+        # working arrays
+        ones_vec = ones(ndiffs)
+        KinvQones = zeros(ndiffs)
+        KinvQdata = zeros(ndiffs)
+        Kinv = zeros(ndiffs)
 
-    # eigenvectors of a matrix with 1 on the diagonal, and -2 on the off-diagonals
-    Q = @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
-    Q .*= sqrt(2 / (ndiffs + 1))
-    Qones = Q * ones_vec
-    # eigenvalues of that matrix
-    D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
-    Qdata = similar(Qones)
-    #TODO delete
-    d1s = sum(dimages, dims = 3)
-    d2s = sum(abs2, dimages, dims = 3)
+        # eigenvectors of a matrix with 1 on the diagonal, and -2 on the off-diagonals
+        Q = @. sin((1:ndiffs) * (1:ndiffs)' * π / (ndiffs + 1))
+        Q .*= sqrt(2 / (ndiffs + 1))
+        Qones = Q * ones_vec
+        # eigenvalues of that matrix
+        D = (1 .- 4 * cos.((1:ndiffs) * π / (ndiffs + 1)))
+        Qdata = similar(Qones)
+        d1s = sum(dimages, dims = 3)
+        d2s = sum(abs2, dimages, dims = 3)
+    end
 
-    for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
+    @timeit "fit" for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
         good_diffs = not_cosmic_ray[pixel_ind, :]
         n_good_diffs = sum(good_diffs)
         if n_good_diffs == ndiffs
-            read_var = readVarMat[pixel_ind]
+            read_var = read_var_mat[pixel_ind]
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
             d2 = d2s[pixel_ind, 1]
@@ -181,7 +225,7 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             Qones = Q * ones_vec
 
             for _ in 1:n_repeat
-                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] / gainMat[pixel_ind] : 0
+                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] / gain_mat[pixel_ind] : 0
                 x = (rate_guess + 1.5read_var)
                 y = 2 * x / read_var
 
@@ -200,8 +244,8 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
             # this implementation is super naive
 
             for _ in 1:n_repeat
-                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] / gainMat[pixel_ind] : 0
-                read_var = readVarMat[pixel_ind]
+                rate_guess = rates[pixel_ind] > 0 ? rates[pixel_ind] / gain_mat[pixel_ind] : 0
+                read_var = read_var_mat[pixel_ind]
                 @views C = SymTridiagonal(
                     (rate_guess + 2read_var) .* ones_vec, -read_var .* ones_vec[1:(end - 1)]
                 )[good_diffs, good_diffs]
@@ -212,12 +256,11 @@ function sutr_wood!(datacube, gainMat, readVarMat; firstind = 1, n_repeat = 2)
                 @views chi2s[pixel_ind] = (dimages[pixel_ind, good_diffs]' *
                                            (C \ dimages[pixel_ind, good_diffs])) /
                                           ivars[pixel_ind] - rates[pixel_ind]^2 * ivars[pixel_ind]
-
             end
         end
     end
     # return rates .* gainMat, ivars ./ (gainMat .^ 2), chi2s, CRimage # outputs in electrons/read
-    return rates, ivars, chi2s, CRimage, sat_mask # outputs in DN/read
+    return rates, ivars, chi2s, CRimage, last_unsaturated # outputs in DN/read
 end
 
 function load_gain_maps(gainReadCalDir, tele, chips)
@@ -247,7 +290,7 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
         if isfile(readVarMatPath)
             f = FITS(readVarMatPath)
             # TODO: Tim and I need to sort out this factor of 2
-#            dat = (read(f[1]) .^ 2) ./ 2
+            #            dat = (read(f[1]) .^ 2) ./ 2
             dat = (read(f[1]) .^ 2)
             close(f)
             refval = nanzeromedian(dat)
@@ -262,4 +305,200 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
         end
     end
     return readVarMatDict
+end
+
+function load_saturation_maps(tel, chips; datadir = "data/saturation_maps")
+    chips = replace(chips, "a" => "R", "b" => "G", "c" => "B")
+    tel = lowercase(tel)
+    saturationMatDict = Dict{String, Array{Float64, 2}}()
+    for chip in string.(collect(chips))
+        saturationMatPath = joinpath(datadir, "saturation_map_$(tel)_chip$(chip).h5")
+        saturationMatDict[chip] = JLD2.load(saturationMatPath, "saturation_values")
+    end
+    return saturationMatDict
+end
+
+# firstind overriden for APO dome flats
+function process_3D(outdir, runname, mjd, expid, chip; firstind = 3,
+        cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
+    dirName = joinpath(outdir, "apred/$(mjd)/")
+    if !ispath(dirName)
+        mkpath(dirName)
+    end
+    plotdirName = joinpath(outdir, "plots/$(mjd)/")
+    if !ispath(plotdirName)
+        mkpath(plotdirName)
+    end
+
+    df = read_almanac_exp_df(joinpath(outdir, "almanac/$(runname).h5"), parg["tele"], mjd)
+    #        println(expid,chip,size(df.observatory),size(df.mjd),size(df.exposure_int))
+    # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
+    rawpath = build_raw_path(
+        df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
+    cartid = df.cartidInt[expid]
+    # decompress and convert apz data format to a standard 3D cube of reads
+    cubedat, hdr_dict = apz2cube(rawpath)
+
+    nread_total = size(cubedat, 3)
+
+    # ADD? reset anomaly fix (currently just drop first ind or two as our "fix")
+
+    # override the firstind and extractMethod in special cases
+    # we drop the first read, but might need to adjust for the few read cases (2,3,4,5)
+    firstind,
+    extractMethod = if ((df.exptype[expid] == "DOMEFLAT") &
+                        (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
+        2, "dcs"
+    elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
+        2, "dcs"
+    elseif (nread_total == 3)
+        #catch some weird cases (like nreads=3 with Darks)
+        #but still reduce them to prevent errors later in pipeline_2d_1d
+        #ULTIMATELY want to make it so these exposures are removed from runlist earlier
+        2, "dcs"
+    else
+        firstind, extractMethod
+    end
+
+    # Might want lastind_loc as well to truncate when all reads are
+    # saturated (important for calculating the exposure mid time)
+    lastind_loc = size(cubedat, 3)
+
+    tdat = @view cubedat[:, :, firstind:lastind_loc]
+    ndiff_used = size(tdat, 3) - 1 # nread_used-1
+
+    first_image_start_time = TAIEpoch(hdr_dict[firstind]["DATE-OBS"])
+    last_image_start_time = TAIEpoch(hdr_dict[lastind_loc]["DATE-OBS"])
+    dtime_read = (hdr_dict[firstind]["INTOFF"] / 1000 / 3600 / 24)days #dt_read, orig in ms, convert to days
+    dtime_delay = (hdr_dict[firstind]["INTDELAY"] / 3600 / 24)days #orig in seconds, convert to days
+    exptime_est = (hdr_dict[firstind]["EXPTIME"] / 3600 / 24)days
+
+    # NOT using dtime_delay because we start directly at first_image_start_time
+    # (though we might need to think about this more: not sure what dtime_delay does)
+    # REMEMBER to add half of a dtime_read to shift to center of exposure
+
+    # Like DRP outputs (we think)
+    mjd_mid_exposure_old = modified_julian(first_image_start_time
+                                           +
+                                           0.5 * exptime_est * size(tdat, 3) / nread_total)
+    # Using dread_time*ndiff_USED
+    mjd_mid_exposure_rough = modified_julian(first_image_start_time
+                                             +
+                                             dtime_read *
+                                             (0.5 + 0.5 * (size(tdat, 3) - 1)))
+    # Using times directly from header
+    mjd_mid_exposure_precise = modified_julian(first_image_start_time + 0.5 * dtime_read
+                                               +
+                                               0.5 *
+                                               (last_image_start_time - first_image_start_time))
+    mjd_mid_exposure = mjd_mid_exposure_precise
+
+    ## zero pointing per read and for ref, sci, and relative for sci amp
+    ## defer 1/f correction to 2D stage
+    outdat = Float64.(tdat)
+    ref_zpt_out, sci_zpt_out, amp_off_vec = zeropoint_read_dcube!(outdat)
+
+    # ADD? reference array-based masking/correction
+
+    # ADD? nonlinearity correction
+
+    if save3dcal
+        #make copy before it is adjusted
+        outdat_cal = copy(outdat)
+    end
+
+    # extraction 3D -> 2D
+    if extractMethod == "dcs"
+        # TODO some kind of outlier rejection, this just keeps all diffs
+        dimage, ivarimage, chisqimage = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
+        CRimage = zeros(Int, size(dimage))
+        last_unsaturated = fill(ndiff_used, 2560, 2048) # exclude the reference array
+    elseif extractMethod == "sutr_wood"
+        # n.b. this will mutate outdat
+        dimage, ivarimage, chisqimage, CRimage, last_unsaturated = sutr_wood!(
+            outdat, gainMatDict[chip], readVarMatDict[chip], saturationMatDict[chip])
+    else
+        error("Extraction method not recognized")
+    end
+
+    # write ar2D file
+    metadata = Dict(
+        "cartid" => cartid,
+        "ndiff_used" => ndiff_used,
+        "nread_total" => nread_total,
+        "extraction_method" => extractMethod,
+        "mjd_mid_exposure_old" => value(mjd_mid_exposure_old),
+        "mjd_mid_exposure_rough" => value(mjd_mid_exposure_rough),
+        "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
+        "mjd_mid_exposure" => value(mjd_mid_exposure)
+    )
+    # need to clean up exptype to account for FPI versus ARCLAMP
+    outfname = join(
+        ["ar2D", df.observatory[expid], df.mjd[expid],
+            last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+        "_")
+    fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
+    safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated)
+
+    if save3dcal
+        outfname3d = join(
+            ["ar3Dcal", df.observatory[expid], df.mjd[expid],
+                last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+            "_")
+        fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
+        safe_jldsave(
+            fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated,
+            outdat = outdat_cal, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip],
+            ref_zpt_out = ref_zpt_out, sci_zpt_out = sci_zpt_out, amp_off_vec = amp_off_vec)
+    end
+
+    return fname
+end
+
+# come back to tuning the chi2perdofcut once more rigorously establish noise model
+function process_2Dcal(fname; chi2perdofcut = 100)
+    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
+    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+
+    dimage = load(fname, "dimage")
+    ivarimage = load(fname, "ivarimage")
+    CRimage = load(fname, "CRimage")
+    chisqimage = load(fname, "chisqimage")
+    last_unsaturated = load(fname, "last_unsaturated")
+
+    metadata = read_metadata(fname)
+    # n.b. every pixel does't use this many diffs. Some are truncated due to saturation
+    ndiff_used = metadata["ndiff_used"]
+
+    ### dark current subtraction
+    darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*.h5", dirname(fname)))
+    if length(darkRateflst) != 1
+        error("I didn't just find one darkRate file for mjd $mjd, I found $(length(darkRateflst))")
+    end
+    darkRate = load(darkRateflst[1], "dark_rate")
+    pix_bitmask = load(darkRateflst[1], "dark_pix_bitmask")
+
+    dimage .-= darkRate
+    # should I be modifying ivarimage? (uncertainty on dark rate in quad... but dark subtraction has bigger sys)
+
+    ### flat fielding
+    flatFractionflst = sort(glob("flatFraction_$(tele)_$(chip)_*.h5", dirname(fname)))
+    if length(flatFractionflst) != 1
+        error("I didn't just find one flatFraction file for mjd $mjd, I found $(length(flatFractionflst))")
+    end
+    flat_im = load(flatFractionflst[1], "flat_im")
+    flat_pix_bitmask = load(flatFractionflst[1], "flat_pix_bitmask")
+    dimage[5:2044, 5:2044] ./= flat_im
+    ivarimage[5:2044, 5:2044] .*= flat_im .^ 2
+    pix_bitmask[5:2044, 5:2044] .|= flat_pix_bitmask
+
+    pix_bitmask .|= (CRimage .== 1) * 2^7
+    pix_bitmask .|= (CRimage .> 1) * 2^8
+    pix_bitmask .|= ((chisqimage ./ last_unsaturated) .> chi2perdofcut) * 2^9
+    # these values are now defined for all pixels including the reference array
+    pix_bitmask .|= (last_unsaturated .<= 0) * 2^13
+    pix_bitmask .|= (last_unsaturated .< ndiff_used) * 2^14
+
+    outfname = replace(fname, "ar2D" => "ar2Dcal")
+    safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
 end
