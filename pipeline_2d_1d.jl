@@ -109,17 +109,9 @@ flush(stdout);
     using AstroTime # can remove after Adam merges the PR to recast as Float
     using ParallelDataTransfer, ProgressMeter
     using ApogeeReduction
+    using ApogeeReduction: read_almanac_exp_df, gh_profiles, read_metadata, regularize_trace, extract_boxcar, extract_optimal_iter, safe_jldsave, get_fluxing_file, get_fibTargDict, get_1d_name, get_and_save_sky_wavecal, get_and_save_sky_dither_per_fiber, reinterp_spectra
 
-    src_dir = "./"
-    include(src_dir * "src/ar1D.jl")
-    include(src_dir * "src/spectraInterpolation.jl")
-    include(src_dir * "src/fileNameHandling.jl")
-    include(src_dir * "src/utils.jl")
-    include(src_dir * "src/skyline_peaks.jl")
-    include(src_dir * "src/arclamp_peaks.jl")
-    include(src_dir * "src/wavecal.jl")
-    include(src_dir * "src/cal_build/traceExtract_GH.jl")
-    include(src_dir * "src/makie_plotutils.jl")
+    include("src/makie_plotutils.jl")
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -365,8 +357,8 @@ all1DFPI = vcat(all1DFPIperchip...)
 
 ## load rough wave dict and sky lines list
 @everywhere begin
-    roughwave_dict = load(src_dir * "data/roughwave_dict.jld2", "roughwave_dict")
-    df_sky_lines = CSV.read(src_dir * "data/APOGEE_lines.csv", DataFrame)
+    roughwave_dict = load("data/roughwave_dict.jld2", "roughwave_dict")
+    df_sky_lines = CSV.read("data/APOGEE_lines.csv", DataFrame)
     df_sky_lines.linindx = 1:size(df_sky_lines, 1)
 end
 
@@ -466,7 +458,7 @@ all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
 println("Reinterpolating exposure spectra:");
 flush(stdout);
 @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
-    fname, backupWaveSoln = night_wave_soln)
+    fname, roughwave_dict,backupWaveSoln = night_wave_soln)
 @showprogress pmap(reinterp_spectra_partial, all1Da)
 
 all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")

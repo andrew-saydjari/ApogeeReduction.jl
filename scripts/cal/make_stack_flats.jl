@@ -1,11 +1,7 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
+using ApogeeReduction: cal2df, load_gain_maps, get_cal_file, gen_design_mat, grow_msk2d, nanzeromedian, nanzeroiqr, safe_jldsave, bad_pix_bits
 
-src_dir = "../"
-include(src_dir * "/fileNameHandling.jl")
-include(src_dir * "/utils.jl")
-include(src_dir * "/makie_plotutils.jl")
-include(src_dir * "/ar3D.jl")
-include(src_dir * "/ar2Dcal.jl")
+include("../../src/makie_plotutils.jl") # TODO: move this to ApogeeReduction.jl
 
 ## Parse command line arguments
 function parse_commandline()

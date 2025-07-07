@@ -3,9 +3,8 @@ Pkg.instantiate();
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Optim
 using Polynomials: Polynomial
 
-
+using ApogeeReduction
 src_dir = "../"
-include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
 
 ## Parse command line arguments

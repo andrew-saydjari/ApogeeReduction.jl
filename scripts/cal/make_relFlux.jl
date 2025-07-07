@@ -1,5 +1,4 @@
 using ArgParse, Distributed, SlurmClusterManager, SlackThreads
-include("../utils.jl") # for safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()
@@ -58,12 +57,9 @@ end
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using HDF5, DataFrames, SlackThreads
-    src_dir = "../"
-    include(src_dir * "/makie_plotutils.jl")
-    include(src_dir * "/utils.jl")
-    include(src_dir * "/fileNameHandling.jl")
-    include(src_dir * "/ar1D.jl")
+    include("../../src/makie_plotutils.jl")
     using ApogeeReduction
+    using ApogeeReduction: safe_jldsave, read_almanac_exp_df, get_1d_name, get_relFlux, read_metadata
 end
 
 @passobj 1 workers() parg # make it available to all workers

@@ -3,7 +3,7 @@
 # julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
 
 using ArgParse, Glob, SlackThreads
-include("../utils.jl") # for the slack environment variables
+using ApogeeReduction # for the slack environment variables
 
 function parse_commandline()
     s = ArgParseSettings()

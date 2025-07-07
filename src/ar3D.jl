@@ -3,7 +3,7 @@ using LinearAlgebra: SymTridiagonal, Diagonal, mul!
 using Statistics: mean, median
 using StatsBase: iqr
 using TimerOutputs
-using FITSIO, EllipsisNotation
+using FITSIO, EllipsisNotation, AstroTime, Glob
 
 function apz2cube(fname)
     f = FITS(fname)
