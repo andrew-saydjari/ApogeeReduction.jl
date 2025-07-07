@@ -181,7 +181,7 @@ Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler.
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
 function sutr_wood(dimages, gain_mat, read_var_mat, last_unsaturated, not_cosmic_ray; n_repeat = 2)
-    # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024
+    # core Woodbury version of SUTR by Andrew Saydjari on October 17, 2024
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
 
     # initial guess for iterative flux calculation.  Median works better than mean.
@@ -209,9 +209,12 @@ function sutr_wood(dimages, gain_mat, read_var_mat, last_unsaturated, not_cosmic
     end
 
     @timeit "fit" for pixel_ind in CartesianIndices(view(dimages, :, :, 1))
+        # ignore cosmic rays and saturated pixels
         good_diffs = not_cosmic_ray[pixel_ind, :]
+        good_diffs[max(last_unsaturated[pixel_ind] + 1, 1):end] .= false
         n_good_diffs = sum(good_diffs)
-        if n_good_diffs == ndiffs
+
+        if n_good_diffs == ndiffs # if all diffs are good, we can use a fast implementation
             read_var = read_var_mat[pixel_ind]
             @views mul!(Qdata, Q, view(dimages, pixel_ind, :))
             d1 = d1s[pixel_ind, 1]
@@ -233,7 +236,10 @@ function sutr_wood(dimages, gain_mat, read_var_mat, last_unsaturated, not_cosmic
                 chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
                                    rates[pixel_ind]^2 * ivars[pixel_ind]
             end
-        else
+        else # otherwise, we need to do the slow implementation.
+            # This _should_ only be needed for a small fraction of pixels.
+            # Several things in this branch allocate
+
             # the appendix of https://github.com/dfink/gspice/blob/main/paper/gspice.pdf
             # has a nice derivation of how to invert a matrix with masked elements
             # this implementation is super naive
@@ -248,9 +254,8 @@ function sutr_wood(dimages, gain_mat, read_var_mat, last_unsaturated, not_cosmic
                 @views ivars[pixel_ind] = ones_vec[1:n_good_diffs]' * (C \ ones_vec[1:n_good_diffs])
                 @views rates[pixel_ind] = (ones_vec[1:n_good_diffs]' *
                                            (C \ dimages[pixel_ind, good_diffs])) / ivars[pixel_ind]
-                @views chi2s[pixel_ind] = (dimages[pixel_ind, good_diffs]' *
-                                           (C \ dimages[pixel_ind, good_diffs])) /
-                                          ivars[pixel_ind] - rates[pixel_ind]^2 * ivars[pixel_ind]
+                @views r = dimages[pixel_ind, good_diffs] .- rates[pixel_ind]
+                @views chi2s[pixel_ind] = r' * (C \ r)
             end
         end
     end
@@ -507,10 +512,11 @@ function process_2Dcal(fname; chi2perdofcut = 100)
 
     pix_bitmask .|= (CRimage .== 1) * 2^7
     pix_bitmask .|= (CRimage .> 1) * 2^8
-    pix_bitmask .|= ((chisqimage ./ last_unsaturated) .> chi2perdofcut) * 2^9
+    pix_bitmask .|= ((chisqimage ./ (last_unsaturated .- CRimage)) .> chi2perdofcut) * 2^9
     # these values are now defined for all pixels including the reference array
-    pix_bitmask .|= (last_unsaturated .<= 0) * 2^13
-    pix_bitmask .|= (last_unsaturated .< ndiff_used) * 2^14
+
+    pix_bitmask .|= (last_unsaturated .< ndiff_used) * 2^13
+    pix_bitmask .|= (last_unsaturated .<= 0) * 2^14
 
     outfname = replace(fname, "ar2D" => "ar2Dcal")
     safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
