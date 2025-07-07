@@ -22,9 +22,10 @@ function apz2cube(fname)
 end
 
 function zeropoint_read_dcube!(dcube)
+    # average reference array ramp
     ref_zpt_vec = mean(dcube[2049:end, :, :], dims = (1, 2))
     sci_zpt_vec = (mean(dcube[1:4, :, :], dims = (1, 2)) +
-                  mean(dcube[2045:2048, :, :], dims = (1, 2))) ./ 2
+                   mean(dcube[2045:2048, :, :], dims = (1, 2))) ./ 2
 
     ref_zpt_out = dropdims(ref_zpt_vec, dims = (1, 2))
     sci_zpt_out = dropdims(sci_zpt_vec, dims = (1, 2))
@@ -111,7 +112,7 @@ function outlier_mask(dimages, last_unsaturated; clip_threshold = 20)
         @views read_buffer[1:last_unsaturated[i, j]] .= dimages[
             i, j, 1:last_unsaturated[i, j]]
 
-        # if there's 3 or fewer unsaturated reads, we can't assess outliers
+        # if there's 2 or fewer unsaturated reads, we can't assess outliers
         if last_unsaturated[i, j] <= 2
             continue
         end
@@ -148,7 +149,8 @@ matrix identity to solve the system of equations.
 - `datacube` has shape (npix_x,npix_y,n_reads), in units of DN
 - `gainMat`: The gain for each pixel (npix_x,npix_y), in units of e-/DN
 - `readVarMat`: the read noise (as a variance) for each pixel (npix_x,npix_y), in units of DN/read
-- `sat_mat`: the saturation level for each pixel (npix_x,npix_y), in units of DN
+- `last_unsaturated`: the index of the last unsaturated read for each pixel. Has shape (npix_x,npix_y)
+- `not_cosmic_ray`: a mask of which reads are not cosmic rays for each pixel. Has the same shape as datacube.
 
 # Keyword Arguments
 - firstind: the index of the first read that should be used.
@@ -159,8 +161,6 @@ A tuple of:
 - `rates` is the best-fit count rate for each pixel
 - `ivars` is the inverse variance describing the uncertainty in the count rate for each pixel
 - `chi2s` is the chi squared value for each pixel
-- `CRimage` is the cosmic ray count image
-- `last_unsaturated` is the index of the last unsaturated read for each pixel
 
 !!! warning
     This mutates datacube. The difference images are written to datacute[:, :, firstindex+1:end]
@@ -168,12 +168,10 @@ A tuple of:
 Written by Andrew Saydjari, based on work by Kevin McKinnon and Adam Wheeler.
 Based on [Tim Brandt's SUTR python code](https://github.com/t-brandt/fitramp).
 """
-function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_repeat = 2)
+function sutr_wood!(datacube, gain_mat, read_var_mat, last_unsaturated, not_cosmic_ray;
+        firstind = 1, n_repeat = 2)
     # Woodbury version of SUTR by Andrew Saydjari on October 17, 2024
     # based on Tim Brandt SUTR python code (https://github.com/t-brandt/fitramp)
-
-    # identify saturated pixels
-    @timeit "new sat mask" last_unsaturated=get_last_unsaturated_read(datacube, sat_mat) # TODO use
 
     # construct the differences images in place, overwriting datacube
     for i in size(datacube, 3):-1:(firstind + 1)
@@ -186,10 +184,7 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
         last_unsaturated .-= 1
     end
 
-    @timeit "CR mask" not_cosmic_ray=outlier_mask(dimages, last_unsaturated)
-    CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
-
-    #    rates = dropdims(mean(dimages; dims = 3), dims = 3)
+    # initial guess for iterative flux calculation.  Median works better than mean.
     rates = dropdims(median(dimages; dims = 3), dims = 3)
     ivars = zeros(Float64, size(datacube, 1), size(datacube, 2))
     chi2s = zeros(Float64, size(datacube, 1), size(datacube, 2))
@@ -259,8 +254,7 @@ function sutr_wood!(datacube, gain_mat, read_var_mat, sat_mat; firstind = 1, n_r
             end
         end
     end
-    # return rates .* gainMat, ivars ./ (gainMat .^ 2), chi2s, CRimage # outputs in electrons/read
-    return rates, ivars, chi2s, CRimage, last_unsaturated # outputs in DN/read
+    return rates, ivars, chi2s # outputs in DN/read (not multiplied by gain)
 end
 
 function load_gain_maps(gainReadCalDir, tele, chips)
@@ -394,6 +388,9 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
                                                (last_image_start_time - first_image_start_time))
     mjd_mid_exposure = mjd_mid_exposure_precise
 
+    # compute the last unsaturated read for each pixel.
+    last_unsaturated = get_last_unsaturated_read(outdat, saturationMatDict[chip])
+
     ## zero pointing per read and for ref, sci, and relative for sci amp
     ## defer 1/f correction to 2D stage
     outdat = Float64.(tdat)
@@ -408,16 +405,18 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
         outdat_cal = copy(outdat)
     end
 
+    # try to identify any cosmic rays
+    not_cosmic_ray = outlier_mask(outdat, last_unsaturated)
+    CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
+
     # extraction 3D -> 2D
-    if extractMethod == "dcs"
-        # TODO some kind of outlier rejection, this just keeps all diffs
-        dimage, ivarimage, chisqimage = dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
-        CRimage = zeros(Int, size(dimage))
-        last_unsaturated = fill(ndiff_used, 2560, 2048) # exclude the reference array
+    dimage, ivarimage, chisqimage = if extractMethod == "dcs"
+        # TODO use last_unsaturated and not_cosmic_ray
+        dcs(outdat, gainMatDict[chip], readVarMatDict[chip])
     elseif extractMethod == "sutr_wood"
         # n.b. this will mutate outdat
-        dimage, ivarimage, chisqimage, CRimage, last_unsaturated = sutr_wood!(
-            outdat, gainMatDict[chip], readVarMatDict[chip], saturationMatDict[chip])
+        sutr_wood!(
+            outdat, gainMatDict[chip], readVarMatDict[chip], last_unsaturated, not_cosmic_ray)
     else
         error("Extraction method not recognized")
     end
