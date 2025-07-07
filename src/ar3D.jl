@@ -23,8 +23,8 @@ end
 
 function zeropoint_read_dcube!(dcube)
     ref_zpt_vec = mean(dcube[2049:end, :, :], dims = (1, 2))
-    sci_zpt_vec = mean(dcube[1:4, :, :], dims = (1, 2)) +
-                  mean(dcube[(end - 3):end, :, :], dims = (1, 2))
+    sci_zpt_vec = (mean(dcube[1:4, :, :], dims = (1, 2)) +
+                  mean(dcube[2045:2048, :, :], dims = (1, 2))) ./ 2
 
     ref_zpt_out = dropdims(ref_zpt_vec, dims = (1, 2))
     sci_zpt_out = dropdims(sci_zpt_vec, dims = (1, 2))
@@ -43,7 +43,7 @@ function zeropoint_read_dcube!(dcube)
     end
 
     amp_off_vec = ref_bot .- reshape((ref_bot[1, :] .+ ref_bot[4, :]) ./ 2, 1, :)
-    amp_off_vec .+= ref_top .- .-reshape((ref_top[1, :] .+ ref_bot[4, :]) ./ 2, 1, :)
+    amp_off_vec .+= ref_top .- reshape((ref_top[1, :] .+ ref_top[4, :]) ./ 2, 1, :)
     amp_off_vec ./= 2
     amp_off_vec .-= reshape((amp_off_vec[1, :] .+ amp_off_vec[4, :]) ./ 2, 1, :)
 
