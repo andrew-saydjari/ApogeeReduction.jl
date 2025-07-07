@@ -631,6 +631,7 @@ end
 
 allExptype = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
 
+# TODO this should be ripped out
 # Define custom sorting order for exposure types
 function get_exptype_priority(exptype::AbstractString)
     priority_map = Dict(
