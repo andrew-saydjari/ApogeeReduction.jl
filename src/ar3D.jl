@@ -22,7 +22,6 @@ function apz2cube(fname)
 end
 
 function zeropoint_read_dcube!(dcube)
-    # average reference array ramp
     ref_zpt_vec = mean(dcube[2049:end, :, :], dims = (1, 2))
     sci_zpt_vec = (mean(dcube[1:4, :, :], dims = (1, 2)) +
                    mean(dcube[2045:2048, :, :], dims = (1, 2))) ./ 2
