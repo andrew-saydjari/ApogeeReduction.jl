@@ -29,6 +29,30 @@ CATEGORY_PATTERNS = [
 const OBJECT_TYPES = ["OBJECT", "DOMEFLAT", "INTERNALFLAT", "QUARTZFLAT", "DARK", "ARCLAMP", ""]
 const OBJECT_TYPE_ORDER = Dict(OBJECT_TYPES .=> 1:length(OBJECT_TYPES))
 
+########################################################
+# Categorize the plots
+# edit here to categorize new plot types
+########################################################
+# Define the main categories and their patterns in the desired order
+# Each of these is a section name and a regex pattern for what should be in that section
+CATEGORY_PATTERNS = [
+    ("ar1Dunical", r"ar1Dunical_.*\.png$"),
+    ("ar1Duni", r"ar1Duni_.*\.png$"),
+    ("wave", r".*wave_.*\.png$"),
+    ("night wave", r"night.*wave_.*\.png$"),
+    ("skyPeakResiduals", r"skyPeakResiduals_.*\.png$"),
+    ("ar1D", r"ar1D_.*\.png$"),
+    ("ar2Dresidualscal", r"ar2Dresidualscal_.*\.png$"),
+    ("fpi", r"fpi.*\.png$"),
+    ("Parameters", r".*Params_.*\.png$")
+]
+
+# Define the order in which object types should appear
+# Leave empty to use alphabetical order
+# the empty string is for files that don't have an object type
+const OBJECT_TYPES = ["OBJECT", "DOMEFLAT", "INTERNALFLAT", "QUARTZFLAT", "DARK", "ARCLAMP", ""]
+const OBJECT_TYPE_ORDER = Dict(OBJECT_TYPES .=> 1:length(OBJECT_TYPES))
+
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
