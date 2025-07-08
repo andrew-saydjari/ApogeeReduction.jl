@@ -109,7 +109,7 @@ flush(stdout);
     using AstroTime # can remove after Adam merges the PR to recast as Float
     using ParallelDataTransfer, ProgressMeter
     using ApogeeReduction
-    using ApogeeReduction: read_almanac_exp_df, gh_profiles, read_metadata, regularize_trace, extract_boxcar, extract_optimal_iter, safe_jldsave, get_fluxing_file, get_fibTargDict, get_1d_name, get_and_save_sky_wavecal, get_and_save_sky_dither_per_fiber, reinterp_spectra
+    using ApogeeReduction: read_almanac_exp_df, gh_profiles, read_metadata, regularize_trace, extract_boxcar, extract_optimal_iter, safe_jldsave, get_fluxing_file, get_fibTargDict, get_1d_name, get_and_save_sky_wavecal, get_and_save_sky_dither_per_fiber, get_and_save_sky_peaks, get_ave_night_wave_soln, sky_wave_plots, reinterp_spectra
 
     include("src/makie_plotutils.jl")
 

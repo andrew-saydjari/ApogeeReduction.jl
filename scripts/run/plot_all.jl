@@ -4,8 +4,7 @@
 using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
 using ApogeeReduction
-src_dir = "../"
-include(src_dir * "/makie_plotutils.jl")
+include("../../src/makie_plotutils.jl")
 ## Parse command line arguments
 function parse_commandline()
     s = ArgParseSettings()

@@ -1,4 +1,4 @@
-using StatsBase: iqr, percentile, quantile
+using StatsBase: iqr, percentile, quantile, std
 using Jackknife
 using JLD2, HDF5 # for safe_jldsave and read_metadata
 using Distributed: myid
