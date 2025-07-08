@@ -4,6 +4,7 @@
 using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
 using ApogeeReduction
+using ApogeeReduction: read_almanac_exp_df, get_1d_name, get_fibTargDict, nanzeropercentile, nanzeromedian, parseCartID, bad_pix_bits, fiberIndx2fiberID, logUniWaveAPOGEE, isnanorzero
 include("../../src/makie_plotutils.jl")
 ## Parse command line arguments
 function parse_commandline()

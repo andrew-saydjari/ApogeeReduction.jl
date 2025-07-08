@@ -16,16 +16,17 @@ The pipeline produces files at many stages of reduction.
 ## Structure
 
 There are four main types of files in this repository:
-- run_*.sh : wrapper scripts to run the pipeline (submit job, determine resources, etc.)
-- make_runlist_*.sh: interface to get the data to run the pipeline on
+- scripts/\*/run_*.sh : wrapper scripts to run the pipeline (submit job, determine resources, etc.)
+- scripts/\*/make_runlist_*.sh: interface to get the data to run the pipeline on
 - pipeline_*.sh: how functions combine to process the data
 - src/*.jl: core functions of the repository
 
 ### File Structure
 ```
 ├── src/ : core functions of the repository
-│   └── run_scripts/ : scripts general users will interact with to run the pipeline
-│   └── cal_build/ : scripts to build the calibrations files
+├── scripts/ : scripts for running the pipeline
+│   └── run/ : scripts general users will interact with to run the pipeline
+│   └── cal/ : scripts to build the calibrations files
 ├── test/ : test files for the repository (name matched to the src/ files they test)
 ├── metadata/ : metadata files for the repository (mostly dates for instrument changes/special calibrations runs)
 ├── data/ : input data (e.g. sky line lists from HITRAN)
