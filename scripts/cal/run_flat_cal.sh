@@ -43,16 +43,16 @@ mkdir -p ${outdir}almanac
 almanac -v -p 12 --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $almanac_file
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
-julia +1.11.0 --project="./" src/cal_build/make_runlist_internal_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
+julia +1.11.0 --project="./" scripts/cal/make_runlist_internal_flats.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 # run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 julia +1.11.0 --project="./" pipeline.jl --workers_per_node 40 --tele $tele --runlist $runlist --outdir $doutdir --runname $runname --chips "RGB" --doCal2d false
 
 # make the stacked flats
 mkdir -p ${outdir}flats
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "R" --dropfirstn $dropfirstn --flat_dir ${doutdir} --runlist $runlist --caldir_darks $caldir_darks
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "G" --dropfirstn $dropfirstn --flat_dir ${doutdir} --runlist $runlist --caldir_darks $caldir_darks
-julia +1.11.0 --project="./" src/cal_build/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "B" --dropfirstn $dropfirstn --flat_dir ${doutdir} --runlist $runlist --caldir_darks $caldir_darks
+julia +1.11.0 --project="./" scripts/cal/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "R" --dropfirstn $dropfirstn --flat_dir ${doutdir} --runlist $runlist --caldir_darks $caldir_darks
+julia +1.11.0 --project="./" scripts/cal/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "G" --dropfirstn $dropfirstn --flat_dir ${doutdir} --runlist $runlist --caldir_darks $caldir_darks
+julia +1.11.0 --project="./" scripts/cal/make_stack_flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --chip "B" --dropfirstn $dropfirstn --flat_dir ${doutdir} --runlist $runlist --caldir_darks $caldir_darks
 
 # Clean up logs and Report Timing
 formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))

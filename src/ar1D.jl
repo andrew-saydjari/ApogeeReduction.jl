@@ -3,9 +3,6 @@ using Distributions: cdf, Normal
 using Interpolations: linear_interpolation, Line
 using DataFrames
 
-include("./wavecal.jl")
-include("./skyline_peaks.jl")
-include("./fileNameHandling.jl")
 # this file contains the code needed to extract a 1D spectrum from a 2D images.
 # trace_params is of size (n_x_pix, n_fibers, 3)
 # the elements correspodn to flux, y-pixel, and gaussian witdth (sigma)
@@ -427,7 +424,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname; backupWaveSoln = nothing)
+function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
     # might need to add in telluric div functionality here?
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")

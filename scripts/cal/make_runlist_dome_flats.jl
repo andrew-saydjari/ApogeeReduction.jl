@@ -1,7 +1,7 @@
 using Pkg;
 Pkg.instantiate();
-using HDF5, ArgParse, DataFrames, JLD2
-include("../utils.jl") # for safe_jldsave
+using JLD2, ArgParse, DataFrames, HDF5
+using ApogeeReduction: safe_jldsave, read_almanac_exp_df
 
 ## Parse command line arguments
 function parse_commandline()
@@ -34,12 +34,10 @@ f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
     df = read_almanac_exp_df(f, parg["tele"], tstmjd)
-    expindx_list = findall((df.imagetyp .== "Dark") .& (df.nreadInt .> 29))
+    expindx_list = findall((df.imagetyp .== "DomeFlat") .& (df.nreadInt .> 3))
     for expindx in expindx_list
-        if expindx > 1 && df.imagetyp[expindx - 1] == "Dark"
-            push!(mjdexp_list, parse(Int, tstmjd))
-            push!(expid_list, expindx)
-        end
+        push!(mjdexp_list, parse(Int, tstmjd))
+        push!(expid_list, expindx)
     end
 end
 

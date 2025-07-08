@@ -1,12 +1,7 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, BinnedStatistics
 
-src_dir = "../"
-include(src_dir * "/fileNameHandling.jl")
-include(src_dir * "/utils.jl")
-include(src_dir * "/makie_plotutils.jl")
-include(src_dir * "/ApogeeReduction.jl")
-
-CHIP_LIST = ApogeeReduction.CHIP_LIST
+using ApogeeReduction
+include("../../src/makie_plotutils.jl")
 
 ## TODO Make sure this function is extended to check BOTH ar2D and ar2Dcal
 

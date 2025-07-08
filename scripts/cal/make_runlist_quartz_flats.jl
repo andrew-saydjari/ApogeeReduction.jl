@@ -1,7 +1,7 @@
 using Pkg;
 Pkg.instantiate();
 using JLD2, ArgParse, DataFrames, HDF5
-include("../utils.jl") # for safe_jldsave
+using ApogeeReduction: safe_jldsave, read_almanac_exp_df
 
 ## Parse command line arguments
 function parse_commandline()

@@ -2,8 +2,8 @@ using Pkg;
 Pkg.instantiate();
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
+using ApogeeReduction
 src_dir = "../"
-include(src_dir * "/utils.jl")
 include(src_dir * "/makie_plotutils.jl")
 
 ## Parse command line arguments
@@ -36,9 +36,9 @@ function summarize_fiber_thrpt(flat_type, tele)
 
     thrpt_mat = zeros(300, 3, length(fname_list))
     @showprogress for (findx, fname) in enumerate(fname_list),
-        (cindx, chip) in enumerate(["a", "b", "c"])
+        (cindx, chip) in enumerate(CHIP_LIST)
 
-        fname_loc = replace(fname, "_a_" => "_$(chip)_")
+        fname_loc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
         trace_params = load(fname_loc, "trace_params")
         thrpt_mat[:, cindx, findx] .= dropdims(nanzeromedian(trace_params[:, :, 1], 1), dims = 1)
     end
@@ -63,7 +63,7 @@ function summarize_fiber_thrpt(flat_type, tele)
     dat[msklow] .= NaN
 
     fig = Figure(size = (600, 600), fontsize = 22)
-    ax = Axis(fig[1, 1], title = "$tele Chip a", xlabel = "Time", ylabel = "Fiber TRACEID")
+    ax = Axis(fig[1, 1], title = "$tele Chip $(FIRST_CHIP)", xlabel = "Time", ylabel = "Fiber TRACEID")
     ce = heatmap!(ax, dat',
         colormap = :linear_bgy_10_95_c74_n256,
         nan_color = :red        # colorrange=(vmin,vmax)

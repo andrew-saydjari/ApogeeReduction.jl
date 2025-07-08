@@ -1,7 +1,9 @@
+# makes a runlist of all the exposures that should be run for a given night.
+# called by run_all.sh
 using Pkg;
 Pkg.instantiate();
-using JLD2, ArgParse, DataFrames, HDF5
-include("../utils.jl") # for safe_jldsave
+using HDF5, JLD2, ArgParse, DataFrames
+using ApogeeReduction: read_almanac_exp_df, safe_jldsave # for safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()
@@ -34,7 +36,10 @@ f = h5open(parg["almanac_file"])
 mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
     df = read_almanac_exp_df(f, parg["tele"], tstmjd)
-    expindx_list = findall((df.imagetyp .== "InternalFlat") .& (df.nreadInt .> 3))
+    good_exp = (df.nreadInt .> 3) .|
+               ((df.imagetyp .== "DomeFlat") .& (df.observatory .== "apo")) .|
+               ((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
+    expindx_list = findall(good_exp)
     for expindx in expindx_list
         push!(mjdexp_list, parse(Int, tstmjd))
         push!(expid_list, expindx)

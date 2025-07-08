@@ -2,7 +2,7 @@
 # Run all the data for a given night and telescope.
 
 # Arguments documented below, but for example (from the repo root dir):
-# sbatch ./src/run_scripts/run_all.sh apo 60855 --mail-type=NONE
+# sbatch ./scripts_run/run_all.sh apo 60855 --mail-type=NONE
 
 #SBATCH --account=sdss-np
 #SBATCH --partition=sdss-shared-np
@@ -69,7 +69,7 @@ almanac -v -p 12 --mjd-start $mjd --mjd-end $mjd --${tele} --output $almanac_fil
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imagine sitting at ApogeeReduction.jl level)
 print_elapsed_time "Building Runlist"
-julia +1.11.0 --project="./" src/run_scripts/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
+julia +1.11.0 --project="./" scripts/run/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
 
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
 # --workers_per_node 28 ## sometimes have to adjust this, could programmatically set based on the average or max read number in the exposures for that night
@@ -78,16 +78,16 @@ julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $runlist --outdi
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
     print_elapsed_time "Extracting Traces from Dome and Quartz Flats"
-    ./src/cal_build/run_trace_cal.sh $tele $mjd $mjd $caldir_darks $caldir_flats
+    ./scripts/cal/run_trace_cal.sh $tele $mjd $mjd $caldir_darks $caldir_flats
 
     print_elapsed_time "Running 2D->1D Pipeline"
     julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 32
 
     print_elapsed_time "Making Plots"
-    julia +1.11.0 --project="./" src/run_scripts/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
+    julia +1.11.0 --project="./" scripts/run/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
 
     print_elapsed_time "Generating plot page for web viewing"
-    julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd $mjd --outdir $outdir
+    julia +1.11.0 --project="./" scripts/run/generate_dashboard.jl --mjd $mjd --outdir $outdir
 fi
 
 print_elapsed_time "Job Completed"

@@ -3,13 +3,9 @@
 ## TODO add sky flux relFlux consistency check plots
 using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
-src_dir = "../"
-include(src_dir * "/fileNameHandling.jl")
-include(src_dir * "/utils.jl")
-include(src_dir * "/makie_plotutils.jl")
-include(src_dir * "/ar1D.jl")
-include(src_dir * "/ApogeeReduction.jl")
-
+using ApogeeReduction
+using ApogeeReduction: read_almanac_exp_df, get_1d_name, get_fibTargDict, nanzeropercentile, nanzeromedian, parseCartID, bad_pix_bits, fiberIndx2fiberID, logUniWaveAPOGEE, isnanorzero
+include("../../src/makie_plotutils.jl")
 ## Parse command line arguments
 function parse_commandline()
     s = ArgParseSettings()
@@ -56,11 +52,6 @@ parg = parse_commandline()
 
 println("Making plots for telescope: $(parg["tele"])")
 println("Output directory: $(parg["outdir"])")
-
-CHIP_LIST = ApogeeReduction.CHIP_LIST
-FIRST_CHIP = ApogeeReduction.FIRST_CHIP
-N_CHIPS = ApogeeReduction.N_CHIPS
-N_FIBERS = ApogeeReduction.N_FIBERS
 
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])

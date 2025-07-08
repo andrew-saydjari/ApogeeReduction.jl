@@ -1,9 +1,7 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
-src_dir = "../"
-include(src_dir * "/utils.jl")
-include(src_dir * "/fileNameHandling.jl")
-include(src_dir * "/makie_plotutils.jl")
+using ApogeeReduction: get_cal_file, nanzeromedian, nanzeroiqr, safe_jldsave, bad_pix_bits
+include("../../src/makie_plotutils.jl")
 
 ## Parse command line arguments
 function parse_commandline()
@@ -57,7 +55,7 @@ nfirst = 1 + parg["dropfirstn"]
 thread = SlackThread();
 thread("DARK stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
-bad_pix_bits = 2^2 + 2^4 + 2^5;
+bad_pix_bits_local = bad_pix_bits + 2^5; # add back in 2^5 (large dark current) for the darks code for now
 sig_measure = 0
 sig_bad_lower = 5
 sig_bad_upper = 7
@@ -106,7 +104,7 @@ pix_bit_mask .|= (abs.(dark_im) .> sig_measure .* sig_est) * 2^3
 pix_bit_mask .|= (dark_im .< -sig_bad_lower .* sig_est) * 2^4
 pix_bit_mask .|= (dark_im .> sig_bad_upper .* sig_est) * 2^5
 
-dat = dark_im[1:2048, 1:2048][pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .== 0]
+dat = dark_im[1:2048, 1:2048][pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits_local .== 0]
 sig_after = nanzeroiqr(dat)
 
 # save dark_pix_bitmask and dark_rate (electron per read)
@@ -152,10 +150,10 @@ end
 
 dark_im_msk = copy(dark_im)
 dark_im_msk[pix_bit_mask .& 2^3 .== 0] .= 0;
-dark_im_msk[pix_bit_mask .& bad_pix_bits .!= 0] .= NaN;
+dark_im_msk[pix_bit_mask .& bad_pix_bits_local .!= 0] .= NaN;
 
 totNum = length(pix_bit_mask[1:2048, 1:2048])
-badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits .!= 0
+badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits_local .!= 0
 corrVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .!= 0) .& .!badVec
 notCorVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .== 0)
 

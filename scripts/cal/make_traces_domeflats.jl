@@ -1,8 +1,5 @@
 using ArgParse, Distributed, SlurmClusterManager, SlackThreads
 
-src_dir = "../"
-include(src_dir * "/utils.jl")
-
 ## Parse command line arguments
 function parse_commandline()
     s = ArgParseSettings()
@@ -40,8 +37,6 @@ function parse_commandline()
     end
     return parse_args(s)
 end
-# I am really in a pickle now. These are really really nightly things, not something
-# for a range of MJD. I will need to change the way I am doing this.
 
 parg = parse_commandline()
 
@@ -57,11 +52,8 @@ end
 
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
-    src_dir = "../"
-    include(src_dir * "/makie_plotutils.jl")
-    include(src_dir * "/utils.jl")
-    include(src_dir * "/fileNameHandling.jl")
-    include(src_dir * "/cal_build/traceExtract_GH.jl")
+    using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, gh_profiles, trace_extract, safe_jldsave, trace_plots, bad_pix_bits
+    include("../../src/makie_plotutils.jl")
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -80,17 +72,17 @@ end
     mjd = load(parg["runlist"], "mjd")
     expid = load(parg["runlist"], "expid")
     flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                 expid[i], chip, "QUARTZFLAT", use_cal = true)
+                 expid[i], chip, "DOMEFLAT", use_cal = true)
              for i in eachindex(mjd), chip in chips]
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
-plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
+plot_paths = @showprogress desc=desc pmap(flist) do fname
     sname = split(split(split(fname, "/")[end],".h5")[1], "_")
     fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
-    
+
     mjdfps2plate = get_fps_plate_divide(teleloc)
     f = jldopen(fname)
     image_data = f["dimage"][1:2048, 1:2048]
@@ -113,15 +105,15 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
 
     safe_jldsave(
         parg["trace_dir"] *
-        "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
+        "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
-    return trace_plots("quartz", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
+    return trace_plots(dirNamePlots, "dome", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()
-thread("QUARTZFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
+thread("DOMEFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 for (filename, heights_widths_path) in zip(flist, plot_paths)
     thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
 end
-thread("QuartzFlat traces done.")
+thread("DomeFlat traces done.")

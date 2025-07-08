@@ -1,6 +1,9 @@
 using Polynomials: fit, Polynomial
 using SpecialFunctions: erf
 using Interpolations: linear_interpolation, Line
+using ProgressMeter
+include("makie_plotutils.jl")
+
 
 function _gauss_hermite_poly(x, n)
     if n == 1
@@ -1067,7 +1070,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     final_param_outputs, final_param_output_covs
 end
 
-function trace_plots(
+function trace_plots(dirNamePlots,
         cal_type, trace_params, teleloc, mjdloc, expidloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
     cut = 750
     fig = Figure(size = (1600, 800), fontsize = 22)

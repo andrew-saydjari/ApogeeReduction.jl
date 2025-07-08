@@ -114,12 +114,7 @@ flush(stdout);
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, ProgressMeter
     using AstroTime: TAIEpoch, modified_julian, days, value
-
-    src_dir = "./"
-    include(src_dir * "src/ar3D.jl")
-    include(src_dir * "src/ar2Dcal.jl")
-    include(src_dir * "src/fileNameHandling.jl")
-    include(src_dir * "src/utils.jl")
+    using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D, process_2Dcal, cal2df, get_cal_path, TAIEpoch
 end
 
 println(BLAS.get_config());
