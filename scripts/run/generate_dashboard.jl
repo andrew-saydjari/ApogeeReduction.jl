@@ -5,6 +5,30 @@
 using ArgParse, Glob, SlackThreads
 using ApogeeReduction # for the slack environment variables
 
+########################################################
+# Categorize the plots
+# edit here to categorize new plot types
+########################################################
+# Define the main categories and their patterns in the desired order
+# Each of these is a section name and a regex pattern for what should be in that section
+CATEGORY_PATTERNS = [
+    ("ar1Dunical", r"ar1Dunical_.*\.png$"),
+    ("ar1Duni", r"ar1Duni_.*\.png$"),
+    ("wave", r".*wave_.*\.png$"),
+    ("night wave", r"night.*wave_.*\.png$"),
+    ("skyPeakResiduals", r"skyPeakResiduals_.*\.png$"),
+    ("ar1D", r"ar1D_.*\.png$"),
+    ("ar2Dresidualscal", r"ar2Dresidualscal_.*\.png$"),
+    ("fpi", r"fpi.*\.png$"),
+    ("Parameters", r".*Params_.*\.png$")
+]
+
+# Define the order in which object types should appear
+# Leave empty to use alphabetical order
+# the empty string is for files that don't have an object type
+const OBJECT_TYPES = ["OBJECT", "DOMEFLAT", "INTERNALFLAT", "QUARTZFLAT", "DARK", "ARCLAMP", ""]
+const OBJECT_TYPE_ORDER = Dict(OBJECT_TYPES .=> 1:length(OBJECT_TYPES))
+
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
@@ -20,44 +44,50 @@ function parse_commandline()
     return parse_args(s)
 end
 
-########################################################
-# Categorize the plots
-# edit here to categorize new plot types
-########################################################
+function extract_object_type(filename)
+    # Extract object type from filename like "something_something_something_OBJECTTYPE.png"
+    idx = findlast('_', basename(filename))
+    obj_type = basename(filename)[(idx + 1):(end - 4)] # cut off the .png extension
+    if all(isuppercase(c) for c in obj_type)
+        obj_type
+    else
+        ""
+    end
+end
+
 function get_plot_categories(plot_files)
-    # Define the main categories and their patterns in the desired order
-    # Each of these is a section name and a regex pattern for what should be in that section
-    category_patterns = [
-        ("ar1Dunical", r"ar1Dunical_.*\.png$"),
-        ("ar1Duni", r"ar1Duni_.*\.png$"),
-        ("wave", r".*wave_.*\.png$"),
-        ("night wave", r"night.*wave_.*\.png$"),
-        ("skyPeakResiduals", r"skyPeakResiduals_.*\.png$"),
-        ("ar1D", r"ar1D_.*\.png$"),
-        ("ar2Dresidualscal", r"ar2Dresidualscal_.*\.png$"),
-        ("fpi", r"fpi.*\.png$"),
-        ("Parameters", r".*Params_.*\.png$")
-    ]
-
-    # Create ordered categories
-    categories = Vector{Tuple{String, Vector{String}}}()
-
-    # Sort files into categories
-    for (category, pattern) in category_patterns
+    categories = []
+    for (category, pattern) in CATEGORY_PATTERNS
         matching_files = filter(f -> occursin(pattern, f), plot_files)
-        if !isempty(matching_files)
-            push!(categories, (category, sort(matching_files)))
+        isempty(matching_files) && continue
+
+        # Group by object type
+        object_groups = Dict{String, Vector{String}}()
+        for file in matching_files
+            obj_type = extract_object_type(file)
+            haskey(object_groups, obj_type) || (object_groups[obj_type] = String[])
+            push!(object_groups[obj_type], file)
         end
+
+        # Sort object types according to OBJECT_TYPE_ORDER
+        obj_types = sort(collect(keys(object_groups)),
+            by = obj_type -> get(OBJECT_TYPE_ORDER, obj_type, 1000))
+
+        # Create ordered list of (object_type, files) tuples
+        object_sections = [(obj_type, sort(object_groups[obj_type])) for obj_type in obj_types]
+        push!(categories, (category, object_sections))
     end
 
     # put files that don't match any category in "other" and print a warning
-    other_files = setdiff(plot_files, [f for (_, files) in categories for f in files])
+    other_files = setdiff(plot_files,
+        [f for (_, obj_sections) in categories for (_, files) in obj_sections for f in files])
     if !isempty(other_files)
         println("Warning: $(length(other_files)) files don't match any category. (Adding to 'other' category)")
-        push!(categories, ("other", sort(other_files)))
+        # Group other files by object type too
+        push!(categories, ("other", [("", other_files)]))
     end
 
-    return categories
+    categories
 end
 
 function generate_html(mjd, outdir, categories)
@@ -94,6 +124,12 @@ function generate_html(mjd, outdir, categories)
                 color: var(--primary-color);
                 border-bottom: 1px solid var(--primary-color);
                 padding-bottom: 10px;
+            }
+            .category h3 {
+                color: var(--secondary-text);
+                margin-top: 20px;
+                margin-bottom: 10px;
+                font-size: 1.1em;
             }
             .plot-grid {
                 display: grid;
@@ -206,34 +242,33 @@ function generate_html(mjd, outdir, categories)
         category_id = replace(lowercase(category), " " => "-")
         html *= """<a href="#$category_id">$category</a>\n"""
     end
-
-    html *= """
-            </div>
-    """
+    html *= "</div>"
 
     # Add content sections
-    for (category, files) in categories
+    for (category, object_sections) in categories
         category_id = replace(lowercase(category), " " => "-")
         html *= """
             <div class="category" id="$category_id">
                 <h2>$category</h2>
-                <div class="plot-grid">
         """
 
-        for file in files
-            filename = basename(file)
+        for (object_type, files) in object_sections
             html *= """
-                    <div class="plot-item" onclick="openModal(this)">
-                        <img src="$filename" alt="$filename">
-                        <div class="plot-title">$filename</div>
-                    </div>
+                <h3>$object_type</h3>
+                <div class="plot-grid">
             """
+            for file in files
+                filename = basename(file)
+                html *= """
+                        <div class="plot-item" onclick="openModal(this)">
+                            <img src="$filename" alt="$filename">
+                            <div class="plot-title">$filename</div>
+                        </div>
+                """
+            end
+            html *= "</div>"
         end
-
-        html *= """
-                </div>
-            </div>
-        """
+        html *= "</div>"
     end
 
     html *= """
