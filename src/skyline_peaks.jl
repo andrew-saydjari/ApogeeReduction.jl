@@ -202,7 +202,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
         x = peak_range
         x_edges = [peak_range .- 0.5; peak_range[end] + 0.5]
         y = flux_vec[peak_range]
-        yamp = abs(maximum(y)) / sqrt(2 * pi)
+        yamp = max(abs(maximum(y)) / sqrt(2 * pi),0.001)
 
         function gfit(p; exclude_idx = nothing)
             lam1 = p[2] - p[4] / 2
@@ -230,7 +230,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
 
         sepd = abs(subline_wav_pix_diffs[2] - subline_wav_pix_diffs[1])
         yoffset = abs(nanzeromedian(y))
-        p0 = [max(yamp,0.01), cpix, 1, sepd, 0.0, yoffset]
+        p0 = [yamp, cpix, 1, sepd, 0.0, yoffset]
         lb = [0.0, cpix - 10, 0.3, 0.8 * sepd, -5, 0]
         ub = [20 * yamp, cpix + 10, 3.0, 1.5 * sepd, 5, 2 * yoffset]
 
