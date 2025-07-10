@@ -43,8 +43,10 @@ bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
 
+bad_fully_saturated = 2^14;
+
 bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
-               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
+               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff + bad_fully_saturated;
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)
@@ -195,7 +197,7 @@ function jack_std(x)
 end
 
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
-normal_cdf(Δ, σ) = 0.5 * (1 + erf((Δ / σ) / √(2))) 
+normal_cdf(Δ, σ) = 0.5 * (1 + erf((Δ / σ) / √(2)))
 
 # used by safe_jldsave
 function check_type_for_jld2(value)
