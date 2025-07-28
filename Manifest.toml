@@ -1780,14 +1780,6 @@ git-tree-sha1 = "fea870727142270bdf7624ad675901a1ee3b4c87"
 uuid = "fdea26ae-647d-5447-a871-4b548cad5224"
 version = "3.7.1"
 
-[[deps.SIRS]]
-deps = ["ArgParse", "Dates", "Dierckx", "DirectConvolution", "FFTW", "FITSIO", "Glob", "HDF5", "JLD", "Jacobi", "LaTeXStrings", "LinearAlgebra", "OMEinsum", "Plots", "Statistics", "StatsBase"]
-git-tree-sha1 = "c2575e332823109b518bcef14d9fd11a3afb8e82"
-repo-rev = "main"
-repo-url = "https://github.com/nasa/SIRS.git"
-uuid = "40ae95f3-0455-409b-a0fb-071cca222575"
-version = "3.5.2"
-
 [[deps.Scratch]]
 deps = ["Dates"]
 git-tree-sha1 = "3bac05bc7e74a75fd9cba4295cde4045d9fe2386"
