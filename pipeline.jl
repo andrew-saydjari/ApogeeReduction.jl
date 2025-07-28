@@ -78,8 +78,8 @@ function parse_commandline()
     end
     return parse_args(s)
 end
-
 parg = parse_commandline()
+
 workers_per_node = parg["workers_per_node"]
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
@@ -114,7 +114,8 @@ flush(stdout);
     using DataFrames, EllipsisNotation, StatsBase
     using ParallelDataTransfer, ProgressMeter
     using AstroTime: TAIEpoch, modified_julian, days, value
-    using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D, process_2Dcal, cal2df, get_cal_path, TAIEpoch
+    using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D,
+                           process_2Dcal, cal2df, get_cal_path, TAIEpoch
 end
 
 println(BLAS.get_config());
