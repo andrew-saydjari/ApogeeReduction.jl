@@ -4,7 +4,8 @@ using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, Optim
 using Polynomials: Polynomial
 
 using ApogeeReduction
-src_dir = "../"
+using ApogeeReduction: nanmedian, nanzeropercentile
+src_dir = "../../src/"
 include(src_dir * "/makie_plotutils.jl")
 
 ## Parse command line arguments
