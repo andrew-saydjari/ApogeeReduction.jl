@@ -44,6 +44,7 @@ run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
 outdir=${4:-"../outdir/"}  # Fourth argument, defaults to "../../outdir/" if not provided
 caldir_darks=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
 caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
+path2arMADGICS=${7:-"../arMADGICS.jl/"}
 
 runname="objects_${mjd}"
 almanac_file=${outdir}/almanac/${runname}.h5
@@ -88,6 +89,15 @@ if [ "$run_2d_only" != "true" ]; then
 
     print_elapsed_time "Generating plot page for web viewing"
     julia +1.11.0 --project="./" scripts/run/generate_dashboard.jl --mjd $mjd --outdir $outdir
+fi
+
+## arMADGICS
+if [ -d ${path2arMADGICS} ]; then
+    print_elapsed_time "Running arMADGICS"
+    julia +1.11.0 --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file
+
+    print_elapsed_time "Running arMADGICS Workup"
+    julia +1.11.0 --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw/
 fi
 
 print_elapsed_time "Job Completed"

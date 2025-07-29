@@ -56,10 +56,13 @@ class TransferFileSensor(FileSensor):
 
 observatories = ("apo", "lco")
 
+# mails to Andrew Saydjari (can turn off by commenting out the mail user)
 sbatch_prefix = re.sub(r"\s+", " ", f"""
     sbatch 
     -vvv
     -D {REPO_DIR}
+    --mail-type=ALL
+    --mail-user=7155301634@vtext.com
 """) 
 # text=f"ApogeeReduction-main DAG failed on {{{{ ds }}}}: {DAG_URL}",
 with DAG(
@@ -127,7 +130,6 @@ with DAG(
                 'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
-                    'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
                     'Pkg.resolve(); '
                     'Pkg.instantiate(); '
                 '\''
