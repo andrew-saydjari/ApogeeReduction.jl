@@ -90,4 +90,11 @@ if [ "$run_2d_only" != "true" ]; then
     julia +1.11.0 --project="./" scripts/run/generate_dashboard.jl --mjd $mjd --outdir $outdir
 fi
 
+## arMADGICS
+print_elapsed_time "Running arMADGICS"
+julia +1.11.0 --project="./" arMADGICS.jl/pipeline.jl --redux_base $outdir --almanac_file $almanac_file
+
+print_elapsed_time "Running arMADGICS Workup"
+julia +1.11.0 --project="./" arMADGICS.jl/workup.jl --outdir ${outdir}arMADGICS/raw/
+
 print_elapsed_time "Job Completed"
