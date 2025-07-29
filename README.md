@@ -3,6 +3,8 @@
 [![Build Status](https://github.com/andrew-saydjari/ApogeeReduction.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/andrew-saydjari/ApogeeReduction.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/andrew-saydjari/ApogeeReduction.jl/branch/main/graph/badge.svg?branch=main)](https://codecov.io/gh/andrew-saydjari/ApogeeReduction.jl)
 
+For error bit definitions, see [docs/src/error_bits.md](docs/src/error_bits.md).
+
 ## Files
 The pipeline produces files at many stages of reduction.
 - `ar3Dcal`: Raw 3D datacubes. These are zero point adjusted 3D inputs into the photoelectron rate extractions and are experimental (not always created).
@@ -54,28 +56,6 @@ Nightly Runs:
 
 Bulk reprocessing workflow is still TBD, but the massive parallelization we have designed even for nightly runs means it should be similar, with possible interruptions to build higher signal to noise calibrations based on combining many calibration exposures.
 
-## Current Flag Bits
-
-Certain pixels are entirely masked or have data of questionable quality. This pipeline bit gives insight into the root cause of why this (tiny fraction of the) data is unable to be processed.
-
-| Bit   | Value     | Meaning     |
-| ----- | --------- | ----------- |
-| -     | 0         | No problems       |
-| 0     | 1         | reference array pixels |
-| 1     | 2         | reference pixels |
-| 2     | 4         | bad reference pixels |
-| 3     | 8         | pixels not dark corrected |
-| 4     | 16        | pixels with negative dark current |
-| 5     | 32        | pixels with large dark current |
-| 6     | 64        | flat response too low |
-| 7     | 128       | reads dropped for CR rejection = 1 |
-| 8     | 256       | reads dropped for CR rejection > 1 |
-| 9     | 512       | bad linear SUTR chi2 |
-| 10    | 1024      | failed 1D extraction |
-| 11    | 2048      | no nearby good pixels in 1D extraction |
-| 12    | 4096      | neff>10 in 1D extraction |
-| 13    | 8192      | pixel partially saturated |
-| 14    | 16384     | pixel fully saturated |
 
 
 ## Testing
