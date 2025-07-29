@@ -7,12 +7,13 @@ function __init__()
     end
 end
 
-export N_FIBERS, N_XPIX, N_CHIPS, CHIP_LIST, FIRST_CHIP
+export N_FIBERS, N_XPIX, N_CHIPS, CHIP_LIST, FIRST_CHIP, LAST_CHIP
 const N_FIBERS = 300
 const N_XPIX = 2048
 const N_CHIPS = 3
 const CHIP_LIST = ["R", "G", "B"]
 const FIRST_CHIP = CHIP_LIST[1]
+const LAST_CHIP = CHIP_LIST[end]
 
 include("ar3D.jl")
 include("ar2Dcal.jl")

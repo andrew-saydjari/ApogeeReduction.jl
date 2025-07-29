@@ -189,15 +189,15 @@ if length(all1Da)>0
                 # Broken fibers
                 scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
                 broken_fibers = xvec[broken_msk]
-                if !isempty(broken_fibers) && (chip == "c") # hardcoded for now
-                    status_str *= "\nChip $(chip) Broken Fibers:\n    $(join(broken_fibers, "\n    "))"
+                if !isempty(broken_fibers) && (chip == LAST_CHIP) # hardcoded for now
+                    status_str *= "\nChip $(chip) Broken Fibers (adjfiberindx):\n    $(join(broken_fibers, "\n    "))"
                 end
 
                 # Warn fibers
                 scatter!(ax, xvec[warn_only_msk], relthrpt[warn_only_msk, cindx], color = "orange")
                 warn_fibers = xvec[warn_only_msk]
-                if !isempty(warn_fibers) && (chip == "c") # hardcoded for now
-                    status_str *= "\nChip $(chip) Warning Fibers:\n    $(join(warn_fibers, "\n    "))"
+                if !isempty(warn_fibers) && (chip == LAST_CHIP) # hardcoded for now
+                    status_str *= "\nChip $(chip) Warning Fibers (adjfiberindx):\n    $(join(warn_fibers, "\n    "))"
                 end
             end
 
