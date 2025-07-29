@@ -35,8 +35,16 @@
     datacube .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5) .* gainMat
     datacube ./= gainMat
 
-    dimage, ivarimage, chisqimage, CRimage, last_unsaturated = ApogeeReduction.sutr_wood!(
-        datacube, gainMat, readVarMat, saturationMat)
+    # compute the last unsaturated read for each pixel.
+    last_unsaturated = ApogeeReduction.get_last_unsaturated_read(datacube, saturationMat)
+
+    dimages = ApogeeReduction.diffify_datacube!(datacube, last_unsaturated)
+    # try to identify any cosmic rays
+    not_cosmic_ray = ApogeeReduction.outlier_mask(dimages, last_unsaturated)
+    CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
+
+    dimage, ivarimage, chisqimage = ApogeeReduction.sutr_wood(
+        dimages, gainMat, readVarMat, last_unsaturated, not_cosmic_ray)
 
     # chop off the reference array for the tests
     dimage = dimage[1:2048, :]
