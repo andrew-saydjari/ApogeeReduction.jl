@@ -130,7 +130,6 @@ with DAG(
                 'julia +1.11.0 --project="./" -e \''
                     'using Pkg; '
                     'Pkg.add(url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"); '
-                    'Pkg.add(url = "https://github.com/nasa/SIRS.git"); '
                     'Pkg.resolve(); '
                     'Pkg.instantiate(); '
                 '\''
