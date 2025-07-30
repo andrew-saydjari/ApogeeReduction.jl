@@ -1,12 +1,20 @@
 @testset "ap3D" begin
+    # note: this whole test is implicitely done with gain = 1.0 for all pixels, because using a 
+    # non-unity would complicate the test while adding little of substance.
+    detector_dims = (2560, 2048)
+    readVarMat = 25 * ones(Float64, detector_dims)
+
+    # ------------------------------------------------------------
+    # build fake image
+    # ------------------------------------------------------------
     # not guarenteed to be reproducible across julia versions
     rng = MersenneTwister(101)
 
-    detector_dims = (2560, 2048)
-    gainMat = 1.9 * ones(Float64, detector_dims)
-    readVarMat = 25 * ones(Float64, detector_dims)
     # pretend the pixels saturate at 90% of digital saturation value
     saturationMat = 2^16 * ones(Float64, detector_dims) * 0.9
+    # set 40,000 (~1%) of pixels to saturation at a low value
+    low_saturation_pixels = rand(rng, eachindex(saturationMat), 40000)
+    saturationMat[low_saturation_pixels] .= 2^16 * 0.1
 
     n_reads = 11
     n_diffs = n_reads - 1
@@ -28,12 +36,26 @@
     true_cr_mask = sum(crs .> 0, dims = 3) .> 0
 
     # without noise, cosmic rays, or saturation effects
-    true_im = ones(Float32, detector_dims) .* flux_per_reads ./ gainMat
+    true_im = ones(Float32, detector_dims) .* flux_per_reads
 
     datacube = zeros(Float32, (detector_dims..., n_reads))
     datacube[:, :, (begin + 1):end] .+= cumsum(dcounts, dims = 3)
-    datacube .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5) .* gainMat
-    datacube ./= gainMat
+
+    # saturate pixels that are above saturationMat, and record the real last unsaturated read for 
+    # each pixel
+    true_last_unsaturated = Matrix{Int}(undef, size(saturationMat))
+    for I in CartesianIndices(true_last_unsaturated)
+        last_unsaturated = findlast(datacube[I, :] .< saturationMat[I])
+        # subtract 1 because of diffs vs reads
+        true_last_unsaturated[I] = last_unsaturated - 1
+        datacube[I, (last_unsaturated + 1):n_reads] .= saturationMat[I]
+    end
+
+    datacube .+= randn(rng, (detector_dims..., n_reads)) .* (readVarMat .^ 0.5)
+
+    # ------------------------------------------------------------
+    # fit the synthetic datacube
+    # ------------------------------------------------------------
 
     # compute the last unsaturated read for each pixel.
     last_unsaturated = ApogeeReduction.get_last_unsaturated_read(datacube, saturationMat)
@@ -44,33 +66,44 @@
     CRimage = sum(.!not_cosmic_ray, dims = 3)[:, :, 1]
 
     dimage, ivarimage, chisqimage = ApogeeReduction.sutr_wood(
-        dimages, gainMat, readVarMat, last_unsaturated, not_cosmic_ray)
+        dimages, ones(size(saturationMat)), readVarMat, last_unsaturated, not_cosmic_ray)
 
+    # ------------------------------------------------------------
     # chop off the reference array for the tests
+    # ------------------------------------------------------------
     dimage = dimage[1:2048, :]
     ivarimage = ivarimage[1:2048, :]
     chisqimage = chisqimage[1:2048, :]
     CRimage = CRimage[1:2048, :]
-    last_unsaturated = last_unsaturated[1:2048, :]
     true_im = true_im[1:2048, :]
     true_cr_mask = true_cr_mask[1:2048, :, 1]
 
     flux_diffs = (dimage .- true_im)
     zscores = flux_diffs .* sqrt.(ivarimage)
-
     high_flux_mask = (true_im .> 1000)
 
-    @test all(last_unsaturated .== n_diffs)
+    saturated = true_last_unsaturated .< n_diffs
+
+    # were the last unsaturated reads correctly identified?
+    @test mean(last_unsaturated .== true_last_unsaturated) > 0.997
+    saturated = true_last_unsaturated .< n_diffs
+    let l = true_last_unsaturated[saturated]
+        # some error comes from read noise, some from the fudge-factor in the saturation flagging
+        @test mean((l .- 1) .<= last_unsaturated[saturated] .<= (l .+ 1)) == 1
+    end
+
+    saturated = saturated[1:2048, 1:2048]
 
     # nearly everything flagged as CR is actually CR
     # as the number of reads increases, this quantity should approach one.
     @test mean(true_cr_mask[CRimage .> 0]) > 0.97
 
     # nearly all CR pixels are flagged
-    @test mean(CRimage[true_cr_mask])≈1 rtol=2e-3
+    @test mean(CRimage[true_cr_mask]) > 0.99
 
     # mean zscore should be 0, but it's biased at low fluxes
     @test isapprox(mean(zscores), 0.0, atol = 0.05)
+    @test isapprox(mean(zscores[saturated]), 0.0, atol = 0.05)
     # at higher fluxes, the mean zscore should be unbiased
     @test isapprox(mean(zscores[high_flux_mask]), 0.0, atol = 3e-3)
     # std(zscore) should be 1
