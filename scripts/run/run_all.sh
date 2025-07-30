@@ -2,7 +2,7 @@
 # Run all the data for a given night and telescope.
 
 # Arguments documented below, but for example (from the repo root dir):
-# sbatch ./scripts_run/run_all.sh apo 60855 --mail-type=NONE
+# sbatch ./scripts/run/run_all.sh apo 60855 --mail-type=NONE
 
 # ------------------------------------------------------------------------------
 #SBATCH --account=sdss-np
