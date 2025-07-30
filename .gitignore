@@ -9,6 +9,7 @@ slurm_logs/*.sh
 *.out
 *.txt
 *.log
+docs/build/
 
 stash/
 .gitignore

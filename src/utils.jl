@@ -31,21 +31,6 @@ end
 # but it is a symptom of the fact that the include situation is a bit tangled
 git_branch, git_commit = initalize_git("./")
 
-# bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
-bad_dark_pix_bits = 2^1 + 2^2 + 2^4
-bad_flat_pix_bits = 2^6;
-# most multiread CR detections are bad for other reasons
-bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
-bad_chi2_pix_bits = 2^9;
-
-# flags for 1d flux extraction
-bad_1d_failed_extract = 2^10;
-bad_1d_no_good_pix = 2^11;
-bad_1d_neff = 2^12;
-
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
-               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
-
 function isnanorzero(x)
     return isnan(x) | iszero(x)
 end
@@ -195,7 +180,7 @@ function jack_std(x)
 end
 
 normal_pdf(Δ, σ) = exp(-0.5 * Δ^2 / σ^2) / √(2π) / σ
-normal_cdf(Δ, σ) = 0.5 * (1 + erf((Δ / σ) / √(2))) 
+normal_cdf(Δ, σ) = 0.5 * (1 + erf((Δ / σ) / √(2)))
 
 # used by safe_jldsave
 function check_type_for_jld2(value)

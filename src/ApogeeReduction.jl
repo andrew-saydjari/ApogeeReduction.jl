@@ -19,6 +19,7 @@ include("ar3D.jl")
 include("ar2Dcal.jl")
 include("ar1D.jl")
 include("fileNameHandling.jl")
+include("error_bits.jl")
 include("utils.jl")
 
 include("wavecal.jl")
