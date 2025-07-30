@@ -69,8 +69,8 @@ end
 """
     get_last_unsaturated_read(datacube, saturation_map; fudge_factor = 0.9, n_cutoff = 2)
 
-Find pixels that are saturated in the datacube and return a mask of which reads to keep for each
-pixel.  This uses a saturation map that specifies the saturation level for each pixel.
+Find pixels that are saturated in the datacube.  This uses a saturation map that specifies the 
+saturation level for each pixel.
 
 It finds the last read that is unsaturated, meaning `<= fudge_factor * saturation_map`, then
 returns the index of the read before it.
@@ -235,6 +235,11 @@ function sutr_wood(dimages, gain_mat, read_var_mat, last_unsaturated, not_cosmic
                 chi2s[pixel_ind] = (d2 - Qdata' * KinvQdata) / x -
                                    rates[pixel_ind]^2 * ivars[pixel_ind]
             end
+        elseif n_good_diffs == 0
+            # if there are no good diffs, we can't fit anything
+            rates[pixel_ind] = 0
+            ivars[pixel_ind] = 0
+            chi2s[pixel_ind] = 0
         else # otherwise, we need to do the slow implementation.
             # This _should_ only be needed for a small fraction of pixels.
             # Several things in this branch allocate
