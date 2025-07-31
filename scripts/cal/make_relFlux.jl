@@ -14,16 +14,16 @@ function parse_commandline()
         help = "telescope name (apo or lco)"
         arg_type = String
         default = ""
-        "--mjd-start"
-        required = true
-        help = "start mjd"
+        "--mjd"
+        required = false
+        help = "mjd of the exposure(s) to be run (overridden by runlist)"
         arg_type = Int
-        default = 0
-        "--mjd-end"
-        required = true
-        help = "end mjd"
+        default = 1
+        "--expid"
+        required = false
+        help = "exposure number to be run (overridden by runlist)"
         arg_type = Int
-        default = 0
+        default = 1
         "--trace_dir"
         required = true
         help = "directory where extractions of traces are stored"
@@ -59,7 +59,8 @@ end
     using HDF5, DataFrames, SlackThreads
     include("../../src/makie_plotutils.jl")
     using ApogeeReduction
-    using ApogeeReduction: safe_jldsave, read_almanac_exp_df, get_1d_name, get_relFlux, read_metadata
+    using ApogeeReduction: safe_jldsave, read_almanac_exp_df, get_1d_name, get_relFlux,
+                           read_metadata
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -75,6 +76,13 @@ end
 
 ## TODO Confirm multiple MJD handling is correct/ideal
 # using runlist for dome/quartz flats only
+unique_teles = if parg["runlist"] != ""
+    subDic = load(parg["runlist"])
+    unique(subDic["tele"])
+else
+    [parg["tele"]]
+end
+
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
     unique(subDic["mjd"])
@@ -90,16 +98,18 @@ else
 end
 
 all1Da = String[] # all 1D files for chip a
-for mjd in unique_mjds
-    df = read_almanac_exp_df(parg["trace_dir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
-    function get_1d_name_partial(expid)
-        parg["trace_dir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+for tele in unique_teles
+    for mjd in unique_mjds
+        df = read_almanac_exp_df(parg["trace_dir"] * "almanac/$(parg["runname"]).h5", tele, mjd)
+        function get_1d_name_partial(expid)
+            parg["trace_dir"] * "apredrelflux/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        end
+        file_list = get_1d_name_partial.(expid_list)
+        append!(all1Da, file_list)
     end
-    file_list = get_1d_name_partial.(expid_list)
-    append!(all1Da, file_list)
 end
 
-if length(all1Da)>0
+if length(all1Da) > 0
     ## need to get cal_type from runlist
     exp_type_lst = map(x -> split(split(x, "FLAT")[1], "_")[end], all1Da)
     unique_exp_lst = unique(exp_type_lst)
@@ -145,80 +155,87 @@ if length(all1Da)>0
 
     # add plotting
     thread = SlackThread()
-    thread("$(cal_type) relFluxing for $(parg["tele"]) from $(unique_mjds[begin]) to $(unique_mjds[end])")
+    if length(unique_mjds) == 1
+        thread("$(cal_type) relFluxing for $(unique_teles[begin]) for SJD $(unique_mjds[begin])")
 
-    @everywhere begin
-        function plot_relFlux(fname)
-            sname = split(split(split(fname, "/")[end],".h5")[1], "_")
-            fnameType, tele, mjd, expnum, chiploc, exptype, cartid = sname[(end - 6):end]
+        @everywhere begin
+            function plot_relFlux(fname)
+                sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
+                fnameType, tele, mjd, expnum, chiploc, exptype, cartid = sname[(end - 6):end]
 
-            xvec = if tele == "apo"
-                1:300
-            elseif tele == "lco"
-                301:600
-            else
-                error("Unknown telescope: $(tele)")
-            end
-            absthrpt = zeros(300, length(chips))
-            relthrpt = zeros(300, length(chips))
-            bitmsk_relthrpt = zeros(Int, 300, length(chips))
-            cartid = Int(read_metadata(fname)["cartid"])
-            for (cindx, chip) in enumerate(chips)
-                local_fname = replace(fname, "_$(chiploc)_" => "_$(chip)_")
-                f = jldopen(local_fname)
-                absthrpt[:, cindx] = f["absthrpt"]
-                relthrpt[:, cindx] = f["relthrpt"]
-                bitmsk_relthrpt[:, cindx] = f["bitmsk_relthrpt"]
-                close(f)
-            end
-
-            # Initialize strings to collect fiber status
-            status_str = "Fiber Status Report for $(tele) MJD=$(mjd) CartID=$(cartid):\n"
-
-            # plot the relFlux
-            fig = Figure(size = (1200, 400))
-            for (cindx, chip) in enumerate(chips)
-                ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chip)")
-                msk = bitmsk_relthrpt[:, cindx] .== 0
-                broken_msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
-                warn_msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
-                warn_only_msk = warn_msk .& .!broken_msk
-
-                scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "limegreen")
-
-                # Broken fibers
-                scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
-                broken_fibers = xvec[broken_msk]
-                if !isempty(broken_fibers) && (chip == LAST_CHIP) # hardcoded for now
-                    status_str *= "\nChip $(chip) Broken Fibers (adjfiberindx):\n    $(join(broken_fibers, "\n    "))"
+                xvec = if tele == "apo"
+                    1:300
+                elseif tele == "lco"
+                    301:600
+                else
+                    error("Unknown telescope: $(tele)")
+                end
+                absthrpt = zeros(300, length(chips))
+                relthrpt = zeros(300, length(chips))
+                bitmsk_relthrpt = zeros(Int, 300, length(chips))
+                cartid = Int(read_metadata(fname)["cartid"])
+                for (cindx, chip) in enumerate(chips)
+                    local_fname = replace(fname, "_$(chiploc)_" => "_$(chip)_")
+                    f = jldopen(local_fname)
+                    absthrpt[:, cindx] = f["absthrpt"]
+                    relthrpt[:, cindx] = f["relthrpt"]
+                    bitmsk_relthrpt[:, cindx] = f["bitmsk_relthrpt"]
+                    close(f)
                 end
 
-                # Warn fibers
-                scatter!(ax, xvec[warn_only_msk], relthrpt[warn_only_msk, cindx], color = "orange")
-                warn_fibers = xvec[warn_only_msk]
-                if !isempty(warn_fibers) && (chip == LAST_CHIP) # hardcoded for now
-                    status_str *= "\nChip $(chip) Warning Fibers (adjfiberindx):\n    $(join(warn_fibers, "\n    "))"
+                # Initialize strings to collect fiber status
+                status_str = "Fiber Status Report for $(tele) MJD=$(mjd) CartID=$(cartid):\n"
+
+                # plot the relFlux
+                fig = Figure(size = (1200, 400))
+                for (cindx, chip) in enumerate(chips)
+                    ax = Axis(fig[1, cindx], title = "RelFlux Chip $(chip)")
+                    msk = bitmsk_relthrpt[:, cindx] .== 0
+                    broken_msk = (bitmsk_relthrpt[:, cindx] .& 2^1) .== 2^1
+                    warn_msk = (bitmsk_relthrpt[:, cindx] .& 2^0) .== 2^0
+                    warn_only_msk = warn_msk .& .!broken_msk
+
+                    scatter!(ax, xvec[msk], relthrpt[msk, cindx], color = "limegreen")
+
+                    # Broken fibers
+                    scatter!(ax, xvec[broken_msk], relthrpt[broken_msk, cindx], color = "red")
+                    broken_fibers = xvec[broken_msk]
+                    if !isempty(broken_fibers) && (chip == LAST_CHIP) # hardcoded for now
+                        status_str *= "\nChip $(chip) Broken Fibers (adjfiberindx):\n    $(join(broken_fibers, "\n    "))"
+                    end
+
+                    # Warn fibers
+                    scatter!(
+                        ax, xvec[warn_only_msk], relthrpt[warn_only_msk, cindx], color = "orange")
+                    warn_fibers = xvec[warn_only_msk]
+                    if !isempty(warn_fibers) && (chip == LAST_CHIP) # hardcoded for now
+                        status_str *= "\nChip $(chip) Warning Fibers (adjfiberindx):\n    $(join(warn_fibers, "\n    "))"
+                    end
                 end
+
+                # we should be more uniform about the naming convention
+                savePath = dirNamePlots *
+                           "$(mjd)/relFlux_$(cal_type)_$(tele)_$(mjd)_$(expnum)_$(cartid).png"
+                save(savePath, fig)
+
+                return savePath, status_str
             end
-
-            # we should be more uniform about the naming convention
-            savePath = dirNamePlots * "$(mjd)/relFlux_$(cal_type)_$(tele)_$(mjd)_$(expnum)_$(cartid).png"
-            save(savePath, fig)
-
-            return savePath, status_str
         end
-    end
 
-    desc = "plotting relFlux"
-    pout = @showprogress desc=desc pmap(plot_relFlux, outfnamesa)
-    status_str_lst = map(x -> x[2], pout)
-    unique_status_strs = unique(status_str_lst)
-    savePath_lst = map(x -> x[1], pout)
-    for status_str in unique_status_strs
-        thread("Relfluxing: $(status_str)")
-    end
-    for savePath in savePath_lst
-        thread("Relfluxing: $(savePath)", savePath)
+        desc = "plotting relFlux"
+        pout = @showprogress desc=desc pmap(plot_relFlux, outfnamesa)
+        status_str_lst = map(x -> x[2], pout)
+        unique_status_strs = unique(status_str_lst)
+        savePath_lst = map(x -> x[1], pout)
+        for status_str in unique_status_strs
+            thread("Relfluxing: $(status_str)")
+        end
+        for savePath in savePath_lst
+            thread("Relfluxing: $(savePath)", savePath)
+        end
+    elseif length(unique_mjds) > 1
+        ## need to think harder about the plotting we want to do in this case
+        thread("$(cal_type) relFluxing for $(unique_teles) with multiple SJDs from $(unique_mjds[begin]) to $(unique_mjds[end])")
     end
 else
     thread = SlackThread()

@@ -81,10 +81,11 @@ end
 parg = parse_commandline()
 
 workers_per_node = parg["workers_per_node"]
+proj_path = dirname(Base.active_project()) * "/"
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=./"])
+        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
         ntasks = parse(Int, ENV["SLURM_NTASKS"])
         nnodes = ntasks ÷ 64  # Each node has 64 cores
         total_workers = nnodes * workers_per_node
@@ -96,7 +97,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         end
         rmprocs(setdiff(1:ntasks, workers_to_keep))
     else
-        addprocs(workers_per_node, exeflags = ["--project=./"])
+        addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
 end
 t_now = now();
@@ -130,13 +131,12 @@ flush(stdout);
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
 # read noise is DN/read
-readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
-@passobj 1 workers() readVarMatDict
-# gain is e-/DN
-gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
-@passobj 1 workers() gainMatDict
-saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
-@passobj 1 workers() saturationMatDict
+@everywhere begin
+    readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
+    # gain is e-/DN
+    gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
+    saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
+end
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
@@ -145,19 +145,24 @@ saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
 # otherwise we iterate over the mjd, expid, and chips specified on the command line
 subiter = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
-
+    msk = subDic["tele"] .== parg["tele"]
+    # add a filter on tele
     Iterators.product(
-        Iterators.zip(subDic["mjd"], subDic["expid"]),
+        Iterators.zip(subDic["mjd"][msk], subDic["expid"][msk]),
         string.(collect(parg["chips"]))
     )
 else
-    # set up an iterator with the same shape as the runlist iterator
     Iterators.product(
         [(parg["mjd"], parg["expid"])],
         string.(collect(parg["chips"]))
     )
 end
 
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Setting up the iterator took $dt");
+t_then = t_now;
+flush(stdout);
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
