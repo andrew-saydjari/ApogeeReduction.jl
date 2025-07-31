@@ -11,24 +11,15 @@ chipRedux2Raw = Dict(
     "B" => "c",
 )
 
-function getUtahBase(release_dir, redux_ver)
-    if occursin("dr", release_dir)
-        dr_number = parse(Int, match(r"dr(\d+)", release_dir).captures[1])
-        if (10 <= dr_number <= 17)
-            return "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/apogee/spectro/redux/$(redux_ver)/"
-        elseif (18 <= dr_number)
-            return "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/spectro/apogee/redux/$(redux_ver)/"
-        end
+function build_raw_path(tele, chip, mjd, exposure_id; cluster = "sdss", suppress_warning = false)
+    base = if cluster == "sdss"
+        "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
+    elseif cluster == "cca"
+        "/mnt/ceph/users/asaydjari/apogee/raw"
+    else
+        !suppress_warning && warn("Unknown cluster, interpreting as a path: $cluster")
+        cluster
     end
-    if release_dir[1:3] == "ipl"
-        return "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/spectro/apogee/redux/$(redux_ver)/"
-    end
-    # the last case catches the dev versions under daily/trial versions
-    return "/uufs/chpc.utah.edu/common/home/sdss/$(release_dir)/apogee/spectro/redux/$(redux_ver)/"
-end
-
-function build_raw_path(tele, chip, mjd, exposure_id)
-    base = "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
     fname = if tele == "apo"
         "apR-$(chipRedux2Raw[chip])-$exposure_id.apz"
     elseif tele == "lco"

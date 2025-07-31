@@ -75,6 +75,21 @@ function parse_commandline()
         help = "number of workers per node"
         arg_type = Int
         default = 58
+        "--cluster"
+        required = false
+        help = "cluster name (sdss or cca or path)"
+        arg_type = String
+        default = "sdss"
+        "--suppress_cluster_path_warning"
+        required = false
+        help = "suppress cluster path warnings"
+        arg_type = Bool
+        default = false
+        "--gain_read_cal_dir"
+        required = false
+        help = "path to the gain and read noise calibration directory"
+        arg_type = String
+        default = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_06_03/pass_clean/"
     end
     return parse_args(s)
 end
@@ -117,26 +132,27 @@ flush(stdout);
     using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D,
                            process_2Dcal, cal2df, get_cal_path, TAIEpoch
 end
-
+@passobj 1 workers() parg
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Worker loading took $dt");
+t_then = t_now;
+flush(stdout);
 println(BLAS.get_config());
 flush(stdout);
 
 ##### 3D stage
 
-@passobj 1 workers() parg
-@everywhere gainReadCalDir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_06_03/pass_clean/"
-
 ## load these based on the chip keyword to the pipeline parg
 # load gain and readnoise calibrations
 # currently globals, should pass and wrap in the partial
 # read noise is DN/read
-readVarMatDict = load_read_var_maps(gainReadCalDir, parg["tele"], parg["chips"])
-@passobj 1 workers() readVarMatDict
-# gain is e-/DN
-gainMatDict = load_gain_maps(gainReadCalDir, parg["tele"], parg["chips"])
-@passobj 1 workers() gainMatDict
-saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
-@passobj 1 workers() saturationMatDict
+@everywhere begin
+    readVarMatDict = load_read_var_maps(parg["gain_read_cal_dir"], parg["tele"], parg["chips"])
+    # gain is e-/DN
+    gainMatDict = load_gain_maps(parg["gain_read_cal_dir"], parg["tele"], parg["chips"])
+    saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
+end
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
 
@@ -161,7 +177,7 @@ end
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
-    gainMatDict, readVarMatDict, saturationMatDict)
+    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"])
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 
