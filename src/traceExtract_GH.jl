@@ -108,30 +108,19 @@ function load_trace_hyperparams(tele, sjd, expid, chip;
     profile_fname = joinpath(
         profile_path, "quartzTraceProfileParams_$(tele)_$(sjd)_$(expid)_$(chip).h5")
 
-    # opening the file with a "do" closure guarantees that the file is closed
-    # (analogous to "with open() as f:" in Python)
-    # the last line of the closure is returned and assigned to the variables
-    (prof_fiber_inds, prof_fiber_centers,
-    smooth_new_indv_heights,
-    n_gauss) = jldopen(profile_fname) do params
-        fiber_inds = collect(minimum(params["fiber_index"]):maximum(params["fiber_index"])) .+ 1
-
-        # number of Gauss-Hermite terms
-        n_gauss = params["gh_order"][1] + 1
-
-        heights = zeros((length(fiber_inds), n_gauss))
-        for j in 1:n_gauss
-            coeffs = reverse(params["gh_$(j-1)_height_coeffs"])
-            heights[:, j] .= Polynomial(coeffs).(fiber_inds)
-        end
-
-        (params["fiber_index"] .+ 1, params["fiber_median_y_center"] .+ 1, heights, n_gauss)
-    end
-
+    params = jldopen(profile_fname)
+    prof_fiber_inds = params["fiber_index"] .+ 1
     # min-to-max fiber indices, including the ones that don't have a profile.
     # this is prevent extrapolation. We want to interpolate betweeen sparePak-defined profiles,
     # without going past the first or last in the sparsePak observation.
-    fiber_inds = collect(minimum(prof_fiber_inds):maximum(prof_fiber_inds))
+    fiber_inds = (minimum(prof_fiber_inds):maximum(prof_fiber_inds))
+    n_gauss = params["gh_order"][1] + 1 # number of Gauss-Hermite terms
+    smooth_new_indv_heights = zeros((length(fiber_inds), n_gauss))
+    for j in 1:n_gauss
+        coeffs = reverse(params["gh_$(j-1)_height_coeffs"])
+        smooth_new_indv_heights[:, j] .= Polynomial(coeffs).(fiber_inds)
+    end
+    prof_fiber_centers = params["fiber_median_y_center"] .+ 1
 
     if make_plots
         for j in 1:n_gauss
