@@ -52,7 +52,7 @@ timed_exec() {
 timed_exec "Starting almanac data collection" almanac -v -p 12 --mjd-start $mjd_start --mjd-end $mjd_end --${tele} --output $almanac_file
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
-timed_exec "Getting domeflat runlist" julia +1.11.0 --project="./" scripts/cal/make_runlist_dome_flats.jl --tele $tele --almanac_file $almanac_file --output $domerunlist
+timed_exec "Getting domeflat runlist (make_runlist_dome_flats.jl)" julia +1.11.0 --project="./" scripts/cal/make_runlist_dome_flats.jl --tele $tele --almanac_file $almanac_file --output $domerunlist
 timed_exec "Running 3D->2D for domeflats" julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 mkdir -p ${outdir}dome_flats
 timed_exec "Domeflat trace generation" julia +1.11.0 --project="./" scripts/cal/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $domerunlist
