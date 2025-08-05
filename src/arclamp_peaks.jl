@@ -6,8 +6,7 @@ using Interpolations: linear_interpolation, Line
 
 function read_fpiPeakLoc_coeffs(tele, chip;
         data_path = "./data/")
-
-    fname = joinpath(data_path,"fpiPeakSpacingParams_$(tele)_$(chip).h5")
+    fname = joinpath(data_path, "fpiPeakSpacingParams_$(tele)_$(chip).h5")
 
     # opening the file with a "do" closure guarantees that the file is closed
     # (analogous to "with open() as f:" in Python)
@@ -16,18 +15,25 @@ function read_fpiPeakLoc_coeffs(tele, chip;
         (params["coeffs_peak_ind_to_x"], params["coeffs_x_to_peak_ind"])
     end
 
-    return coeffs_peak_ind_to_x,coeffs_x_to_peak_ind
+    return coeffs_peak_ind_to_x, coeffs_x_to_peak_ind
 end
 
-function gaussian_int_pdf(x_vals, params; return_deriv = false)
-    #calculate the integrated gaussian probabilities
+"""
+Calculate the integrated Gaussian probability density function.
 
-    #params shape = (n_peaks,n_params)
-    #x_vals shape = (n_peaks,n_pix)
+Arguments:
+- `x_vals`: the positions at which to evaluate the PDF (n_peaks,n_pix)
+- `params`: the parameters of the Gaussian (n_peaks,n_params). The second column of `params`
+   should be the mean of the Gaussian, and the third column should be stddev.
+   THIS IGNORES THE OTHER PARAMETERS.
+- `return_deriv`: whether to return the derivatives of the PDF with respect to the parameters
 
-    #params = (height,mean,width)
-    #x_vals = integers (ie pixels)
-
+Returns:
+- `cdf`: the integrated PDF (n_peaks,n_pix)
+- `dcdf_dmu`: the derivatives of the integrated PDF with respect to the mean (n_peaks,n_pix)
+- `dcdf_dsig`: the derivatives of the integrated PDF with respect to the width (n_peaks,n_pix)
+"""
+function gaussian_cdf(x_vals, params; return_deriv = false)
     z_above = ((x_vals .+ 0.5) .- params[:, 2]) ./ params[:, 3]
     z_below = ((x_vals .- 0.5) .- params[:, 2]) ./ params[:, 3]
 
@@ -40,43 +46,56 @@ function gaussian_int_pdf(x_vals, params; return_deriv = false)
         dcdf_dsig = (2 * π)^(-0.5) .*
                     (exp.(-1 .* z_above .^ 2 ./ 2) .* (-z_above ./ params[:, 3]) .-
                      exp.(-1 .* z_below .^ 2 ./ 2) .* (-z_below ./ params[:, 3]))
-        #
-        #        dmu = 0.0001
-        #        z_above_above = ((x_vals .+ 0.5) .- (params[:, 2] .+ dmu)) ./ params[:, 3]
-        #        z_below_above = ((x_vals .- 0.5) .- (params[:, 2] .+ dmu)) ./ params[:, 3]
-        #        cdf_above = (0.5 * erf.(z_above_above ./ (2 ^ 0.5)))            .- (0.5 * erf.(z_below_above ./ (2 ^ 0.5))) 
-        #        z_above_below = ((x_vals .+ 0.5) .- (params[:, 2] .- dmu)) ./ params[:, 3]
-        #        z_below_below = ((x_vals .- 0.5) .- (params[:, 2] .- dmu)) ./ params[:, 3]
-        #        cdf_below = (0.5 * erf.(z_above_below ./ (2 ^ 0.5)))            .- (0.5 * erf.(z_below_below ./ (2 ^ 0.5))) 
-        #        dcdf_dmu_emp = (cdf_above .- cdf_below) ./ (2*dmu)
-        #    
-        #        dsig = 0.001
-        #        z_above_above = ((x_vals .+ 0.5) .- (params[:, 2] .+ 0.0)) ./ (params[:, 3] .+ dsig)
-        #        z_below_above = ((x_vals .- 0.5) .- (params[:, 2] .+ 0.0)) ./ (params[:, 3] .+ dsig)
-        #        cdf_above = (0.5 * erf.(z_above_above ./ (2 ^ 0.5)))            .- (0.5 * erf.(z_below_above ./ (2 ^ 0.5))) 
-        #        z_above_below = ((x_vals .+ 0.5) .- (params[:, 2] .+ 0.0)) ./ (params[:, 3] .- dsig)
-        #        z_below_below = ((x_vals .- 0.5) .- (params[:, 2] .+ 0.0)) ./ (params[:, 3] .- dsig)
-        #        cdf_below = (0.5 * erf.(z_above_below ./ (2 ^ 0.5))) .- (0.5 * erf.(z_below_below ./ (2 ^ 0.5))) 
-        #        dcdf_dsig_emp = (cdf_above .- cdf_below) ./ (2*dsig)
-        #
-        #	fib_ind = 10
-        #	println("diff ",(dcdf_dmu .- dcdf_dmu_emp)[fib_ind,:])
-        #	println("orig ",dcdf_dmu[fib_ind,:])
-        #	println("emp ",dcdf_dmu_emp[fib_ind,:])
-        #
-        #	println("diff ",(dcdf_dsig .- dcdf_dsig_emp)[fib_ind,:])
-        #	println("orig ",dcdf_dsig[fib_ind,:])
-        #	println("emp ",dcdf_dsig_emp[fib_ind,:])
-
         return cdf, dcdf_dmu, dcdf_dsig
     else
         return cdf
     end
 end
 
+"""
+The sum of many "gaussians" evaluated at x, each parameterized by 4 params:
+- height
+- mean
+- width
+- bias
+model = height*gauss(x,center,width)+bias
+"""
+function multigauss_forward_model!(out, x, params)
+    out .= params[:, 1] .* gaussian_cdf(x, params) .+ params[:, 4]
+end
+# for convenience, don't use when performance is important
+function multigauss_forward_model(x, params)
+    out = zeros(length(x))
+    multigauss_forward_model!(out, x, params)
+    out
+end
+
+"""
+Finds the best-fit parameters for multiple Gaussian peaks, accounting for overlapping peaks and
+biases.
+
+# Arguments:
+- `all_rel_fluxes`: the fluxes of the peaks (n_pixels,n_peaks)
+- `all_rel_ivars`: the inverse variances of the peaks (n_pixels,n_peaks)
+- `first_guess_params`: the initial guess for the parameters (n_peaks,n_params)
+- `fit_inds`: the indices of the pixels to fit (n_pixels,)
+- `best_model_fit_inds`: the indices of the pixels to use for the best model (n_pixels,)
+- `offset_inds`: the indices of the pixels to offset (n_pixels,)
+
+# Keyword Arguments:
+- `n_iter`: the number of iterations to run (default: 10)
+
+- `return_cov`: whether to return the covariance matrix (default: false)
+- `use_first_guess_heights`: whether to use the first guess heights (default: false)
+- `max_center_move`: the maximum allowed move for the mean (default: 3)
+- `min_widths`: the minimum allowed width (default: 0.1)
+- `max_widths`: the maximum allowed width (default: 3.0)
+- `n_pad`: the number of pixels to pad the fit indices by (default: 0)
+- `n_offset`: the number of pixels to offset the best model fit indices by (default: 10)
+"""
 function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds;
-        n_iter = 10, dmu = 0.001, dsig = 0.001, return_cov = false,
+        n_iter = 10, return_cov = false,
         use_first_guess_heights = false, max_center_move = 3,
         min_widths = 0.1, max_widths = 3.0, n_pad = 0, n_offset = 10)
     n_pixels = size(all_rel_fluxes, 1)
@@ -112,7 +131,7 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
     for r_ind in 1:n_iter
 
         # CDF version
-        model_fluxes_unit_height, dmodel_dmu, dmodel_dsig = gaussian_int_pdf(
+        model_fluxes_unit_height, dmodel_dmu, dmodel_dsig = gaussian_cdf(
             fit_inds, curr_guess, return_deriv = true)
 
         if r_ind == 1
@@ -127,7 +146,7 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
                 #subtract off, then get height updates
                 model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height)
 
-                best_model_fluxes_unit_height = gaussian_int_pdf(
+                best_model_fluxes_unit_height = gaussian_cdf(
                     best_model_fit_inds, curr_guess)
                 best_model_fluxes = (curr_guess[:, 1] .* best_model_fluxes_unit_height)
                 best_model_fluxes[.!isfinite.(curr_guess[:, 1]), :] .= 0
@@ -164,7 +183,7 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
 
         model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height) .+ curr_guess[:, 4]
 
-        best_model_fluxes_unit_height = gaussian_int_pdf(
+        best_model_fluxes_unit_height = gaussian_cdf(
             best_model_fit_inds, curr_guess)
         best_model_fluxes = (curr_guess[:, 1] .* best_model_fluxes_unit_height)
 
@@ -214,11 +233,6 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
                 end
             end
         end
-
-        #	println(r_ind," ",v_hat[1,:])
-        #	println(r_ind," ",v_hat[2,:])
-        #	println(r_ind," ",v_hat[3,:])
-        #	println(r_ind," ",v_hat[4,:])
 
         new_params .= curr_guess .+ v_hat'
         new_params[:, 1] .= max.(new_params[:, 1], 0.01)
@@ -351,11 +365,11 @@ Arguments:
 - `coeffs_x_to_peak_ind`: size (n_params), coefficients to estimate peak integers from locations
 """
 function get_initial_fpi_peaks(flux, ivar,
-		coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
+        coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
     #smooth the fluxes, then find local maxima
     #fit Gaussians to those local maxima
     #use the positions of those Gaussians to infer the positions of missing peaks
-    #do a second pass on fitting 
+    #do a second pass on fitting
     #return bias polynomial coefficients and peak (width,height,center)
 
     peak_to_x_func = Polynomial(coeffs_peak_ind_to_x)
@@ -365,9 +379,9 @@ function get_initial_fpi_peaks(flux, ivar,
     x = collect(1:n_pixels)
 
     good_ivars = (ivar .> 0)
-#    if !any(good_ivars)
-#        return [], zeros((0, 4)), zeros((0, 4, 4))
-#    end
+    #    if !any(good_ivars)
+    #        return [], zeros((0, 4)), zeros((0, 4, 4))
+    #    end
 
     sigma = 1.0 # smoothing length, pixels
     n_smooth_pix = max(5, round(Int, 3 * sigma) + 1)
@@ -380,7 +394,7 @@ function get_initial_fpi_peaks(flux, ivar,
     smoothed_fluxes = nansum(((flux .* good_ivars)[all_smooth_inds])' .* smooth_weights, 1)'
     smoothed_fluxes ./= nansum(good_ivars[all_smooth_inds]' .* smooth_weights, 1)'
 
-    #    flux_thresh = nanzeropercentile(smoothed_fluxes,percent_vec=[70])[1] 
+    #    flux_thresh = nanzeropercentile(smoothed_fluxes,percent_vec=[70])[1]
     flux_thresh = nanzeropercentile(smoothed_fluxes, percent_vec = [60])[1]
 
     # find local maxima and minima
@@ -456,12 +470,12 @@ function get_initial_fpi_peaks(flux, ivar,
 
     good_y_vals = local_max_waves[good_max_inds]
 
-    peak_int_guess = ceil.(Int,round.(x_to_peak_func.(good_y_vals)))
+    peak_int_guess = ceil.(Int, round.(x_to_peak_func.(good_y_vals)))
     peak_x_guess = peak_to_x_func.(peak_int_guess)
     curr_offset = nanmedian(peak_x_guess .- good_y_vals)
-    min_max_peak_ints = ceil.(Int,round.(x_to_peak_func.([1,2048])))
+    min_max_peak_ints = ceil.(Int, round.(x_to_peak_func.([1, 2048])))
     peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
-    good_y_vals = ceil.(Int,round.(peak_to_x_func.(peak_ints) .- curr_offset)) 
+    good_y_vals = ceil.(Int, round.(peak_to_x_func.(peak_ints) .- curr_offset))
 
     good_max_inds = (good_y_vals .>= (n_offset + 1)) .&
                     (good_y_vals .<= n_pixels - (n_offset + 1))
@@ -612,20 +626,20 @@ function get_initial_fpi_peaks(flux, ivar,
                       (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
     end
 
-#    peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
-#
-#    all_peak_ints = range(
-#        start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
-#    all_peak_locs = peak_func.(all_peak_ints)
-#    keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
-#    all_peak_ints = all_peak_ints[keep_peak_ints]
-#    all_peak_locs = all_peak_locs[keep_peak_ints]
+    #    peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
+    #
+    #    all_peak_ints = range(
+    #        start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
+    #    all_peak_locs = peak_func.(all_peak_ints)
+    #    keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
+    #    all_peak_ints = all_peak_ints[keep_peak_ints]
+    #    all_peak_locs = all_peak_locs[keep_peak_ints]
 
     peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
-    peak_int_guess = ceil.(Int,round.(x_to_peak_func.(new_params[:, 2])))
+    peak_int_guess = ceil.(Int, round.(x_to_peak_func.(new_params[:, 2])))
     peak_x_guess = peak_to_x_func.(peak_int_guess)
     curr_offset = nanmedian(peak_x_guess .- new_params[:, 2])
-    all_peak_locs = peak_to_x_func.(peak_ints) .- curr_offset 
+    all_peak_locs = peak_to_x_func.(peak_ints) .- curr_offset
     keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
     all_peak_ints = peak_ints[keep_peak_ints]
     all_peak_locs = all_peak_locs[keep_peak_ints]
@@ -776,16 +790,16 @@ function get_and_save_fpi_peaks(fname)
 
     coeffs_peak_ind_to_x,
     coeffs_x_to_peak_ind = read_fpiPeakLoc_coeffs(
-	tele, chip; data_path = "./data/")
+        tele, chip; data_path = "./data/")
 
     function get_peaks_partial(intup)
-        flux_1d, ivar_1d, 
-	coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = intup
-        get_initial_fpi_peaks(flux_1d, ivar_1d, 
-	    coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
+        flux_1d, ivar_1d,
+        coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = intup
+        get_initial_fpi_peaks(flux_1d, ivar_1d,
+            coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
     end
-    in2do = Iterators.zip(eachcol(flux_1d), eachcol(ivar_1d), 
-		eachcol(coeffs_peak_ind_to_x), eachcol(coeffs_x_to_peak_ind))
+    in2do = Iterators.zip(eachcol(flux_1d), eachcol(ivar_1d),
+        eachcol(coeffs_peak_ind_to_x), eachcol(coeffs_x_to_peak_ind))
     pout = map(get_peaks_partial, in2do)
 
     max_peaks = 0
@@ -811,7 +825,8 @@ function get_and_save_fpi_peaks(fname)
             fpi_line_mat[peak_ind, :, i] .= pout[i][2][peak_ind, :]
             fpi_line_cov_mat[peak_ind, :, :, i] .= pout[i][3][peak_ind, :, :]
         end
-	fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(fpi_line_mat[:,2,i])
+        fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i],
+            extrapolation_bc = Line()).(fpi_line_mat[:, 2, i])
     end
 
     outname = replace(replace(fname, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
@@ -888,7 +903,8 @@ function get_and_save_arclamp_peaks(fname)
             fpi_line_mat[peak_ind, :, i] .= pout[i][2][peak_ind, :]
             fpi_line_cov_mat[peak_ind, :, :, i] .= pout[i][3][peak_ind, :, :]
         end
-	fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(fpi_line_mat[:,2,i])
+        fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i],
+            extrapolation_bc = Line()).(fpi_line_mat[:, 2, i])
     end
 
     outname = replace(replace(fname, "ar1Dcal" => "arclampPeaks"), "ar1D" => "arclampPeaks")
@@ -938,5 +954,3 @@ end
 #        get_and_save_fpi_peaks(fname)
 #    end
 #end
-
-
