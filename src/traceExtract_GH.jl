@@ -4,7 +4,6 @@ using Interpolations: linear_interpolation, Line
 using ProgressMeter
 include("makie_plotutils.jl")
 
-
 function _gauss_hermite_poly(x, n)
     if n == 1
         ones(size(x))
@@ -61,8 +60,32 @@ function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv
 end
 
 """
-Read in and construct the Gauss-Hermite profiles and associated fiber indices for a given night,
-chip, and telescope.
+holds the default trace hyperparams for a given chip. Should not be used directly.
+Use `get_default_trace_hyperparams` instead.
+"""
+const default_trace_hyperparams = Dict{Tuple{String, String}, Any}()
+
+"""
+Get the default trace hyperparams for a given chip. Loads the data lazily.
+"""
+function get_default_trace_hyperparams(tel, chip)
+    exposures_to_use = Dict([
+        "apo" => ("59549", "39870035"),
+        "lco" => ("60044", "44820015")
+    ])
+
+    # load the data lazily into memory
+    if !haskey(default_trace_hyperparams, (tel, chip))
+        sjd, expid = exposures_to_use[tel]
+        default_trace_hyperparams[(tel, chip)] = load_trace_hyperparams(tel, sjd, expid, chip)
+    end
+
+    default_trace_hyperparams[(tel, chip)]
+end
+
+"""
+Read in and construct the trace hyperparams for a given telescope, night, expid, and chip.
+We don't actually do this for every exposure, see also `get_default_trace_hyperparams`.
 
 Keyword arguments:
 - `n_sub`: the number of sub-pixels to use in the profile
@@ -80,27 +103,17 @@ Returns a tuple of:
 - `all_y_prof`: the Gauss-Hermite profiles
 - `all_y_prof_deriv`: the derivatives of the Gauss-Hermite profiles
 """
-function gh_profiles(tele, mjd, expid, chip;
-        n_sub = 100, make_plots = false, profile_path = "./data/", plot_path = "../outdir/plots/")
-
-    # TODO actually get these from the arguments
-    if tele == "apo"
-        profile_mjd = "59549"
-        profile_expid = "39870035"
-    elseif tele == "lco"
-        profile_mjd = "60044"
-        profile_expid = "44820015"
-    end
-
-    profile_fname = joinpath(profile_path,
-        "quartzTraceProfileParams_$(tele)_$(profile_mjd)_$(profile_expid)_$(chip).h5")
+function load_trace_hyperparams(tele, sjd, expid, chip;
+        n_sub = 100, make_plots = false, profile_path = "./data/", plot_path = "../outdir/$(sjd)/plots/")
+    profile_fname = joinpath(
+        profile_path, "quartzTraceProfileParams_$(tele)_$(sjd)_$(expid)_$(chip).h5")
 
     # opening the file with a "do" closure guarantees that the file is closed
     # (analogous to "with open() as f:" in Python)
     # the last line of the closure is returned and assigned to the variables
-    prof_fiber_inds, prof_fiber_centers,
+    (prof_fiber_inds, prof_fiber_centers,
     smooth_new_indv_heights,
-    n_gauss = jldopen(profile_fname) do params
+    n_gauss) = jldopen(profile_fname) do params
         fiber_inds = collect(minimum(params["fiber_index"]):maximum(params["fiber_index"])) .+ 1
 
         # number of Gauss-Hermite terms
@@ -180,7 +193,6 @@ function gh_profiles(tele, mjd, expid, chip;
         save(tracePlot_heights_Path, fig)
     end
 
-    #    med_center_to_fiber_func = fit(prof_fiber_centers, prof_fiber_inds, 3)
     med_center_to_fiber_func = linear_interpolation(
         prof_fiber_centers, prof_fiber_inds, extrapolation_bc = Line())
 
