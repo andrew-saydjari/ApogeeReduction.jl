@@ -230,6 +230,10 @@ flush(stdout);
                 relthrpt, bitmsk_relthrpt, fiberTypeList)
         else
             outfname_norelflux = replace(outfname, "apred" => "apredrelflux")
+            dirName = dirname(outfname_norelflux)
+            if !ispath(dirName)
+                mkpath(dirName)
+            end
             safe_jldsave(
                 outfname_norelflux, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
                 extract_trace_centers = regularized_trace_params[:, :, 2])
@@ -246,20 +250,23 @@ flush(stdout);
 @passobj 1 workers() parg
 
 # Find the 2D calibration files for the relevant MJDs
-unique_mjds = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    unique(subDic["mjd"])
+mjd_list = if parg["runlist"] != ""
+    load(parg["runlist"],"mjd")
 else
     [parg["mjd"]]
 end
+unique_mjds = unique(mjd_list)
 
 # make file name list
 expid_list = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
+    subDic = load(parg["runlist"]) # could just load expid here.
     subDic["expid"]
 else
     [parg["expid"]]
 end
+
+# need to be building a msk on the expid for the different MJDs
+# or a list of lists
 
 list2Dexp = []
 for mjd in unique_mjds
@@ -269,7 +276,8 @@ for mjd in unique_mjds
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
     end
-    local2D = get_2d_name_partial.(expid_list)
+    mskMJD = mjd_list .== mjd
+    local2D = get_2d_name_partial.(expid_list[mskMJD])
     push!(list2Dexp, local2D)
 end
 all2Da = vcat(list2Dexp...)
