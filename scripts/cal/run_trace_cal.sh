@@ -30,12 +30,13 @@ runname="trace_cal_${tele}_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
 domerunlist=${outdir}almanac/runlist_dome_${runname}.h5
 quartzrunlist=${outdir}almanac/runlist_quartz_${runname}.h5
-caldir_darks=${4:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
-caldir_flats=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_02_24/outdir/"}
+caldir_darks=${4:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
+caldir_flats=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
 
 
 # Function to time and execute a command with description
 timed_exec() {
+    echo ""
     local description="$1"
     shift
     echo "$description..."
@@ -44,6 +45,7 @@ timed_exec() {
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
     echo "$description completed in ${duration} seconds"
+    echo ""
 }
 
 # get the data summary file for the MJD
@@ -51,16 +53,12 @@ timed_exec "Starting almanac data collection" almanac -v -p 12 --mjd-start $mjd_
 
 # get the runlist file (julia projects seem to refer to where your cmd prompt is when you call the shell. Here I imaging sitting at ApogeeReduction.jl level)
 timed_exec "Getting domeflat runlist" julia +1.11.0 --project="./" scripts/cal/make_runlist_dome_flats.jl --tele $tele --almanac_file $almanac_file --output $domerunlist
-
-# run the reduction pipeline (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 timed_exec "Running 3D->2D for domeflats" julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
-
 mkdir -p ${outdir}dome_flats
 timed_exec "Domeflat trace generation" julia +1.11.0 --project="./" scripts/cal/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $domerunlist
 
 # Parallel reduction for quartz flats
 timed_exec "Getting quartzflat runlist" julia +1.11.0 --project="./" scripts/cal/make_runlist_quartz_flats.jl --tele $tele --almanac_file $almanac_file --output $quartzrunlist
-# (all cals like dark sub/flats that would be a problem, should be post 3D->2D extraction)
 timed_exec "Running 3D->2D for quartzflats" julia +1.11.0 --project="./" pipeline.jl --tele $tele --runlist $quartzrunlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats
 mkdir -p ${outdir}quartz_flats
 timed_exec "Quartzflat trace generation" julia +1.11.0 --project="./" scripts/cal/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $quartzrunlist
