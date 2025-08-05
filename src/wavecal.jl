@@ -1503,6 +1503,26 @@ function ingest_fpiLines_file(fileName)
     return fpi_line_xlst, fpi_line_xlst_errs
 end
 
+function ingest_fpiLines_file_FULLMAT(fileName)
+    # Read in fpi line peaks data
+    f = h5open(fileName, "r+")
+    fpi_line_mat, fpi_line_cov_mat = try
+        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+    catch
+        println(fileName)
+        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+    end
+    close(f)
+
+#    good_ivars = (fpi_line_cov_mat[:, 2, 2, :] .> 0) .& (fpi_line_cov_mat[:, 2, 2, :] .< 100)
+    fpi_line_err_mat = zeros(Float64, size(fpi_line_mat))
+    for i=1:size(fpi_line_mat,2)
+        fpi_line_err_mat[:,i,:] .= nansqrt.(fpi_line_cov_mat[:,i,i,:])
+    end
+
+    return fpi_line_mat,fpi_line_err_mat
+end
+
 function ingest_skyLines_file(fileName)
     # Read in sky line peaks data
     f = h5open(fileName, "r+")
@@ -1550,6 +1570,33 @@ function ingest_skyLines_exp(fname; chip_lst = CHIP_LIST)
     end
     # dims are num_sky_lines x num_fibers
     return sky_line_uxlst, sky_line_fwlst, sky_line_chipInt
+end
+
+function ingest_fpiLines_exp_FULLMAT(fname)
+    fpi_line_mats = Array{Float64,3}[]
+    fpi_line_errs = Array{Float64,3}[]
+    fpi_line_chipInt = Matrix{Int}[]
+    for chip in CHIP_LIST
+        fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        if isfile(fnameloc)
+            fpi_line_mat, fpi_line_err = ingest_fpiLines_file_FULLMAT(fnameloc)
+            chipIndx = getChipIndx(chip)
+            push!(fpi_line_mats, fpi_line_mat)
+            push!(fpi_line_errs, fpi_line_err)
+            push!(fpi_line_chipInt, chipIndx .* ones(Int, size(fpi_line_mat,1), size(fpi_line_mat,3)))
+        else
+            println("$(fnameloc) is not a file")
+            push!(fpi_line_mats, [])
+            push!(fpi_line_errs, [])
+            push!(fpi_line_chipInt, [])
+        end
+    end
+    fpi_line_mats = vcat(fpi_line_mats...)
+    fpi_line_errs = vcat(fpi_line_errs...)
+    fpi_line_chipInt = vcat(fpi_line_chipInt...)
+
+    # dims are num_fpi_lines x num_fibers
+    return fpi_line_mats, fpi_line_errs, fpi_line_chipInt
 end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)
@@ -1604,6 +1651,32 @@ function ingest_fpiLines(fname_list)
 
     # dims are num_fpi_lines x num_fibers
     return fpi_line_uxlst, fpi_line_uxlst_errs, fpi_line_chipInt, fpi_line_expInt, fpi_line_peakInt
+end
+
+function ingest_fpiLines_FULLMAT(fname_list)
+    fpi_line_mats = Array{Float64,3}[]
+    fpi_line_mat_errs = Array{Float64,3}[]
+    fpi_line_chipInt = Matrix{Int}[]
+    fpi_line_expInt = Matrix{Int}[]
+    fpi_line_peakInt = Matrix{Int}[]
+    for fname_ind in 1:size(fname_list, 1)
+        fname = fname_list[fname_ind]
+        curr_out = ingest_fpiLines_exp_FULLMAT(fname)
+        push!(fpi_line_mats, curr_out[1])
+        push!(fpi_line_mat_errs, curr_out[2])
+        push!(fpi_line_chipInt, curr_out[3])
+        push!(fpi_line_peakInt,
+            (collect(1:size(curr_out[3], 1)) .- 1) .* ones(Int, size(curr_out[3])))
+        push!(fpi_line_expInt, fname_ind .* ones(Int, size(curr_out[3])))
+    end
+    fpi_line_mats = vcat(fpi_line_mats...)
+    fpi_line_mat_errs = vcat(fpi_line_mat_errs...)
+    fpi_line_chipInt = vcat(fpi_line_chipInt...)
+    fpi_line_expInt = vcat(fpi_line_expInt...)
+    fpi_line_peakInt = vcat(fpi_line_peakInt...)
+
+    # dims are num_fpi_lines x num_fibers
+    return fpi_line_mats, fpi_line_mat_errs, fpi_line_chipInt, fpi_line_expInt, fpi_line_peakInt
 end
 
 function sky_wave_plots(
