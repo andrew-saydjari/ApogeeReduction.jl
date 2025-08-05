@@ -41,4 +41,4 @@ for tstmjd in mjd_list
     end
 end
 
-safe_jldsave(parg["output"]; mjd = mjdexp_list, expid = expid_list)
+safe_jldsave(parg["output"]; mjd = mjdexp_list, expid = expid_list, no_metadata = true)
