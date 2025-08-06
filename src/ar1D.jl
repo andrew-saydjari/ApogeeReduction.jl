@@ -595,8 +595,8 @@ function process_1D(fname;
     falm = h5open(joinpath(outdir, "almanac/$(runname).h5"))
     dfalmanac = read_almanac_exp_df(falm, tele, mjd)
 
-    med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
-    all_y_prof, all_y_prof_deriv = gh_profiles(tele, mjd, expnum, chip; n_sub = 100)
+    (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
+    all_y_prof, all_y_prof_deriv) = get_default_trace_hyperparams(tele, chip)
 
     fnamecal = if (fnameType == "ar2D")
         replace(fname, "ar2D" => "ar2Dcal")
