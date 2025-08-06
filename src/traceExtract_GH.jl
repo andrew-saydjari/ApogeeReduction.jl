@@ -52,8 +52,12 @@ function int_gauss_hermite_term(x_bins, n; mean = 0.0, width = 1.0, return_deriv
     end
 
     if return_deriv
-        pdf = -_gauss_hermite_poly(zscore, n + 1) .* gauss_and_width_factor
-        cdf, pdf
+#        pdf = -_gauss_hermite_poly(zscore, n + 1) .* gauss_and_width_factor
+#        cdf, pdf
+	cdf_pdf = zeros(Float64,(2,size(cdf)...)) 
+	cdf_pdf[1,:,:] .= cdf
+	cdf_pdf[2,:,:] .= -_gauss_hermite_poly(zscore, n + 1) .* gauss_and_width_factor
+	cdf_pdf
     else
         cdf
     end
