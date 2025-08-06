@@ -205,7 +205,10 @@ flush(stdout);
     extraction = parg["extraction"],
     relFlux = parg["relFlux"],
     trace_type = trace_type,
-    chip_list = CHIP_LIST)
+    chip_list = CHIP_LIST,
+    profile_path = joinpath(proj_path, "data"),
+    plot_path = joinpath(parg["outdir"], "plots/")
+    )
 @showprogress pmap(process_1D_wrapper, all2D)
 println("Extracting 2Dcal to 1Dcal:");
 flush(stdout);
