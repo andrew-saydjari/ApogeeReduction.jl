@@ -587,7 +587,7 @@ function process_1D(fname;
         extraction::String,
         relFlux::Bool,
         trace_type::String,
-        chip_list::Vector{String} = CHIP_LIST;
+        chip_list::Vector{String} = CHIP_LIST,
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
