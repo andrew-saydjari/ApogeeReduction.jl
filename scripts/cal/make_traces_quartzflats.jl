@@ -52,7 +52,8 @@ end
 
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
-    using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, gh_profiles, trace_extract, safe_jldsave, trace_plots, bad_pix_bits
+    using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, gh_profiles,
+                           trace_extract, safe_jldsave, trace_plots, bad_pix_bits
     include("../../src/makie_plotutils.jl")
 end
 
@@ -80,9 +81,9 @@ end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
-    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
-    
+
     mjdfps2plate = get_fps_plate_divide(teleloc)
     f = jldopen(fname)
     image_data = f["dimage"][1:2048, 1:2048]
@@ -106,9 +107,10 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
     safe_jldsave(
         parg["trace_dir"] *
         "quartz_flats/quartzTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
-        trace_params = trace_params, trace_param_covs = trace_param_covs)
+        trace_params = trace_params, trace_param_covs = trace_param_covs, no_metadata = true)
 
-    return trace_plots(dirNamePlots, "quartz", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
+    return trace_plots(dirNamePlots, "quartz", trace_params, teleloc, mjdloc,
+        expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()
