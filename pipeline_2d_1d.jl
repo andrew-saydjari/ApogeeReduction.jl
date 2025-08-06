@@ -75,10 +75,11 @@ dirNamePlots = parg["outdir"] * "plots/"
 mkpath(dirNamePlots) # will work even if it already exists
 
 workers_per_node = parg["workers_per_node"]
+proj_path = dirname(Base.active_project()) * "/"
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=./"])
+        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
         ntasks = parse(Int, ENV["SLURM_NTASKS"])
         nnodes = ntasks ÷ 64  # Each node has 64 cores
         total_workers = nnodes * workers_per_node
@@ -90,7 +91,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         end
         rmprocs(setdiff(1:ntasks, workers_to_keep))
     else
-        addprocs(workers_per_node, exeflags = ["--project=./"])
+        addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
 end
 t_now = now();
@@ -111,8 +112,6 @@ flush(stdout);
     using ApogeeReduction
     using ApogeeReduction: read_almanac_exp_df, gh_profiles, read_metadata, regularize_trace, extract_boxcar, extract_optimal_iter, safe_jldsave, get_fluxing_file, get_fibTargDict, get_1d_name, get_and_save_sky_wavecal, get_and_save_sky_dither_per_fiber, get_and_save_sky_peaks, get_ave_night_wave_soln, sky_wave_plots, reinterp_spectra, get_and_save_arclamp_peaks, get_and_save_fpi_peaks, comb_exp_get_and_save_fpi_wavecal
 
-    include("src/makie_plotutils.jl")
-
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
     trace_type = "quartz" #probably should use this!
@@ -121,8 +120,14 @@ end
 println(BLAS.get_config());
 flush(stdout);
 
+@passobj 1 workers() parg
+@passobj 1 workers() proj_path
+
 ##### 1D stage
 @everywhere begin
+
+    include(joinpath(proj_path, "src/makie_plotutils.jl"))
+
     function process_1D(fname)
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
@@ -132,7 +137,7 @@ flush(stdout);
         dfalmanac = read_almanac_exp_df(falm, parg["tele"], mjd)
 
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
-        all_y_prof, all_y_prof_deriv = gh_profiles(tele, mjd, expnum, chip; n_sub = 100)
+        all_y_prof, all_y_prof_deriv = gh_profiles(tele, mjd, expnum, chip; n_sub = 100, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["outdir"], "plots/"))
 
         fnamecal = if (fnameType == "ar2D")
             replace(fname, "ar2D" => "ar2Dcal")
@@ -224,8 +229,6 @@ dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Function definitions took $dt");
 t_then = t_now;
 flush(stdout);
-
-@passobj 1 workers() parg
 
 # Find the 2D calibration files for the relevant MJDs
 unique_mjds = if parg["runlist"] != ""
@@ -357,8 +360,8 @@ all1DFPI = vcat(all1DFPIperchip...)
 
 ## load rough wave dict and sky lines list
 @everywhere begin
-    roughwave_dict = load("data/roughwave_dict.jld2", "roughwave_dict")
-    df_sky_lines = CSV.read("data/APOGEE_lines.csv", DataFrame)
+    roughwave_dict = load(joinpath(proj_path, "data", "roughwave_dict.jld2"), "roughwave_dict")
+    df_sky_lines = CSV.read(joinpath(proj_path, "data", "APOGEE_lines.csv"), DataFrame)
     df_sky_lines.linindx = 1:size(df_sky_lines, 1)
 end
 
@@ -412,11 +415,11 @@ if size(all1DArclamp, 1) > 0
     ## get (non-fpi) arclamp peaks
     println("Fitting arclamp peaks:")
     flush(stdout)
-    try
+    # try
         @showprogress pmap(get_and_save_arclamp_peaks, all1DArclamp)
-    catch
-        println("\nFAILED fitting arclamp peaks")
-    end
+    # catch
+        # println("\nFAILED fitting arclamp peaks")
+    # end
 end
 
 
@@ -426,12 +429,13 @@ if size(all1DFPI, 1) > 0
     flush(stdout)
     all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
     fit_all_fpi = true
-    try
-        all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
-    catch
-        global fit_all_fpi = false
-        println("\nFAILED fitting FPI peaks")
-    end
+    # try
+        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
+        all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks_partial, all1DFPI)
+    # catch
+    #     global fit_all_fpi = false
+    #     println("\nFAILED fitting FPI peaks")
+    # end
     #change the condition once there are wavelength 
     #solutions from the ARCLAMPs as well
     if fit_all_fpi & (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)

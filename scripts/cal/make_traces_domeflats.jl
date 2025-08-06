@@ -41,10 +41,11 @@ end
 parg = parse_commandline()
 
 # memory usage is under 3GB per worker in testing
+proj_path = dirname(Base.active_project()) * "/"
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=./"])
+        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
     else
         addprocs(16)
     end
@@ -53,17 +54,19 @@ end
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, gh_profiles, trace_extract, safe_jldsave, trace_plots, bad_pix_bits
-    include("../../src/makie_plotutils.jl")
 end
 
 @passobj 1 workers() parg # make it available to all workers
+@passobj 1 workers() proj_path
 
 @everywhere begin
+    include(joinpath(proj_path, "src/makie_plotutils.jl"))
+
     chips = collect(String, split(parg["chips"], ""))
 
     # make summary plots and gifs and send to slack in outer loop
 
-    dirNamePlots = parg["trace_dir"] * "plots/"
+    dirNamePlots = joinpath(parg["trace_dir"], "plots/")
     if !ispath(dirNamePlots)
         mkpath(dirNamePlots)
     end
@@ -92,7 +95,7 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
 
     med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
     all_y_prof, all_y_prof_deriv = gh_profiles(
-        teleloc, mjdloc, expnumloc, chiploc; n_sub = 100)
+        teleloc, mjdloc, expnumloc, chiploc; n_sub = 100, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
 
     #    trace_params, trace_param_covs = trace_extract(
     #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
@@ -101,11 +104,10 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
     trace_param_covs = trace_extract(
         image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
-        ; good_pixels = good_pixels)
+        ; good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
 
     safe_jldsave(
-        parg["trace_dir"] *
-        "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
+        joinpath(parg["trace_dir"], "dome_flats", "domeTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5");
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
     return trace_plots(dirNamePlots, "dome", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)

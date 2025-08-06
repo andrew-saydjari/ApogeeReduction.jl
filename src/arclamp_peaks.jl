@@ -754,7 +754,7 @@ function get_initial_arclamp_peaks(flux, ivar)
     return collect(1:size(new_params, 1)), new_params, v_hat_cov
 end
 
-function get_and_save_fpi_peaks(fname)
+function get_and_save_fpi_peaks(fname; data_path = "./data/")
     sname = split(fname, "_")
     tele, mjd, expid, chip = sname[(end - 4):(end - 1)]
     f = jldopen(fname, "r+")
@@ -776,7 +776,7 @@ function get_and_save_fpi_peaks(fname)
 
     coeffs_peak_ind_to_x,
     coeffs_x_to_peak_ind = read_fpiPeakLoc_coeffs(
-	tele, chip; data_path = "./data/")
+	tele, chip; data_path = data_path)
 
     function get_peaks_partial(intup)
         flux_1d, ivar_1d, 

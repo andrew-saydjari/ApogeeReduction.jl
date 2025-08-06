@@ -96,10 +96,11 @@ end
 parg = parse_commandline()
 
 workers_per_node = parg["workers_per_node"]
+proj_path = dirname(Base.active_project()) * "/"
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=./"])
+        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
         ntasks = parse(Int, ENV["SLURM_NTASKS"])
         nnodes = ntasks ÷ 64  # Each node has 64 cores
         total_workers = nnodes * workers_per_node
@@ -111,7 +112,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         end
         rmprocs(setdiff(1:ntasks, workers_to_keep))
     else
-        addprocs(workers_per_node, exeflags = ["--project=./"])
+        addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
 end
 t_now = now();
@@ -133,6 +134,7 @@ flush(stdout);
                            process_2Dcal, cal2df, get_cal_path, TAIEpoch
 end
 @passobj 1 workers() parg
+@passobj 1 workers() proj_path
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
 println("Worker loading took $dt");
@@ -151,7 +153,7 @@ flush(stdout);
     readVarMatDict = load_read_var_maps(parg["gain_read_cal_dir"], parg["tele"], parg["chips"])
     # gain is e-/DN
     gainMatDict = load_gain_maps(parg["gain_read_cal_dir"], parg["tele"], parg["chips"])
-    saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"])
+    saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"], datadir = proj_path * "data/saturation_maps")
 end
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
