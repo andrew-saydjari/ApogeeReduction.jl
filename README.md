@@ -68,8 +68,8 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 4     | 16        | pixels with negative dark current |
 | 5     | 32        | pixels with large dark current |
 | 6     | 64        | flat response too low |
-| 7     | 128       | reads dropped for CR rejection = 1 |
-| 8     | 256       | reads dropped for CR rejection > 1 |
+| 7     | 128       | one diff was dropped because it is a likely cosmic ray |
+| 8     | 256       | more than one diff was dropped because they were likely cosmic rays (sus) |
 | 9     | 512       | bad linear SUTR chi2 |
 | 10    | 1024      | failed 1D extraction |
 | 11    | 2048      | no nearby good pixels in 1D extraction |

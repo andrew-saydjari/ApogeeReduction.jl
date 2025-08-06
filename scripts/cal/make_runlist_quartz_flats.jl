@@ -35,15 +35,10 @@ mjd_list = keys(f[parg["tele"]])
 for tstmjd in mjd_list
     df = read_almanac_exp_df(f, parg["tele"], tstmjd)
     expindx_list = findall((df.imagetyp .== "QuartzFlat"))
-    #    if f[parg["tele"]] == 'lco'
-    #        expindx_list = findall((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
-    #    elseif f[parg["tele"]] == 'apo'
-    #        expindx_list = findall((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 10))
-    #    end
     for expindx in expindx_list
         push!(mjdexp_list, parse(Int, tstmjd))
         push!(expid_list, expindx)
     end
 end
 
-safe_jldsave(parg["output"]; mjd = mjdexp_list, expid = expid_list)
+safe_jldsave(parg["output"]; mjd = mjdexp_list, expid = expid_list, no_metadata = true)
