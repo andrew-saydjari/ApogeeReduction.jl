@@ -357,7 +357,7 @@ end
 # firstind overriden for APO dome flats
 function process_3D(outdir, runname, tel, mjd, expid, chip,
         gainMatDict, readVarMatDict, saturationMatDict;
-        firstind = 3, cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
+        firstind = 3, cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false, cluster = "sdss", suppress_warning = false)
     dirName = joinpath(outdir, "apred/$(mjd)/")
     if !ispath(dirName)
         mkpath(dirName)
@@ -371,7 +371,7 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
     #        println(expid,chip,size(df.observatory),size(df.mjd),size(df.exposure_int))
     # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
     rawpath = build_raw_path(
-        df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
+        df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"), cluster = cluster, suppress_warning = suppress_warning)
     cartid = df.cartidInt[expid]
     # decompress and convert apz data format to a standard 3D cube of reads
     cubedat, hdr_dict = apz2cube(rawpath)

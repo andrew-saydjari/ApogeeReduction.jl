@@ -512,11 +512,11 @@ function get_ave_night_wave_soln(
                     split(split(unique_fname_list[fname_ind], "/")[end], ".h5")[1], "_")[(end - 3):end]
                 curr_peak_fname = "$(curr_path)/$(wavetype)LinePeaks_$(curr_tele)_$(curr_mjd)_$(curr_expid)_$(FIRST_CHIP)_$(curr_exptype).h5"
 
-		dither_outputs = get_sky_dither_per_fiber(
-                    curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)
-		if isnothing(dither_outputs)
-		    continue
-		end
+                dither_outputs = get_sky_dither_per_fiber(
+                            curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)
+                if isnothing(dither_outputs)
+                    continue
+                end
                 all_ditherParams[:, :, fname_ind] .= dither_outputs[1]
 
                 for fibIndx in 1:N_FIBERS

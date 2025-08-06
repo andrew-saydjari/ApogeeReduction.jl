@@ -587,7 +587,9 @@ function process_1D(fname;
         extraction::String,
         relFlux::Bool,
         trace_type::String,
-        chip_list::Vector{String} = CHIP_LIST)
+        chip_list::Vector{String} = CHIP_LIST,
+        profile_path = "./data/",
+        plot_path = "../outdir/$(sjd)/plots/")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
 
@@ -596,7 +598,7 @@ function process_1D(fname;
     dfalmanac = read_almanac_exp_df(falm, tele, mjd)
 
     (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
-    all_y_prof, all_y_prof_deriv) = get_default_trace_hyperparams(tele, chip)
+    all_y_prof, all_y_prof_deriv) = get_default_trace_hyperparams(tele, chip, profile_path = profile_path, plot_path = plot_path)
 
     fnamecal = if (fnameType == "ar2D")
         replace(fname, "ar2D" => "ar2Dcal")
@@ -638,7 +640,7 @@ function process_1D(fname;
     resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
     safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar)
     if relFlux
-        # relative fluxing (using "c" only for now)
+        # relative fluxing (using B (last chip) only for now)
         # this is the path to the underlying fluxing file.
         # it is symlinked below to an exposure-specific file (linkPath).
         calPath = get_fluxing_file(
