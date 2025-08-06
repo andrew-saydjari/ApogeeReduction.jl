@@ -53,7 +53,9 @@ end
 
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
-    using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, gh_profiles, trace_extract, safe_jldsave, trace_plots, bad_pix_bits
+    using ApogeeReduction
+    using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, trace_extract,
+                           safe_jldsave, trace_plots, bad_pix_bits
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -83,7 +85,7 @@ end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(flist) do fname
-    sname = split(split(split(fname, "/")[end],".h5")[1], "_")
+    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
 
     mjdfps2plate = get_fps_plate_divide(teleloc)
@@ -93,9 +95,8 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
     pix_bitmask_image = f["pix_bitmask"][1:2048, 1:2048]
     close(f)
 
-    med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
-    all_y_prof, all_y_prof_deriv = gh_profiles(
-        teleloc, mjdloc, expnumloc, chiploc; n_sub = 100, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
+    (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
+    all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc)
 
     #    trace_params, trace_param_covs = trace_extract(
     #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
@@ -108,9 +109,10 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
 
     safe_jldsave(
         joinpath(parg["trace_dir"], "dome_flats", "domeTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5");
-        trace_params = trace_params, trace_param_covs = trace_param_covs)
+        trace_params = trace_params, trace_param_covs = trace_param_covs, no_metadata = true)
 
-    return trace_plots(dirNamePlots, "dome", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
+    return trace_plots(dirNamePlots, "dome", trace_params, teleloc, mjdloc,
+        expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()

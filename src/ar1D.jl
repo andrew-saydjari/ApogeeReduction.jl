@@ -226,9 +226,10 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 elseif any(curr_good_fluxes)
                     curr_neff = sqrt(1 / sum(model_vals[curr_good_fluxes] .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[curr_good_fluxes]])
-		    if any(.!curr_good_fluxes)
-                        dropped_pixel_mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels[.!curr_good_fluxes]])
-		    end
+                    if any(.!curr_good_fluxes)
+                        dropped_pixel_mask_1d[xpix, fib] = reduce(
+                            |, pix_bitmask[xpix, ypixels[.!curr_good_fluxes]])
+                    end
                 else
                     curr_neff = sqrt(1 / sum(model_vals .^ 2))
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
@@ -241,8 +242,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                 end
 
                 if curr_neff > neff_thresh
-#                    new_flux_1d[fib] = 0.0
-#                    ivar_1d[xpix, fib] = 0.0
+                    #                    new_flux_1d[fib] = 0.0
+                    #                    ivar_1d[xpix, fib] = 0.0
                     mask_1d[xpix, fib] |= bad_1d_neff
                 end
 
@@ -501,14 +502,16 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
         dropped_pixels_mask_1d = f["dropped_pixels_mask_1d"]
         extract_trace_centers = f["extract_trace_centers"]
         close(f)
-        push!(metadata_lst,read_metadata(fnameloc))
+        push!(metadata_lst, read_metadata(fnameloc))
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
-        dropped_mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= dropped_pixels_mask_1d[end:-1:1, :]
+        dropped_mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= dropped_pixels_mask_1d[
+            end:-1:1, :]
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
-        trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[end:-1:1, :]
+        trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[
+            end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
         chipInt_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipind
     end
@@ -532,9 +535,9 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
         wave_fiber = wave_stack[good_pix_fiber, fiberindx]
         trace_center_fiber = trace_center_stack[good_pix_fiber, fiberindx]
         chipBit_fiber = chipBit_stack[good_pix_fiber, fiberindx]
-	chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
+        chipInt_fiber = chipInt_stack[good_pix_fiber, fiberindx]
         pixindx_fiber = pixvec[good_pix_fiber]
-	xpix_fiber = xpix_stack[good_pix_fiber]
+        xpix_fiber = xpix_stack[good_pix_fiber]
 
         Rinv = generateInterpMatrix_sparse_inv(
             wave_fiber, chipBit_fiber, logUniWaveAPOGEE, pixindx_fiber)
@@ -546,9 +549,12 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
         cntvec[:, fiberindx] .+= msk_inter
 
         #right now, only works for a single exposure
-	outTraceCoords[:, fiberindx, 1] .= linear_interpolation(wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-	outTraceCoords[:, fiberindx, 2] .= linear_interpolation(wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-	outTraceCoords[:, fiberindx, 3] .= linear_interpolation(wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
+            wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
+            wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
+            wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
 
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)
@@ -568,8 +574,111 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
     # Write reinterpolated data
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
-        outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk, extract_trace_coords = outTraceCoords, wavecal_type)
+        outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk,
+        extract_trace_coords = outTraceCoords, wavecal_type)
     return
 end
 
-logUniWaveAPOGEE = 10 .^ range((start = 4.17825), step = 6.0e-6, length = 8700);
+const logUniWaveAPOGEE = 10 .^ range((start = 4.17825), step = 6.0e-6, length = 8700);
+
+function process_1D(fname;
+        outdir::String,
+        runname::String,
+        extraction::String,
+        relFlux::Bool,
+        trace_type::String,
+        chip_list::Vector{String} = CHIP_LIST)
+    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
+    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+
+    # how worried should I be about loading this every time?
+    falm = h5open(joinpath(outdir, "almanac/$(runname).h5"))
+    dfalmanac = read_almanac_exp_df(falm, tele, mjd)
+
+    (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
+    all_y_prof, all_y_prof_deriv) = get_default_trace_hyperparams(tele, chip)
+
+    fnamecal = if (fnameType == "ar2D")
+        replace(fname, "ar2D" => "ar2Dcal")
+    else
+        fname
+    end
+
+    dimage = load(fname, "dimage")
+    ivarimage = load(fname, "ivarimage")
+    pix_bitmask = load(fnamecal, "pix_bitmask")
+    metadata = read_metadata(fname)
+
+    # this seems annoying to load so often if we know we are doing a daily... need to ponder
+    traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).h5",
+        outdir * "apred/$(mjd)/"))
+    trace_params = load(traceList[1], "trace_params")
+
+    # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of
+    # everything to some degree
+    regularized_trace_params = regularize_trace(trace_params)
+
+    flux_1d, ivar_1d,
+    mask_1d,
+    dropped_pixels_mask_1d,
+    resid_flux,
+    resid_ivar = if extraction == "boxcar"
+        extract_boxcar(
+            dimage, ivarimage, pix_bitmask, regularized_trace_params, return_resids = true)
+    elseif extraction == "optimal"
+        #            extract_optimal(dimage, ivarimage, pix_bitmask, regularized_trace_params)
+        extract_optimal_iter(dimage, ivarimage, pix_bitmask, regularized_trace_params,
+            med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+            min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, return_resids = true)
+    else
+        error("Extraction method $(extraction) not recognized")
+    end
+
+    outfname = replace(fname, "ar2D" => "ar1D")
+    resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
+    safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar)
+    if relFlux
+        # relative fluxing (using "c" only for now)
+        # this is the path to the underlying fluxing file.
+        # it is symlinked below to an exposure-specific file (linkPath).
+        calPath = get_fluxing_file(
+            dfalmanac, outdir, tele, mjd, expnum, fluxing_chip = chip_list[end])
+        expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
+        fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
+        fiberTypeList = map(x -> fibtargDict[x], 1:300)
+
+        if isnothing(calPath)
+            # TODO uncomment this
+            @warn "No fluxing file available for $(tele) $(mjd) $(expnum) $(chip)"
+            relthrpt = ones(size(flux_1d, 2))
+            bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
+        elseif !isfile(calPath)
+            error("Fluxing file $(calPath) for $(tele) $(mjd) $(expnum) $(chip) does not exist")
+        else
+            linkPath = abspath(joinpath(
+                dirname(fname), "relFlux_$(tele)_$(mjd)_$(expnum)_$(chip).h5"))
+            if !islink(linkPath)
+                symlink(abspath(calPath), linkPath)
+            end
+            relthrpt = load(linkPath, "relthrpt")
+            relthrptr = reshape(relthrpt, (1, length(relthrpt)))
+            bitmsk_relthrpt = load(linkPath, "bitmsk_relthrpt")
+        end
+
+        # don't flux broken fibers (don't use warn fibers for sky)
+        msk_goodwarn = (bitmsk_relthrpt .== 0) .| (bitmsk_relthrpt .& 2^0) .== 2^0
+        if any(msk_goodwarn)
+            flux_1d[:, msk_goodwarn] ./= relthrptr[:, msk_goodwarn]
+            ivar_1d[:, msk_goodwarn] .*= relthrptr[:, msk_goodwarn] .^ 2
+        end
+
+        # we probably want to append info from the fiber dictionary from alamanac into the file name
+        safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
+            extract_trace_centers = regularized_trace_params[:, :, 2],
+            relthrpt, bitmsk_relthrpt, fiberTypeList)
+    else
+        safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
+            extract_trace_centers = regularized_trace_params[:, :, 2])
+    end
+    close(falm)
+end
