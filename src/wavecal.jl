@@ -802,15 +802,23 @@ function comb_exp_get_and_save_fpi_wavecal(
                 peak_waves[on_chip, fibIndx] .= yt
 
 		if size(on_chip,1) == 1
-                    peak_ints[on_chip, fibIndx] += round(nanmedian(2 * cavity_size ./
+		    int_offset = round(nanmedian(2 * cavity_size ./
                                                                 peak_waves[on_chip, fibIndx] .-
                                                                 (peak_ints[on_chip, fibIndx] .+
                                                                  m_offset)))
+		    if !isfinite(int_offset)
+                        int_offset = 0
+		    end
+                    peak_ints[on_chip, fibIndx] += int_offset
 		else
-                    peak_ints[on_chip, fibIndx] .+= round(nanmedian(2 * cavity_size ./
+		    int_offset = round(nanmedian(2 * cavity_size ./
                                                                 peak_waves[on_chip, fibIndx] .-
                                                                 (peak_ints[on_chip, fibIndx] .+
                                                                  m_offset)))
+		    if !isfinite(int_offset)
+                        int_offset = 0
+		    end
+                    peak_ints[on_chip, fibIndx] .+= int_offset
 		end
             end
         end
