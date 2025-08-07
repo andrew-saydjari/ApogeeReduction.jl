@@ -739,7 +739,7 @@ function plot_1d_uni(
     else
         extrema(filtered_dat)
     end
-    full_yrange = full_ylims[2] - full_ylims[1]
+    full_yrange = max(1,full_ylims[2] - full_ylims[1])
     full_ylims = (full_ylims[1] - 0.05 * full_yrange, full_ylims[2] + 0.05 * full_yrange)
 
     limits!(ax1, full_xlims..., full_ylims...)
@@ -756,7 +756,7 @@ function plot_1d_uni(
     else
         extrema(filtered_dat)
     end
-    yrange = ylims[2] - ylims[1]
+    yrange = max(1,ylims[2] - ylims[1])
     ylims = (ylims[1] - 0.05 * yrange, ylims[2] + 0.05 * yrange)
 
     limits!(ax2, xlims..., ylims...)
@@ -773,7 +773,7 @@ function plot_1d_uni(
     else
         extrema(filtered_dat)
     end
-    left_yrange = left_ylims[2] - left_ylims[1]
+    left_yrange = max(1,left_ylims[2] - left_ylims[1])
     left_ylims = (left_ylims[1] - 0.05 * left_yrange, left_ylims[2] + 0.05 * left_yrange)
 
     limits!(ax3, left_xlims..., left_ylims...)
@@ -791,7 +791,7 @@ function plot_1d_uni(
     else
         extrema(filtered_dat)
     end
-    right_yrange = right_ylims[2] - right_ylims[1]
+    right_yrange = max(1,right_ylims[2] - right_ylims[1])
     right_ylims = (right_ylims[1] - 0.05 * right_yrange, right_ylims[2] + 0.05 * right_yrange)
 
     limits!(ax4, right_xlims..., right_ylims...)
@@ -808,7 +808,7 @@ function plot_1d_uni(
     else
         extrema(filtered_dat)
     end
-    chip_b_yrange = chip_b_ylims[2] - chip_b_ylims[1]
+    chip_b_yrange = max(1,chip_b_ylims[2] - chip_b_ylims[1])
     chip_b_ylims = (
         chip_b_ylims[1] - 0.05 * chip_b_yrange, chip_b_ylims[2] + 0.05 * chip_b_yrange)
 
@@ -825,7 +825,7 @@ function plot_1d_uni(
     else
         extrema(filtered_dat)
     end
-    chip_a_yrange = chip_a_ylims[2] - chip_a_ylims[1]
+    chip_a_yrange = max(1,chip_a_ylims[2] - chip_a_ylims[1])
     chip_a_ylims = (
         chip_a_ylims[1] - 0.05 * chip_a_yrange, chip_a_ylims[2] + 0.05 * chip_a_yrange)
 

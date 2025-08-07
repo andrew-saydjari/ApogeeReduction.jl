@@ -461,6 +461,9 @@ function get_initial_fpi_peaks(flux, ivar,
     curr_offset = nanmedian(peak_x_guess .- good_y_vals)
     min_max_peak_ints = ceil.(Int,round.(x_to_peak_func.([1,2048])))
     peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
+    if !isfinite(curr_offset)
+        curr_offset = 0
+    end
     good_y_vals = ceil.(Int,round.(peak_to_x_func.(peak_ints) .- curr_offset)) 
 
     good_max_inds = (good_y_vals .>= (n_offset + 1)) .&
@@ -625,6 +628,9 @@ function get_initial_fpi_peaks(flux, ivar,
     peak_int_guess = ceil.(Int,round.(x_to_peak_func.(new_params[:, 2])))
     peak_x_guess = peak_to_x_func.(peak_int_guess)
     curr_offset = nanmedian(peak_x_guess .- new_params[:, 2])
+    if !isfinite(curr_offset)
+        curr_offset = 0
+    end
     all_peak_locs = peak_to_x_func.(peak_ints) .- curr_offset 
     keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
     all_peak_ints = peak_ints[keep_peak_ints]
