@@ -357,9 +357,9 @@ function generate_html(mjd, outdir, categories)
 end
 
 function main()
-    args = parse_commandline()
-    mjd = args["mjd"]
-    outdir = args["outdir"]
+    parg = parse_commandline()
+    mjd = parg["mjd"]
+    outdir = parg["outdir"]
 
     # Get the plots directory for this MJD
     plots_dir = joinpath(outdir, "plots", string(mjd))
