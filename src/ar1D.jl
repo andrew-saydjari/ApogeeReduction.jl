@@ -430,6 +430,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    mjd_int = parse(Int, mjd)
 
     # could shift this to a preallocation step
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
@@ -485,7 +486,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
             flush(stdout)
             wavecal_type = "error_fixed_fallback"
         else
-            chipWaveSoln = backupWaveSoln
+            chipWaveSoln = backupWaveSoln[mjd_int]
             println("No wavecal found for $(fname), using nightly average as fallback")
             flush(stdout)
             wavecal_type = "error_night_ave_fallback"

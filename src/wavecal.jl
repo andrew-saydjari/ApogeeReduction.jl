@@ -1631,6 +1631,52 @@ function ingest_fpiLines(fname_list)
     return fpi_line_uxlst, fpi_line_uxlst_errs, fpi_line_chipInt, fpi_line_expInt, fpi_line_peakInt
 end
 
+## TODO local parallelization mode (which would also need to pamp inside of sky_wave_plots)
+function skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = "../outdir")
+    mskMJD = (mjd_list_wavecal .== mjd)
+    if size(all1DObjectWavecal[mskMJD], 1) > 0
+        all1DObjectWavecal_mjd = all1DObjectWavecal[mskMJD]
+        # using all skyline wavelength solutions to determine median solution for SJD
+        night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
+            all1DObjectWavecal_mjd, fit_dither = true)
+
+        # using skylines to measure dither offsets from nightly skyline wavelength solution for SJD
+        get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
+                fname, night_linParams, night_nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
+        
+        map(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks[mskMJD])
+
+        # plotting skyline wavelength solution diagnostic figures
+        # make sure plot directory exists
+        mkpath(joinpath(outdir, "plots", string(mjd)))
+        sky_wave_plots(
+            all1DObjectWavecal[mskMJD], night_linParams, night_nlParams, night_wave_soln,
+            dirNamePlots = joinpath(outdir, "plots/"),
+            plot_fibers = (1, 50, 100, 150, 200, 250, 300),
+            plot_pixels = (1, 512, 1024, 1536, 2048))
+        return night_wave_soln, night_linParams, night_nlParams
+    else
+        return nothing, nothing, nothing
+    end    
+end
+
+function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
+    mskMJD_fpi = (mjd_list_fpi .== mjd)
+    mskMJD_obj = (mjd_list_wavecal .== mjd)
+    if (!isnothing(night_linParams_dict[mjd])) & (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+        # using FPI exposures to measure high-precision nightly wavelength solution
+        outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
+            all1DfpiPeaks_a[mskMJD_fpi], night_linParams_dict[mjd], night_nlParams_dict[mjd], cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2)
+
+        # using skylines to measure dither offsets from FPI-defined wavelength solution
+        get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
+            fname, night_linParams, night_nlParams; dporder = 2,
+            wavetype = "fpi", max_offset = 1.0)
+
+        map(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks[mskMJD_obj])
+    end
+end
+
 function sky_wave_plots(
         fname_list, night_linParams, night_nlParams, night_wave_soln;
         dirNamePlots = "../outdir/plots/", plot_fibers = (1, 50, 100, 150, 200, 250, 300),
