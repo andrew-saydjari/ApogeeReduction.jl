@@ -10,12 +10,9 @@ function read_fpiPeakLoc_coeffs(tele, chip;
 
     # opening the file with a "do" closure guarantees that the file is closed
     # (analogous to "with open() as f:" in Python)
-    coeffs_peak_ind_to_x,
-    coeffs_x_to_peak_ind = jldopen(fname) do params
+    jldopen(fname) do params
         (params["coeffs_peak_ind_to_x"], params["coeffs_x_to_peak_ind"])
     end
-
-    return coeffs_peak_ind_to_x, coeffs_x_to_peak_ind
 end
 
 """
@@ -76,7 +73,7 @@ biases.
 - `first_guess_params`: the initial guess for the parameters (n_peaks,n_params)
 - `fit_inds`: the indices of the pixels to fit
 - `best_model_fit_inds`: the indices of the pixels to use for the best model
-- `offset_inds`: the indices of the pixels to offset
+- `offset_inds`
 
 # Keyword Arguments:
 - `n_iter`: the number of iterations to run (default: 10)
@@ -129,13 +126,10 @@ function fit_gauss_and_bias(
         (size(fit_fluxes, 1), n_params, curr_n_peaks))
 
     comb_model_fluxes = zeros(size(all_rel_fluxes))
-    param_offsets = zeros(Float64, size(curr_guess))
 
     flux_diffs = copy(fit_fluxes)
 
     for r_ind in 1:n_iter
-
-        # CDF version
         model_fluxes_unit_height, dmodel_dmu, dmodel_dsig = gaussian_int_pdf(
             fit_inds, curr_guess, return_deriv = true)
 
@@ -171,9 +165,6 @@ function fit_gauss_and_bias(
             ivar_heights = (nansum((model_fluxes_unit_height .^ 2)' .* fit_ivars, 1))[1, :]
             mean_heights = nansum(model_fluxes_unit_height' .* flux_diffs .* fit_ivars, 1)[1, :] ./
                            ivar_heights
-            #             @show mean_heights
-
-            #     	    println(0," ",first_guess_params[:,1])
 
             if !use_first_guess_heights
                 #then mean_heights gives the first guess heights
@@ -188,8 +179,7 @@ function fit_gauss_and_bias(
 
         model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height) .+ curr_guess[:, 4]
 
-        best_model_fluxes_unit_height = gaussian_int_pdf(
-            best_model_fit_inds, curr_guess)
+        best_model_fluxes_unit_height = gaussian_int_pdf(best_model_fit_inds, curr_guess)
         best_model_fluxes = (curr_guess[:, 1] .* best_model_fluxes_unit_height)
 
         best_model_fluxes[.!isfinite.(curr_guess[:, 1]), :] .= 0
@@ -275,62 +265,6 @@ function apply_freq_soln(x, freqParams, chipPolyParams, chipIndx)
     Ax = positional_poly_mat(xt, porder = porder)
     freq = Ax * freqParams
     return freq
-end
-
-"""
-Uses the FPI data, skyline wavelength solution & chip polynomial solution
-to return estimates for the FPI parameters by fitting Gaussians to FPI peaks.
-
-Returns:
-- ``:
-"""
-function get_firstGuessParams(
-        fluxfpi, ivarfpi, goodfpi, fiber_waveParams, fiber_chipPolyParams; bias_porder = 10)
-    n_pixels = size(fluxfpi, 1)
-    n_fibers = size(fluxfpi, 2)
-    n_chips = size(fluxfpi, 3)
-
-    x = collect(1:n_pixels) #same for all fibers
-    x_boundaries = [x .- 0.5; x[end] + 0.5] #pixel edges
-
-    fib_inds = 1:n_fibers
-    chip_inds = 1:n_chips
-
-    Ax_bias = positional_poly_mat(x, porder = bias_porder)
-
-    #don't use bad pixels in fitting
-    #    fluxfpi[.!goodfpi] = 0.0
-    ivarfpi[.!goodfpi] = 0.0
-
-    #output = (flux,mean,width,bias)
-    n_params = 4
-
-    #fit Gaussians and bias to FPI fluxes
-    for chipIndx in chip_inds
-        for fibIndx in fib_inds
-            fit_initial_fpi_peaks(x, fluxfpi[fibIndx, :, chipIndx],
-                ivarfpi[fibIndx, :, chipIndx])
-            curr_guess_params = zeros(Float64, ())
-            fit_gaussians(fluxfpi[fibIndx, :, chipIndx],
-                ivarfpi[fibIndx, :, chipIndx] .^ -0.5,
-                curr_guess_params,
-                fit_inds, best_model_fit_inds, offset_inds;
-                n_iter = 10, dmu = 0.001, dsig = 0.001, return_cov = false,
-                use_first_guess_heights = false, max_center_move = 3,
-                min_widths = 0.1, max_widths = 5.0)
-
-            waves = apply_freq_soln(x,
-                fiber_waveParams[fibIndx, :],
-                fiber_chipPolyParams[fibIndx, :],
-                chipIndx)
-            freqs = 3.0e5 ./ waves
-        end
-    end
-
-    #intrinsic width of FPI summed-Lorentzian profile
-    gamma = 0.02 * peak_freq_spacing
-
-    return gamma
 end
 
 """
@@ -516,7 +450,7 @@ function get_initial_fpi_peaks(flux, ivar,
     #get first guess peak parameters
     new_params = fit_gauss_and_bias(flux_pad, ivar_pad, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds;
-        n_iter = 10, dmu = 0.001, dsig = 0.001, return_cov = false,
+        n_iter = 10, return_cov = false,
         use_first_guess_heights = true, max_center_move = 3,
         min_widths = 0.1, max_widths = 3.0, n_pad = n_pad, n_offset = n_offset)
     #subtract off n_pad from the center positions
@@ -669,7 +603,7 @@ function get_initial_fpi_peaks(flux, ivar,
     #repeat fit to get measurements of all peaks
     new_params, v_hat_cov = fit_gauss_and_bias(flux_pad, ivar_pad, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds;
-        n_iter = 10, dmu = 0.001, dsig = 0.001, return_cov = true,
+        n_iter = 10, return_cov = true,
         use_first_guess_heights = true, max_center_move = 3,
         min_widths = 0.1, max_widths = 3.0, n_pad = n_pad, n_offset = n_offset)
 
@@ -764,7 +698,7 @@ function get_initial_arclamp_peaks(flux, ivar)
     #get first guess peak parameters
     new_params, v_hat_cov = fit_gauss_and_bias(flux_pad, ivar_pad, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds;
-        n_iter = 10, dmu = 0.001, dsig = 0.001, return_cov = true,
+        n_iter = 10, return_cov = true,
         use_first_guess_heights = true, max_center_move = 3,
         min_widths = 0.1, max_widths = 3.0, n_pad = n_pad, n_offset = n_offset)
     #subtract off n_pad from the center positions

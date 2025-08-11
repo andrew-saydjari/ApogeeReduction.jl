@@ -225,6 +225,8 @@ function pdf_func_mult(x, mean, width, fiber_inds, x_prof_min, x_prof_max_ind, n
     end
 end
 
+# very similar to fit_gauss_and_bias
+# should be merged, probably
 function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_inds, best_model_fit_inds, offset_inds,
         fiber_inds, x_prof_min, x_prof_max_ind,
