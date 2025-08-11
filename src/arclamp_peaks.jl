@@ -19,7 +19,7 @@ function read_fpiPeakLoc_coeffs(tele, chip;
 end
 
 """
-Calculate the integrated Gaussian probability density function.
+Calculate the integrated Gaussian probability density function within each pixel, for each peak.
 
 Arguments:
 - `x_vals`: the positions at which to evaluate the PDF (n_peaks,n_pix)
@@ -29,43 +29,39 @@ Arguments:
 - `return_deriv`: whether to return the derivatives of the PDF with respect to the parameters
 
 Returns:
-- `cdf`: the integrated PDF (n_peaks,n_pix)
-- `dcdf_dmu`: the derivatives of the integrated PDF with respect to the mean (n_peaks,n_pix)
-- `dcdf_dsig`: the derivatives of the integrated PDF with respect to the width (n_peaks,n_pix)
+- `int_pdf`: the integrated PDF (n_peaks,n_pix)
+possibly:
+- `dint_pdf_dmu`: the derivatives of the integrated PDF with respect to the mean (n_peaks,n_pix)
+- `dint_pdf_dsig`: the derivatives of the integrated PDF with respect to the width (n_peaks,n_pix)
 """
-function gaussian_cdf(x_vals, params; return_deriv = false)
+function gaussian_int_pdf(x_vals, params; return_deriv = false)
     z_above = ((x_vals .+ 0.5) .- params[:, 2]) ./ params[:, 3]
     z_below = ((x_vals .- 0.5) .- params[:, 2]) ./ params[:, 3]
 
-    cdf = (0.5 * erf.(z_above ./ (2^0.5))) .- (0.5 * erf.(z_below ./ (2^0.5)))
+    int_pdf = (0.5 * erf.(z_above ./ (2^0.5))) .- (0.5 * erf.(z_below ./ (2^0.5)))
 
     if return_deriv
-        dcdf_dmu = (2 * π)^(-0.5) .*
-                   (exp.(-1 .* z_above .^ 2 ./ 2) .- exp.(-1 .* z_below .^ 2 ./ 2)) .*
-                   (-1 ./ params[:, 3])
-        dcdf_dsig = (2 * π)^(-0.5) .*
-                    (exp.(-1 .* z_above .^ 2 ./ 2) .* (-z_above ./ params[:, 3]) .-
-                     exp.(-1 .* z_below .^ 2 ./ 2) .* (-z_below ./ params[:, 3]))
-        return cdf, dcdf_dmu, dcdf_dsig
+        dint_pdf_dmu = (2 * π)^(-0.5) .*
+                       (exp.(-1 .* z_above .^ 2 ./ 2) .- exp.(-1 .* z_below .^ 2 ./ 2)) .*
+                       (-1 ./ params[:, 3])
+        dint_pdf_dsig = (2 * π)^(-0.5) .*
+                        (exp.(-1 .* z_above .^ 2 ./ 2) .* (-z_above ./ params[:, 3]) .-
+                         exp.(-1 .* z_below .^ 2 ./ 2) .* (-z_below ./ params[:, 3]))
+
+        return int_pdf, dint_pdf_dmu, dint_pdf_dsig
     else
-        return cdf
+        return int_pdf
     end
 end
 
-"""
-The sum of many "gaussians" evaluated at x, each parameterized by 4 params:
-- height
-- mean
-- width
-- bias
-model = height*gauss(x,center,width)+bias
-"""
 function multigauss_forward_model!(out, x, params)
-    out .= params[:, 1] .* gaussian_cdf(x, params) .+ params[:, 4]
+    per_peak_densities = params[:, 1] .* gaussian_int_pdf(x, params) .+ params[:, 4]
+    out .= sum(per_peak_densities, dims = 1)
+    out
 end
 # for convenience, don't use when performance is important
 function multigauss_forward_model(x, params)
-    out = zeros(length(x))
+    out = zeros(size(x))
     multigauss_forward_model!(out, x, params)
     out
 end
@@ -75,16 +71,15 @@ Finds the best-fit parameters for multiple Gaussian peaks, accounting for overla
 biases.
 
 # Arguments:
-- `all_rel_fluxes`: the fluxes of the peaks (n_pixels,n_peaks)
-- `all_rel_ivars`: the inverse variances of the peaks (n_pixels,n_peaks)
+- `all_rel_fluxes`: the fluxes of the peaks (n_pixels,)
+- `all_rel_ivars`: the inverse variances of the peaks (n_pixels,)
 - `first_guess_params`: the initial guess for the parameters (n_peaks,n_params)
-- `fit_inds`: the indices of the pixels to fit (n_pixels,)
-- `best_model_fit_inds`: the indices of the pixels to use for the best model (n_pixels,)
-- `offset_inds`: the indices of the pixels to offset (n_pixels,)
+- `fit_inds`: the indices of the pixels to fit
+- `best_model_fit_inds`: the indices of the pixels to use for the best model
+- `offset_inds`: the indices of the pixels to offset
 
 # Keyword Arguments:
 - `n_iter`: the number of iterations to run (default: 10)
-
 - `return_cov`: whether to return the covariance matrix (default: false)
 - `use_first_guess_heights`: whether to use the first guess heights (default: false)
 - `max_center_move`: the maximum allowed move for the mean (default: 3)
@@ -93,11 +88,21 @@ biases.
 - `n_pad`: the number of pixels to pad the fit indices by (default: 0)
 - `n_offset`: the number of pixels to offset the best model fit indices by (default: 10)
 """
-function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
-        fit_inds, best_model_fit_inds, offset_inds;
-        n_iter = 10, return_cov = false,
-        use_first_guess_heights = false, max_center_move = 3,
-        min_widths = 0.1, max_widths = 3.0, n_pad = 0, n_offset = 10)
+function fit_gauss_and_bias(
+        all_rel_fluxes,
+        all_rel_ivars,
+        first_guess_params,
+        fit_inds,
+        best_model_fit_inds,
+        offset_inds;
+        n_iter = 10,
+        return_cov = false,
+        use_first_guess_heights = false,
+        max_center_move = 3,
+        min_widths = 0.1,
+        max_widths = 3.0,
+        n_pad = 0,
+        n_offset = 10)
     n_pixels = size(all_rel_fluxes, 1)
     fit_inds .+= n_pad
     best_model_fit_inds .+= n_pad
@@ -131,7 +136,7 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
     for r_ind in 1:n_iter
 
         # CDF version
-        model_fluxes_unit_height, dmodel_dmu, dmodel_dsig = gaussian_cdf(
+        model_fluxes_unit_height, dmodel_dmu, dmodel_dsig = gaussian_int_pdf(
             fit_inds, curr_guess, return_deriv = true)
 
         if r_ind == 1
@@ -146,7 +151,7 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
                 #subtract off, then get height updates
                 model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height)
 
-                best_model_fluxes_unit_height = gaussian_cdf(
+                best_model_fluxes_unit_height = gaussian_int_pdf(
                     best_model_fit_inds, curr_guess)
                 best_model_fluxes = (curr_guess[:, 1] .* best_model_fluxes_unit_height)
                 best_model_fluxes[.!isfinite.(curr_guess[:, 1]), :] .= 0
@@ -183,7 +188,7 @@ function fit_gauss_and_bias(all_rel_fluxes, all_rel_ivars, first_guess_params,
 
         model_fluxes = (curr_guess[:, 1] .* model_fluxes_unit_height) .+ curr_guess[:, 4]
 
-        best_model_fluxes_unit_height = gaussian_cdf(
+        best_model_fluxes_unit_height = gaussian_int_pdf(
             best_model_fit_inds, curr_guess)
         best_model_fluxes = (curr_guess[:, 1] .* best_model_fluxes_unit_height)
 
@@ -929,28 +934,3 @@ function get_and_save_arclamp_peaks(fname)
 
     return outname
 end
-
-#using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
-#using DataFrames, EllipsisNotation, StatsBase
-#using ParallelDataTransfer, ProgressMeter
-
-#src_dir = "../"
-#include(src_dir * "src/ar1D.jl")
-#include(src_dir * "src/spectraInterpolation.jl")
-#include(src_dir * "src/fileNameHandling.jl")
-#include(src_dir * "src/utils.jl")
-#fname = "../outdir//apred/60816/ar1Dcal_lco_60816_0008_a_ARCLAMP.h5"
-#fname = "../outdir//apred/60816/ar1Dcal_apo_60816_0009_a_ARCLAMP.h5"
-
-#get_and_save_fpi_peaks(fname)
-
-#mjd = 60816
-#tele = "apo"
-#expids = ["0008","0009","0073","0074"]
-#for expid in expids
-#    for chip in ["a","b","c"]
-#        fname = "../outdir//apred/60816/ar1Dcal_$(tele)_$(mjd)_$(expid)_$(chip)_ARCLAMP.h5"
-#	println(fname)
-#        get_and_save_fpi_peaks(fname)
-#    end
-#end
