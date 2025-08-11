@@ -42,7 +42,6 @@ end
 for tele in tele2do
     mjd_list = keys(f[tele])
     for tstmjd in mjd_list
-        flush(stdout)
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.nreadInt .> 3) .|
                    ((df.imagetyp .== "DomeFlat") .& (df.observatory .== "apo")) .|

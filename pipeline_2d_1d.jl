@@ -250,17 +250,24 @@ flush(stdout);
 @passobj 1 workers() parg
 
 # Find the 2D calibration files for the relevant MJDs
+tele_list = if parg["runlist"] != ""
+    load(parg["runlist"], "tele")
+else
+    [parg["tele"]]
+end
+unique_teles = unique(tele_list)
+mskTele = tele_list .== parg["tele"]
+
 mjd_list = if parg["runlist"] != ""
-    load(parg["runlist"],"mjd")
+    load(parg["runlist"], "mjd")
 else
     [parg["mjd"]]
 end
-unique_mjds = unique(mjd_list)
+unique_mjds = unique(mjd_list[mskTele])
 
 # make file name list
 expid_list = if parg["runlist"] != ""
-    subDic = load(parg["runlist"]) # could just load expid here.
-    subDic["expid"]
+    load(parg["runlist"], "expid")
 else
     [parg["expid"]]
 end
@@ -276,7 +283,7 @@ for mjd in unique_mjds
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
     end
-    mskMJD = mjd_list .== mjd
+    mskMJD = (mjd_list .== mjd) .& mskTele
     local2D = get_2d_name_partial.(expid_list[mskMJD])
     push!(list2Dexp, local2D)
 end
@@ -315,13 +322,14 @@ end
 # extract the 2D to 1D, ideally the calibrated files
 # need to think hard about batching daily versus all data for cal load in
 # someday we might stop doing the uncal extractions, but very useful for testing
-println("Extracting 2D to 1D:");
-flush(stdout);
-@showprogress pmap(process_1D, all2D)
-println("Extracting 2Dcal to 1Dcal:");
-flush(stdout);
-all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
-@showprogress pmap(process_1D, all2Dcal)
+
+###### HELLO A HACK HERE WE NEED TO REMOVE
+# desc = "Extracting 2D to 1D"
+# @showprogress desc=desc pmap(process_1D, all2D)
+
+# desc = "Extracting 2Dcal to 1Dcal"
+# all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
+# @showprogress desc=desc pmap(process_1D, all2Dcal)
 
 ### Only do the wavelength solution if we are relFluxing
 if parg["relFlux"]
@@ -359,11 +367,12 @@ if parg["relFlux"]
                 return nothing
             end
         end
-        local1D = get_1d_name_partial.(expid_list)
+        mskMJD = (mjd_list .== mjd) .& mskTele
+        local1D = get_1d_name_partial.(expid_list[mskMJD])
         push!(list1DexpObject, filter(!isnothing, local1D))
-        local1D_fpi = get_1d_name_FPI_partial.(expid_list)
+        local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
         push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
         push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
     end
     all1DObjecta = vcat(list1DexpObject...)
@@ -393,92 +402,113 @@ if parg["relFlux"]
         df_sky_lines.linindx = 1:size(df_sky_lines, 1)
     end
 
-    ## get sky line peaks
-    println("Fitting sky line peaks:")
-    flush(stdout)
-    @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-        fname, roughwave_dict, df_sky_lines)
-    @showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
+    ##### HARD HACK HERE, MUST REMOVE
+    # ## get sky line peaks
+    # @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+    #     fname, roughwave_dict, df_sky_lines)
+    # desc = "Fitting sky line peaks: "
+    # @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
+
+    # # get arclamp peaks
+    # if size(all1DArclamp, 1) > 0
+    #     ## get (non-fpi) arclamp peaks
+    #     desc = "Fitting arclamp peaks: "
+    #     @showprogress desc=desc pmap(get_and_save_arclamp_peaks, all1DArclamp)
+    # end
+
+    all1DfpiPeaks_a = replace.(
+        replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    all1DfpiPeaks = if size(all1DFPI, 1) > 0
+        ## get FPI peaks
+        desc = "Fitting FPI peaks: "
+        @showprogress desc=desc pmap(get_and_save_fpi_peaks, all1DFPI)
+    else
+        []
+    end
+    all1DfpiPeaks_out = reshape(all1DfpiPeaks,length(all1DfpiPeaks_a),length(CHIP_LIST))
+    mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
+    println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
     ## get wavecal from sky line peaks
     println("Solving skyline wavelength solution:")
     flush(stdout)
     #only need to give one chip's list because internal
     #logic handles finding other chips when ingesting data
+    #Andrew says that that is a bit worrisome and would should revisit that logic
     all1DObjectSkyPeaks = replace.(
         replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
     all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
     all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
-    if size(all1DObjectWavecal, 1) > 0
-        println("Using all skyline wavelength solutions to determine median solution.")
-        flush(stdout)
-        night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
-            all1DObjectWavecal, fit_dither = true)
-        sendto(workers(), night_wave_soln = night_wave_soln)
-        sendto(workers(), night_linParams = night_linParams)
-        sendto(workers(), night_nlParams = night_nlParams)
-
-        println("Using skylines to measure dither offsets from nightly skyline average wavelength solution")
-        @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
-            fname, night_linParams, night_nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
-
-        @showprogress pmap(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks)
-
-        println("Plotting skyline wavelength solution diagnostic figures.")
-
-        sky_wave_plots(
-            all1DObjectWavecal, night_linParams, night_nlParams, night_wave_soln,
-            dirNamePlots = dirNamePlots,
-            plot_fibers = (1, 50, 100, 150, 200, 250, 300),
-            plot_pixels = (1, 512, 1024, 1536, 2048))
-    else
-        night_wave_soln, night_nlParams, night_linParams = nothing, nothing, nothing
-        sendto(workers(), night_wave_soln = night_wave_soln)
-        sendto(workers(), night_linParams = night_linParams)
-        sendto(workers(), night_nlParams = night_nlParams)
-    end
-
-    if size(all1DArclamp, 1) > 0
-        ## get (non-fpi) arclamp peaks
-        println("Fitting arclamp peaks:")
-        flush(stdout)
-        try
-            @showprogress pmap(get_and_save_arclamp_peaks, all1DArclamp)
-        catch
-            println("\nFAILED fitting arclamp peaks")
-        end
-    end
-
-    if size(all1DFPI, 1) > 0
-        ## get FPI peaks
-        println("Fitting FPI peaks:")
-        flush(stdout)
-        all1DfpiPeaks_a = replace.(
-            replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-        fit_all_fpi = true
-        try
-            all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks, all1DFPI)
-        catch
-            global fit_all_fpi = false
-            println("\nFAILED fitting FPI peaks")
-        end
-        #change the condition once there are wavelength 
-        #solutions from the ARCLAMPs as well
-        if fit_all_fpi & (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)
-            println("Using $(size(all1DfpiPeaks_a,1)) FPI exposures to measure high-precision nightly wavelength solution")
-            outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-                all1DfpiPeaks_a, night_linParams, night_nlParams, cporder = 1, wporder = 4, dporder = 2,
-                n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2)
+    # putting this parallelized within each mjd is really not good in the bulk run context
+    night_wave_soln_dict = Dict{Int, Any}()
+    night_linParams_dict = Dict{Int, Any}()
+    night_nlParams_dict = Dict{Int, Any}()
+    mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
+    for mjd in unique_mjds
+        mskMJD = (mjd_list_wavecal .== mjd)
+        if size(all1DObjectWavecal[mskMJD], 1) > 0
+            println("Using all skyline wavelength solutions to determine median solution for MJD $mjd.")
+            flush(stdout)
+            all1DObjectWavecal_mjd = all1DObjectWavecal[mskMJD]
+            night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
+                all1DObjectWavecal_mjd, fit_dither = true)
+            night_wave_soln_dict[mjd] = night_wave_soln
+            night_linParams_dict[mjd] = night_linParams
+            night_nlParams_dict[mjd] = night_nlParams
             sendto(workers(), night_wave_soln = night_wave_soln)
             sendto(workers(), night_linParams = night_linParams)
             sendto(workers(), night_nlParams = night_nlParams)
 
-            println("Using skylines to measure dither offsets from FPI-defined wavelength solution")
+            println("Using skylines to measure dither offsets from nightly skyline average wavelength solution for MJD $mjd.")
             @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
-                fname, night_linParams, night_nlParams; dporder = 2, wavetype = "fpi", max_offset = 1.0)
+                fname, night_linParams, night_nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
 
-            @showprogress pmap(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks)
+            @showprogress pmap(
+                get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks[mskMJD])
+
+            println("Plotting skyline wavelength solution diagnostic figures.")
+
+            # I am very worried about the lack of parallelization here.
+            sky_wave_plots(
+                all1DObjectWavecal[mskMJD], night_linParams, night_nlParams, night_wave_soln,
+                dirNamePlots = dirNamePlots,
+                plot_fibers = (1, 50, 100, 150, 200, 250, 300),
+                plot_pixels = (1, 512, 1024, 1536, 2048))
+        else
+            night_wave_soln_dict[mjd] = nothing
+            night_linParams_dict[mjd] = nothing
+            night_nlParams_dict[mjd] = nothing
+        end
+    end
+    sendto(workers(), night_wave_soln_dict = night_wave_soln_dict)
+    sendto(workers(), night_linParams_dict = night_linParams_dict)
+    sendto(workers(), night_nlParams_dict = night_nlParams_dict)
+
+    if size(all1DFPI, 1) > 0
+        mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
+        #change the condition once there are wavelength 
+        #solutions from the ARCLAMPs as well
+        for mjd in unique_mjds
+            mskMJD_fpi = (mjd_list_fpi .== mjd)
+            mskMJD_obj = (mjd_list_wavecal .== mjd)
+            if (!isnothing(night_linParams_dict[mjd])) & (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+                println("Using $(size(all1DfpiPeaks_a[mskMJD_fpi],1)) FPI exposures to measure high-precision nightly wavelength solution")
+                outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
+                    all1DfpiPeaks_a[mskMJD_fpi], night_linParams_dict[mjd], night_nlParams_dict[mjd], cporder = 1, wporder = 4,
+                    dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2)
+                sendto(workers(), night_wave_soln = night_wave_soln)
+                sendto(workers(), night_linParams = night_linParams)
+                sendto(workers(), night_nlParams = night_nlParams)
+
+                println("Using skylines to measure dither offsets from FPI-defined wavelength solution")
+                @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
+                    fname, night_linParams, night_nlParams; dporder = 2,
+                    wavetype = "fpi", max_offset = 1.0)
+
+                @showprogress pmap(
+                    get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks[mskMJD_obj])
+            end
         end
     end
 

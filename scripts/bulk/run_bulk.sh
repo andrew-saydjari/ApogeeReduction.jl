@@ -64,6 +64,9 @@ print_elapsed_time() {
     echo
 }
 
+### ANDREW YOU REALLY NEED TO THINK ABOUT WORKERS PER NODE BEFORE LAUNCHING
+### REMOVING SOME OF THE UNCAL SAVES WOULD ALSO BE A GOOD IDEA
+
 # # get the data summary file for the MJD
 # print_elapsed_time "Running Almanac"
 # # would like to switch back to -p 12 once the multinode context is fixed
@@ -80,40 +83,41 @@ print_elapsed_time() {
 # done
 
 # Only continue if run_2d_only is false
-if [ "$run_2d_only" != "true" ]; then
-    ### Traces and Refluxing
-    # would really like to combine the different telescopes here
-    for flat_type in ${flat_types[@]}
-    do
-        flatrunlist=${outdir}almanac/runlist_${tele}_${flat_type}_${runname}.h5
-        for tele in ${tele_list[@]}
-        do
-            print_elapsed_time "Making runlist for $flat_type Flats for $tele"
-            julia +1.11.0 --project="./" scripts/cal/make_runlist_${flat_type}_flats.jl --tele $tele --almanac_file $almanac_file --output $flatrunlist
+# if [ "$run_2d_only" != "true" ]; then
+#     ### Traces and Refluxing
+#     # would really like to combine the different telescopes here
+#     for flat_type in ${flat_types[@]}
+#     do
+        # flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
+        # print_elapsed_time "Making runlist for $flat_type Flats"
+        # julia +1.11.0 --project="./" scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --output $flatrunlist --flat_type $flat_type
 
-            print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
-            mkdir -p ${outdir}${flat_type}_flats
-            julia +1.11.0 --project="./" scripts/cal/make_traces_${flat_type}flats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${outdir} --runlist $flatrunlist
+        # for tele in ${tele_list[@]}
+        # do
+        #     print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
+        #     mkdir -p ${outdir}${flat_type}_flats
+        #     julia +1.11.0 --project="./" scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type
 
-            print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
-            mkdir -p ${outdir}/apredrelflux
-            julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false
-        done
+        #     print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
+        #     mkdir -p ${outdir}/apredrelflux
+        #     julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false
+        # done
 
-        print_elapsed_time "Making relFlux for $flat_type Flats"
-        julia +1.11.0 --project="./" scripts/cal/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --trace_dir ${outdir} --runlist $flatrunlist --runname $runname   
-    done
+        # print_elapsed_time "Making relFlux for $flat_type Flats"
+        # julia +1.11.0 --project="./" scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname   
+    # done
 
-    # apparently KMcKinnon wrote very brittle average wavelength solution code that will need to get rewrapped
     ### 2D->1D
-    # print_elapsed_time "Running 2D->1D Pipeline"
-    # julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 32
-
+    for tele in ${tele_list[@]}
+    do
+        print_elapsed_time "Running 2D->1D Pipeline"
+        julia +1.11.0 --project="./" pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 64
+    done
     ### Plots
-    # print_elapsed_time "Making Plots"
-    # julia +1.11.0 --project="./" scripts/run/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
+    #     print_elapsed_time "Making Plots"
+    #     julia +1.11.0 --project="./" scripts/run/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
 
-    ### Dashboard
+    # ## Dashboard
     # print_elapsed_time "Generating plot page for web viewing"
     # julia +1.11.0 --project="./" scripts/run/generate_dashboard.jl --mjd $mjd --outdir $outdir
 

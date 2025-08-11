@@ -14,16 +14,6 @@ function parse_commandline()
         help = "telescope name (apo or lco)"
         arg_type = String
         default = ""
-        "--mjd-start"
-        required = true
-        help = "start mjd"
-        arg_type = Int
-        default = 0
-        "--mjd-end"
-        required = true
-        help = "end mjd"
-        arg_type = Int
-        default = 0
         "--trace_dir"
         required = true
         help = "directory where 2D extractions of traces are stored"
@@ -32,8 +22,11 @@ function parse_commandline()
         "--runlist"
         required = true
         help = "path name to hdf5 file with keys specifying list of exposures to run"
+        "--flat_type"
+        required = true
+        help = "flat type, i.e. dome or quartz"
         arg_type = String
-        default = ""
+        default = "quartz"
     end
     return parse_args(s)
 end
@@ -58,6 +51,7 @@ end
 
 @passobj 1 workers() parg # make it available to all workers
 
+# maybe the flist should be passed to everywhere?
 @everywhere begin
     chips = collect(String, split(parg["chips"], ""))
 
@@ -69,11 +63,21 @@ end
     end
 
     # Load in the exact set of exposures
-    mjd = load(parg["runlist"], "mjd")
-    expid = load(parg["runlist"], "expid")
-    flist = [get_cal_file(parg["trace_dir"], parg["tele"], mjd[i],
-                 expid[i], chip, "DOMEFLAT", use_cal = true)
-             for i in eachindex(mjd), chip in chips]
+    tele_list = load(parg["runlist"], "tele")
+    unique_teles = unique(tele_list)
+    mjd_list = load(parg["runlist"], "mjd")
+    unique_mjds = unique(mjd_list)
+    expid_list = load(parg["runlist"], "expid")
+    cal_flist = String[] # all cal files for FIRST CHIP
+    for tele in unique_teles
+        expid2do = findall(tele_list .== tele)
+        for chip in chips
+            for i in expid2do
+                push!(cal_flist, get_cal_file(parg["trace_dir"], tele_list[i], mjd_list[i], expid_list[i], chip, "$(uppercase(parg["flat_type"]))FLAT", use_cal = true))
+            end
+        end
+    end
+    flist = vcat(cal_flist...)
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 end
@@ -82,7 +86,7 @@ desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(flist) do fname
     sname = split(split(split(fname, "/")[end],".h5")[1], "_")
     fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
-
+    
     mjdfps2plate = get_fps_plate_divide(teleloc)
     f = jldopen(fname)
     image_data = f["dimage"][1:2048, 1:2048]
@@ -105,15 +109,19 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
 
     safe_jldsave(
         parg["trace_dir"] *
-        "dome_flats/domeTrace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
+        "$(parg["flat_type"])_flats/$(parg["flat_type"])Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5";
         trace_params = trace_params, trace_param_covs = trace_param_covs)
 
-    return trace_plots(dirNamePlots, "dome", trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
+    return trace_plots(dirNamePlots, parg["flat_type"], trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
 thread = SlackThread()
-thread("DOMEFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
-for (filename, heights_widths_path) in zip(flist, plot_paths)
-    thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
+if length(unique_mjds) > 1
+    thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) from SJD $(minimum(unique_mjds)) to $(maximum(unique_mjds))")
+    for (filename, heights_widths_path) in zip(flist, plot_paths)
+        thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
+    end
+else
+    thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) had no data")
 end
-thread("DomeFlat traces done.")
+thread("$(parg["flat_type"])Flat traces done.")

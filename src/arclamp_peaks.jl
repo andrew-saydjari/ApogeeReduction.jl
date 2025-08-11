@@ -365,9 +365,9 @@ function get_initial_fpi_peaks(flux, ivar,
     x = collect(1:n_pixels)
 
     good_ivars = (ivar .> 0)
-#    if !any(good_ivars)
-#        return [], zeros((0, 4)), zeros((0, 4, 4))
-#    end
+    #    if !any(good_ivars)
+    #        return [], zeros((0, 4)), zeros((0, 4, 4))
+    #    end
 
     sigma = 1.0 # smoothing length, pixels
     n_smooth_pix = max(5, round(Int, 3 * sigma) + 1)
@@ -612,14 +612,14 @@ function get_initial_fpi_peaks(flux, ivar,
                       (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
     end
 
-#    peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
-#
-#    all_peak_ints = range(
-#        start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
-#    all_peak_locs = peak_func.(all_peak_ints)
-#    keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
-#    all_peak_ints = all_peak_ints[keep_peak_ints]
-#    all_peak_locs = all_peak_locs[keep_peak_ints]
+    #    peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
+    #
+    #    all_peak_ints = range(
+    #        start = max(peak_ints[1], 0) - 50, stop = min(1000, peak_ints[end]) + 50, step = 1)
+    #    all_peak_locs = peak_func.(all_peak_ints)
+    #    keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
+    #    all_peak_ints = all_peak_ints[keep_peak_ints]
+    #    all_peak_locs = all_peak_locs[keep_peak_ints]
 
     peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
     peak_int_guess = ceil.(Int,round.(x_to_peak_func.(new_params[:, 2])))
@@ -774,19 +774,23 @@ function get_and_save_fpi_peaks(fname)
     flux_1d[.!good_pix] .= 0.0
     x = collect(1:n_pixels)
 
-    coeffs_peak_ind_to_x,
-    coeffs_x_to_peak_ind = read_fpiPeakLoc_coeffs(
-	tele, chip; data_path = "./data/")
+    coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = read_fpiPeakLoc_coeffs(tele, chip; data_path = "./data/")
 
     function get_peaks_partial(intup)
-        flux_1d, ivar_1d, 
-	coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = intup
-        get_initial_fpi_peaks(flux_1d, ivar_1d, 
-	    coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
+        flux_1d, ivar_1d, coeffs_peak_ind_to_x, coeffs_x_to_peak_ind = intup
+        get_initial_fpi_peaks(flux_1d, ivar_1d, coeffs_peak_ind_to_x, coeffs_x_to_peak_ind)
     end
     in2do = Iterators.zip(eachcol(flux_1d), eachcol(ivar_1d), 
 		eachcol(coeffs_peak_ind_to_x), eachcol(coeffs_x_to_peak_ind))
-    pout = map(get_peaks_partial, in2do)
+    pout = try
+       map(get_peaks_partial, in2do)
+    catch
+        println("Error in get_and_save_fpi_peaks: $fname")
+        return nothing
+    end
+    if isnothing(pout)
+        return nothing
+    end
 
     max_peaks = 0
     for j in 1:size(pout, 1)

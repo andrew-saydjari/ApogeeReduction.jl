@@ -4,7 +4,9 @@
 using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
 using ApogeeReduction
-using ApogeeReduction: read_almanac_exp_df, get_1d_name, get_fibTargDict, nanzeropercentile, nanzeromedian, parseCartID, bad_pix_bits, fiberIndx2fiberID, logUniWaveAPOGEE, isnanorzero
+using ApogeeReduction: read_almanac_exp_df, get_1d_name, get_fibTargDict, nanzeropercentile,
+                       nanzeromedian, parseCartID, bad_pix_bits, fiberIndx2fiberID,
+                       logUniWaveAPOGEE, isnanorzero
 include("../../src/makie_plotutils.jl")
 ## Parse command line arguments
 function parse_commandline()
@@ -12,8 +14,9 @@ function parse_commandline()
     @add_arg_table s begin
         "--chips"
         required = false
-        help = "chip name (a, b, c)"
+        help = "chip names (R,G,B) to plot, default all"
         arg_type = String
+        default = ""
         "--tele"
         required = true
         help = "telescope name (apo or lco)"
@@ -53,6 +56,12 @@ parg = parse_commandline()
 println("Making plots for telescope: $(parg["tele"])")
 println("Output directory: $(parg["outdir"])")
 
+chips2do = if parg["chips"] != ""
+    string.(collect(parg["chips"]))
+else
+    CHIP_LIST
+end
+
 unique_mjds = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
     unique(subDic["mjd"])
@@ -74,9 +83,15 @@ end
 
 println("\nFound $(length(unique_mjds)) unique MJDs to process")
 
+tele_list = if parg["runlist"] != ""
+    load(parg["runlist"], "tele")
+else
+    [parg["tele"]]
+end
+unique_teles = unique(tele_list)
+
 expid_list = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    subDic["expid"]
+    load(parg["runlist"], "expid")
 else
     [parg["expid"]]
 end
@@ -85,37 +100,43 @@ list1DexpObject = []
 list1DexpFPI = []
 list1DexpArclamp = []
 for mjd in unique_mjds
-    df = read_almanac_exp_df(
-        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
-    function get_1d_name_partial(expid)
-        if df.imagetyp[expid] == "Object"
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
-        else
-            return nothing
+    mskMJD = (mjd_list .== mjd) .& (tele_list .== parg["tele"])
+    if count(mskMJD) > 0
+        df = read_almanac_exp_df(
+            joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+        function get_1d_name_partial(expid)
+            if df.imagetyp[expid] == "Object"
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
         end
-    end
-    function get_1d_name_ARCLAMP_partial(expid)
-        if (df.imagetyp[expid] == "ArcLamp") &
-           ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
-        else
-            return nothing
+        function get_1d_name_ARCLAMP_partial(expid)
+            if (df.imagetyp[expid] == "ArcLamp") &
+               ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
         end
-    end
-    function get_1d_name_FPI_partial(expid)
-        if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
-           (df.lampune[expid] == "F")
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
-        else
-            return nothing
+        function get_1d_name_FPI_partial(expid)
+            if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
+               (df.lampune[expid] == "F")
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
         end
+        local1D = get_1d_name_partial.(expid_list)
+        push!(list1DexpObject, filter(!isnothing, local1D))
+        local1D_fpi = get_1d_name_FPI_partial.(expid_list)
+        push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
+        push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
     end
-    local1D = get_1d_name_partial.(expid_list)
-    push!(list1DexpObject, filter(!isnothing, local1D))
-    local1D_fpi = get_1d_name_FPI_partial.(expid_list)
-    push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-    local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
-    push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
 end
 all1DObjecta = vcat(list1DexpObject...)
 all1DFPIa = vcat(list1DexpFPI...)
@@ -563,7 +584,7 @@ end
 all2Da = vcat(list2Dexp...)
 
 # per chip example 2D flux residuals from 1D extraction
-for chip in CHIP_LIST
+for chip in chips2do
     println("\nGenerating 2D residual plots for chip $chip")
     all2D = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
@@ -571,10 +592,10 @@ for chip in CHIP_LIST
 
     # TODO parallelize plotting
     # we should customize this to the exposures we want to see and types of stars we want
-    nsamp = minimum([length(all2D), 10])
-    sample_exposures = sample(rng, all2D, nsamp, replace = false)
-    f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-    for exp_fname in sample_exposures
+    # nsamp = minimum([length(all2D), 10])
+    # sample_exposures = sample(rng, all2D, nsamp, replace = false)
+    f = h5open(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"))
+    for exp_fname in all2D
         sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
         fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
 
@@ -603,8 +624,8 @@ for chip in CHIP_LIST
         colsize!(fig.layout, 1, Aspect(1, data_aspect))
         resize_to_layout!(fig)
 
-        savePath = get_save_dir(mjd) *
-                   "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(exptype).png"
+        savePath = joinpath(get_save_dir(mjd),
+            "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(exptype).png")
         save(savePath, fig, px_per_unit = 3)
     end
 end
@@ -640,7 +661,7 @@ end
 sorted_exptypes = sort(unique(allExptype), by = get_exptype_priority)
 
 # per chip example spectra
-for chip in string.(collect(parg["chips"]))
+for chip in chips2do
     println("\nGenerating example spectra plots for chip $chip")
     all1D = replace.(all1Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
 
@@ -652,11 +673,10 @@ for chip in string.(collect(parg["chips"]))
     for exptype2plot in sorted_exptypes
         msk_exptype = allExptype .== exptype2plot
         if any(msk_exptype)
-            nsamp = minimum([count(msk_exptype), 3])
-            sample_exposures = sample(rng, all1D[msk_exptype], nsamp, replace = false)
-
+            # nsamp = minimum([count(msk_exptype), 3])
+            # sample_exposures = sample(rng, all1D[msk_exptype], nsamp, replace = false)
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-            for exp_fname in sample_exposures
+            for exp_fname in all1D[msk_exptype]
                 sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
                 fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
 
@@ -846,10 +866,10 @@ rng = MersenneTwister(536 + unique_mjds[1])
 for exptype2plot in sorted_exptypes
     msk_exptype = allExptype .== exptype2plot
     if any(msk_exptype)
-        nsamp = minimum([count(msk_exptype), 3])
-        sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
+        # nsamp = minimum([count(msk_exptype), 3])
+        # sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-        for exp_fname in sample_exposures
+        for exp_fname in all1Da[msk_exptype]
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
             fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
             expuni_fname = replace(

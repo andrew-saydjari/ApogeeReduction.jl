@@ -10,7 +10,7 @@ function parse_commandline()
         default = "RGB"
         arg_type = String
         "--tele"
-        required = true
+        required = false
         help = "telescope name (apo or lco)"
         arg_type = String
         default = ""
@@ -68,7 +68,7 @@ end
 @everywhere begin
     chips = collect(String, split(parg["chips"], ""))
 
-    dirNamePlots = parg["trace_dir"] * "plots/"
+    dirNamePlots = joinpath(parg["trace_dir"], "plots/")
     if !ispath(dirNamePlots)
         mkpath(dirNamePlots)
     end
@@ -76,23 +76,22 @@ end
 
 ## TODO Confirm multiple MJD handling is correct/ideal
 # using runlist for dome/quartz flats only
-unique_teles = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    unique(subDic["tele"])
+tele_list = if parg["runlist"] != ""
+    load(parg["runlist"], "tele")
 else
     [parg["tele"]]
 end
+unique_teles = unique(tele_list)
 
-unique_mjds = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    unique(subDic["mjd"])
+mjd_list = if parg["runlist"] != ""
+    load(parg["runlist"], "mjd")
 else
     [parg["mjd"]]
 end
+unique_mjds = unique(mjd_list)
 
 expid_list = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    subDic["expid"]
+    load(parg["runlist"], "expid")
 else
     [parg["expid"]]
 end
@@ -100,12 +99,17 @@ end
 all1Da = String[] # all 1D files for chip a
 for tele in unique_teles
     for mjd in unique_mjds
-        df = read_almanac_exp_df(parg["trace_dir"] * "almanac/$(parg["runname"]).h5", tele, mjd)
-        function get_1d_name_partial(expid)
-            parg["trace_dir"] * "apredrelflux/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
+        mskMJD = (mjd_list .== mjd) .& (tele_list .== tele)
+        if count(mskMJD) > 0
+            df = read_almanac_exp_df(
+                joinpath(parg["trace_dir"], "almanac/$(parg["runname"]).h5"), tele, mjd)
+            function get_1d_name_partial(expid)
+                joinpath(parg["trace_dir"], "apredrelflux/$(mjd)",
+                    get_1d_name(expid, df, cal = true) * ".h5")
+            end
+            file_list = get_1d_name_partial.(expid_list[mskMJD])
+            append!(all1Da, file_list)
         end
-        file_list = get_1d_name_partial.(expid_list)
-        append!(all1Da, file_list)
     end
 end
 
@@ -127,10 +131,10 @@ if length(all1Da) > 0
 
     @everywhere begin
         function get_and_save_relFlux(fname)
-            println("reading ", fname)
             absthrpt, relthrpt, bitmsk_relthrpt, metadata = get_relFlux(fname)
             cartid = Int(metadata["cartid"])
             outfname = replace(fname,
+                "apredrelflux" => "$(cal_type)_flats",
                 "apred" => "$(cal_type)_flats",
                 "ar1Dcal" => "$(cal_type)Flux",
                 ".h5" => "_$(cartid).h5"
@@ -139,13 +143,12 @@ if length(all1Da) > 0
             if !ispath(dname)
                 mkpath(dname)
             end
-            println("writing ", outfname)
             safe_jldsave(outfname, metadata; absthrpt, relthrpt, bitmsk_relthrpt)
             return outfname
         end
     end
 
-    desc = "get and save relFlux from DomeFlats"
+    desc = "get and save relFlux from Flats"
     outfnames = @showprogress desc=desc pmap(get_and_save_relFlux, all1D)
     outfnamesa = outfnames[1:length(all1Da)]
 
