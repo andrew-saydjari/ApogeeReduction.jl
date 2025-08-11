@@ -45,10 +45,11 @@ end
 
 parg = parse_commandline()
 
+proj_path = dirname(Base.active_project()) * "/"
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=./"])
+        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
     else
         addprocs(16)
     end
@@ -57,15 +58,17 @@ end
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using HDF5, DataFrames, SlackThreads
-    include("../../src/makie_plotutils.jl")
     using ApogeeReduction
     using ApogeeReduction: safe_jldsave, read_almanac_exp_df, get_1d_name, get_relFlux,
                            read_metadata
 end
 
 @passobj 1 workers() parg # make it available to all workers
+@passobj 1 workers() proj_path
 
 @everywhere begin
+    include(joinpath(proj_path, "src/makie_plotutils.jl"))
+
     chips = collect(String, split(parg["chips"], ""))
 
     dirNamePlots = joinpath(parg["trace_dir"], "plots/")

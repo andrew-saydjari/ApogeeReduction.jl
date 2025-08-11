@@ -29,7 +29,7 @@ function initalize_git(git_dir)
 end
 # this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
 # but it is a symptom of the fact that the include situation is a bit tangled
-git_branch, git_commit = initalize_git("./")
+git_branch, git_commit = initalize_git(dirname(Base.active_project()) * "/")
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^1 + 2^2 + 2^4
@@ -43,8 +43,10 @@ bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
 
+bad_fully_saturated = 2^14;
+
 bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
-               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff;
+               bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff + bad_fully_saturated;
 
 function isnanorzero(x)
     return isnan(x) | iszero(x)

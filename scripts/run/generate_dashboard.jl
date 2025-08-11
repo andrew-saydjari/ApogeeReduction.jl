@@ -357,9 +357,9 @@ function generate_html(mjd, outdir, categories)
 end
 
 function main()
-    args = parse_commandline()
-    mjd = args["mjd"]
-    outdir = args["outdir"]
+    parg = parse_commandline()
+    mjd = parg["mjd"]
+    outdir = parg["outdir"]
 
     # Get the plots directory for this MJD
     plots_dir = joinpath(outdir, "plots", string(mjd))
@@ -381,10 +381,15 @@ function main()
 
     # post a link to slack
     # the link to the dashboard is relative to the current directory
-    dir = abspath(joinpath(pwd(), "..", "outdir", "plots", string(mjd), "dashboard.html"))
-    url = replace(dir, "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/")
+    dir = abspath(joinpath(pwd(), parg["outdir"], "plots", string(mjd), "dashboard.html"))
+    url = replace(
+        replace(dir, "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/"),
+        "/mnt/ceph/users/asaydjari/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/"
+    )
     thread = SlackThread()
-    thread("The reduction plots dashboard for SJD $(mjd) has been generated and is available at: $url")
+    msg = "The reduction plots dashboard for SJD $(mjd) has been generated and is available at: $url"
+    thread(msg)
+    println(msg)
 end
 
 main()
