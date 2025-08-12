@@ -249,13 +249,13 @@ end
     profile_path = joinpath(proj_path, "data"),
     plot_path = joinpath(parg["outdir"], "plots/")
     )
-# if parg["doUncals"]
-#     desc = "Extracting 2D to 1D (uncals):"
-#     @showprogress desc=desc pmap(process_1D_wrapper, all2D)
-# end
-# all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
-# desc = "Extracting 2Dcal to 1Dcal:"
-# @showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
+if parg["doUncals"]
+    desc = "Extracting 2D to 1D (uncals):"
+    @showprogress desc=desc pmap(process_1D_wrapper, all2D)
+end
+all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
+desc = "Extracting 2Dcal to 1Dcal:"
+@showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
 
 ### Only do the wavelength solution if we are relFluxing
 if parg["relFlux"]
@@ -328,32 +328,32 @@ if parg["relFlux"]
         df_sky_lines.linindx = 1:size(df_sky_lines, 1)
     end
 
-    # ## get sky line peaks
-    # @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-    #     fname, roughwave_dict, df_sky_lines)
-    # desc = "Fitting sky line peaks: "
-    # @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
+    ## get sky line peaks
+    @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+        fname, roughwave_dict, df_sky_lines)
+    desc = "Fitting sky line peaks: "
+    @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
 
-    # # get arclamp peaks
-    # if size(all1DArclamp, 1) > 0
-    #     ## get (non-fpi) arclamp peaks
-    #     desc = "Fitting arclamp peaks: "
-    #     @showprogress desc=desc pmap(get_and_save_arclamp_peaks, all1DArclamp)
-    # end
+    # get arclamp peaks
+    if size(all1DArclamp, 1) > 0
+        ## get (non-fpi) arclamp peaks
+        desc = "Fitting arclamp peaks: "
+        @showprogress desc=desc pmap(get_and_save_arclamp_peaks, all1DArclamp)
+    end
 
-    # all1DfpiPeaks_a = replace.(
-    #     replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-    # all1DfpiPeaks = if size(all1DFPI, 1) > 0
-    #     ## get FPI peaks
-    #     desc = "Fitting FPI peaks: "
-    #     @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
-    #     @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
-    # else
-    #     []
-    # end
-    # all1DfpiPeaks_out = reshape(all1DfpiPeaks,length(all1DfpiPeaks_a),length(CHIP_LIST))
-    # mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
-    # println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
+    all1DfpiPeaks_a = replace.(
+        replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    all1DfpiPeaks = if size(all1DFPI, 1) > 0
+        ## get FPI peaks
+        desc = "Fitting FPI peaks: "
+        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
+        @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
+    else
+        []
+    end
+    all1DfpiPeaks_out = reshape(all1DfpiPeaks,length(all1DfpiPeaks_a),length(CHIP_LIST))
+    mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
+    println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
     ## get wavecal from sky line peaks
     #only need to give one chip's list because internal
@@ -385,16 +385,16 @@ if parg["relFlux"]
         night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_dict.jld2"), "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
     end
 
-    # # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
-    # if size(all1DFPI, 1) > 0
-    #     mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
-    #     desc = "FPI medwave/skyline dither: "
-    #     sendto(workers(), mjd_list_fpi = mjd_list_fpi)
-    #     sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
-    #     sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-    #     @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
-    #     @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
-    # end
+    # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
+    if size(all1DFPI, 1) > 0
+        mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
+        desc = "FPI medwave/skyline dither: "
+        sendto(workers(), mjd_list_fpi = mjd_list_fpi)
+        sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
+        sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
+        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
+    end
 
     ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 
