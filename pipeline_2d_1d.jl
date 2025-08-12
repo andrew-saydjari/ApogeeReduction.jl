@@ -259,67 +259,67 @@ end
 
 ### Only do the wavelength solution if we are relFluxing
 if parg["relFlux"]
-    # ## get all OBJECT files (happy to add any other types that see sky?)
-    # ## also get FPI and arclamp files
-    # list1DexpObject = []
-    # list1DexpFPI = []
-    # list1DexpArclamp = []
-    # for mjd in unique_mjds
-    #     df = read_almanac_exp_df(
-    #         joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
-    #     function get_1d_name_partial(expid)
-    #         if df.imagetyp[expid] == "Object"
-    #             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
-    #                    ".h5"
-    #         else
-    #             return nothing
-    #         end
-    #     end
-    #     function get_1d_name_ARCLAMP_partial(expid)
-    #         if (df.imagetyp[expid] == "ArcLamp") &
-    #            ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
-    #             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
-    #                    ".h5"
-    #         else
-    #             return nothing
-    #         end
-    #     end
-    #     function get_1d_name_FPI_partial(expid)
-    #         if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
-    #            (df.lampune[expid] == "F")
-    #             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
-    #                    ".h5"
-    #         else
-    #             return nothing
-    #         end
-    #     end
-    #     mskMJD = (mjd_list .== mjd) .& mskTele
-    #     local1D = get_1d_name_partial.(expid_list[mskMJD])
-    #     push!(list1DexpObject, filter(!isnothing, local1D))
-    #     local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
-    #     push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-    #     local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
-    #     push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
-    # end
-    # all1DObjecta = vcat(list1DexpObject...)
-    # all1DFPIa = vcat(list1DexpFPI...)
-    # all1DArclampa = vcat(list1DexpArclamp...)
-    # all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    ## get all OBJECT files (happy to add any other types that see sky?)
+    ## also get FPI and arclamp files
+    list1DexpObject = []
+    list1DexpFPI = []
+    list1DexpArclamp = []
+    for mjd in unique_mjds
+        df = read_almanac_exp_df(
+            joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+        function get_1d_name_partial(expid)
+            if df.imagetyp[expid] == "Object"
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
+        end
+        function get_1d_name_ARCLAMP_partial(expid)
+            if (df.imagetyp[expid] == "ArcLamp") &
+               ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
+        end
+        function get_1d_name_FPI_partial(expid)
+            if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
+               (df.lampune[expid] == "F")
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
+        end
+        mskMJD = (mjd_list .== mjd) .& mskTele
+        local1D = get_1d_name_partial.(expid_list[mskMJD])
+        push!(list1DexpObject, filter(!isnothing, local1D))
+        local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
+        push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
+        push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
+    end
+    all1DObjecta = vcat(list1DexpObject...)
+    all1DFPIa = vcat(list1DexpFPI...)
+    all1DArclampa = vcat(list1DexpArclamp...)
+    all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
 
-    # all1DObjectperchip = []
-    # all1DArclampperchip = []
-    # all1DFPIperchip = []
-    # for chip in CHIP_LIST
-    #     all1DObjectchip = replace.(all1DObjecta, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    #     push!(all1DObjectperchip, all1DObjectchip)
-    #     all1DArclampchip = replace.(all1DArclampa, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    #     push!(all1DArclampperchip, all1DArclampchip)
-    #     all1DFPIchip = replace.(all1DFPIa, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    #     push!(all1DFPIperchip, all1DFPIchip)
-    # end
-    # all1DObject = vcat(all1DObjectperchip...)
-    # all1DArclamp = vcat(all1DArclampperchip...)
-    # all1DFPI = vcat(all1DFPIperchip...)
+    all1DObjectperchip = []
+    all1DArclampperchip = []
+    all1DFPIperchip = []
+    for chip in CHIP_LIST
+        all1DObjectchip = replace.(all1DObjecta, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all1DObjectperchip, all1DObjectchip)
+        all1DArclampchip = replace.(all1DArclampa, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all1DArclampperchip, all1DArclampchip)
+        all1DFPIchip = replace.(all1DFPIa, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all1DFPIperchip, all1DFPIchip)
+    end
+    all1DObject = vcat(all1DObjectperchip...)
+    all1DArclamp = vcat(all1DArclampperchip...)
+    all1DFPI = vcat(all1DFPIperchip...)
 
     ## load rough wave dict and sky lines list
     @everywhere begin
@@ -355,38 +355,37 @@ if parg["relFlux"]
     # mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
     # println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
-    # ## get wavecal from sky line peaks
-    # #only need to give one chip's list because internal
-    # #logic handles finding other chips when ingesting data
-    # #Andrew says that that is a bit worrisome and would should revisit that logic
-    # all1DObjectSkyPeaks = replace.(
-    #     replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
-    # desc = "Skyline wavelength solutions:"
-    # all1DObjectWavecal = @showprogress desc=desc pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
-    # all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
+    ## get wavecal from sky line peaks
+    #only need to give one chip's list because internal
+    #logic handles finding other chips when ingesting data
+    #Andrew says that that is a bit worrisome and would should revisit that logic
+    all1DObjectSkyPeaks = replace.(
+        replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+    desc = "Skyline wavelength solutions:"
+    all1DObjectWavecal = @showprogress desc=desc pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+    all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
-    # # putting this parallelized within each mjd is really not good in the bulk run context
-    # mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
+    # putting this parallelized within each mjd is really not good in the bulk run context
+    mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
 
-    # sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
-    # sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
-    # sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-    # desc = "Skyline medwave/skyline dither: "
-    # @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
-    # pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
+    sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
+    sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
+    sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+    desc = "Skyline medwave/skyline dither: "
+    @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
+    pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
 
-    # night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
-    # night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
-    # night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
+    night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
+    night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
+    night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
 
-    # mkpath(joinpath(parg["outdir"], "wavecal"))
-    # safe_jldsave(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_dict.jld2"), night_wave_soln_dict = night_wave_soln_dict, night_linParams_dict = night_linParams_dict, night_nlParams_dict = night_nlParams_dict, no_metadata = true)
+    mkpath(joinpath(parg["outdir"], "wavecal"))
+    safe_jldsave(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_dict.jld2"), night_wave_soln_dict = night_wave_soln_dict, night_linParams_dict = night_linParams_dict, night_nlParams_dict = night_nlParams_dict, no_metadata = true)
     @everywhere begin
-        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_dict.jld2"), "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
+        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_dict.jld2"), "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
     end
 
-    # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
-
+    # # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
     # if size(all1DFPI, 1) > 0
     #     mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
     #     desc = "FPI medwave/skyline dither: "

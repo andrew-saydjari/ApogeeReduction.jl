@@ -476,7 +476,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
     end
     if !found_soln
         #this is not a great global fallback, but it works so we get something to look at
-        if isnothing(backupWaveSoln)
+        if isnothing(backupWaveSoln) || isnothing(backupWaveSoln[mjd_int])
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
@@ -513,7 +513,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
         try
             wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         catch
-            println((typeof(wave_stack), typeof(N_XPIX), typeof(chipind), typeof(chipWaveSoln)))
+            println((typeof(wave_stack), typeof(N_XPIX), typeof(chipind), typeof(chipWaveSoln),fname, mjd_int, typeof(backupWaveSoln), typeof(backupWaveSoln)))
         end 
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[

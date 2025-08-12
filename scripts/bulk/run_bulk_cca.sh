@@ -121,11 +121,11 @@ if [ "$run_2d_only" != "true" ]; then
     # done
 
     ### 2D->1D
-    for tele in ${tele_list[@]}
-    do
-        print_elapsed_time "Running 2D->1D Pipeline for $tele"
-        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
-    done
+    # for tele in ${tele_list[@]}
+    # do
+    #     print_elapsed_time "Running 2D->1D Pipeline for $tele"
+    #     julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+    # done
     ### Plots
     #     print_elapsed_time "Making Plots"
     #     julia +$julia_version --project=$base_dir $base_dir/scripts/run/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
@@ -137,7 +137,7 @@ if [ "$run_2d_only" != "true" ]; then
     ## arMADGICS
     if [ -d ${path2arMADGICS} ]; then
         print_elapsed_time "Running arMADGICS"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline_cca.jl --redux_base $outdir --almanac_file $almanac_file
 
         print_elapsed_time "Running arMADGICS Workup"
         julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw/
