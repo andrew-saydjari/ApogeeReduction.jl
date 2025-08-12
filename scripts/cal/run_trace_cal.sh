@@ -10,10 +10,16 @@
 #SBATCH --job-name=ar_trace_cal
 #SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
-
-# exit immediately if any of the steps returns a non-zero exit code
-set -e
+set -e # exit immediately if any of the steps returns a non-zero exit code
 set -o pipefail
+
+if [ -n "$SLURM_JOB_NODELIST" ]; then
+    hostname
+    echo $SLURM_JOB_NODELIST
+else
+    hostname
+fi
+echo "running from $(pwd)"
 
 # load all of the modules to talk to the database (need to be on Utah)
 # should turn this off as an option for users once the MJD summaries are generated

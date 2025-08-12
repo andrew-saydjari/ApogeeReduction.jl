@@ -512,11 +512,11 @@ function get_ave_night_wave_soln(
                     split(split(unique_fname_list[fname_ind], "/")[end], ".h5")[1], "_")[(end - 3):end]
                 curr_peak_fname = "$(curr_path)/$(wavetype)LinePeaks_$(curr_tele)_$(curr_mjd)_$(curr_expid)_$(FIRST_CHIP)_$(curr_exptype).h5"
 
-		dither_outputs = get_sky_dither_per_fiber(
-                    curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)
-		if isnothing(dither_outputs)
-		    continue
-		end
+                dither_outputs = get_sky_dither_per_fiber(
+                            curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)
+                if isnothing(dither_outputs)
+                    continue
+                end
                 all_ditherParams[:, :, fname_ind] .= dither_outputs[1]
 
                 for fibIndx in 1:N_FIBERS
@@ -764,6 +764,7 @@ function comb_exp_get_and_save_fpi_wavecal(
     #read in the peak positions
     fpi_line_uxlst, fpi_line_uxlst_errs, fpi_line_chipInt, fpi_line_expInt, fpi_line_peakInt = ingest_fpiLines(fname_list)
     n_peaks = size(fpi_line_uxlst, 1)
+    println(n_peaks)
 
     #use the initial wavelength solution and the 
     #chip b peaks to define the m integers 
@@ -802,15 +803,23 @@ function comb_exp_get_and_save_fpi_wavecal(
                 peak_waves[on_chip, fibIndx] .= yt
 
 		if size(on_chip,1) == 1
-                    peak_ints[on_chip, fibIndx] += round(nanmedian(2 * cavity_size ./
+		    int_offset = round(nanmedian(2 * cavity_size ./
                                                                 peak_waves[on_chip, fibIndx] .-
                                                                 (peak_ints[on_chip, fibIndx] .+
                                                                  m_offset)))
+		    if !isfinite(int_offset)
+                        int_offset = 0
+		    end
+                    peak_ints[on_chip, fibIndx] += int_offset
 		else
-                    peak_ints[on_chip, fibIndx] .+= round(nanmedian(2 * cavity_size ./
+		    int_offset = round(nanmedian(2 * cavity_size ./
                                                                 peak_waves[on_chip, fibIndx] .-
                                                                 (peak_ints[on_chip, fibIndx] .+
                                                                  m_offset)))
+		    if !isfinite(int_offset)
+                        int_offset = 0
+		    end
+                    peak_ints[on_chip, fibIndx] .+= int_offset
 		end
             end
         end
@@ -831,7 +840,7 @@ function comb_exp_get_and_save_fpi_wavecal(
     test_peak_ints = round.(2 .* cavity_size ./ peak_waves .- m_offset)
     #    bad_peaks = (abs.(test_peak_ints .- peak_ints) .> 5) .| (abs.(peak_waves .- expect_peak_waves) .> 2.0)
     #    bad_peaks = (abs.(peak_waves .- expect_peak_waves) .> 2.0) .| isnan.(fpi_ximport)
-    bad_peaks = (abs.(test_peak_ints .- peak_ints) .> 5) .| isnan.(fpi_ximport)
+    bad_peaks = (abs.(test_peak_ints .- peak_ints) .> 5) .| isnan.(fpi_ximport) .| isnan.(peak_ints)
     #    bad_peaks = isnan.(fpi_ximport)
     verbose &&
         println("Found $(sum(bad_peaks)) bad peaks (out of a total $(length(bad_peaks)) peaks) that are too offset from the expected peak positions")
@@ -944,17 +953,34 @@ function comb_exp_get_and_save_fpi_wavecal(
 	        n_other = sum(good_peaks[on_other, i])
 
 	        n_use = min(n_first,n_other)
-	        peak_ints[on_first,i][begin:n_use]
 
-		peak_offset = ceil(Int,nanmedian(peak_ints[on_first,i][begin:n_use]-peak_ints[on_other,i][begin:n_use]))
-		if peak_offset >= 0
-    		    new_peak_offset = ceil(Int,nanmedian(peak_ints[on_first,i][begin:n_use-peak_offset]-peak_ints[on_other,i][begin+peak_offset:n_use]))
-                    pix_offset = nanmedian(fpi_ximport[on_first,i][begin:n_use-peak_offset]-fpi_ximport[on_other,i][begin+peak_offset:n_use])
+		peak_offset = nanmedian(peak_ints[on_first,i][begin:n_use]-peak_ints[on_other,i][begin:n_use])
+		if isfinite(peak_offset) 
+    		    peak_offset = ceil(Int,peak_offset)
+		end
+
+		if !isfinite(peak_offset)
+		    pix_offset = NaN
+		elseif peak_offset >= 0
+		    new_peak_offset = nanmedian(peak_ints[on_first,i][begin:n_use-peak_offset]-peak_ints[on_other,i][begin+peak_offset:n_use])
+		    if isfinite(new_peak_offset)
+                        new_peak_offset = ceil(Int,new_peak_offset)
+                        pix_offset = nanmedian(fpi_ximport[on_first,i][begin:n_use-peak_offset]-fpi_ximport[on_other,i][begin+peak_offset:n_use])
+		    else
+                        new_peak_offset = NaN
+			pix_offset = NaN
+		    end
 		else
 		    peak_offset = abs(peak_offset)
-    		    new_peak_offset = ceil(Int,nanmedian(peak_ints[on_first,i][begin+peak_offset:n_use]-peak_ints[on_other,i][begin:n_use-peak_offset]))
-                    pix_offset = nanmedian(fpi_ximport[on_first,i][begin+peak_offset:n_use]-fpi_ximport[on_other,i][begin:n_use-peak_offset])
-		    peak_offset *= -1
+		    new_peak_offset = nanmedian(peak_ints[on_first,i][begin+peak_offset:n_use]-peak_ints[on_other,i][begin:n_use-peak_offset])
+                    if isfinite(new_peak_offset)
+                        new_peak_offset = ceil(Int,new_peak_offset)
+                        pix_offset = nanmedian(fpi_ximport[on_first,i][begin+peak_offset:n_use]-fpi_ximport[on_other,i][begin:n_use-peak_offset])
+		        peak_offset *= -1
+		    else
+                        new_peak_offset = NaN
+			pix_offset = NaN
+		    end
 		end
 #		println(i," ",chipIndx," ",fname_ind," ",peak_offset," ",new_peak_offset," ",pix_offset," ",pix_offset * 2048)
 

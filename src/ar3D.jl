@@ -22,9 +22,8 @@ function apz2cube(fname)
 end
 
 function zeropoint_read_dcube!(dcube)
-    ref_zpt_vec = mean(dcube[2049:end, :, :], dims = (1, 2))
-    sci_zpt_vec = (mean(dcube[1:4, :, :], dims = (1, 2)) +
-                   mean(dcube[2045:2048, :, :], dims = (1, 2))) ./ 2
+    ref_zpt_vec = median(dcube[2049:end, :, :], dims = (1, 2))
+    sci_zpt_vec = median(cat(dcube[1:4, :, :], dcube[2045:2048, :, :], dims = 1), dims = (1, 2))
 
     ref_zpt_out = dropdims(ref_zpt_vec, dims = (1, 2))
     sci_zpt_out = dropdims(sci_zpt_vec, dims = (1, 2))
@@ -33,24 +32,28 @@ function zeropoint_read_dcube!(dcube)
     dcube[2049:end, :, :] .-= ref_zpt_vec
 
     amp_ranges = [1:512, 513:1024, 1025:1536, 1537:2048]
-    ref_bot = zeros(4, length(ref_zpt_out))
+    ref_bot_zpt = dropdims(
+        median(cat(dcube[amp_ranges[1], 1:4, :], dcube[amp_ranges[4], 1:4, :], dims = 1),
+            dims = (1, 2)),
+        dims = (1, 2))
+    ref_top_zpt = dropdims(
+        median(
+            cat(dcube[amp_ranges[1], 2045:2048, :], dcube[amp_ranges[4], 2045:2048, :], dims = 1),
+            dims = (1, 2)),
+        dims = (1, 2))
+    amp_off_vec = zeros(4, length(ref_zpt_out))
     for (aindx, amp) in enumerate(amp_ranges)
-        ref_bot[aindx, :] .= dropdims(mean(dcube[amp, 1:4, :], dims = (1, 2)), dims = (1, 2))
+        amp_off_vec[aindx, :] .= dropdims(
+            median(
+                cat(dcube[amp, 1:4, :] .- reshape(ref_bot_zpt, 1, 1, :),
+                    dcube[amp, 2045:2048, :] .- reshape(ref_top_zpt, 1, 1, :),
+                    dims = 2), dims = (1, 2)), dims = (1, 2))
     end
-    ref_top = zeros(4, length(ref_zpt_out))
-    for (aindx, amp) in enumerate(amp_ranges)
-        ref_top[aindx, :] .= dropdims(mean(dcube[amp, 2045:2048, :], dims = (1, 2)), dims = (1, 2))
-    end
-
-    amp_off_vec = ref_bot .- reshape((ref_bot[1, :] .+ ref_bot[4, :]) ./ 2, 1, :)
-    amp_off_vec .+= ref_top .- reshape((ref_top[1, :] .+ ref_top[4, :]) ./ 2, 1, :)
-    amp_off_vec ./= 2
     amp_off_vec .-= reshape((amp_off_vec[1, :] .+ amp_off_vec[4, :]) ./ 2, 1, :)
 
-    dcube[1:512, :, :] .-= reshape(amp_off_vec[1, :], 1, 1, :)
-    dcube[513:1024, :, :] .-= reshape(amp_off_vec[2, :], 1, 1, :)
-    dcube[1025:1536, :, :] .-= reshape(amp_off_vec[3, :], 1, 1, :)
-    dcube[1537:2048, :, :] .-= reshape(amp_off_vec[4, :], 1, 1, :)
+    for i in eachindex(amp_ranges)
+        dcube[amp_ranges[i], :, :] .-= reshape(amp_off_vec[i, :], 1, 1, :)
+    end
 
     return ref_zpt_out, sci_zpt_out, amp_off_vec
 end
@@ -357,7 +360,8 @@ end
 # firstind overriden for APO dome flats
 function process_3D(outdir, runname, tel, mjd, expid, chip,
         gainMatDict, readVarMatDict, saturationMatDict;
-        firstind = 3, cor1fnoise = true, extractMethod = "sutr_wood", save3dcal = false)
+        firstind = 3, cor1fnoise = true, extractMethod = "sutr_wood",
+        save3dcal = false, cluster = "sdss", suppress_warning = false)
     dirName = joinpath(outdir, "apred/$(mjd)/")
     if !ispath(dirName)
         mkpath(dirName)
@@ -371,7 +375,8 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
     #        println(expid,chip,size(df.observatory),size(df.mjd),size(df.exposure_int))
     # check if chip is in the llist of chips in df.something[expid] (waiting on Andy Casey to update alamanc)
     rawpath = build_raw_path(
-        df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"))
+        df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"),
+        cluster = cluster, suppress_warning = suppress_warning)
     cartid = df.cartidInt[expid]
     # decompress and convert apz data format to a standard 3D cube of reads
     cubedat, hdr_dict = apz2cube(rawpath)

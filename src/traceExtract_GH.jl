@@ -68,7 +68,7 @@ const default_trace_hyperparams = Dict{Tuple{String, String}, Any}()
 """
 Get the default trace hyperparams for a given chip. Loads the data lazily.
 """
-function get_default_trace_hyperparams(tel, chip)
+function get_default_trace_hyperparams(tel, chip; profile_path = "./data/", plot_path = "../outdir/$(sjd)/plots/")
     exposures_to_use = Dict([
         "apo" => ("59549", "39870035"),
         "lco" => ("60044", "44820015")
@@ -77,7 +77,7 @@ function get_default_trace_hyperparams(tel, chip)
     # load the data lazily into memory
     if !haskey(default_trace_hyperparams, (tel, chip))
         sjd, expid = exposures_to_use[tel]
-        default_trace_hyperparams[(tel, chip)] = load_trace_hyperparams(tel, sjd, expid, chip)
+        default_trace_hyperparams[(tel, chip)] = load_trace_hyperparams(tel, sjd, expid, chip, profile_path = profile_path, plot_path = plot_path)
     end
 
     default_trace_hyperparams[(tel, chip)]
