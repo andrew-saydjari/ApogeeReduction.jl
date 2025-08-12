@@ -48,6 +48,8 @@ bad_fully_saturated = 2^14;
 bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
                bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff + bad_fully_saturated;
 
+speed_of_light = 299792.458 #km/s
+
 function isnanorzero(x)
     return isnan(x) | iszero(x)
 end
@@ -79,7 +81,6 @@ nanzeromedian(x) =
     end
 nanzeromedian(x, y) = mapslices(nanzeromedian, x, dims = y)
 
-#@Kevin can we remove?
 nanmedian(x) =
     if all(isnan, x)
         NaN
@@ -97,8 +98,15 @@ nanzeroiqr(x) =
     end
 nanzeroiqr(x, y) = mapslices(nanzeroiqr, x, dims = y)
 
+nansqrt(x) =
+    if isnan(x) | (x < 0)
+        NaN
+    else
+        sqrt(x)
+    end
+
 # Single vector version
-function nanzeropercentile(x::AbstractVector; percent_vec = [16, 50, 64])
+function nanzeropercentile(x::AbstractVector; percent_vec = [16, 50, 84])
     if all(isnanorzero, x)
         fill(NaN, length(percent_vec))
     else
@@ -107,7 +115,7 @@ function nanzeropercentile(x::AbstractVector; percent_vec = [16, 50, 64])
 end
 
 # Array version with dimensions
-function nanzeropercentile(x::AbstractArray; percent_vec = [16, 50, 64], dims = 1)
+function nanzeropercentile(x::AbstractArray; percent_vec = [16, 50, 84], dims = 1)
     mapslices(v -> nanzeropercentile(vec(v), percent_vec = percent_vec), x, dims = dims)
 end
 
