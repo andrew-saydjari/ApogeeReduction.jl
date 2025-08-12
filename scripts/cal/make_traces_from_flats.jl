@@ -27,6 +27,11 @@ function parse_commandline()
         help = "flat type, i.e. dome or quartz"
         arg_type = String
         default = "quartz"
+        "--slack_quiet"
+        required = false
+        help = "if true, don't send slack notifications"
+        arg_type = Bool
+        default = false
     end
     return parse_args(s)
 end
@@ -110,21 +115,24 @@ plot_paths = @showprogress desc=desc pmap(flist) do fname
         image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
         ; good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
-
+    savename = joinpath(parg["trace_dir"], "$(parg["flat_type"])_flats", "$(mjdloc)", "$(parg["flat_type"])Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5")
+    mkpath(dirname(savename))
     safe_jldsave(
-        joinpath(parg["trace_dir"], "$(parg["flat_type"])_flats", "$(parg["flat_type"])Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5");
+        savename;
         trace_params = trace_params, trace_param_covs = trace_param_covs, no_metadata = true)
 
     return trace_plots(dirNamePlots, parg["flat_type"], trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
 end
 
-thread = SlackThread()
-if length(unique_mjds) > 1
-    thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) from SJD $(minimum(unique_mjds)) to $(maximum(unique_mjds))")
-    for (filename, heights_widths_path) in zip(flist, plot_paths)
-        thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
+if !parg["slack_quiet"]
+    thread = SlackThread()
+    if length(unique_mjds) > 1
+        thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) from SJD $(minimum(unique_mjds)) to $(maximum(unique_mjds))")
+        for (filename, heights_widths_path) in zip(flist, plot_paths)
+            thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
+        end
+    else
+        thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) had no data")
     end
-else
-    thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) had no data")
+    thread("$(parg["flat_type"])Flat traces done.")
 end
-thread("$(parg["flat_type"])Flat traces done.")

@@ -41,7 +41,7 @@ juliaup add $julia_version
 tele=$1
 mjd=$2
 run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
-outdir=${4:-"outdir/"}  # Fourth argument, defaults to "../../outdir/" if not provided
+outdir=${4:-"outdir/"}  # Fourth argument, defaults to "outdir/" if not provided
 outdir_madgics=${outdir}arMADGICS/raw/ # this is where the arMADGICS output will be saved
 caldir_darks=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
 caldir_flats=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}

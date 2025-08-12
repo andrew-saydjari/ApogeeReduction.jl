@@ -74,7 +74,7 @@ function parse_commandline()
         required = false
         help = "number of workers per node"
         arg_type = Int
-        default = 58
+        default = -1 # -1 means use all the cores on the node
         "--cluster"
         required = false
         help = "cluster name (sdss or cca or path)"
@@ -97,24 +97,23 @@ parg = parse_commandline()
 
 workers_per_node = parg["workers_per_node"]
 proj_path = dirname(Base.active_project()) * "/"
-proj_path = dirname(Base.active_project()) * "/"
 if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
-        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
-        ntasks = parse(Int, ENV["SLURM_NTASKS"])
-        nnodes = ntasks ÷ 64  # Each node has 64 cores
-        total_workers = nnodes * workers_per_node
-        workers_to_keep = []
-        for node in 0:(nnodes - 1)
-            node_start = 1 + node * 64
-            spacing = 64 ÷ workers_per_node
-            append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+        if workers_per_node != -1
+            ntasks = parse(Int, ENV["SLURM_NTASKS"])
+            nnodes = parse(Int, ENV["SLURM_NNODES"])
+            total_workers = nnodes * workers_per_node
+            workers_to_keep = []
+            for node in 0:(nnodes - 1)
+                node_start = 1 + node * 64
+                spacing = 64 ÷ workers_per_node
+                append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+            end
+            rmprocs(setdiff(1:ntasks, workers_to_keep))
         end
-        rmprocs(setdiff(1:ntasks, workers_to_keep))
     else
-        addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
         addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
 end

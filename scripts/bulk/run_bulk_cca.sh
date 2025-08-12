@@ -5,27 +5,26 @@
 # sbatch ./scripts/bulk/run_bulk.sh 60584 60591
 #60584 60614, 60796 60826
 
-#SBATCH --account=sdss-np
-#SBATCH --partition=sdss-shared-np
-#SBATCH --nodes=3
-#SBATCH --ntasks-per-node=64
-
-#SBATCH --mem=0 #requesting all of the memory on the node
+# ------------------------------------------------------------------------------
+#SBATCH --partition=cca,gen
+#SBATCH --constraint="[genoa|icelake|rome]"
+#SBATCH --nodes=1 #3
 
 #SBATCH --time=8:00:00
 #SBATCH --job-name=ar_bulk
 #SBATCH --output=slurm_logs/%x_%j.out
-
 # ------------------------------------------------------------------------------
+SLURM_NTASKS=$(($SLURM_CPUS_ON_NODE * $SLURM_NNODES))
+export SLURM_NTASKS
+# Print all SLURM environment variables
+env | grep SLURM | while read -r line; do
+    echo "$line"
+done
 
 # exit the script immediately if a command fails
 set -e
 set -o pipefail
 
-# load all of the modules to talk to the database (need to be on Utah)
-# should turn this off as an option for users once the MJD summaries are generated
-# TODO switch to almanac/default once that's working.
-module load sdssdb/main almanac/main sdsstools postgresql ffmpeg
 if [ -n "$SLURM_JOB_NODELIST" ]; then
     hostname
     echo $SLURM_JOB_NODELIST
@@ -50,10 +49,11 @@ juliaup add $julia_version
 mjd_start=$1
 mjd_end=$2
 run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
-outdir=${4:-"../outdir/"}  # Fourth argument, defaults to "../outdir/" if not provided
-caldir_darks=${5:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
-caldir_flats=${6:-"/uufs/chpc.utah.edu/common/home/sdss42/sdsswork/users/u6039752-1/working/2025_06_16/outdir/"}
-path2arMADGICS=${7:-"$(dirname "$base_dir")/arMADGICS.jl/"}
+outdir=${4:-"outdir/"}  # Fourth argument, defaults to "outdir/" if not provided
+caldir_darks=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
+caldir_flats=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
+gain_read_cal_dir=${7:-"/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"}
+path2arMADGICS=${8:-"$(dirname "$base_dir")/arMADGICS.jl/"}
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -65,33 +65,38 @@ mkdir -p ${outdir}/almanac
 
 # nice function to print the elapsed time at each step
 print_elapsed_time() {
-    formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($SECONDS/86400)) $(($SECONDS%86400/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
-    echo
+    current_seconds=$SECONDS
+    if [ -n "$LAST_TIME" ]; then
+        diff_seconds=$((current_seconds - LAST_TIME))
+        diff_time=$(printf '%dd %dh:%dm:%ds\n' $(($diff_seconds/86400)) $(($diff_seconds%86400/3600)) $(($diff_seconds%3600/60)) $(($diff_seconds%60)))
+        echo
+        echo "Time since last step: $diff_time"
+    fi
+    formatted_time=$(printf '%dd %dh:%dm:%ds\n' $(($current_seconds/86400)) $(($current_seconds%86400/3600)) $(($current_seconds%3600/60)) $(($current_seconds%60)))
     echo "Elapsed time: $formatted_time"
     echo
     echo "--------- $1 ---------"
     echo
+    LAST_TIME=$current_seconds
 }
-
-### ANDREW YOU REALLY NEED TO THINK ABOUT WORKERS PER NODE BEFORE LAUNCHING
 
 # # get the data summary file for the MJD
 # print_elapsed_time "Running Almanac"
 # # would like to switch back to -p 12 once the multinode context is fixed
 # almanac -v --mjd-start $mjd_start --mjd-end $mjd_end --output $almanac_file --fibers
 
-# print_elapsed_time "Building Runlist"
-# julia +$julia_version --project=$base_dir $base_dir/scripts/run/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
+print_elapsed_time "Building Runlist"
+julia +$julia_version --project=$base_dir $base_dir/scripts/run/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
 
 # for tele in ${tele_list[@]}
 # do
 #     print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
 #     ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-#     julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --workers_per_node 64
+#     julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir
 # done
 
 # Only continue if run_2d_only is false
-# if [ "$run_2d_only" != "true" ]; then
+if [ "$run_2d_only" != "true" ]; then
     # ### Traces and Refluxing
     # # would really like to combine the different telescopes here
     # for flat_type in ${flat_types[@]}
@@ -104,11 +109,11 @@ print_elapsed_time() {
     #     do
     #         print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
     #         mkdir -p ${outdir}${flat_type}_flats
-    #         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type
+    #         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true
 
     #         print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
     #         mkdir -p ${outdir}/apredrelflux
-    #         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --workers_per_node 64
+    #         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false
     #     done
 
     #     print_elapsed_time "Making relFlux for $flat_type Flats"
@@ -118,8 +123,8 @@ print_elapsed_time() {
     ### 2D->1D
     for tele in ${tele_list[@]}
     do
-        print_elapsed_time "Running 2D->1D Pipeline"
-        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --workers_per_node 64
+        print_elapsed_time "Running 2D->1D Pipeline for $tele"
+        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
     done
     ### Plots
     #     print_elapsed_time "Making Plots"
@@ -129,14 +134,14 @@ print_elapsed_time() {
     # print_elapsed_time "Generating plot page for web viewing"
     # julia +$julia_version --project=$base_dir $base_dir/scripts/run/generate_dashboard.jl --mjd $mjd --outdir $outdir
 
-    ### arMADGICS
-    # if [ -d ${path2arMADGICS} ]; then
-    #     print_elapsed_time "Running arMADGICS"
-    #     julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file
+    ## arMADGICS
+    if [ -d ${path2arMADGICS} ]; then
+        print_elapsed_time "Running arMADGICS"
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file
 
-    #     print_elapsed_time "Running arMADGICS Workup"
-    #     julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw/
-    # fi
+        print_elapsed_time "Running arMADGICS Workup"
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw/
+    fi
 fi
 
 print_elapsed_time "Job Completed"

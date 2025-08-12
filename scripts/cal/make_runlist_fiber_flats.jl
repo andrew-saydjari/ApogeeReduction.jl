@@ -46,7 +46,10 @@ for tele in tele2do
     mjd_list = keys(f[tele])
     for tstmjd in mjd_list
         df = read_almanac_exp_df(f, tele, tstmjd)
-        good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") .& (df.nreadInt .> 3)
+        good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") 
+        if parg["flat_type"] == "dome"
+            good_exp .&= (df.nreadInt .> 3)
+        end
         expindx_list = findall(good_exp)
         for expindx in expindx_list
             push!(mjdexp_list, parse(Int, tstmjd))

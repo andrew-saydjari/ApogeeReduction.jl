@@ -60,7 +60,7 @@ function parse_commandline()
         required = false
         help = "number of workers per node"
         arg_type = Int
-        default = 32
+        default = -1 # -1 means use all the cores on the node
         "--relFlux"
         required = false
         help = "use relFluxing (true or false)"
@@ -94,16 +94,18 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
-        ntasks = parse(Int, ENV["SLURM_NTASKS"])
-        nnodes = ntasks ÷ 64  # Each node has 64 cores
-        total_workers = nnodes * workers_per_node
-        workers_to_keep = []
-        for node in 0:(nnodes - 1)
-            node_start = 1 + node * 64
-            spacing = 64 ÷ workers_per_node
-            append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+        if workers_per_node != -1
+            ntasks = parse(Int, ENV["SLURM_NTASKS"])
+            nnodes = parse(Int, ENV["SLURM_NNODES"])
+            total_workers = nnodes * workers_per_node
+            workers_to_keep = []
+            for node in 0:(nnodes - 1)
+                node_start = 1 + node * 64
+                spacing = 64 ÷ workers_per_node
+                append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+            end
+            rmprocs(setdiff(1:ntasks, workers_to_keep))
         end
-        rmprocs(setdiff(1:ntasks, workers_to_keep))
     else
         addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
@@ -139,8 +141,21 @@ end
 println(BLAS.get_config());
 flush(stdout);
 
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Function definitions 1 took $dt");
+t_then = t_now;
+flush(stdout);
+
+# Is this really causing 3 min of overhead?
 @passobj 1 workers() parg
-@passobj 1 workers() proj_path
+@everywhere proj_path = dirname(Base.active_project()) * "/"
+
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Pass object took $dt");
+t_then = t_now;
+flush(stdout);
 
 ##### 1D stage
 @everywhere begin
@@ -148,7 +163,7 @@ flush(stdout);
 end
 t_now = now();
 dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Function definitions took $dt");
+println("Function definitions 2 took $dt");
 t_then = t_now;
 flush(stdout);
 
@@ -206,11 +221,11 @@ all2D = vcat(all2Dperchip...)
 for mjd in unique_mjds
     for chip in CHIP_LIST
         traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
-            parg["outdir"] * "$(trace_type)_flats/"))
+            parg["outdir"] * "$(trace_type)_flats/$(mjd)/"))
         if length(traceList) > 1
             @warn "Multiple $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
         elseif length(traceList) == 0
-            @error "No $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "$(trace_type)_flats/")."
+            @error "No $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "$(trace_type)_flats/$(mjd)/")."
         end
         calPath = traceList[1]
         linkPath = parg["outdir"] * "apred/$(mjd)/" *
@@ -234,77 +249,77 @@ end
     profile_path = joinpath(proj_path, "data"),
     plot_path = joinpath(parg["outdir"], "plots/")
     )
-if parg["doUncals"]
-    desc = "Extracting 2D to 1D (uncals):"
-    @showprogress desc=desc pmap(process_1D_wrapper, all2D)
-end
-all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
-desc = "Extracting 2Dcal to 1Dcal:"
-@showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
+# if parg["doUncals"]
+#     desc = "Extracting 2D to 1D (uncals):"
+#     @showprogress desc=desc pmap(process_1D_wrapper, all2D)
+# end
+# all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
+# desc = "Extracting 2Dcal to 1Dcal:"
+# @showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
 
 ### Only do the wavelength solution if we are relFluxing
 if parg["relFlux"]
-    ## get all OBJECT files (happy to add any other types that see sky?)
-    ## also get FPI and arclamp files
-    list1DexpObject = []
-    list1DexpFPI = []
-    list1DexpArclamp = []
-    for mjd in unique_mjds
-        df = read_almanac_exp_df(
-            joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
-        function get_1d_name_partial(expid)
-            if df.imagetyp[expid] == "Object"
-                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
-                       ".h5"
-            else
-                return nothing
-            end
-        end
-        function get_1d_name_ARCLAMP_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") &
-               ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
-                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
-                       ".h5"
-            else
-                return nothing
-            end
-        end
-        function get_1d_name_FPI_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
-               (df.lampune[expid] == "F")
-                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
-                       ".h5"
-            else
-                return nothing
-            end
-        end
-        mskMJD = (mjd_list .== mjd) .& mskTele
-        local1D = get_1d_name_partial.(expid_list[mskMJD])
-        push!(list1DexpObject, filter(!isnothing, local1D))
-        local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
-        push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
-        push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
-    end
-    all1DObjecta = vcat(list1DexpObject...)
-    all1DFPIa = vcat(list1DexpFPI...)
-    all1DArclampa = vcat(list1DexpArclamp...)
-    all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    # ## get all OBJECT files (happy to add any other types that see sky?)
+    # ## also get FPI and arclamp files
+    # list1DexpObject = []
+    # list1DexpFPI = []
+    # list1DexpArclamp = []
+    # for mjd in unique_mjds
+    #     df = read_almanac_exp_df(
+    #         joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+    #     function get_1d_name_partial(expid)
+    #         if df.imagetyp[expid] == "Object"
+    #             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+    #                    ".h5"
+    #         else
+    #             return nothing
+    #         end
+    #     end
+    #     function get_1d_name_ARCLAMP_partial(expid)
+    #         if (df.imagetyp[expid] == "ArcLamp") &
+    #            ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+    #             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+    #                    ".h5"
+    #         else
+    #             return nothing
+    #         end
+    #     end
+    #     function get_1d_name_FPI_partial(expid)
+    #         if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
+    #            (df.lampune[expid] == "F")
+    #             return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+    #                    ".h5"
+    #         else
+    #             return nothing
+    #         end
+    #     end
+    #     mskMJD = (mjd_list .== mjd) .& mskTele
+    #     local1D = get_1d_name_partial.(expid_list[mskMJD])
+    #     push!(list1DexpObject, filter(!isnothing, local1D))
+    #     local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
+    #     push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
+    #     local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
+    #     push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
+    # end
+    # all1DObjecta = vcat(list1DexpObject...)
+    # all1DFPIa = vcat(list1DexpFPI...)
+    # all1DArclampa = vcat(list1DexpArclamp...)
+    # all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
 
-    all1DObjectperchip = []
-    all1DArclampperchip = []
-    all1DFPIperchip = []
-    for chip in CHIP_LIST
-        all1DObjectchip = replace.(all1DObjecta, "_$(FIRST_CHIP)_" => "_$(chip)_")
-        push!(all1DObjectperchip, all1DObjectchip)
-        all1DArclampchip = replace.(all1DArclampa, "_$(FIRST_CHIP)_" => "_$(chip)_")
-        push!(all1DArclampperchip, all1DArclampchip)
-        all1DFPIchip = replace.(all1DFPIa, "_$(FIRST_CHIP)_" => "_$(chip)_")
-        push!(all1DFPIperchip, all1DFPIchip)
-    end
-    all1DObject = vcat(all1DObjectperchip...)
-    all1DArclamp = vcat(all1DArclampperchip...)
-    all1DFPI = vcat(all1DFPIperchip...)
+    # all1DObjectperchip = []
+    # all1DArclampperchip = []
+    # all1DFPIperchip = []
+    # for chip in CHIP_LIST
+    #     all1DObjectchip = replace.(all1DObjecta, "_$(FIRST_CHIP)_" => "_$(chip)_")
+    #     push!(all1DObjectperchip, all1DObjectchip)
+    #     all1DArclampchip = replace.(all1DArclampa, "_$(FIRST_CHIP)_" => "_$(chip)_")
+    #     push!(all1DArclampperchip, all1DArclampchip)
+    #     all1DFPIchip = replace.(all1DFPIa, "_$(FIRST_CHIP)_" => "_$(chip)_")
+    #     push!(all1DFPIperchip, all1DFPIchip)
+    # end
+    # all1DObject = vcat(all1DObjectperchip...)
+    # all1DArclamp = vcat(all1DArclampperchip...)
+    # all1DFPI = vcat(all1DFPIperchip...)
 
     ## load rough wave dict and sky lines list
     @everywhere begin
@@ -313,73 +328,74 @@ if parg["relFlux"]
         df_sky_lines.linindx = 1:size(df_sky_lines, 1)
     end
 
-    ## get sky line peaks
-    @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-        fname, roughwave_dict, df_sky_lines)
-    desc = "Fitting sky line peaks: "
-    @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
+    # ## get sky line peaks
+    # @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+    #     fname, roughwave_dict, df_sky_lines)
+    # desc = "Fitting sky line peaks: "
+    # @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
 
-    # get arclamp peaks
-    if size(all1DArclamp, 1) > 0
-        ## get (non-fpi) arclamp peaks
-        desc = "Fitting arclamp peaks: "
-        @showprogress desc=desc pmap(get_and_save_arclamp_peaks, all1DArclamp)
-    end
+    # # get arclamp peaks
+    # if size(all1DArclamp, 1) > 0
+    #     ## get (non-fpi) arclamp peaks
+    #     desc = "Fitting arclamp peaks: "
+    #     @showprogress desc=desc pmap(get_and_save_arclamp_peaks, all1DArclamp)
+    # end
 
-    all1DfpiPeaks_a = replace.(
-        replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-    all1DfpiPeaks = if size(all1DFPI, 1) > 0
-        ## get FPI peaks
-        desc = "Fitting FPI peaks: "
-        @showprogress desc=desc pmap(get_and_save_fpi_peaks, all1DFPI)
-    else
-        []
-    end
-    all1DfpiPeaks_out = reshape(all1DfpiPeaks,length(all1DfpiPeaks_a),length(CHIP_LIST))
-    mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
-    println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
+    # all1DfpiPeaks_a = replace.(
+    #     replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    # all1DfpiPeaks = if size(all1DFPI, 1) > 0
+    #     ## get FPI peaks
+    #     desc = "Fitting FPI peaks: "
+    #     @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
+    #     @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
+    # else
+    #     []
+    # end
+    # all1DfpiPeaks_out = reshape(all1DfpiPeaks,length(all1DfpiPeaks_a),length(CHIP_LIST))
+    # mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
+    # println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
-    ## get wavecal from sky line peaks
-    #only need to give one chip's list because internal
-    #logic handles finding other chips when ingesting data
-    #Andrew says that that is a bit worrisome and would should revisit that logic
-    all1DObjectSkyPeaks = replace.(
-        replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
-    desc = "Skyline wavelength solutions:"
-    all1DObjectWavecal = @showprogress desc=desc pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
-    all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
+    # ## get wavecal from sky line peaks
+    # #only need to give one chip's list because internal
+    # #logic handles finding other chips when ingesting data
+    # #Andrew says that that is a bit worrisome and would should revisit that logic
+    # all1DObjectSkyPeaks = replace.(
+    #     replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+    # desc = "Skyline wavelength solutions:"
+    # all1DObjectWavecal = @showprogress desc=desc pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+    # all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
-    # putting this parallelized within each mjd is really not good in the bulk run context
-    mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
+    # # putting this parallelized within each mjd is really not good in the bulk run context
+    # mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
 
-    sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
-    sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
-    sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-    desc = "Skyline medwave/skyline dither: "
-    @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
-    pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
+    # sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
+    # sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
+    # sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+    # desc = "Skyline medwave/skyline dither: "
+    # @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
+    # pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
 
-    night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
-    night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
-    night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
+    # night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
+    # night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
+    # night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
 
-    mkpath(joinpath(parg["outdir"], "wavecal"))
-    safe_jldsave(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_dict.jld2"), night_wave_soln_dict = night_wave_soln_dict, night_linParams_dict = night_linParams_dict, night_nlParams_dict = night_nlParams_dict, no_metadata = true)
+    # mkpath(joinpath(parg["outdir"], "wavecal"))
+    # safe_jldsave(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_dict.jld2"), night_wave_soln_dict = night_wave_soln_dict, night_linParams_dict = night_linParams_dict, night_nlParams_dict = night_nlParams_dict, no_metadata = true)
     @everywhere begin
         night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_dict.jld2"), "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
     end
 
     # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
 
-    if size(all1DFPI, 1) > 0
-        mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
-        desc = "FPI medwave/skyline dither: "
-        sendto(workers(), mjd_list_fpi = mjd_list_fpi)
-        sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
-        sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
-        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
-    end
+    # if size(all1DFPI, 1) > 0
+    #     mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
+    #     desc = "FPI medwave/skyline dither: "
+    #     sendto(workers(), mjd_list_fpi = mjd_list_fpi)
+    #     sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
+    #     sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+    #     @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
+    #     @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
+    # end
 
     ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 

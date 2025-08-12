@@ -510,6 +510,11 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
         dropped_mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= dropped_pixels_mask_1d[
             end:-1:1, :]
+        try
+            wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
+        catch
+            println((typeof(wave_stack), typeof(N_XPIX), typeof(chipind), typeof(chipWaveSoln)))
+        end 
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[
             end:-1:1, :]
