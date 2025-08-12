@@ -1,6 +1,6 @@
 # This script generates a dashboard of diagnostic plots for a given MJD.
 # Example usage (from the root of the ApogeeReduction.jl repository):
-# julia +1.11.0 --project="./" src/run_scripts/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
+# julia +1.11.0 --project scripts/run/generate_dashboard.jl --mjd 60835 --outdir ../outdir/
 
 using ArgParse, Glob, SlackThreads
 using ApogeeReduction # for the slack environment variables
@@ -175,6 +175,33 @@ function generate_html(mjd, outdir, categories)
                 margin: auto;
                 display: block;
             }
+            .nav-button {
+                position: fixed;
+                bottom: 20px;
+                transform: none;
+                background-color: rgba(0, 0, 0, 0.7);
+                color: var(--text-color);
+                border: 2px solid var(--primary-color);
+                border-radius: 50%;
+                width: 80px;
+                height: 80px;
+                font-size: 24px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1001;
+            }
+            .nav-button:hover {
+                background-color: var(--primary-color);
+                color: var(--background-color);
+            }
+            .nav-button.prev {
+                left: 20px;
+            }
+            .nav-button.next {
+                right: 20px;
+            }
             .modal-filename {
                 color: var(--text-color);
                 text-align: center;
@@ -276,8 +303,10 @@ function generate_html(mjd, outdir, categories)
         <div id="imageModal" class="modal" onclick="closeModal()">
             <span class="close">&times;</span>
             <img class="modal-content" id="modalImage">
+            <button class="nav-button prev" onclick="navigateImage(-1, event)">&larr;</button>
+            <button class="nav-button next" onclick="navigateImage(1, event)">&rarr;</button>
             <div class="modal-filename" id="modalFilename"></div>
-            <div class="modal-hint">Use &larr; and &rarr; arrow keys to navigate between plots</div>
+            <div class="modal-hint">Use &larr; and &rarr; arrow keys or click the buttons to navigate between plots</div>
         </div>
         <script>
             // Add active class to current section in nav
@@ -327,6 +356,12 @@ function generate_html(mjd, outdir, categories)
                 document.getElementById('imageModal').style.display = "none";
             }
 
+            function navigateImage(direction, event) {
+                event.stopPropagation();
+                currentIndex = (currentIndex + direction + allPlotItems.length) % allPlotItems.length;
+                openModal(allPlotItems[currentIndex]);
+            }
+
             // Close modal when clicking the close button
             document.querySelector('.close').onclick = function(event) {
                 event.stopPropagation();
@@ -361,19 +396,10 @@ function main()
     mjd = parg["mjd"]
     outdir = parg["outdir"]
 
-    # Get the plots directory for this MJD
     plots_dir = joinpath(outdir, "plots", string(mjd))
-
-    # Get all PNG files in the directory
     plot_files = glob("*.png", plots_dir)
-
-    # Categorize the plots
     categories = get_plot_categories(plot_files)
-
-    # Generate the HTML
     html = generate_html(mjd, outdir, categories)
-
-    # Write the HTML file
     output_file = joinpath(plots_dir, "dashboard.html")
     write(output_file, html)
 
