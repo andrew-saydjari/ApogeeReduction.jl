@@ -212,12 +212,14 @@ if parg["doCal2d"]
             calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, string(chip))
             linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
             if !isfile(linkPath)
+                mkpath(dirname(linkPath))
                 symlink(calPath, linkPath)
             end
 
             calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, string(chip))
             linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
             if !isfile(linkPath)
+                mkpath(dirname(linkPath))
                 symlink(calPath, linkPath)
             end
         end
