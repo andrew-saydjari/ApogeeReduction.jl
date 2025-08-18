@@ -11,8 +11,6 @@
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca,gen,genx
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=64
-#SBATCH --mem=0 #requesting all of the memory on the node
 
 #SBATCH --time=8:00:00
 #SBATCH --job-name=ar_all
@@ -79,7 +77,7 @@ julia +$julia_version --project=$base_dir $base_dir/scripts/run/make_runlist_all
 
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline"
 # --workers_per_node 28 ## sometimes have to adjust this, could programmatically set based on the average or max read number in the exposures for that night
-julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --workers_per_node 50 --cluster cca --gain_read_cal_dir $gain_read_cal_dir
+julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --workers_per_node 50 --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode commit_exists
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
