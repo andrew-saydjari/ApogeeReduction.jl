@@ -1,8 +1,12 @@
 #!/bin/bash
 # Run all the data for a given night and telescope.
 
-# Arguments documented below, but for example (from the repo root dir):
-# sbatch ./scripts_run/run_all.sh apo 60855
+# Ideally you run this from a parent directory, which contains
+# both the output directory and the slurm logs directory.
+# (Both will be created if they don't exist.)
+#
+# Arguments documented below, but for example:
+# sbatch path/to/ApogeeReduction/scripts/run/run_all_cca.sh apo 60855
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca,gen,genx
