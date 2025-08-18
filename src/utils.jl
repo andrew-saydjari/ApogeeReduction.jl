@@ -277,6 +277,36 @@ function read_metadata(filename::AbstractString)
     end
 end
 
+function check_file(filename::AbstractString; mode = "clobber") # mode is "clobber", "commit_exists", "commit_same"
+    # the output of this file is logically "can skip"
+    if mode == "clobber"
+        return false
+    end
+    file_exists = isfile(filename)
+    if !file_exists
+        return false
+    end
+    metadata = read_metadata(filename)
+    if haskey(metadata, "git_commit")
+        if (mode == "commit_exists")
+            return true
+        end
+    else
+        return false
+    end
+    git_commit_file = metadata["git_commit"]
+    
+    ## three modes: always clobber (false), skip if metadata["git_commit"] exists (true), skip if metadata["git_commit"] exists and is the same as the current commit (true)
+    # check existence
+    # then check that it also has a metadata["git_commit"]
+    # then check that the metadata["git_commit"] is the same as the current commit
+    # if the mode is "clobber", then return true
+    # if the mode is "skip", then return false
+    # if the mode is "skip_if_same", then return false if the metadata["git_commit"] is the same as the current commit, otherwise return true
+    # if the mode is "skip_if_different", then return false if the metadata["git_commit"] is the same as the current commit, otherwise return true
+    return true
+end
+
 function parseCartID(x)
     if x == "FPS"
         return 0
