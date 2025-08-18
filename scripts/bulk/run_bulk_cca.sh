@@ -6,9 +6,9 @@
 #60584 60614, 60796 60826
 
 # ------------------------------------------------------------------------------
-#SBATCH --partition=cca,gen
+#SBATCH --partition=gen
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 
 #SBATCH --time=8:00:00
 #SBATCH --job-name=ar_bulk
