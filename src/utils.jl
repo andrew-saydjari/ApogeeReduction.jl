@@ -30,7 +30,7 @@ function initalize_git(git_dir)
 end
 # this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
 # but it is a symptom of the fact that the include situation is a bit tangled
-git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
+const git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^1 + 2^2 + 2^4
@@ -226,13 +226,14 @@ end
     safe_jldsave(filename::AbstractString, [metadata::Dict{String, <:Any}]; kwargs...)
 
 This function is a wrapper around JLD2.jldsave with a couple of extra features:
-- It write the metadata dict as a group called "metadata".
+- It writes the metadata dict as a group called "metadata".
+    - It records the git branch, commit, and clean status as metadata.
 - It checks if the types of the values to be saved will result in a hard-to-read HDF5 file and warns if so.
 - It converts BitArrays to Array{Bool} if necessary. This means that the saved data will be 8x
   larger (Bools are 1 byte), even when read back into Julia.
-- It records the git branch and commit in the saved file.
 """
 function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; kwargs...)
+    # convert/check types to ones that will create clean HDF5 files
     to_save = Dict{Symbol, Any}()
     for (k, v) in kwargs
         if (k == :metadata || k == :meta_data)
@@ -241,9 +242,15 @@ function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; k
         to_save[k] = check_type_for_jld2(v)
     end
 
+    # add the git info to the metadata
+    metadata["git_branch"] = git_branch
+    metadata["git_commit"] = git_commit
+    metadata["git_clean"] = git_clean
+
+    # save the data
     JLD2.jldsave(filename; to_save...)
 
-    # add metadata group
+    # add metadata group to the file
     h5open(filename, "r+") do f
         g = create_group(f, "metadata")
         for (k, v) in metadata
