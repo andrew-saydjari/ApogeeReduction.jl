@@ -277,7 +277,7 @@ function read_metadata(filename::AbstractString)
     end
 end
 
-function check_file(filename::AbstractString; mode = "clobber") # mode is "clobber", "commit_exists", "commit_same"
+function check_file(filename::AbstractString; mode = "commit_same") # mode is "clobber", "commit_exists", "commit_same"
     # the output of this file is logically "can skip"
     if mode == "clobber"
         return false
@@ -295,16 +295,15 @@ function check_file(filename::AbstractString; mode = "clobber") # mode is "clobb
         return false
     end
     git_commit_file = metadata["git_commit"]
-    
-    ## three modes: always clobber (false), skip if metadata["git_commit"] exists (true), skip if metadata["git_commit"] exists and is the same as the current commit (true)
-    # check existence
-    # then check that it also has a metadata["git_commit"]
-    # then check that the metadata["git_commit"] is the same as the current commit
-    # if the mode is "clobber", then return true
-    # if the mode is "skip", then return false
-    # if the mode is "skip_if_same", then return false if the metadata["git_commit"] is the same as the current commit, otherwise return true
-    # if the mode is "skip_if_different", then return false if the metadata["git_commit"] is the same as the current commit, otherwise return true
-    return true
+    if (mode == "commit_same")
+        if (git_commit_file == git_commit)
+            return true
+        else
+            return false
+        end
+    end
+    # throw an error if we make it here
+    error("Made it past logic or unknown mode: $mode")
 end
 
 function parseCartID(x)

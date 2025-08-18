@@ -80,6 +80,11 @@ function parse_commandline()
         help = "cluster name (sdss or cca or path)"
         arg_type = String
         default = "sdss"
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
         "--suppress_cluster_path_warning"
         required = false
         help = "suppress cluster path warnings"
@@ -179,7 +184,7 @@ end
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
-    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"])
+    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"], checkpoint_mode = parg["checkpoint_mode"])
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 
@@ -215,7 +220,7 @@ if parg["doCal2d"]
             end
         end
     end
-
+    @everywhere partial_process_2Dcal(fname) = process_2Dcal(fname, checkpoint_mode = parg["checkpoint_mode"])
     # process the 2D calibration for all exposures
-    @showprogress desc="2D Calibration" pmap(process_2Dcal, all2D)
+    @showprogress desc="2D Calibration" pmap(partial_process_2Dcal, all2D)
 end
