@@ -1,5 +1,7 @@
-using Pkg;
-Pkg.instantiate();
+@time "environment instantiation" begin
+    using Pkg
+    Pkg.instantiate()
+end
 using JLD2, ArgParse, DataFrames, HDF5
 using ApogeeReduction: safe_jldsave, read_almanac_exp_df
 

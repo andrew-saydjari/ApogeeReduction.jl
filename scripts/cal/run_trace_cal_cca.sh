@@ -33,16 +33,15 @@ juliaup add $julia_version
 tele=$1
 mjd_start=$2
 mjd_end=$3
+outdir=${4:-"outdir/"}
+caldir_darks=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
+caldir_flats=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
+gain_read_cal_dir=${7:-"/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"}
 
-outdir="/mnt/ceph/users/asaydjari/working/2025_07_31/outdir/"
-doutdir=$outdir
 runname="objects_${mjd_start}"
 almanac_file=${outdir}almanac/${runname}.h5
 domerunlist=${outdir}almanac/runlist_dome_${runname}.h5
 quartzrunlist=${outdir}almanac/runlist_quartz_${runname}.h5
-caldir_darks=${4:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
-caldir_flats=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
-gain_read_cal_dir=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"}
 
 # nice function to print the elapsed time at each step
 print_elapsed_time() {
@@ -63,7 +62,7 @@ print_elapsed_time "Running 3D->2D..."
 julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir
 
 mkdir -p ${outdir}dome_flats
-julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $domerunlist
+julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_domeflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${outdir} --runlist $domerunlist
 
 #### Parallel reduction for quartz flats ####
 print_elapsed_time "Getting quartzflat runlist..."
@@ -74,20 +73,20 @@ print_elapsed_time "Running 3D->2D..."
 julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $quartzrunlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir
 
 mkdir -p ${outdir}quartz_flats
-julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $quartzrunlist
+julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_quartzflats.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${outdir} --runlist $quartzrunlist
 
 ### 2D->1D and relFlux ####
 # DomeFlats
 print_elapsed_time "Running 2D->1D Pipeline for DomeFlats"
 julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $domerunlist --outdir $outdir --runname $runname --relFlux false
 
-julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $domerunlist --runname $runname
+julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${outdir} --runlist $domerunlist --runname $runname
 
 # QuartzFlats
 print_elapsed_time "Running 2D->1D Pipeline for QuartzFlats"
 julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $quartzrunlist --outdir $outdir --runname $runname --relFlux false
 
-julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${doutdir} --runlist $quartzrunlist --runname $runname
+julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --mjd-start $mjd_start --mjd-end $mjd_end --tele $tele --trace_dir ${outdir} --runlist $quartzrunlist --runname $runname
 
 # Clean up logs and Report Timing
 print_elapsed_time "Job completed"
