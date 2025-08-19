@@ -6,11 +6,12 @@
 #60584 60614, 60796 60826
 
 # ------------------------------------------------------------------------------
-#SBATCH --partition=gen
+#SBATCH --partition=preempt
+#SBATCH --qos=preempt
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=2
+#SBATCH --nodes=8
 
-#SBATCH --time=8:00:00
+#SBATCH --time=2-00:00
 #SBATCH --job-name=ar_bulk
 #SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
