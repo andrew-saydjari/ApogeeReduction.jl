@@ -61,6 +61,11 @@ function parse_commandline()
         help = "number of workers per node"
         arg_type = Int
         default = 32
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
         "--relFlux"
         required = false
         help = "use relFluxing (true or false)"
@@ -111,7 +116,7 @@ flush(stdout);
                            get_and_save_sky_dither_per_fiber, get_and_save_sky_peaks,
                            get_ave_night_wave_soln, sky_wave_plots, reinterp_spectra,
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
-                           comb_exp_get_and_save_fpi_wavecal
+                           comb_exp_get_and_save_fpi_wavecal, process_1D
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -198,7 +203,7 @@ end
 # someday we might stop doing the uncal extractions, but very useful for testing
 println("Extracting 2D to 1D:");
 flush(stdout);
-@everywhere process_1D_wrapper(fname) = ApogeeReduction.process_1D(
+@everywhere process_1D_wrapper(fname) = process_1D(
     fname,
     outdir = parg["outdir"],
     runname = parg["runname"],
@@ -294,7 +299,8 @@ flush(stdout);
 #logic handles finding other chips when ingesting data
 all1DObjectSkyPeaks = replace.(
     replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
-all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+get_and_save_sky_wavecal_partial(fname) = get_and_save_sky_wavecal(fname, checkpoint_mode = parg["checkpoint_mode"])
+all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
 all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
 if size(all1DObjectWavecal, 1) > 0
@@ -333,11 +339,8 @@ if size(all1DArclamp, 1) > 0
     ## get (non-fpi) arclamp peaks
     println("Fitting arclamp peaks:")
     flush(stdout)
-    # try
-        @showprogress pmap(get_and_save_arclamp_peaks, all1DArclamp)
-    # catch
-        # println("\nFAILED fitting arclamp peaks")
-    # end
+    @everywhere get_and_save_arclamp_peaks_partial(fname) = get_and_save_arclamp_peaks(fname, checkpoint_mode = parg["checkpoint_mode"])
+    @showprogress pmap(get_and_save_arclamp_peaks_partial, all1DArclamp)
 end
 
 if size(all1DFPI, 1) > 0
@@ -346,15 +349,10 @@ if size(all1DFPI, 1) > 0
     flush(stdout)
     all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
     fit_all_fpi = true
-    # try
-        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
-        all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks_partial, all1DFPI)
-    # catch
-    #     global fit_all_fpi = false
-    #     println("\nFAILED fitting FPI peaks")
-    # end
-    #change the condition once there are wavelength 
-    #solutions from the ARCLAMPs as well
+
+    @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
+    all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks_partial, all1DFPI)
+
     if fit_all_fpi & (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)
         println("Using $(size(all1DfpiPeaks_a,1)) FPI exposures to measure high-precision nightly wavelength solution")
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
@@ -379,7 +377,7 @@ all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
 println("Reinterpolating exposure spectra:");
 flush(stdout);
 @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
-    fname, roughwave_dict, backupWaveSoln = night_wave_soln)
+    fname, roughwave_dict, backupWaveSoln = night_wave_soln, checkpoint_mode = parg["checkpoint_mode"])
 @showprogress pmap(reinterp_spectra_partial, all1Da)
 
 all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")

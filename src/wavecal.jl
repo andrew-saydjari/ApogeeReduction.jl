@@ -278,7 +278,11 @@ end
 
 # Sky line wavecal
 #function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
-function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4)
+function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same")
+    outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
+    if check_file(outname, mode = checkpoint_mode)
+        return outname
+    end
     # initial guess for the (low-order)chip polynomial parameters
     if occursin("_apo_", fname)
         # chipPolyParams0 = [-1.0716 1.00111
@@ -329,7 +333,6 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4)
         chipPolyParams0[:, 3, 2] .= scale_func_chip3.(fibInds)
     end
 
-    outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
     if size(sky_line_uxlst,1) < 1
         return nothing

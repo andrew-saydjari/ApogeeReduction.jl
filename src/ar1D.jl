@@ -425,7 +425,11 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
+function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, checkpoint_mode = "commit_same")
+    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
+    if check_file(outname, mode = checkpoint_mode)
+        return
+    end
     # might need to add in telluric div functionality here?
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
@@ -572,7 +576,6 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
     outmsk = (cntvec .== framecnts)
 
     # Write reinterpolated data
-    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk,
         extract_trace_coords = outTraceCoords, wavecal_type)
