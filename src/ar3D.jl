@@ -361,7 +361,7 @@ end
 function process_3D(outdir, runname, tel, mjd, expid, chip,
         gainMatDict, readVarMatDict, saturationMatDict;
         firstind = 3, cor1fnoise = true, extractMethod = "sutr_wood",
-        save3dcal = false, cluster = "sdss", suppress_warning = false)
+        save3dcal = false, cluster = "sdss", suppress_warning = false, checkpoint_mode = "commit_same")
     dirName = joinpath(outdir, "apred/$(mjd)/")
     if !ispath(dirName)
         mkpath(dirName)
@@ -378,6 +378,27 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
         df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"),
         cluster = cluster, suppress_warning = suppress_warning)
     cartid = df.cartidInt[expid]
+
+    outfname = join(
+        ["ar2D", df.observatory[expid], df.mjd[expid],
+            last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+        "_")
+    fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
+
+    outfname3d = join(
+        ["ar3Dcal", df.observatory[expid], df.mjd[expid],
+            last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+        "_")
+    fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
+
+    if save3dcal && check_file(fname3d, mode=checkpoint_mode) && check_file(fname, mode=checkpoint_mode)
+        return fname
+    end
+
+    if check_file(fname, mode=checkpoint_mode)
+        return fname
+    end
+
     # decompress and convert apz data format to a standard 3D cube of reads
     cubedat, hdr_dict = apz2cube(rawpath)
 
@@ -460,19 +481,9 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
         "mjd_mid_exposure" => value(mjd_mid_exposure)
     )
     # need to clean up exptype to account for FPI versus ARCLAMP
-    outfname = join(
-        ["ar2D", df.observatory[expid], df.mjd[expid],
-            last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
-        "_")
-    fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
     safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated)
 
     if save3dcal
-        outfname3d = join(
-            ["ar3Dcal", df.observatory[expid], df.mjd[expid],
-                last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
-            "_")
-        fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
         safe_jldsave(
             fname3d, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated,
             outdat = outdat_cal, gainMat = gainMatDict[chip], readVarMat = readVarMatDict[chip],
@@ -483,9 +494,13 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
 end
 
 # come back to tuning the chi2perdofcut once more rigorously establish noise model
-function process_2Dcal(fname; chi2perdofcut = 100)
+function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_same")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    outfname = replace(fname, "ar2D" => "ar2Dcal")
+    if check_file(outfname, mode = checkpoint_mode)
+        return
+    end
 
     dimage = load(fname, "dimage")
     ivarimage = load(fname, "ivarimage")
@@ -527,6 +542,6 @@ function process_2Dcal(fname; chi2perdofcut = 100)
     pix_bitmask .|= (last_unsaturated .< ndiff_used) * 2^13
     pix_bitmask .|= (last_unsaturated .<= 0) * 2^14
 
-    outfname = replace(fname, "ar2D" => "ar2Dcal")
     safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
+    return
 end

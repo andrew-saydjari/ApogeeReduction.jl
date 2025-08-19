@@ -849,7 +849,12 @@ function get_and_save_fpi_peaks(fname; data_path = "./data/")
     return outname
 end
 
-function get_and_save_arclamp_peaks(fname)
+function get_and_save_arclamp_peaks(fname; checkpoint_mode = "commit_same")
+    outname = replace(replace(fname, "ar1Dcal" => "arclampPeaks"), "ar1D" => "arclampPeaks")
+    if check_file(outname, mode = checkpoint_mode)
+        return outname
+    end
+
     sname = split(fname, "_")
     tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
     f = jldopen(fname, "r+")
@@ -903,25 +908,26 @@ function get_and_save_arclamp_peaks(fname)
 	fpi_trace_centers[:, i] .= linear_interpolation(x_pixels, extract_trace_centers[:, i], extrapolation_bc = Line()).(fpi_line_mat[:,2,i])
     end
 
-    outname = replace(replace(fname, "ar1Dcal" => "arclampPeaks"), "ar1D" => "arclampPeaks")
-    f = h5open(outname, "w")
+    # f = h5open(outname, "w")
 
-    # Write original data
-    write(f, "arclamp_line_mat", fpi_line_mat)
-    attrs(f["arclamp_line_mat"])["axis_1"] = "peak_index"
-    attrs(f["arclamp_line_mat"])["axis_2"] = "fit_info"
-    attrs(f["arclamp_line_mat"])["axis_3"] = "fibers"
+    # # Write original data
+    # write(f, "arclamp_line_mat", fpi_line_mat)
+    # attrs(f["arclamp_line_mat"])["axis_1"] = "peak_index"
+    # attrs(f["arclamp_line_mat"])["axis_2"] = "fit_info"
+    # attrs(f["arclamp_line_mat"])["axis_3"] = "fibers"
 
-    write(f, "arclamp_line_cov_mat", fpi_line_cov_mat)
-    attrs(f["arclamp_line_cov_mat"])["axis_1"] = "peak_index"
-    attrs(f["arclamp_line_cov_mat"])["axis_2"] = "fit_info"
-    attrs(f["arclamp_line_cov_mat"])["axis_3"] = "fit_info"
-    attrs(f["arclamp_line_cov_mat"])["axis_4"] = "fibers"
+    # write(f, "arclamp_line_cov_mat", fpi_line_cov_mat)
+    # attrs(f["arclamp_line_cov_mat"])["axis_1"] = "peak_index"
+    # attrs(f["arclamp_line_cov_mat"])["axis_2"] = "fit_info"
+    # attrs(f["arclamp_line_cov_mat"])["axis_3"] = "fit_info"
+    # attrs(f["arclamp_line_cov_mat"])["axis_4"] = "fibers"
 
-    write(f, "arclamp_line_trace_centers", fpi_trace_centers)
-    attrs(f["arclamp_line_trace_centers"])["axis_1"] = "peak_index"
-    attrs(f["arclamp_line_trace_centers"])["axis_2"] = "fibers"
-    close(f)
+    # write(f, "arclamp_line_trace_centers", fpi_trace_centers)
+    # attrs(f["arclamp_line_trace_centers"])["axis_1"] = "peak_index"
+    # attrs(f["arclamp_line_trace_centers"])["axis_2"] = "fibers"
+    # close(f)
+
+    safe_jldsave(outname, arclamp_line_mat = fpi_line_mat, arclamp_line_cov_mat = fpi_line_cov_mat, arclamp_line_trace_centers = fpi_trace_centers, no_metadata = true)
 
     return outname
 end

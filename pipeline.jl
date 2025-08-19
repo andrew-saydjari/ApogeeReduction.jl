@@ -80,6 +80,11 @@ function parse_commandline()
         help = "cluster name (sdss or cca or path)"
         arg_type = String
         default = "sdss"
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
         "--suppress_cluster_path_warning"
         required = false
         help = "suppress cluster path warnings"
@@ -104,11 +109,12 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         if workers_per_node != -1
             ntasks = parse(Int, ENV["SLURM_NTASKS"])
             nnodes = parse(Int, ENV["SLURM_NNODES"])
+            cpus_per_node = parse(Int, ENV["SLURM_CPUS_ON_NODE"])
             total_workers = nnodes * workers_per_node
             workers_to_keep = []
             for node in 0:(nnodes - 1)
-                node_start = 1 + node * 64
-                spacing = 64 ÷ workers_per_node
+                node_start = 1 + node * cpus_per_node
+                spacing = cpus_per_node ÷ workers_per_node
                 append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
             end
             rmprocs(setdiff(1:ntasks, workers_to_keep))
@@ -186,7 +192,7 @@ flush(stdout);
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
-    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"])
+    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"], checkpoint_mode = parg["checkpoint_mode"])
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 
@@ -226,5 +232,6 @@ if parg["doCal2d"]
     end
 
     # process the 2D calibration for all exposures
-    @showprogress desc="2D Calibration" pmap(process_2Dcal, all2D)
+    @everywhere process_2Dcal_partial(fname) = process_2Dcal(fname, checkpoint_mode = parg["checkpoint_mode"])
+    @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
 end

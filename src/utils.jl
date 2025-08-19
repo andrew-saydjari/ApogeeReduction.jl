@@ -13,23 +13,24 @@ function initalize_git(git_dir)
         git_repo = LibGit2.GitRepo(git_dir)
         git_head = LibGit2.head(git_repo)
         git_branch = LibGit2.shortname(git_head)
+        git_clean = !LibGit2.isdirty(git_repo)
 
         if myid() == 1
-            println("Running on branch: $git_branch, commit: $git_commit")
+            println("Running on branch: $git_branch, commit: $git_commit, clean: $git_clean")
             flush(stdout)
         end
-        return git_branch, git_commit
+        return git_branch, git_commit, git_clean
     catch e
         if myid() == 1
             println("Local folder is not a git repository. Not recording git branch and commit.")
             flush(stdout)
         end
-        return "", ""
+        return "", "", false
     end
 end
 # this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
 # but it is a symptom of the fact that the include situation is a bit tangled
-git_branch, git_commit = initalize_git(dirname(Base.active_project()) * "/")
+const git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^1 + 2^2 + 2^4
@@ -240,6 +241,10 @@ function safe_jldsave(filename::AbstractString, metadata::Dict{String, <:Any}; k
         to_save[k] = check_type_for_jld2(v)
     end
 
+    metadata["git_branch"] = git_branch
+    metadata["git_commit"] = git_commit
+    metadata["git_clean"] = git_clean
+
     JLD2.jldsave(filename; to_save...)
 
     # add metadata group
@@ -267,6 +272,35 @@ function read_metadata(filename::AbstractString)
     h5open(filename, "r") do f
         read(f["metadata"])
     end
+end
+
+function check_file(filename::AbstractString; mode = "commit_same") # mode is "clobber", "commit_exists", "commit_same"
+    # the output of this file is logically "can skip"
+    if mode == "clobber"
+        return false
+    end
+    file_exists = isfile(filename)
+    if !file_exists
+        return false
+    end
+    metadata = read_metadata(filename)
+    if haskey(metadata, "git_commit")
+        if (mode == "commit_exists")
+            return true
+        end
+    else
+        return false
+    end
+    git_commit_file = metadata["git_commit"]
+    if (mode == "commit_same")
+        if (git_commit_file == git_commit)
+            return true
+        else
+            return false
+        end
+    end
+    # throw an error if we make it here
+    error("Made it past logic or unknown mode: $mode")
 end
 
 function parseCartID(x)

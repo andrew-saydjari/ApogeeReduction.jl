@@ -97,11 +97,12 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         if workers_per_node != -1
             ntasks = parse(Int, ENV["SLURM_NTASKS"])
             nnodes = parse(Int, ENV["SLURM_NNODES"])
+            cpus_per_node = parse(Int, ENV["SLURM_CPUS_ON_NODE"])
             total_workers = nnodes * workers_per_node
             workers_to_keep = []
             for node in 0:(nnodes - 1)
-                node_start = 1 + node * 64
-                spacing = 64 ÷ workers_per_node
+                node_start = 1 + node * cpus_per_node
+                spacing = cpus_per_node ÷ workers_per_node
                 append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
             end
             rmprocs(setdiff(1:ntasks, workers_to_keep))
@@ -131,7 +132,7 @@ flush(stdout);
                            get_ave_night_wave_soln, sky_wave_plots, reinterp_spectra,
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither, fpi_medwavecal_skyline_dither,
-                           safe_jldsave
+                           safe_jldsave, process_1D
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -238,7 +239,7 @@ for mjd in unique_mjds
 end
 
 # extract the 2D to 1D
-@everywhere process_1D_wrapper(fname) = ApogeeReduction.process_1D(
+@everywhere process_1D_wrapper(fname) = process_1D(
     fname,
     outdir = parg["outdir"],
     runname = parg["runname"],
@@ -338,7 +339,8 @@ if parg["relFlux"]
     if size(all1DArclamp, 1) > 0
         ## get (non-fpi) arclamp peaks
         desc = "Fitting arclamp peaks: "
-        @showprogress desc=desc pmap(get_and_save_arclamp_peaks, all1DArclamp)
+        @everywhere get_and_save_arclamp_peaks_partial(fname) = get_and_save_arclamp_peaks(fname, checkpoint_mode = parg["checkpoint_mode"])
+        @showprogress desc=desc pmap(get_and_save_arclamp_peaks_partial, all1DArclamp)
     end
 
     all1DfpiPeaks_a = replace.(
@@ -362,7 +364,8 @@ if parg["relFlux"]
     all1DObjectSkyPeaks = replace.(
         replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
     desc = "Skyline wavelength solutions:"
-    all1DObjectWavecal = @showprogress desc=desc pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
+    @everywhere get_and_save_sky_wavecal_partial(fname) = get_and_save_sky_wavecal(fname, checkpoint_mode = parg["checkpoint_mode"])
+    all1DObjectWavecal = @showprogress desc=desc pmap(get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
     all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
 
     # putting this parallelized within each mjd is really not good in the bulk run context
@@ -401,7 +404,7 @@ if parg["relFlux"]
     ## combine chips for single exposure onto loguniform wavelength grid
     ## pushing off the question of dither combinations for now (to apMADGICS stage)
     @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
-            fname, roughwave_dict, backupWaveSoln = night_wave_soln_dict)
+            fname, roughwave_dict, backupWaveSoln = night_wave_soln_dict, checkpoint_mode = parg["checkpoint_mode"])
     if parg["doUncals"]
         all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
         desc = "Reinterp exposure spectra (uncals):"
