@@ -96,7 +96,7 @@ desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(flist) do fname
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
-    #thresholds are ~20% of typical value from days when lamps were on
+    #thresholds are ~20% of typical value (of smallest flux chip, and smallest flux from dome vs quartz) from days when lamps were on
     if teleloc == "apo"
         flux_med_thresh = 16
         flux_68p_thresh = 40
