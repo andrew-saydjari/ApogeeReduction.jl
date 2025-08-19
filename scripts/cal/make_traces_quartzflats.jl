@@ -55,7 +55,7 @@ end
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction
     using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide,
-                           trace_extract, safe_jldsave, trace_plots, bad_pix_bits
+                           trace_extract, safe_jldsave, trace_plots, bad_pix_bits, nanzeropercentile
 end
 
 @passobj 1 workers() parg # make it available to all workers
