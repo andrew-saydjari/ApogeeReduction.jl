@@ -87,6 +87,14 @@ desc = "trace extract for $(parg["tele"]) $(chips)"
 plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+    #thresholds are ~20% of typical value from days when lamps were on
+    if teleloc == "apo"
+        flux_med_thresh = 16
+        flux_68p_thresh = 40
+    elseif teleloc == "lco"
+        flux_med_thresh = 10
+        flux_68p_thresh = 10
+    end
 
     mjdfps2plate = get_fps_plate_divide(teleloc)
     f = jldopen(fname)
@@ -101,6 +109,13 @@ plot_paths = @showprogress desc=desc pmap(enumerate(flist)) do (indx, fname)
     #    trace_params, trace_param_covs = trace_extract(
     #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
     good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
+    flux_summary = nanzeropercentile(image_data[good_pixels],percent_vec=[16,50,84])
+    flux_med = flux_summary[2]
+    flux_68p = 0.5*(flux_summary[3]-flux_summary[1])
+    if flux_68p < flux_68p_thresh
+        @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2))) was skipped for appearing to have the lamp turned off."
+        return nothing
+    end
     trace_params,
     trace_param_covs = trace_extract(
         image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
@@ -118,6 +133,10 @@ end
 thread = SlackThread()
 thread("QUARTZFLAT TRACES for $(parg["tele"]) $(chips) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 for (filename, heights_widths_path) in zip(flist, plot_paths)
+    if isnothing(heights_widths_path)
+        thread("WARNING: File $(filename) was skipped for appearing to have the lamp turned off.")
+        continue
+    end
     thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
 end
 thread("QuartzFlat traces done.")
