@@ -892,8 +892,16 @@ function get_and_save_arclamp_peaks(fname; checkpoint_mode = "commit_same")
 
     max_peaks = 0
     for i in 1:size(pout, 1)
-        max_peaks = max(max_peaks, length(pout[i][1]))
+		curr_n_peaks = length(pout[i][1])
+		if curr_n_peaks == 0
+			@warn "File $(fname) FiberIndex $(i) found no useful arclamp peaks"
+		end
+        max_peaks = max(max_peaks, curr_n_peaks)
     end
+	if max_peaks == 0
+		@warn "File $(fname) found no useful arclamp peaks in ANY fibers."
+		return nothing
+	end
 
     n_params = size(pout[1][2], 2)
     fpi_trace_centers = zeros(
