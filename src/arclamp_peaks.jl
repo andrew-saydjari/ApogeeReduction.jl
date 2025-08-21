@@ -720,6 +720,9 @@ function get_initial_arclamp_peaks(flux, ivar)
     good_max_inds = ((local_max_waves .>= (n_offset + 1)) .&
                      (local_max_waves .<= n_pixels - (n_offset + 1)))
     good_y_vals = local_max_waves[good_max_inds]
+    if size(good_y_vals,1) == 0
+        return [], zeros((0, 4)), zeros((0, 4, 4))
+    end
 
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
     offset_inds = range(start = -4, stop = 4, step = 1)
@@ -889,8 +892,16 @@ function get_and_save_arclamp_peaks(fname; checkpoint_mode = "commit_same")
 
     max_peaks = 0
     for i in 1:size(pout, 1)
-        max_peaks = max(max_peaks, length(pout[i][1]))
+		curr_n_peaks = length(pout[i][1])
+		if curr_n_peaks == 0
+			@warn "File $(fname) FiberIndex $(i) found no useful arclamp peaks"
+		end
+        max_peaks = max(max_peaks, curr_n_peaks)
     end
+	if max_peaks == 0
+		@warn "File $(fname) found no useful arclamp peaks in ANY fibers."
+		return nothing
+	end
 
     n_params = size(pout[1][2], 2)
     fpi_trace_centers = zeros(

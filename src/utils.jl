@@ -17,7 +17,7 @@ function initalize_git(git_dir)
         git_clean = !LibGit2.isdirty(git_repo)
 
         if myid() == 1
-            println("Running on branch: $git_branch, commit: $git_commit, clean: $git_clean, clean: $git_clean")
+            println("Running on branch: $git_branch, commit: $git_commit, clean: $git_clean")
             flush(stdout)
         end
         return git_branch, git_commit, git_clean, git_clean
