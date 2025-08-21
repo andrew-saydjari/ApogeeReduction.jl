@@ -209,24 +209,19 @@ function pdf_func_mult(x, mean, width, fiber_inds, x_prof_min, x_prof_max_ind, n
         min_prof_fib, all_y_prof, all_y_prof_deriv; return_deriv = false)
     x_bins = x[:, 1] .+ range(-0.5, size(x, 2))'
     z_bins = (x_bins .- mean) ./ width
-    bad_params = (.!isfinite.(z_bins))
-    bad_peaks = dropdims(any(bad_params,dims=2),dims = 2)
-    mults = ones(size(bad_peaks))
-    mults[bad_peaks] .= NaN
-    z_bins[bad_params] .= 0.0
     z_ints = ceil.(Int, round.((z_bins .- x_prof_min) .* n_sub)) .+ 1
     z_ints = clamp.(z_ints, 1, x_prof_max_ind)
 
     fib_ints = (fiber_inds .- min_prof_fib) .+ 1 .+ zeros(Int, size(z_ints))
     pdfs = diff(getindex.(Ref(all_y_prof), fib_ints, z_ints), dims = 2)
     if !return_deriv
-        return pdfs .* mults
+        return pdfs
     else
         dpdf_dmus = diff(getindex.(Ref(all_y_prof_deriv), fib_ints, z_ints), dims = 2) .*
                     (-1 ./ width)
         dpdf_dsigs = diff(
             getindex.(Ref(all_y_prof_deriv), fib_ints, z_ints) .* (-1 .* z_bins ./ width), dims = 2)
-        return pdfs .* mults, dpdf_dmus .* mults, dpdf_dsigs .* mults
+        return pdfs, dpdf_dmus, dpdf_dsigs
     end
 end
 
@@ -423,8 +418,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     prior_center_to_fiber_func = linear_interpolation(
         prior_trace_pos, prior_fiber_inds, extrapolation_bc = Line())
 
-    good_pixels .= good_pixels .& (ivar_image .> 0) .& (isfinite.(image_data))
     noise_image = 1 ./ sqrt.(ivar_image)
+    good_pixels .= good_pixels .& (ivar_image .> 0)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
 
     # Cutout image in x direction
@@ -582,8 +577,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         n_iter = 10, return_cov = false,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
-    good_results = dropdims(all(isfinite.(new_params),dims=2),dims=2)
-    new_params = new_params[good_results,:]
 
     med_flux = nanmedian(new_params[:, 1])
     good_throughput_fibers = (new_params[:, 1] ./ med_flux) .> 0.2
@@ -622,8 +615,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         n_iter = 10, return_cov = false,
         use_first_guess_heights = false, max_center_move = 2,
         min_widths = 0.5, max_widths = 2.0)
-    good_results = dropdims(all(isfinite.(new_params),dims=2),dims=2)
-    new_params = new_params[good_results,:]
 
     curr_best_params = copy(new_params)
 
@@ -788,8 +779,6 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         use_first_guess_heights = true, max_center_move = 3,
         min_widths = 0.8 .* first_guess_params[:, 3],
         max_widths = 1.2 .* first_guess_params[:, 3])
-#    good_results = dropdims(all(isfinite.(new_params),dims=2),dims=2)
-#    new_params = new_params[good_results,:]
 
     #save the middle-of-detector best fit parameters for first guess
     best_fit_ave_params = copy(new_params)
@@ -928,7 +917,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     curr_fiber_inds = clamp.(range(1, size(best_fit_ave_params, 1)), min_prof_fib, max_prof_fib)
 
     med_flux = nanmedian(best_fit_ave_params[:, 1], 1)
-    good_throughput_fibers = ((best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh) .& (isfinite.(best_fit_ave_params[:,2]))
+    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh
     low_throughput_fibers = findall(.!good_throughput_fibers)
 
     x_inds = axes(image_data, 1)
