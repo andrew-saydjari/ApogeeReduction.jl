@@ -720,6 +720,9 @@ function get_initial_arclamp_peaks(flux, ivar)
     good_max_inds = ((local_max_waves .>= (n_offset + 1)) .&
                      (local_max_waves .<= n_pixels - (n_offset + 1)))
     good_y_vals = local_max_waves[good_max_inds]
+    if size(good_y_vals,1) == 0
+        return [], zeros((0, 4)), zeros((0, 4, 4))
+    end
 
     #fit 1D gaussians to each identified peak, using offset_inds around each peak
     offset_inds = range(start = -4, stop = 4, step = 1)
