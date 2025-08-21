@@ -51,7 +51,7 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
     else
-        addprocs(16)
+        addprocs(64)
     end
 end
 
@@ -133,6 +133,7 @@ if length(all1Da) > 0
     all1D = vcat(flist_chips...)
 
     @everywhere begin
+        # this is so fast, not currently checkpointing (would need to get cartid before calling get_relFlux)
         function get_and_save_relFlux(fname)
             absthrpt, relthrpt, bitmsk_relthrpt, metadata = get_relFlux(fname)
             cartid = Int(metadata["cartid"])
@@ -239,6 +240,7 @@ if length(all1Da) > 0
         for savePath in savePath_lst
             thread("Relfluxing: $(savePath)", savePath)
         end
+    # in addition to improving multi mjd handling, we need to think about checkpointing for these plots
     elseif length(unique_mjds) > 1
         ## need to think harder about the plotting we want to do in this case
         thread("$(cal_type) relFluxing for $(unique_teles) with multiple SJDs from $(unique_mjds[begin]) to $(unique_mjds[end])")

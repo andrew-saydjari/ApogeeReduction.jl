@@ -279,9 +279,14 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     if mode == "clobber"
         return false
     end
+    ext_name = split(filename, ".")[end]
     file_exists = isfile(filename)
     if !file_exists
         return false
+    end
+    # as long as clobber is not true, existence of pngs is enough to skip
+    if file_exists && (ext_name == "png")
+        return true
     end
     metadata = read_metadata(filename)
     if haskey(metadata, "git_commit")

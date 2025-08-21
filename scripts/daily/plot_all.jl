@@ -64,26 +64,12 @@ else
     CHIP_LIST
 end
 
-unique_mjds = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    unique(subDic["mjd"])
-else
-    [parg["mjd"]]
-end
-
 # Get the save directory for a plot (subfoldered by mjd)
 function get_save_dir(mjd; outdir = parg["outdir"])
     dir = joinpath(outdir, "plots", string(mjd))
     mkpath(dir)
     return dir * "/"
 end
-
-if length(unique_mjds) == 0
-    println(stderr, "ERROR: No MJDs found for plotting.")
-    exit(1)
-end
-
-println("\nFound $(length(unique_mjds)) unique MJDs to process")
 
 tele_list = if parg["runlist"] != ""
     load(parg["runlist"], "tele")
@@ -92,11 +78,25 @@ else
 end
 unique_teles = unique(tele_list)
 
+mjd_list = if parg["runlist"] != ""
+    load(parg["runlist"], "mjd")
+else
+    [parg["mjd"]]
+end
+unique_mjds = unique(mjd_list)
+
 expid_list = if parg["runlist"] != ""
     load(parg["runlist"], "expid")
 else
     [parg["expid"]]
 end
+
+if length(unique_mjds) == 0
+    println(stderr, "ERROR: No MJDs found for plotting.")
+    exit(1)
+end
+
+println("\nFound $(length(unique_mjds)) unique MJDs to process")
 
 list1DexpObject = []
 list1DexpFPI = []
@@ -636,7 +636,7 @@ all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
     df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
     function get_1d_name_partial(expid)
-        parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df) * ".h5"
+        parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
 
     file_list = get_1d_name_partial.(expid_list)
@@ -720,7 +720,7 @@ for chip in chips2do
                     ax2.ylabel = "ADU"
 
                     savePath = get_save_dir(mjd) *
-                               "ar1D_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
+                               "$(fnameType)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
                     save(savePath, fig)
                 end
             end
@@ -874,12 +874,12 @@ for exptype2plot in sorted_exptypes
         for exp_fname in all1Da[msk_exptype]
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
             fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
-            expuni_fname = replace(
-                replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
-            outflux = load(expuni_fname, "flux_1d")
-            outmsk = load(expuni_fname, "mask_1d")
+            # expuni_fname = replace(
+            #     replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
+            # outflux = load(expuni_fname, "flux_1d")
+            # outmsk = load(expuni_fname, "mask_1d")
             expunical_fname = replace(
-                replace(exp_fname, "ar1D" => "ar1Dunical"), "_$(FIRST_CHIP)_" => "_")
+                replace(exp_fname, "ar1Dcal" => "ar1Dunical"), "_$(FIRST_CHIP)_" => "_")
             outfluxcal = load(expunical_fname, "flux_1d")
             outmskcal = load(expunical_fname, "mask_1d")
             # need to switch this back when the masking is updated
@@ -888,8 +888,8 @@ for exptype2plot in sorted_exptypes
             fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
-                plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",
-                    tele, mjd, expnum, exptype, expuni_fname)
+                # plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",
+                #     tele, mjd, expnum, exptype, expuni_fname)
                 plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, "ar1Dunical",
                     tele, mjd, expnum, exptype, expunical_fname)
             end

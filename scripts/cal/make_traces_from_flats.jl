@@ -32,6 +32,11 @@ function parse_commandline()
         help = "if true, don't send slack notifications"
         arg_type = Bool
         default = false
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
     end
     return parse_args(s)
 end
@@ -53,7 +58,7 @@ end
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction
     using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, trace_extract,
-                           safe_jldsave, trace_plots, bad_pix_bits
+                           safe_jldsave, trace_plots, bad_pix_bits, check_file
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -90,39 +95,45 @@ end
     flist = vcat(cal_flist...)
 
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
+
+    function make_traces(fname, flat_type; checkpoint_mode = "commit_same")
+        sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
+        fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+        mjdfps2plate = get_fps_plate_divide(teleloc)
+        
+        savename = joinpath(parg["trace_dir"], "$(flat_type)_flats", "$(mjdloc)", "$(flat_type)Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5")
+        if check_file(savename, mode = checkpoint_mode)
+            return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = checkpoint_mode)
+        end
+        
+        f = jldopen(fname)
+        image_data = f["dimage"][1:N_XPIX, 1:N_XPIX]
+        ivar_image = f["ivarimage"][1:N_XPIX, 1:N_XPIX]
+        pix_bitmask_image = f["pix_bitmask"][1:N_XPIX, 1:N_XPIX]
+        close(f)
+    
+        (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
+        all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
+    
+        #    trace_params, trace_param_covs = trace_extract(
+        #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
+        good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
+        trace_params,
+        trace_param_covs = trace_extract(
+            image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
+            med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
+            ; good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
+        
+        mkpath(dirname(savename))
+        safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, no_metadata = true)
+    
+        return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = checkpoint_mode)
+    end
 end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
-plot_paths = @showprogress desc=desc pmap(flist) do fname
-    sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
-    
-    mjdfps2plate = get_fps_plate_divide(teleloc)
-    f = jldopen(fname)
-    image_data = f["dimage"][1:2048, 1:2048]
-    ivar_image = f["ivarimage"][1:2048, 1:2048]
-    pix_bitmask_image = f["pix_bitmask"][1:2048, 1:2048]
-    close(f)
-
-    (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
-    all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
-
-    #    trace_params, trace_param_covs = trace_extract(
-    #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
-    good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
-    trace_params,
-    trace_param_covs = trace_extract(
-        image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-        med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
-        ; good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
-    savename = joinpath(parg["trace_dir"], "$(parg["flat_type"])_flats", "$(mjdloc)", "$(parg["flat_type"])Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5")
-    mkpath(dirname(savename))
-    safe_jldsave(
-        savename;
-        trace_params = trace_params, trace_param_covs = trace_param_covs, no_metadata = true)
-
-    return trace_plots(dirNamePlots, parg["flat_type"], trace_params, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
-end
+@everywhere make_traces_partial(fname) = make_traces(fname, parg["flat_type"], checkpoint_mode = parg["checkpoint_mode"])
+plot_paths = @showprogress desc=desc pmap(make_traces_partial, flist)
 
 if !parg["slack_quiet"]
     thread = SlackThread()

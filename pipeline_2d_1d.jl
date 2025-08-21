@@ -61,6 +61,11 @@ function parse_commandline()
         help = "number of workers per node"
         arg_type = Int
         default = -1 # -1 means use all the cores on the node
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
         "--relFlux"
         required = false
         help = "use relFluxing (true or false)"
@@ -132,7 +137,7 @@ flush(stdout);
                            get_ave_night_wave_soln, sky_wave_plots, reinterp_spectra,
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither, fpi_medwavecal_skyline_dither,
-                           safe_jldsave, process_1D
+                           safe_jldsave, process_1D, check_file
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -331,7 +336,7 @@ if parg["relFlux"]
 
     ## get sky line peaks
     @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-        fname, roughwave_dict, df_sky_lines)
+        fname, roughwave_dict, df_sky_lines, checkpoint_mode = parg["checkpoint_mode"])
     desc = "Fitting sky line peaks: "
     @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
 
@@ -348,7 +353,7 @@ if parg["relFlux"]
     all1DfpiPeaks = if size(all1DFPI, 1) > 0
         ## get FPI peaks
         desc = "Fitting FPI peaks: "
-        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
+        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"), checkpoint_mode = parg["checkpoint_mode"])
         @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
     else
         []
@@ -374,18 +379,22 @@ if parg["relFlux"]
     sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
     sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
     sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-    desc = "Skyline medwave/skyline dither: "
-    @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
-    pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
 
-    night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
-    night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
-    night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
+    @everywhere outname = joinpath(parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_$(parg["runname"])_dict.jld2")
+    if !check_file(outname, mode = parg["checkpoint_mode"])
+        desc = "Skyline medwave/skyline dither: "
+        @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
+        pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
 
-    mkpath(joinpath(parg["outdir"], "wavecal"))
-    safe_jldsave(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_dict.jld2"), night_wave_soln_dict = night_wave_soln_dict, night_linParams_dict = night_linParams_dict, night_nlParams_dict = night_nlParams_dict, no_metadata = true)
+        night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
+        night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
+        night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
+
+        mkpath(dirname(outname))
+        safe_jldsave(outname, night_wave_soln_dict = night_wave_soln_dict, night_linParams_dict = night_linParams_dict, night_nlParams_dict = night_nlParams_dict, no_metadata = true)
+    end
     @everywhere begin
-        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(joinpath(parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_dict.jld2"), "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
+        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(outname, "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
     end
 
     # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
@@ -395,7 +404,7 @@ if parg["relFlux"]
         sendto(workers(), mjd_list_fpi = mjd_list_fpi)
         sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
         sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
+        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict, checkpoint_mode = parg["checkpoint_mode"])
         @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
     end
 

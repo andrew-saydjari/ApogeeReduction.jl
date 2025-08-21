@@ -568,16 +568,19 @@ function get_ave_night_wave_soln(
 end
 
 function get_and_save_sky_dither_per_fiber(
-        fname, linParams, nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
+        fname, linParams, nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0, checkpoint_mode = "commit_same")
+    outname = replace(replace(fname, "skyLinePeaks" => "waveCalNight$(wavetype)Dither"), "_$(FIRST_CHIP)_" => "_")
+    if check_file(outname, mode = checkpoint_mode)
+        return outname
+    end
+
     dither_outputs = get_sky_dither_per_fiber(
         fname, linParams, nlParams; dporder = dporder, return_waveSoln = true, max_offset = max_offset)
     if isnothing(dither_outputs)
         return nothing
     end
     ditherParams, resid_vec, chipWaveSoln, resid_xt = dither_outputs
-
-    outname = replace(
-        replace(fname, "skyLinePeaks" => "waveCalNight$(wavetype)Dither"), "_$(FIRST_CHIP)_" => "_")
+    
     safe_jldsave(outname; linParams, nlParams, ditherParams,
         resid_vec, resid_xt, chipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
 
@@ -735,13 +738,17 @@ end
 function comb_exp_get_and_save_fpi_wavecal(
         fname_list, initial_linParams, initial_nlParams;
         cporder = 1, wporder = 4, dporder = 2, verbose = true,
-        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3)
+        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3, checkpoint_mode = "commit_same")
     n_fnames = size(fname_list, 1)
     fname = fname_list[1]
     tele, mjd, expid = split(fname, "_")[(end - 4):(end - 2)]
     outname = replace(
         replace(replace(fname, "fpiPeaks" => "waveCalFPI"), "_$(FIRST_CHIP)_" => "_"),
         "_$(expid)_" => "_")
+    if check_file(outname, mode = checkpoint_mode)
+        linParams, nlParams, chipWaveSoln = load(outname, "linParams", "nlParams", "chipWaveSoln")
+        return outname, linParams, nlParams, chipWaveSoln
+    end
 
     #first guess FPI cavity size, Angstroms
     if occursin("_lco_", fname)
@@ -984,14 +991,14 @@ function comb_exp_get_and_save_fpi_wavecal(
 			pix_offset = NaN
 		    end
 		end
-#		println(i," ",chipIndx," ",fname_ind," ",peak_offset," ",new_peak_offset," ",pix_offset," ",pix_offset * 2048)
+		# println(i," ",chipIndx," ",fname_ind," ",peak_offset," ",new_peak_offset," ",pix_offset," ",pix_offset * 2048)
 
                 dither_offsets[i, chipIndx, fname_ind] = pix_offset
             end
         end
     end
     exp_med_dithers = nanmedian(nanmedian(dither_offsets, 2), 1)[1, 1, :]
-    #    println("dithers ",size(exp_med_dithers),exp_med_dithers,exp_med_dithers .* 2048)
+    # println("dithers ",size(exp_med_dithers),exp_med_dithers,exp_med_dithers .* 2048)
 
     for i in 1:N_FIBERS
         start = 1
@@ -1312,13 +1319,6 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
     end
 
-    safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
-        exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
-        resid_chipInts = fpi_line_chipInt, resid_peak_ints = peak_ints,
-        resid_exp_ints = fpi_line_expInt, resid_used_in_fit = good_peaks,
-        chipWaveSoln = chipWaveSoln,
-        fpi_m0 = med_m0, fpi_m0_offset = m_offset, fpi_cavity_size = cavity_size, no_metadata = true) # KEVIN FIX THIS!!!!
-
     #loop over the exposures and make the expected waveCalNightfpiDither output
     for fname_ind in 1:n_fnames
         curr_outname = replace(replace(
@@ -1345,6 +1345,12 @@ function comb_exp_get_and_save_fpi_wavecal(
             resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
             chipWaveSoln = chipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
     end
+    safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
+        exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
+        resid_chipInts = fpi_line_chipInt, resid_peak_ints = peak_ints,
+        resid_exp_ints = fpi_line_expInt, resid_used_in_fit = good_peaks,
+        chipWaveSoln = chipWaveSoln,
+        fpi_m0 = med_m0, fpi_m0_offset = m_offset, fpi_cavity_size = cavity_size, no_metadata = true) # KEVIN FIX THIS!!!!
 
     return outname, linParams, nlParams, chipWaveSoln
 end
@@ -1664,13 +1670,13 @@ function skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWav
     end    
 end
 
-function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict)
+function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict; checkpoint_mode = "commit_same")
     mskMJD_fpi = (mjd_list_fpi .== mjd)
     mskMJD_obj = (mjd_list_wavecal .== mjd)
     if (!isnothing(night_linParams_dict[mjd])) & (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
         # using FPI exposures to measure high-precision nightly wavelength solution
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a[mskMJD_fpi], night_linParams_dict[mjd], night_nlParams_dict[mjd], cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2)
+            all1DfpiPeaks_a[mskMJD_fpi], night_linParams_dict[mjd], night_nlParams_dict[mjd], cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, checkpoint_mode = checkpoint_mode)
 
         # using skylines to measure dither offsets from FPI-defined wavelength solution
         get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
