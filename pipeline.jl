@@ -1,18 +1,13 @@
 ## This is a reduction pipeline for APOGEE
-import Pkg;
-using Dates;
-t0 = now();
-t_then = t0;
 using InteractiveUtils;
 versioninfo();
-Pkg.instantiate();
-Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
+@time "Package instantiation and precompilation" begin
+    import Pkg
+    Pkg.instantiate()
+    Pkg.precompile() # no need for Pkg.activate("./") because of invocation w/ environment
+end
 
-using Distributed, ArgParse, TimerOutputs
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Package activation took $dt");
-t_then = t_now;
+@time "Package activation" using Distributed, ArgParse, TimerOutputs
 flush(stdout);
 
 ## Parse command line arguments
@@ -100,38 +95,37 @@ function parse_commandline()
 end
 parg = parse_commandline()
 
-workers_per_node = parg["workers_per_node"]
-proj_path = dirname(Base.active_project()) * "/"
-if parg["runlist"] != "" # only multiprocess if we have a list of exposures
-    if "SLURM_NTASKS" in keys(ENV)
-        using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
-        if workers_per_node != -1
-            ntasks = parse(Int, ENV["SLURM_NTASKS"])
-            nnodes = parse(Int, ENV["SLURM_NNODES"])
-            cpus_per_node = parse(Int, ENV["SLURM_CPUS_ON_NODE"])
-            total_workers = nnodes * workers_per_node
-            workers_to_keep = []
-            for node in 0:(nnodes - 1)
-                node_start = 1 + node * cpus_per_node
-                spacing = cpus_per_node ÷ workers_per_node
-                append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+@time "Allocating workers" begin
+    workers_per_node = parg["workers_per_node"]
+    proj_path = dirname(Base.active_project()) * "/"
+    if parg["runlist"] != "" # only multiprocess if we have a list of exposures
+        if "SLURM_NTASKS" in keys(ENV)
+            using SlurmClusterManager
+            addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+            if workers_per_node != -1
+                ntasks = parse(Int, ENV["SLURM_NTASKS"])
+                nnodes = parse(Int, ENV["SLURM_NNODES"])
+                cpus_per_node = parse(Int, ENV["SLURM_CPUS_ON_NODE"])
+                total_workers = nnodes * workers_per_node
+                workers_to_keep = []
+                for node in 0:(nnodes - 1)
+                    node_start = 1 + node * cpus_per_node
+                    spacing = cpus_per_node ÷ workers_per_node
+                    append!(workers_to_keep,
+                        [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+                end
+                rmprocs(setdiff(1:ntasks, workers_to_keep))
             end
-            rmprocs(setdiff(1:ntasks, workers_to_keep))
+        else
+            addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
         end
-    else
-        addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
 end
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Allocating $(nworkers()) workers took $dt")
-t_then = t_now;
-flush(stdout);
+
 println("Running Main on ", gethostname());
 flush(stdout);
 
-@everywhere begin
+@time "Loading worker packages" @everywhere begin
     using LinearAlgebra
     BLAS.set_num_threads(1)
     using FITSIO, HDF5, FileIO, JLD2, Glob
@@ -143,11 +137,6 @@ flush(stdout);
 end
 @passobj 1 workers() parg
 @passobj 1 workers() proj_path
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Worker loading took $dt");
-t_then = t_now;
-flush(stdout);
 println(BLAS.get_config());
 flush(stdout);
 
@@ -161,7 +150,8 @@ flush(stdout);
     readVarMatDict = load_read_var_maps(parg["gain_read_cal_dir"], parg["tele"], parg["chips"])
     # gain is e-/DN
     gainMatDict = load_gain_maps(parg["gain_read_cal_dir"], parg["tele"], parg["chips"])
-    saturationMatDict = load_saturation_maps(parg["tele"], parg["chips"], datadir = proj_path * "data/saturation_maps")
+    saturationMatDict = load_saturation_maps(
+        parg["tele"], parg["chips"], datadir = proj_path * "data/saturation_maps")
 end
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
@@ -192,7 +182,9 @@ flush(stdout);
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
-    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"], checkpoint_mode = parg["checkpoint_mode"])
+    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"],
+    suppress_warning = parg["suppress_cluster_path_warning"],
+    checkpoint_mode = parg["checkpoint_mode"])
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 
@@ -232,6 +224,7 @@ if parg["doCal2d"]
     end
 
     # process the 2D calibration for all exposures
-    @everywhere process_2Dcal_partial(fname) = process_2Dcal(fname, checkpoint_mode = parg["checkpoint_mode"])
+    @everywhere process_2Dcal_partial(fname) = process_2Dcal(
+        fname, checkpoint_mode = parg["checkpoint_mode"])
     @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
 end
