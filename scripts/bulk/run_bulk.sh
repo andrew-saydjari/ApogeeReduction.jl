@@ -55,6 +55,7 @@ caldir_darks=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
 caldir_flats=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
 gain_read_cal_dir=${7:-"/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"}
 path2arMADGICS=${8:-"$(dirname "$base_dir")/arMADGICS.jl/"}
+checkpoint_mode=${9:-"commit_exists"}
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -93,7 +94,7 @@ for tele in ${tele_list[@]}
 do
     print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
     ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-    julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode "commit_same"
+    julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
 done
 
 # Only continue if run_2d_only is false
@@ -110,11 +111,11 @@ if [ "$run_2d_only" != "true" ]; then
         do
             print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
             mkdir -p ${outdir}${flat_type}_flats
-            julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode "commit_same"
+            julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
 
             print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
             mkdir -p ${outdir}/apredrelflux
-            julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode "commit_same"
+            julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode $checkpoint_mode
         done
 
         print_elapsed_time "Making relFlux for $flat_type Flats"
@@ -125,7 +126,7 @@ if [ "$run_2d_only" != "true" ]; then
     for tele in ${tele_list[@]}
     do
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
-        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode "commit_same"
+        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode
     done
     ### Plots
     #     print_elapsed_time "Making Plots"
