@@ -1072,7 +1072,14 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 end
 
 function trace_plots(dirNamePlots,
-        cal_type, trace_params, teleloc, mjdloc, expidloc, chiploc, mjdfps2plate, fpifib1, fpifib2)
+        cal_type, fname, teleloc, mjdloc, expidloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = "commit_same")
+    tracePlot_heights_widths_Path = dirNamePlots * "$(mjdloc)/$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
+    if check_file(tracePlot_heights_widths_Path, mode = checkpoint_mode)
+        return tracePlot_heights_widths_Path
+    end
+
+    trace_params = load(fname, "trace_params")
+    
     cut = 750
     fig = Figure(size = (1600, 800), fontsize = 22)
     ax = Axis(fig[1, 1],
@@ -1106,9 +1113,6 @@ function trace_plots(dirNamePlots,
     med_val = nanzeromedian(y)
     hlines!(ax, med_val, linestyle = :dash)
 
-    tracePlot_heights_widths_Path = dirNamePlots *
-                                    "$(mjdloc)/$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
     save(tracePlot_heights_widths_Path, fig)
-
     return tracePlot_heights_widths_Path
 end

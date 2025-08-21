@@ -62,7 +62,7 @@ sbatch_prefix = re.sub(r"\s+", " ", f"""
     -vvv
     -D {REPO_DIR}
     --mail-type=ALL
-    --mail-user=7155301634@vtext.com
+    --mail-user=slurm_notify-aaaaq7zc7ou7enlnbsexygd3he@sdss5.slack.com
 """) 
 # text=f"ApogeeReduction-main DAG failed on {{{{ ds }}}}: {DAG_URL}",
 with DAG(
