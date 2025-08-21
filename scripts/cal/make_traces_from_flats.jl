@@ -58,7 +58,7 @@ end
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction
     using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, trace_extract,
-                           safe_jldsave, trace_plots, bad_pix_bits, check_file
+                           safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -100,6 +100,14 @@ end
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)
+        #thresholds are ~20% of typical value (of smallest flux chip, and smallest flux from dome vs quartz) from days when lamps were on
+        if teleloc == "apo"
+            flux_med_thresh = 16
+            flux_68p_thresh = 40
+        elseif teleloc == "lco"
+            flux_med_thresh = 10
+            flux_68p_thresh = 10
+        end
         
         savename = joinpath(parg["trace_dir"], "$(flat_type)_flats", "$(mjdloc)", "$(flat_type)Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5")
         if check_file(savename, mode = checkpoint_mode)
@@ -111,13 +119,20 @@ end
         ivar_image = f["ivarimage"][1:N_XPIX, 1:N_XPIX]
         pix_bitmask_image = f["pix_bitmask"][1:N_XPIX, 1:N_XPIX]
         close(f)
+        good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
+        flux_summary = nanzeropercentile(image_data[good_pixels],percent_vec=[16,50,84])
+        flux_med = flux_summary[2]
+        flux_68p = 0.5*(flux_summary[3]-flux_summary[1])
+        if flux_68p < flux_68p_thresh
+            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2))) was skipped for appearing to have the lamp turned off."
+            return nothing
+        end
     
         (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
     
         #    trace_params, trace_param_covs = trace_extract(
         #        image_data, ivar_image, teleloc, mjdloc, chiploc, expidloc; good_pixels = nothing)
-        good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
         trace_params,
         trace_param_covs = trace_extract(
             image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
@@ -140,6 +155,10 @@ if !parg["slack_quiet"]
     if length(unique_mjds) > 1
         thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) from SJD $(minimum(unique_mjds)) to $(maximum(unique_mjds))")
         for (filename, heights_widths_path) in zip(flist, plot_paths)
+            if isnothing(heights_widths_path)
+                thread("WARNING: File $(filename) was skipped for appearing to have the lamp turned off.")
+                continue
+            end
             thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)
         end
     else
