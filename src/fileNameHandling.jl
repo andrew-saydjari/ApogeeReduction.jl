@@ -15,7 +15,7 @@ function build_raw_path(tele, chip, mjd, exposure_id; cluster = "sdss", suppress
     base = if cluster == "sdss"
         "/uufs/chpc.utah.edu/common/home/sdss/sdsswork/data/apogee" #the raw data is NOT version dependent
     elseif cluster == "cca"
-        "/mnt/ceph/users/sdssv/APOGEE/raw"
+        "/mnt/ceph/users/sdssv/raw/APOGEE"
     else
         !suppress_warning && warn("Unknown cluster, interpreting as a path: $cluster")
         cluster
