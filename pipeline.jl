@@ -155,30 +155,26 @@ flush(stdout);
 end
 
 # write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
-
-# setup the (sjd, expid, chip) tuples to iterate over
-# if we have a runlist, we iterate over the mjd and expid in the runlist
-# otherwise we iterate over the mjd, expid, and chips specified on the command line
-subiter = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    msk = subDic["tele"] .== parg["tele"]
-    # add a filter on tele
-    Iterators.product(
-        Iterators.zip(subDic["mjd"][msk], subDic["expid"][msk]),
-        string.(collect(parg["chips"]))
-    )
-else
-    Iterators.product(
-        [(parg["mjd"], parg["expid"])],
-        string.(collect(parg["chips"]))
-    )
+@time "Setting up the iterator" begin
+    # setup the (sjd, expid, chip) tuples to iterate over
+    # if we have a runlist, we iterate over the mjd and expid in the runlist
+    # otherwise we iterate over the mjd, expid, and chips specified on the command line
+    subiter = if parg["runlist"] != ""
+        subDic = load(parg["runlist"])
+        msk = subDic["tele"] .== parg["tele"]
+        # add a filter on tele
+        Iterators.product(
+            Iterators.zip(subDic["mjd"][msk], subDic["expid"][msk]),
+            string.(collect(parg["chips"]))
+        )
+    else
+        Iterators.product(
+            [(parg["mjd"], parg["expid"])],
+            string.(collect(parg["chips"]))
+        )
+    end
 end
 
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Setting up the iterator took $dt");
-t_then = t_now;
-flush(stdout);
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
