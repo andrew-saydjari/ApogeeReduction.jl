@@ -74,12 +74,17 @@ function parse_commandline()
         required = false
         help = "number of workers per node"
         arg_type = Int
-        default = 58
+        default = -1 # -1 means use all the cores on the node
         "--cluster"
         required = false
         help = "cluster name (sdss or cca or path)"
         arg_type = String
         default = "sdss"
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
         "--suppress_cluster_path_warning"
         required = false
         help = "suppress cluster path warnings"
@@ -101,16 +106,19 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
     if "SLURM_NTASKS" in keys(ENV)
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
-        ntasks = parse(Int, ENV["SLURM_NTASKS"])
-        nnodes = ntasks ÷ 64  # Each node has 64 cores
-        total_workers = nnodes * workers_per_node
-        workers_to_keep = []
-        for node in 0:(nnodes - 1)
-            node_start = 1 + node * 64
-            spacing = 64 ÷ workers_per_node
-            append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+        if workers_per_node != -1
+            ntasks = parse(Int, ENV["SLURM_NTASKS"])
+            nnodes = parse(Int, ENV["SLURM_NNODES"])
+            cpus_per_node = parse(Int, ENV["SLURM_CPUS_ON_NODE"])
+            total_workers = nnodes * workers_per_node
+            workers_to_keep = []
+            for node in 0:(nnodes - 1)
+                node_start = 1 + node * cpus_per_node
+                spacing = cpus_per_node ÷ workers_per_node
+                append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+            end
+            rmprocs(setdiff(1:ntasks, workers_to_keep))
         end
-        rmprocs(setdiff(1:ntasks, workers_to_keep))
     else
         addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
@@ -163,23 +171,28 @@ end
 # otherwise we iterate over the mjd, expid, and chips specified on the command line
 subiter = if parg["runlist"] != ""
     subDic = load(parg["runlist"])
-
+    msk = subDic["tele"] .== parg["tele"]
+    # add a filter on tele
     Iterators.product(
-        Iterators.zip(subDic["mjd"], subDic["expid"]),
+        Iterators.zip(subDic["mjd"][msk], subDic["expid"][msk]),
         string.(collect(parg["chips"]))
     )
 else
-    # set up an iterator with the same shape as the runlist iterator
     Iterators.product(
         [(parg["mjd"], parg["expid"])],
         string.(collect(parg["chips"]))
     )
 end
 
+t_now = now();
+dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
+println("Setting up the iterator took $dt");
+t_then = t_now;
+flush(stdout);
 # partially apply the process_3D function to everything except the (sjd, expid, chip) values
 @everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
     parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
-    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"])
+    gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"], suppress_warning = parg["suppress_cluster_path_warning"], checkpoint_mode = parg["checkpoint_mode"])
 desc = "3D->2D for $(parg["tele"]) $(parg["chips"])"
 ap2dnamelist = @showprogress desc=desc pmap(process_3D_partial, subiter)
 
@@ -205,17 +218,20 @@ if parg["doCal2d"]
             calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd, string(chip))
             linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
             if !isfile(linkPath)
+                mkpath(dirname(linkPath))
                 symlink(calPath, linkPath)
             end
 
             calPath, calFlag = get_cal_path(df_flat, parg["tele"], mjd, string(chip))
             linkPath = parg["outdir"] * "/apred/$(mjd)/" * basename(calPath)
             if !isfile(linkPath)
+                mkpath(dirname(linkPath))
                 symlink(calPath, linkPath)
             end
         end
     end
 
     # process the 2D calibration for all exposures
-    @showprogress desc="2D Calibration" pmap(process_2Dcal, all2D)
+    @everywhere process_2Dcal_partial(fname) = process_2Dcal(fname, checkpoint_mode = parg["checkpoint_mode"])
+    @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
 end

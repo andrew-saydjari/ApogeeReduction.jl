@@ -425,11 +425,16 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
+function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, checkpoint_mode = "commit_same")
     # might need to add in telluric div functionality here?
+    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
+    if check_file(outname, mode = checkpoint_mode)
+        return
+    end
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    mjd_int = parse(Int, mjd)
 
     # could shift this to a preallocation step
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
@@ -475,7 +480,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
     end
     if !found_soln
         #this is not a great global fallback, but it works so we get something to look at
-        if isnothing(backupWaveSoln)
+        if isnothing(backupWaveSoln) || isnothing(backupWaveSoln[mjd_int])
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
@@ -485,7 +490,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
             flush(stdout)
             wavecal_type = "error_fixed_fallback"
         else
-            chipWaveSoln = backupWaveSoln
+            chipWaveSoln = backupWaveSoln[mjd_int]
             println("No wavecal found for $(fname), using nightly average as fallback")
             flush(stdout)
             wavecal_type = "error_night_ave_fallback"
@@ -509,6 +514,11 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
         dropped_mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= dropped_pixels_mask_1d[
             end:-1:1, :]
+        try
+            wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
+        catch
+            println((typeof(wave_stack), typeof(N_XPIX), typeof(chipind), typeof(chipWaveSoln),fname, mjd_int, typeof(backupWaveSoln), typeof(backupWaveSoln)))
+        end 
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[
             end:-1:1, :]
@@ -572,7 +582,6 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing)
     outmsk = (cntvec .== framecnts)
 
     # Write reinterpolated data
-    outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk,
         extract_trace_coords = outTraceCoords, wavecal_type)
@@ -679,7 +688,13 @@ function process_1D(fname;
             extract_trace_centers = regularized_trace_params[:, :, 2],
             relthrpt, bitmsk_relthrpt, fiberTypeList)
     else
-        safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
+        outfname_norelflux = replace(outfname, "apred" => "apredrelflux")
+        dirName = dirname(outfname_norelflux)
+        if !ispath(dirName)
+            mkpath(dirName)
+        end
+        safe_jldsave(
+            outfname_norelflux, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2])
     end
     close(falm)

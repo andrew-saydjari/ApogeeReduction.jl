@@ -8,10 +8,10 @@ function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
         "--tele"
-        required = true
+        required = false
         help = "telescope name (apo or lco)"
         arg_type = String
-        default = ""
+        default = "both"
         "--almanac_file"
         required = true
         help = "path to the almanac file"
@@ -30,17 +30,27 @@ parg = parse_commandline()
 
 mjdexp_list = Int[]
 expid_list = Int[]
+tele_list = String[]
 f = h5open(parg["almanac_file"])
-mjd_list = keys(f[parg["tele"]])
-for tstmjd in mjd_list
-    df = read_almanac_exp_df(f, parg["tele"], tstmjd)
-    expindx_list = findall((df.imagetyp .== "Dark") .& (df.nreadInt .> 29))
-    for expindx in expindx_list
-        if expindx > 1 && df.imagetyp[expindx - 1] == "Dark"
-            push!(mjdexp_list, parse(Int, tstmjd))
-            push!(expid_list, expindx)
+tele2do = if parg["tele"] == "both"
+    keys(f)
+else
+    [parg["tele"]]
+end
+for tele in tele2do
+    mjd_list = keys(f[tele])
+    for tstmjd in mjd_list
+        df = read_almanac_exp_df(f, tele, tstmjd)
+        good_exp = (df.imagetyp .== "Dark") .& (df.nreadInt .> 29)
+        expindx_list = findall(good_exp)
+        for expindx in expindx_list
+            if expindx > 1 && df.imagetyp[expindx - 1] == "Dark"
+                push!(mjdexp_list, parse(Int, tstmjd))
+                push!(expid_list, expindx)
+                push!(tele_list, tele)
+            end
         end
     end
 end
 
-safe_jldsave(parg["output"]; mjd = mjdexp_list, expid = expid_list)
+safe_jldsave(parg["output"]; tele = tele_list, mjd = mjdexp_list, expid = expid_list)
