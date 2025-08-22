@@ -400,7 +400,13 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
     end
 
     # decompress and convert apz data format to a standard 3D cube of reads
-    cubedat, hdr_dict = apz2cube(rawpath)
+    cubedat, hdr_dict = try
+        apz2cube(rawpath)
+    catch
+        @warn "Failed to read $(rawpath)"
+        apz2cube(rawpath)
+        return
+    end
 
     nread_total = size(cubedat, 3)
 
