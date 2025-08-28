@@ -102,7 +102,7 @@ if [ "$run_2d_only" != "true" ]; then
         print_elapsed_time "Making runlist for $flat_type Flats"
         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --output $flatrunlist --flat_type $flat_type
 
-        print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
+        print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
         mkdir -p ${outdir}${flat_type}_flats
         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
 

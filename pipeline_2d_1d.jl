@@ -274,11 +274,11 @@ if parg["relFlux"]
             end
         end
         mskMJD = (mjd_list .== mjd) .& mskTele
-        local1D = get_1d_name_partial.(expid_list[mskMJD])
+        local1D = get_1d_name_partial.(dfindx_list[mskMJD])
         push!(list1DexpObject, filter(!isnothing, local1D))
-        local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
+        local1D_fpi = get_1d_name_FPI_partial.(dfindx_list[mskMJD])
         push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(dfindx_list[mskMJD])
         push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
     end
     all1DObjecta = vcat(list1DexpObject...)
