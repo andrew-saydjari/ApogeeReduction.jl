@@ -14,24 +14,23 @@ function initalize_git(git_dir)
         git_head = LibGit2.head(git_repo)
         git_branch = LibGit2.shortname(git_head)
         git_clean = !LibGit2.isdirty(git_repo)
-        git_clean = !LibGit2.isdirty(git_repo)
 
         if myid() == 1
             println("Running on branch: $git_branch, commit: $git_commit, clean: $git_clean")
             flush(stdout)
         end
-        return git_branch, git_commit, git_clean, git_clean
+        return git_branch, git_commit, git_clean
     catch e
         if myid() == 1
             println("Local folder is not a git repository. Not recording git branch and commit.")
             flush(stdout)
         end
-        return "", "", false, false
+        return "", "", false
     end
 end
 # this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
 # but it is a symptom of the fact that the include situation is a bit tangled
-const git_branch, git_commit, git_clean, git_clean = initalize_git(dirname(Base.active_project()) * "/")
+const git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
 bad_dark_pix_bits = 2^1 + 2^2 + 2^4
@@ -302,7 +301,7 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     end
     git_commit_file = metadata["git_commit"]
     if (mode == "commit_same")
-        if (git_commit_file == git_commit)
+        if (git_commit_file == git_commit) && (git_clean)
             return true
         else
             return false
