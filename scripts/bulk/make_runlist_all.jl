@@ -46,7 +46,6 @@ for tele in tele2do
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.nreadInt .> 3) .|
-                   ((df.imagetyp .== "DomeFlat") .& (df.observatory .== "apo")) .|
                    ((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc

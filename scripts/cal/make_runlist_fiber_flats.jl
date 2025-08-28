@@ -51,6 +51,8 @@ for tele in tele2do
         good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") 
         if parg["flat_type"] == "dome"
             good_exp .&= (df.nreadInt .> 3)
+        else
+            good_exp .&= (df.nreadInt .>= 3)
         end
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
