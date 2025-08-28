@@ -41,12 +41,13 @@ end
 for tele in tele2do
     mjd_list = keys(f[tele])
     for tstmjd in mjd_list
+        tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.imagetyp .== "InternalFlat") .& (df.nreadInt .> 3)
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
-            push!(mjdexp_list, parse(Int, tstmjd))
-            push!(expid_list, long_expid_to_short(df.exposure_int[dfindx]))
+            push!(mjdexp_list, tstmjd_int)
+            push!(expid_list, long_expid_to_short(tstmjd_int, df.exposure_int[dfindx]))
             push!(dfindx_list, dfindx)
             push!(tele_list, tele)
         end
