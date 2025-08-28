@@ -47,7 +47,7 @@ for tele in tele2do
         for dfindx in dfindx_list_loc
             if dfindx > 1 && df.imagetyp[dfindx - 1] == "Dark"
                 push!(mjdexp_list, parse(Int, tstmjd))
-                push!(expid_list, long_expid_to_short(df.exposure[dfindx]))
+                push!(expid_list, long_expid_to_short(df.exposure_int[dfindx]))
                 push!(dfindx_list, dfindx)
                 push!(tele_list, tele)
             end
