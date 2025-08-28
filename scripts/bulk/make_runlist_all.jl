@@ -3,7 +3,7 @@
 using Pkg;
 Pkg.instantiate();
 using HDF5, JLD2, ArgParse, DataFrames
-using ApogeeReduction: read_almanac_exp_df, safe_jldsave # for safe_jldsave
+using ApogeeReduction: read_almanac_exp_df, safe_jldsave, long_expid_to_short
 
 ## Parse command line arguments
 function parse_commandline()
