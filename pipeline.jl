@@ -25,7 +25,7 @@ function parse_commandline()
         arg_type = Int
         default = 1
         # probably want to add in defaults that loops over them all
-        "--expid"
+        "--dfindx"
         required = false
         help = "exposure number to be run"
         arg_type = Int
@@ -154,30 +154,30 @@ flush(stdout);
         parg["tele"], parg["chips"], datadir = proj_path * "data/saturation_maps")
 end
 
-# write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with expid
+# write out sym links in the level of folder that MUST be uniform in their cals? or a billion symlinks with dfindx
 @time "Setting up the iterator" begin
-    # setup the (sjd, expid, chip) tuples to iterate over
-    # if we have a runlist, we iterate over the mjd and expid in the runlist
-    # otherwise we iterate over the mjd, expid, and chips specified on the command line
+    # setup the (sjd, dfindx, chip) tuples to iterate over
+    # if we have a runlist, we iterate over the mjd and dfindx in the runlist
+    # otherwise we iterate over the mjd, dfindx, and chips specified on the command line
     subiter = if parg["runlist"] != ""
         subDic = load(parg["runlist"])
         msk = subDic["tele"] .== parg["tele"]
         # add a filter on tele
         Iterators.product(
-            Iterators.zip(subDic["mjd"][msk], subDic["expid"][msk]),
+            Iterators.zip(subDic["mjd"][msk], subDic["dfindx"][msk]),
             string.(collect(parg["chips"]))
         )
     else
         Iterators.product(
-            [(parg["mjd"], parg["expid"])],
+            [(parg["mjd"], parg["dfindx"])],
             string.(collect(parg["chips"]))
         )
     end
 end
 
-# partially apply the process_3D function to everything except the (sjd, expid, chip) values
-@everywhere process_3D_partial(((mjd, expid), chip)) = process_3D(
-    parg["outdir"], parg["runname"], parg["tele"], mjd, expid, chip,
+# partially apply the process_3D function to everything except the (sjd, dfindx, chip) values
+@everywhere process_3D_partial(((mjd, dfindx), chip)) = process_3D(
+    parg["outdir"], parg["runname"], parg["tele"], mjd, dfindx, chip,
     gainMatDict, readVarMatDict, saturationMatDict, cluster = parg["cluster"],
     suppress_warning = parg["suppress_cluster_path_warning"],
     checkpoint_mode = parg["checkpoint_mode"])

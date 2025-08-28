@@ -109,7 +109,7 @@ if [ "$run_2d_only" != "true" ]; then
 
         for tele in ${tele_list[@]}
         do
-            print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
+            print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
             mkdir -p ${outdir}${flat_type}_flats
             julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
 

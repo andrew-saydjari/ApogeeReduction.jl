@@ -30,6 +30,7 @@ parg = parse_commandline()
 
 mjdexp_list = Int[]
 expid_list = Int[]
+dfindx_list = Int[]
 tele_list = String[]
 f = h5open(parg["almanac_file"])
 tele2do = if parg["tele"] == "both"
@@ -42,15 +43,16 @@ for tele in tele2do
     for tstmjd in mjd_list
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.imagetyp .== "Dark") .& (df.nreadInt .> 29)
-        expindx_list = findall(good_exp)
-        for expindx in expindx_list
-            if expindx > 1 && df.imagetyp[expindx - 1] == "Dark"
+        dfindx_list_loc = findall(good_exp)
+        for dfindx in dfindx_list_loc
+            if dfindx > 1 && df.imagetyp[dfindx - 1] == "Dark"
                 push!(mjdexp_list, parse(Int, tstmjd))
-                push!(expid_list, expindx)
+                push!(expid_list, long_expid_to_short(df.exposure[dfindx]))
+                push!(dfindx_list, dfindx)
                 push!(tele_list, tele)
             end
         end
     end
 end
 
-safe_jldsave(parg["output"]; tele = tele_list, mjd = mjdexp_list, expid = expid_list)
+safe_jldsave(parg["output"]; tele = tele_list, mjd = mjdexp_list, expid = expid_list, dfindx = dfindx_list)
