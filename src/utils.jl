@@ -291,6 +291,11 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     if file_exists && (ext_name == "png")
         return true
     end
+    f = h5open(filename, "r")
+    if !haskey(f, "metadata")
+        return false
+    end
+    close(f)
     metadata = read_metadata(filename)
     if haskey(metadata, "git_commit")
         if (mode == "commit_exists")
