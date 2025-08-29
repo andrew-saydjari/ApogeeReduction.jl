@@ -9,7 +9,7 @@
 #SBATCH --partition=preempt
 #SBATCH --qos=preempt
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=8
+#SBATCH --nodes=1
 
 #SBATCH --time=2-00:00
 #SBATCH --job-name=ar_bulk
