@@ -512,9 +512,9 @@ function get_ave_night_wave_soln(
         for r_ind in 1:2
             for fname_ind in 1:n_fnames
                 curr_path = join(split(unique_fname_list[fname_ind], "/")[begin:(end - 1)], "/")
-                curr_tele, curr_mjd, curr_expid, curr_exptype = split(
+                curr_tele, curr_mjd, curr_expid, curr_imagetyp = split(
                     split(split(unique_fname_list[fname_ind], "/")[end], ".h5")[1], "_")[(end - 3):end]
-                curr_peak_fname = "$(curr_path)/$(wavetype)LinePeaks_$(curr_tele)_$(curr_mjd)_$(curr_expid)_$(FIRST_CHIP)_$(curr_exptype).h5"
+                curr_peak_fname = "$(curr_path)/$(wavetype)LinePeaks_$(curr_tele)_$(curr_mjd)_$(curr_expid)_$(FIRST_CHIP)_$(curr_imagetyp).h5"
 
                 dither_outputs = get_sky_dither_per_fiber(
                             curr_peak_fname, med_linParams, med_nlParams; dporder = dporder)

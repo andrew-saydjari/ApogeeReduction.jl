@@ -381,13 +381,13 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
 
     outfname = join(
         ["ar2D", df.observatory[expid], df.mjd[expid],
-            last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+            last(df.exposure_str[expid], 4), chip, df.imagetyp[expid]],
         "_")
     fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
 
     outfname3d = join(
         ["ar3Dcal", df.observatory[expid], df.mjd[expid],
-            last(df.exposure_str[expid], 4), chip, df.exptype[expid]],
+            last(df.exposure_str[expid], 4), chip, df.imagetyp[expid]],
         "_")
     fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
 
@@ -415,10 +415,10 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
     # override the firstind and extractMethod in special cases
     # we drop the first read, but might need to adjust for the few read cases (2,3,4,5)
     firstind,
-    extractMethod = if ((df.exptype[expid] == "DOMEFLAT") &
+    extractMethod = if ((df.imagetyp[expid] == "DOMEFLAT") &
                         (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
         2, "dcs"
-    elseif ((df.exptype[expid] == "QUARTZFLAT") & (nread_total == 3))
+    elseif ((df.imagetyp[expid] == "QUARTZFLAT") & (nread_total == 3))
         2, "dcs"
     elseif (nread_total == 3)
         #catch some weird cases (like nreads=3 with Darks)
@@ -486,7 +486,7 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
         "mjd_mid_exposure_precise" => value(mjd_mid_exposure_precise),
         "mjd_mid_exposure" => value(mjd_mid_exposure)
     )
-    # need to clean up exptype to account for FPI versus ARCLAMP
+    # need to clean up imagetyp to account for FPI versus ARCLAMP
     safe_jldsave(fname, metadata; dimage, ivarimage, chisqimage, CRimage, last_unsaturated)
 
     if save3dcal
@@ -502,7 +502,7 @@ end
 # come back to tuning the chi2perdofcut once more rigorously establish noise model
 function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_same")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
     outfname = replace(fname, "ar2D" => "ar2Dcal")
     if check_file(outfname, mode = checkpoint_mode)
         return
