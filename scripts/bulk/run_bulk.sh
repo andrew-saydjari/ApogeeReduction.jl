@@ -3,13 +3,14 @@
 
 # Arguments documented below, but for example (from the repo root dir):
 # sbatch ./scripts/bulk/run_bulk.sh 60584 60591
-#60584 60614, 60796 60826
+# 60584 60614, 60796 60826
+# constraint="[genoa|icelake|rome]"
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=preempt
 #SBATCH --qos=preempt
-#SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=1
+#SBATCH --constraint="[genoa]"
+#SBATCH --nodes=8
 
 #SBATCH --time=2-00:00
 #SBATCH --job-name=ar_bulk
