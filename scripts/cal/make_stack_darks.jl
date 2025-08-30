@@ -194,7 +194,7 @@ let #each frame
     if length(flist) < 500
         for (indx, fname) in enumerate(flist)
             sname = split(split(split(fname, "/")[end],".h5")[1], "_")
-            fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+            fnameType, teleloc, mjdloc, expnumloc, chiploc, imagetyp = sname[(end - 5):end]
             
             f = jldopen(fname)
             temp_im = f["dimage"]
@@ -235,7 +235,7 @@ let # each frame residuals
     if length(flist) < 500
         for (indx, fname) in enumerate(flist)
             sname = split(split(split(fname, "/")[end],".h5")[1], "_")
-            fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+            fnameType, teleloc, mjdloc, expnumloc, chiploc, imagetyp = sname[(end - 5):end]
             f = jldopen(fname)
             temp_im = f["dimage"]
             close(f)

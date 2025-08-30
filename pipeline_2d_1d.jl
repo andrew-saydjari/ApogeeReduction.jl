@@ -24,7 +24,7 @@ function parse_commandline()
         arg_type = Int
         default = 1
         # probably want to add in defaults that loops over them all
-        "--expid"
+        "--dfindx"
         required = false
         help = "exposure number to be run"
         arg_type = Int
@@ -149,60 +149,26 @@ end
 ##### 1D stage
 @time "include makie_plotutils" @everywhere include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
-# Find the 2D calibration files for the relevant MJDs
-tele_list = if parg["runlist"] != ""
-    load(parg["runlist"], "tele")
-else
-    [parg["tele"]]
-end
-unique_teles = unique(tele_list)
-mskTele = tele_list .== parg["tele"]
-
-mjd_list = if parg["runlist"] != ""
-    load(parg["runlist"], "mjd")
-else
-    [parg["mjd"]]
-end
-unique_mjds = unique(mjd_list[mskTele])
-
-# make file name list
-expid_list = if parg["runlist"] != ""
-    load(parg["runlist"], "expid")
-else
-    [parg["expid"]]
-end
-
-# need to be building a msk on the expid for the different MJDs
-# or a list of lists
-
-list2Dexp = []
-for mjd in unique_mjds
-    df = read_almanac_exp_df(
-        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
-    function get_2d_name_partial(expid)
-        parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
-    end
-    mskMJD = (mjd_list .== mjd) .& mskTele
-    local2D = get_2d_name_partial.(expid_list[mskMJD])
-    push!(list2Dexp, local2D)
-end
-
 @time "Generating file lists" begin
-    # Find the 2D calibration files for the relevant MJDs
-    unique_mjds = if parg["runlist"] != ""
-        subDic = load(parg["runlist"])
-        unique(subDic["mjd"])
+    tele_list = if parg["runlist"] != ""
+        load(parg["runlist"], "tele")
+    else
+        [parg["tele"]]
+    end
+    unique_teles = unique(tele_list)
+    mskTele = tele_list .== parg["tele"]
+
+    mjd_list = if parg["runlist"] != ""
+        load(parg["runlist"], "mjd")
     else
         [parg["mjd"]]
     end
+    unique_mjds = unique(mjd_list[mskTele])
 
-    # make file name list
-    expid_list = if parg["runlist"] != ""
-        subDic = load(parg["runlist"])
-        subDic["expid"]
+    dfindx_list = if parg["runlist"] != ""
+        load(parg["runlist"], "dfindx")
     else
-        [parg["expid"]]
+        [parg["dfindx"]]
     end
 
     list2Dexp = []
@@ -213,7 +179,8 @@ end
             parg["outdir"] * "/apred/$(mjd)/" *
             replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
         end
-        local2D = get_2d_name_partial.(expid_list)
+        mskMJD = (mjd_list .== mjd) .& mskTele
+        local2D = get_2d_name_partial.(dfindx_list[mskMJD])
         push!(list2Dexp, local2D)
     end
     all2Da = vcat(list2Dexp...)
@@ -244,6 +211,7 @@ end
                    replace(basename(calPath), "$(trace_type)Trace" => "$(trace_type)TraceMain")
         if !isfile(linkPath)
             # come back to why this symlink does not work
+            # is this causing memory bloat?
             cp(calPath, linkPath)
         end
     end
@@ -306,11 +274,11 @@ if parg["relFlux"]
             end
         end
         mskMJD = (mjd_list .== mjd) .& mskTele
-        local1D = get_1d_name_partial.(expid_list[mskMJD])
+        local1D = get_1d_name_partial.(dfindx_list[mskMJD])
         push!(list1DexpObject, filter(!isnothing, local1D))
-        local1D_fpi = get_1d_name_FPI_partial.(expid_list[mskMJD])
+        local1D_fpi = get_1d_name_FPI_partial.(dfindx_list[mskMJD])
         push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list[mskMJD])
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(dfindx_list[mskMJD])
         push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
     end
     all1DObjecta = vcat(list1DexpObject...)

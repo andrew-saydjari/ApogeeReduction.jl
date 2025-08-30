@@ -50,9 +50,9 @@ tele=$1
 mjd=$2
 run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
 outdir=${4:-"outdir/"}  # Fourth argument, defaults to "outdir/" if not provided
-caldir_darks=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
-caldir_flats=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
-gain_read_cal_dir=${7:-"/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"}
+caldir_darks=${5:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
+caldir_flats=${6:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
+gain_read_cal_dir=${7:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
 path2arMADGICS=${8:-"$(dirname "$base_dir")/arMADGICS.jl/"}
 checkpoint_mode=${9:-"commit_exists"}
 
@@ -102,7 +102,7 @@ if [ "$run_2d_only" != "true" ]; then
         print_elapsed_time "Making runlist for $flat_type Flats"
         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --output $flatrunlist --flat_type $flat_type
 
-        print_elapsed_time "Extracting Traces from $flat_type Flats for $tele"
+        print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
         mkdir -p ${outdir}${flat_type}_flats
         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
 
@@ -129,7 +129,7 @@ if [ "$run_2d_only" != "true" ]; then
     ## arMADGICS
     if [ -d ${path2arMADGICS} ]; then
         print_elapsed_time "Running arMADGICS"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline_cca.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw/
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw/
 
         print_elapsed_time "Running arMADGICS Workup"
         julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw/

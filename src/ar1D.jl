@@ -324,7 +324,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
     exposure_info = df_exp[findfirst(df_exp[!, "exposure_str"] .== exposure_id), :]
     configid = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.exptype == "OBJECT"
+    fibtargDict = if exposure_info.imagetyp == "OBJECT"
         try
             df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configid)"]))
             # normalizes all column names to lowercase
@@ -433,7 +433,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     end
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
     mjd_int = parse(Int, mjd)
 
     # could shift this to a preallocation step
@@ -600,7 +600,7 @@ function process_1D(fname;
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
 
     # how worried should I be about loading this every time?
     falm = h5open(joinpath(outdir, "almanac/$(runname).h5"))

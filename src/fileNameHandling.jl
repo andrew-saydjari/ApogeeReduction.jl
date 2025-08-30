@@ -40,19 +40,19 @@ function long_expid_to_short(mjd, expnum)
     return expnum - (mjd - 55562) * 10000
 end
 
-function get_cal_file(parent_dir, tele, mjd, expnum, chip, exptype; use_cal = false)
+function get_cal_file(parent_dir, tele, mjd, expnum, chip, imagetyp; use_cal = false)
     if use_cal
         fname_type = "ar2Dcal"
     else
         fname_type = "ar2D"
     end
     return parent_dir *
-           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(lpad(expnum, 4, "0"))_$(chip)_$(exptype).h5"
+           "apred/$(mjd)/$(fname_type)_$(tele)_$(mjd)_$(lpad(expnum, 4, "0"))_$(chip)_$(lowercase(imagetyp)).h5"
 end
 
 function get_fluxing_file_name(parent_dir, tele, mjd, exposure, chip, cartid)
     return parent_dir *
-           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(exposure)_$(chip)_DOMEFLAT_$(cartid).h5"
+           "dome_flats/$(mjd)/domeFlux_$(tele)_$(mjd)_$(exposure)_$(chip)_domeflat_$(cartid).h5"
 end
 
 function get_1d_name(expid, df; cal = false)
@@ -61,7 +61,7 @@ function get_1d_name(expid, df; cal = false)
     else
         "ar1D"
     end
-    return join([fnameType, df.observatory[expid], df.mjd[expid], last(df.exposure_str[expid],4), chipRaw2Redux[df.chip[expid]], df.exptype[expid]], "_")
+    return join([fnameType, df.observatory[expid], df.mjd[expid], last(df.exposure_str[expid],4), chipRaw2Redux[df.chip[expid]], lowercase(df.imagetyp[expid])], "_")
 end
 
 function fiberIndx2fiberID(fibindx)

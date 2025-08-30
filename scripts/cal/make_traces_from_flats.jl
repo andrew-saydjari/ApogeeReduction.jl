@@ -98,7 +98,7 @@ end
 
     function make_traces(fname, flat_type; checkpoint_mode = "commit_same")
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-        fnameType, teleloc, mjdloc, expnumloc, chiploc, exptype = sname[(end - 5):end]
+        fnameType, teleloc, mjdloc, expnumloc, chiploc, imagetyp = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)
         #thresholds are ~20% of typical value (of smallest flux chip, and smallest flux from dome vs quartz) from days when lamps were on
         if teleloc == "apo"

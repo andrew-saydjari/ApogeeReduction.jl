@@ -168,7 +168,7 @@ if length(all1Da) > 0
         @everywhere begin
             function plot_relFlux(fname)
                 sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-                fnameType, tele, mjd, expnum, chiploc, exptype, cartid = sname[(end - 6):end]
+                fnameType, tele, mjd, expnum, chiploc, imagetyp, cartid = sname[(end - 6):end]
 
                 xvec = if tele == "apo"
                     1:300
