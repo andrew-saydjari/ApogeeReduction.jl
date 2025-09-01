@@ -57,4 +57,12 @@ for tele in tele2do
     end
 end
 
+# Save the data even if empty
 safe_jldsave(parg["output"]; tele = tele_list, mjd = mjdexp_list, expid = expid_list, dfindx = dfindx_list)
+
+# Check if list is empty and exit with specific code
+if length(mjdexp_list) == 0
+    println("WARNING: No exposures found for the specified parameters")
+    println("Exiting with code 16 to indicate empty runlist")
+    exit(16)
+end
