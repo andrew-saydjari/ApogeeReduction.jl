@@ -410,7 +410,7 @@ function main()
     dir = abspath(joinpath(pwd(), parg["outdir"], "plots", string(mjd), "dashboard.html"))
     url = replace(
         replace(dir, "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/"),
-        "/mnt/ceph/users/asaydjari/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/"
+        "/mnt/ceph/users/sdssv/work/asaydjari/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/sdsswork/"
     )
     thread = SlackThread()
     msg = "The reduction plots dashboard for SJD $(mjd) has been generated and is available at: $url"

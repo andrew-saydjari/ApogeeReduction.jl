@@ -599,7 +599,7 @@ for chip in chips2do
     f = h5open(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"))
     for exp_fname in all2D
         sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
-        fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
+        fnameType, tele, mjd, expnum, chiploc, imagetyp = sname[(end - 5):end]
 
         flux_2d = load(exp_fname, "resid_flux")
         ivar_2d = load(exp_fname, "resid_ivar")
@@ -627,7 +627,7 @@ for chip in chips2do
         resize_to_layout!(fig)
 
         savePath = joinpath(get_save_dir(mjd),
-            "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(exptype).png")
+            "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(imagetyp).png")
         save(savePath, fig, px_per_unit = 3)
     end
 end
@@ -643,11 +643,11 @@ for mjd in unique_mjds
     append!(all1Da, file_list)
 end
 
-allExptype = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
+allimagetyp = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
 
 # TODO this should be ripped out
 # Define custom sorting order for exposure types
-function get_exptype_priority(exptype::AbstractString)
+function get_imagetyp_priority(imagetyp::AbstractString)
     priority_map = Dict(
         "OBJECT" => 1,
         "DOMEFLAT" => 2,
@@ -656,11 +656,11 @@ function get_exptype_priority(exptype::AbstractString)
         "DARK" => 5,
         "ARCLAMP" => 6
     )
-    return get(priority_map, exptype, 999)  # Unknown types get high number
+    return get(priority_map, imagetyp, 999)  # Unknown types get high number
 end
 
-# Sort allExptype using the custom priority function
-sorted_exptypes = sort(unique(allExptype), by = get_exptype_priority)
+# Sort allimagetyp using the custom priority function
+sorted_imagetyps = sort(unique(allimagetyp), by = get_imagetyp_priority)
 
 # per chip example spectra
 for chip in chips2do
@@ -672,15 +672,15 @@ for chip in chips2do
     # TODO parallelize plotting
     # we should customize this to the types of objects we want
     # for example, we want to be looking at the tellurics and pure sky
-    for exptype2plot in sorted_exptypes
-        msk_exptype = allExptype .== exptype2plot
-        if any(msk_exptype)
-            # nsamp = minimum([count(msk_exptype), 3])
-            # sample_exposures = sample(rng, all1D[msk_exptype], nsamp, replace = false)
+    for imagetyp2plot in sorted_imagetyps
+        msk_imagetyp = allimagetyp .== imagetyp2plot
+        if any(msk_imagetyp)
+            # nsamp = minimum([count(msk_imagetyp), 3])
+            # sample_exposures = sample(rng, all1D[msk_imagetyp], nsamp, replace = false)
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-            for exp_fname in all1D[msk_exptype]
+            for exp_fname in all1D[msk_imagetyp]
                 sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
-                fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
+                fnameType, tele, mjd, expnum, chiploc, imagetyp = sname[(end - 5):end]
 
                 flux_1d = load(exp_fname, "flux_1d")
                 mask_1d = load(exp_fname, "mask_1d")
@@ -720,7 +720,7 @@ for chip in chips2do
                     ax2.ylabel = "ADU"
 
                     savePath = get_save_dir(mjd) *
-                               "$(fnameType)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(exptype).png"
+                               "$(fnameType)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(imagetyp).png"
                     save(savePath, fig)
                 end
             end
@@ -733,7 +733,7 @@ end
 println("\nGenerating reinterpolated spectra examples")
 
 function plot_1d_uni(
-        fib, fibtargDict, outflux, outmsk, bname, tele, mjd, expnum, exptype, expuni_fname)
+        fib, fibtargDict, outflux, outmsk, bname, tele, mjd, expnum, imagetyp, expuni_fname)
     fibID = fiberIndx2fiberID(fib)
     fibType = fibtargDict[fibID]
 
@@ -857,7 +857,7 @@ function plot_1d_uni(
     resize_to_layout!(fig)
 
     savePath = get_save_dir(mjd) *
-               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(fib)_$(fibType)_$(exptype).png"
+               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(fib)_$(fibType)_$(imagetyp).png"
     save(savePath, fig)
     return
 end
@@ -865,15 +865,15 @@ end
 rng = MersenneTwister(536 + unique_mjds[1])
 
 # TODO: parallelize plotting
-for exptype2plot in sorted_exptypes
-    msk_exptype = allExptype .== exptype2plot
-    if any(msk_exptype)
-        # nsamp = minimum([count(msk_exptype), 3])
-        # sample_exposures = sample(rng, all1Da[msk_exptype], nsamp, replace = false)
+for imagetyp2plot in sorted_imagetyps
+    msk_imagetyp = allimagetyp .== imagetyp2plot
+    if any(msk_imagetyp)
+        # nsamp = minimum([count(msk_imagetyp), 3])
+        # sample_exposures = sample(rng, all1Da[msk_imagetyp], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-        for exp_fname in all1Da[msk_exptype]
+        for exp_fname in all1Da[msk_imagetyp]
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
-            fnameType, tele, mjd, expnum, chiploc, exptype = sname[(end - 5):end]
+            fnameType, tele, mjd, expnum, chiploc, imagetyp = sname[(end - 5):end]
             # expuni_fname = replace(
             #     replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
             # outflux = load(expuni_fname, "flux_1d")
@@ -889,9 +889,9 @@ for exptype2plot in sorted_exptypes
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 # plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",
-                #     tele, mjd, expnum, exptype, expuni_fname)
+                #     tele, mjd, expnum, imagetyp, expuni_fname)
                 plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, "ar1Dunical",
-                    tele, mjd, expnum, exptype, expunical_fname)
+                    tele, mjd, expnum, imagetyp, expunical_fname)
             end
         end
     end
