@@ -1,19 +1,12 @@
 ## This is a reduction pipeline for APOGEE
-import Pkg;
-using Dates;
-t0 = now();
-t_then = t0;
-using InteractiveUtils;
+using InteractiveUtils
 versioninfo();
-Pkg.instantiate();
-Pkg.precompile(); # no need for Pkg.activate("./") because of invocation w/ environment
-
-using Distributed, ArgParse, TimerOutputs
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Package activation took $dt");
-t_then = t_now;
-flush(stdout);
+@time "Package activation" begin
+    import Pkg
+    Pkg.instantiate()
+    Pkg.precompile() # no need for Pkg.activate("./") because of invocation w/ environment
+    using Distributed, ArgParse, TimerOutputs
+end
 
 ## Parse command line arguments
 # we have forced this one to run over all chips for the sake of the wavelength solution
@@ -31,7 +24,7 @@ function parse_commandline()
         arg_type = Int
         default = 1
         # probably want to add in defaults that loops over them all
-        "--expid"
+        "--dfindx"
         required = false
         help = "exposure number to be run"
         arg_type = Int
@@ -60,46 +53,70 @@ function parse_commandline()
         required = false
         help = "number of workers per node"
         arg_type = Int
-        default = 32
+        default = -1 # -1 means use all the cores on the node
+        "--checkpoint_mode"
+        required = false
+        help = "checkpoint mode (clobber, commit_exists, commit_same)"
+        arg_type = String
+        default = "commit_same"
         "--relFlux"
         required = false
         help = "use relFluxing (true or false)"
         arg_type = Bool
         default = true
+        "--waveSoln"
+        required = false
+        help = "do the wavelength solution (true or false)"
+        arg_type = Bool
+        default = true
+        "--doUncals"
+        required = false
+        help = "move uncalibrated (no flats/darks etc.) 2d data forward"
+        arg_type = Bool
+        default = false
     end
     return parse_args(s)
 end
 parg = parse_commandline()
+dirNamePlots = parg["outdir"] * "plots/"
+mkpath(dirNamePlots) # will work even if it already exists
+
+# if we are not refluxing, we should not be doing the wavelength solution
+if !parg["relFlux"] && parg["waveSoln"]
+    error("Should not perform wavelength solution when relFlux is false. Set --waveSoln=false or --relFlux=true")
+end
 
 workers_per_node = parg["workers_per_node"]
 proj_path = dirname(Base.active_project()) * "/"
-if parg["runlist"] != "" # only multiprocess if we have a list of exposures
-    if "SLURM_NTASKS" in keys(ENV)
-        using SlurmClusterManager
-        addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
-        ntasks = parse(Int, ENV["SLURM_NTASKS"])
-        nnodes = ntasks ÷ 64  # Each node has 64 cores
-        total_workers = nnodes * workers_per_node
-        workers_to_keep = []
-        for node in 0:(nnodes - 1)
-            node_start = 1 + node * 64
-            spacing = 64 ÷ workers_per_node
-            append!(workers_to_keep, [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+
+@time "Allocating workers" begin
+    if parg["runlist"] != "" # only multiprocess if we have a list of exposures
+        if "SLURM_NTASKS" in keys(ENV)
+            using SlurmClusterManager
+            addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
+            if workers_per_node != -1
+                ntasks = parse(Int, ENV["SLURM_NTASKS"])
+                nnodes = parse(Int, ENV["SLURM_NNODES"])
+                cpus_per_node = parse(Int, ENV["SLURM_CPUS_ON_NODE"])
+                total_workers = nnodes * workers_per_node
+                workers_to_keep = []
+                for node in 0:(nnodes - 1)
+                    node_start = 1 + node * cpus_per_node
+                    spacing = cpus_per_node ÷ workers_per_node
+                    append!(workers_to_keep,
+                        [node_start + spacing * i for i in 0:(workers_per_node - 1)])
+                end
+                rmprocs(setdiff(1:ntasks, workers_to_keep))
+            end
+        else
+            addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
         end
-        rmprocs(setdiff(1:ntasks, workers_to_keep))
-    else
-        addprocs(workers_per_node, exeflags = ["--project=$proj_path"])
     end
 end
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Allocating $(nworkers()) workers took $dt");
-t_then = t_now;
-flush(stdout);
 println("Running Main on ", gethostname());
 flush(stdout);
 
-@everywhere begin
+@time "Setting up worker packages" @everywhere begin
     using LinearAlgebra
     BLAS.set_num_threads(1)
     using FITSIO, HDF5, FileIO, JLD2, Glob, CSV
@@ -111,7 +128,9 @@ flush(stdout);
                            get_and_save_sky_dither_per_fiber, get_and_save_sky_peaks,
                            get_ave_night_wave_soln, sky_wave_plots, reinterp_spectra,
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
-                           comb_exp_get_and_save_fpi_wavecal
+                           comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither,
+                           fpi_medwavecal_skyline_dither,
+                           safe_jldsave, process_1D, check_file
 
     ###decide which type of cal to use for traces (i.e. dome or quartz flats)
     # trace_type = "dome"
@@ -121,84 +140,85 @@ end
 println(BLAS.get_config());
 flush(stdout);
 
-@passobj 1 workers() parg
-@passobj 1 workers() proj_path
+@time "Passing objects to workers" begin
+    # Is this really causing 3 min of overhead?
+    @passobj 1 workers() parg
+    @everywhere proj_path = dirname(Base.active_project()) * "/"
+end
 
 ##### 1D stage
-@everywhere begin
-    include(joinpath(proj_path, "src/makie_plotutils.jl"))
-end
-t_now = now();
-dt = Dates.canonicalize(Dates.CompoundPeriod(t_now - t_then));
-println("Function definitions took $dt");
-t_then = t_now;
-flush(stdout);
+@time "include makie_plotutils" @everywhere include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
-# Find the 2D calibration files for the relevant MJDs
-unique_mjds = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    unique(subDic["mjd"])
-else
-    [parg["mjd"]]
-end
-
-# make file name list
-expid_list = if parg["runlist"] != ""
-    subDic = load(parg["runlist"])
-    subDic["expid"]
-else
-    [parg["expid"]]
-end
-
-list2Dexp = []
-for mjd in unique_mjds
-    df = read_almanac_exp_df(
-        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
-    function get_2d_name_partial(expid)
-        parg["outdir"] * "/apred/$(mjd)/" *
-        replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
+@time "Generating file lists" begin
+    tele_list = if parg["runlist"] != ""
+        load(parg["runlist"], "tele")
+    else
+        [parg["tele"]]
     end
-    local2D = get_2d_name_partial.(expid_list)
-    push!(list2Dexp, local2D)
-end
-all2Da = vcat(list2Dexp...)
+    unique_teles = unique(tele_list)
+    mskTele = tele_list .== parg["tele"]
 
-all2Dperchip = []
-for chip in CHIP_LIST
-    all2Dchip = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    push!(all2Dperchip, all2Dchip)
+    mjd_list = if parg["runlist"] != ""
+        load(parg["runlist"], "mjd")
+    else
+        [parg["mjd"]]
+    end
+    unique_mjds = unique(mjd_list[mskTele])
+
+    dfindx_list = if parg["runlist"] != ""
+        load(parg["runlist"], "dfindx")
+    else
+        [parg["dfindx"]]
+    end
+
+    list2Dexp = []
+    for mjd in unique_mjds
+        df = read_almanac_exp_df(
+            joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+        function get_2d_name_partial(expid)
+            parg["outdir"] * "/apred/$(mjd)/" *
+            replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
+        end
+        mskMJD = (mjd_list .== mjd) .& mskTele
+        local2D = get_2d_name_partial.(dfindx_list[mskMJD])
+        push!(list2Dexp, local2D)
+    end
+    all2Da = vcat(list2Dexp...)
+
+    all2Dperchip = []
+    for chip in CHIP_LIST
+        all2Dchip = replace.(all2Da, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all2Dperchip, all2Dchip)
+    end
+    all2D = vcat(all2Dperchip...)
 end
-all2D = vcat(all2Dperchip...)
 
 # we should do somthing smart to assemble the traces from a night into a single file
 # that gives us the trace of a fiber as a funciton of time or something
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
-for mjd in unique_mjds
+@time "Processing trace files" for mjd in unique_mjds
     for chip in CHIP_LIST
         traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
-            parg["outdir"] * "$(trace_type)_flats/"))
+            parg["outdir"] * "$(trace_type)_flats/$(mjd)/"))
         if length(traceList) > 1
             @warn "Multiple $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
         elseif length(traceList) == 0
-            @error "No $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "$(trace_type)_flats/")."
+            @error "No $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "$(trace_type)_flats/$(mjd)/")."
         end
         calPath = traceList[1]
         linkPath = parg["outdir"] * "apred/$(mjd)/" *
                    replace(basename(calPath), "$(trace_type)Trace" => "$(trace_type)TraceMain")
         if !isfile(linkPath)
             # come back to why this symlink does not work
+            # is this causing memory bloat?
             cp(calPath, linkPath)
         end
     end
 end
 
-# extract the 2D to 1D, ideally the calibrated files
-# need to think hard about batching daily versus all data for cal load in
-# someday we might stop doing the uncal extractions, but very useful for testing
-println("Extracting 2D to 1D:");
-flush(stdout);
-@everywhere process_1D_wrapper(fname) = ApogeeReduction.process_1D(
+# extract the 2D to 1D
+@everywhere process_1D_wrapper(fname) = process_1D(
     fname,
     outdir = parg["outdir"],
     runname = parg["runname"],
@@ -208,181 +228,187 @@ flush(stdout);
     chip_list = CHIP_LIST,
     profile_path = joinpath(proj_path, "data"),
     plot_path = joinpath(parg["outdir"], "plots/")
-    )
-@showprogress pmap(process_1D_wrapper, all2D)
-println("Extracting 2Dcal to 1Dcal:");
-flush(stdout);
+)
+if parg["doUncals"]
+    desc = "Extracting 2D to 1D (uncals):"
+    @showprogress desc=desc pmap(process_1D_wrapper, all2D)
+end
 all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
-@showprogress pmap(process_1D_wrapper, all2Dcal)
+desc = "Extracting 2Dcal to 1Dcal:"
+@showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
 
-## get all OBJECT files (happy to add any other types that see sky?)
-## also get FPI and arclamp files
-list1DexpObject = []
-list1DexpFPI = []
-list1DexpArclamp = []
-for mjd in unique_mjds
-    df = read_almanac_exp_df(
-        joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
-    function get_1d_name_partial(expid)
-        if df.imagetyp[expid] == "Object"
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
-        else
-            return nothing
+### Only do the wavelength solution if we are relFluxing
+if parg["relFlux"]
+    ## get all OBJECT files (happy to add any other types that see sky?)
+    ## also get FPI and arclamp files
+    list1DexpObject = []
+    list1DexpFPI = []
+    list1DexpArclamp = []
+    for mjd in unique_mjds
+        df = read_almanac_exp_df(
+            joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
+        function get_1d_name_partial(expid)
+            if df.imagetyp[expid] == "Object"
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
         end
-    end
-    function get_1d_name_ARCLAMP_partial(expid)
-        if (df.imagetyp[expid] == "ArcLamp") &
-           ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
-        else
-            return nothing
+        function get_1d_name_ARCLAMP_partial(expid)
+            if (df.imagetyp[expid] == "ArcLamp") &
+               ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
         end
-    end
-    function get_1d_name_FPI_partial(expid)
-        if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
-           (df.lampune[expid] == "F")
-            return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
-        else
-            return nothing
+        function get_1d_name_FPI_partial(expid)
+            if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
+               (df.lampune[expid] == "F")
+                return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
+                       ".h5"
+            else
+                return nothing
+            end
         end
+        mskMJD = (mjd_list .== mjd) .& mskTele
+        local1D = get_1d_name_partial.(dfindx_list[mskMJD])
+        push!(list1DexpObject, filter(!isnothing, local1D))
+        local1D_fpi = get_1d_name_FPI_partial.(dfindx_list[mskMJD])
+        push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(dfindx_list[mskMJD])
+        push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
     end
-    local1D = get_1d_name_partial.(expid_list)
-    push!(list1DexpObject, filter(!isnothing, local1D))
-    local1D_fpi = get_1d_name_FPI_partial.(expid_list)
-    push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-    local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
-    push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
-end
-all1DObjecta = vcat(list1DexpObject...)
-all1DFPIa = vcat(list1DexpFPI...)
-all1DArclampa = vcat(list1DexpArclamp...)
-all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-
-all1DObjectperchip = []
-all1DArclampperchip = []
-all1DFPIperchip = []
-for chip in CHIP_LIST
-    all1DObjectchip = replace.(all1DObjecta, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    push!(all1DObjectperchip, all1DObjectchip)
-    all1DArclampchip = replace.(all1DArclampa, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    push!(all1DArclampperchip, all1DArclampchip)
-    all1DFPIchip = replace.(all1DFPIa, "_$(FIRST_CHIP)_" => "_$(chip)_")
-    push!(all1DFPIperchip, all1DFPIchip)
-end
-all1DObject = vcat(all1DObjectperchip...)
-all1DArclamp = vcat(all1DArclampperchip...)
-all1DFPI = vcat(all1DFPIperchip...)
-
-## load rough wave dict and sky lines list
-@everywhere begin
-    roughwave_dict = load(joinpath(proj_path, "data", "roughwave_dict.jld2"), "roughwave_dict")
-    df_sky_lines = CSV.read(joinpath(proj_path, "data", "APOGEE_lines.csv"), DataFrame)
-    df_sky_lines.linindx = 1:size(df_sky_lines, 1)
-end
-
-## get sky line peaks
-println("Fitting sky line peaks:");
-flush(stdout);
-@everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-    fname, roughwave_dict, df_sky_lines)
-@showprogress pmap(get_and_save_sky_peaks_partial, all1DObject)
-
-## get wavecal from sky line peaks
-println("Solving skyline wavelength solution:");
-flush(stdout);
-#only need to give one chip's list because internal
-#logic handles finding other chips when ingesting data
-all1DObjectSkyPeaks = replace.(
-    replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
-all1DObjectWavecal = @showprogress pmap(get_and_save_sky_wavecal, all1DObjectSkyPeaks)
-all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
-
-if size(all1DObjectWavecal, 1) > 0
-    println("Using all skyline wavelength solutions to determine median solution.")
-    flush(stdout)
-    night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
-        all1DObjectWavecal, fit_dither = true)
-    sendto(workers(), night_wave_soln = night_wave_soln)
-    sendto(workers(), night_linParams = night_linParams)
-    sendto(workers(), night_nlParams = night_nlParams)
-
-    println("Using skylines to measure dither offsets from nightly skyline average wavelength solution")
-    @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
-        fname, night_linParams, night_nlParams; dporder = 1, wavetype = "sky", max_offset = 1.0)
-
-    @showprogress pmap(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks)
-
-    println("Plotting skyline wavelength solution diagnostic figures.")
-
-    # make sure plot directory exists
-    mkpath(joinpath(parg["outdir"], "plots", string(parg["mjd"]))) # 
-
-    sky_wave_plots(
-        all1DObjectWavecal, night_linParams, night_nlParams, night_wave_soln,
-        dirNamePlots = joinpath(parg["outdir"], "plots/"),
-        plot_fibers = (1, 50, 100, 150, 200, 250, 300),
-        plot_pixels = (1, 512, 1024, 1536, 2048))
-else
-    night_wave_soln, night_nlParams, night_linParams = nothing, nothing, nothing
-    sendto(workers(), night_wave_soln = night_wave_soln)
-    sendto(workers(), night_linParams = night_linParams)
-    sendto(workers(), night_nlParams = night_nlParams)
-end
-
-if size(all1DArclamp, 1) > 0
-    ## get (non-fpi) arclamp peaks
-    println("Fitting arclamp peaks:")
-    flush(stdout)
-    # try
-        @showprogress pmap(get_and_save_arclamp_peaks, all1DArclamp)
-    # catch
-        # println("\nFAILED fitting arclamp peaks")
-    # end
-end
-
-if size(all1DFPI, 1) > 0
-    ## get FPI peaks
-    println("Fitting FPI peaks:")
-    flush(stdout)
+    all1DObjecta = vcat(list1DexpObject...)
+    all1DFPIa = vcat(list1DexpFPI...)
+    all1DArclampa = vcat(list1DexpArclamp...)
     all1DfpiPeaks_a = replace.(replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-    fit_all_fpi = true
-    # try
-        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(fname, data_path = joinpath(proj_path, "data"))
-        all1DfpiPeaks = @showprogress pmap(get_and_save_fpi_peaks_partial, all1DFPI)
-    # catch
-    #     global fit_all_fpi = false
-    #     println("\nFAILED fitting FPI peaks")
-    # end
-    #change the condition once there are wavelength 
-    #solutions from the ARCLAMPs as well
-    if fit_all_fpi & (!isnothing(night_linParams)) & (size(all1DfpiPeaks_a, 1) > 0)
-        println("Using $(size(all1DfpiPeaks_a,1)) FPI exposures to measure high-precision nightly wavelength solution")
-        outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a, night_linParams, night_nlParams, cporder = 1, wporder = 4, dporder = 2,
-            n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2)
-        sendto(workers(), night_wave_soln = night_wave_soln)
-        sendto(workers(), night_linParams = night_linParams)
-        sendto(workers(), night_nlParams = night_nlParams)
 
-        println("Using skylines to measure dither offsets from FPI-defined wavelength solution")
-        @everywhere get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
-            fname, night_linParams, night_nlParams; dporder = 2, wavetype = "fpi", max_offset = 1.0)
-
-        @showprogress pmap(get_and_save_sky_dither_per_fiber_partial, all1DObjectSkyPeaks)
+    all1DObjectperchip = []
+    all1DArclampperchip = []
+    all1DFPIperchip = []
+    for chip in CHIP_LIST
+        all1DObjectchip = replace.(all1DObjecta, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all1DObjectperchip, all1DObjectchip)
+        all1DArclampchip = replace.(all1DArclampa, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all1DArclampperchip, all1DArclampchip)
+        all1DFPIchip = replace.(all1DFPIa, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        push!(all1DFPIperchip, all1DFPIchip)
     end
+    all1DObject = vcat(all1DObjectperchip...)
+    all1DArclamp = vcat(all1DArclampperchip...)
+    all1DFPI = vcat(all1DFPIperchip...)
+
+    ## load rough wave dict and sky lines list
+    @everywhere begin
+        roughwave_dict = load(joinpath(proj_path, "data", "roughwave_dict.jld2"), "roughwave_dict")
+        df_sky_lines = CSV.read(joinpath(proj_path, "data", "APOGEE_lines.csv"), DataFrame)
+        df_sky_lines.linindx = 1:size(df_sky_lines, 1)
+    end
+
+    ## get sky line peaks
+    @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+        fname, roughwave_dict, df_sky_lines, checkpoint_mode = parg["checkpoint_mode"])
+    desc = "Fitting sky line peaks: "
+    @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
+
+    # get arclamp peaks
+    if size(all1DArclamp, 1) > 0
+        ## get (non-fpi) arclamp peaks
+        desc = "Fitting arclamp peaks: "
+        @everywhere get_and_save_arclamp_peaks_partial(fname) = get_and_save_arclamp_peaks(
+            fname, checkpoint_mode = parg["checkpoint_mode"])
+        @showprogress desc=desc pmap(get_and_save_arclamp_peaks_partial, all1DArclamp)
+    end
+
+    all1DfpiPeaks_a = replace.(
+        replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    all1DfpiPeaks = if size(all1DFPI, 1) > 0
+        ## get FPI peaks
+        desc = "Fitting FPI peaks: "
+        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(
+            fname, data_path = joinpath(proj_path, "data"),
+            checkpoint_mode = parg["checkpoint_mode"])
+        @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
+    else
+        []
+    end
+    all1DfpiPeaks_out = reshape(all1DfpiPeaks, length(all1DfpiPeaks_a), length(CHIP_LIST))
+    mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
+    println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
+
+    ## get wavecal from sky line peaks
+    #only need to give one chip's list because internal
+    #logic handles finding other chips when ingesting data
+    #Andrew says that that is a bit worrisome and would should revisit that logic
+    all1DObjectSkyPeaks = replace.(
+        replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+    desc = "Skyline wavelength solutions:"
+    @everywhere get_and_save_sky_wavecal_partial(fname) = get_and_save_sky_wavecal(
+        fname, checkpoint_mode = parg["checkpoint_mode"])
+    all1DObjectWavecal = @showprogress desc=desc pmap(
+        get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
+    all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
+
+    # putting this parallelized within each mjd is really not good in the bulk run context
+    mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
+
+    sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
+    sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
+    sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+
+    @everywhere outname = joinpath(
+        parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_$(parg["runname"])_dict.jld2")
+    if !check_file(outname, mode = parg["checkpoint_mode"])
+        desc = "Skyline medwave/skyline dither: "
+        @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
+            mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
+        pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
+
+        night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
+        night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
+        night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
+
+        mkpath(dirname(outname))
+        safe_jldsave(outname, night_wave_soln_dict = night_wave_soln_dict,
+            night_linParams_dict = night_linParams_dict,
+            night_nlParams_dict = night_nlParams_dict, no_metadata = true)
+    end
+    @everywhere begin
+        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(
+            outname, "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
+    end
+
+    # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
+    if size(all1DFPI, 1) > 0
+        mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
+        desc = "FPI medwave/skyline dither: "
+        sendto(workers(), mjd_list_fpi = mjd_list_fpi)
+        sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
+        sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(
+            mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
+            night_linParams_dict, night_nlParams_dict, checkpoint_mode = parg["checkpoint_mode"])
+        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
+    end
+
+    ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
+
+    ## combine chips for single exposure onto loguniform wavelength grid
+    ## pushing off the question of dither combinations for now (to apMADGICS stage)
+    @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
+        fname, roughwave_dict, backupWaveSoln = night_wave_soln_dict,
+        checkpoint_mode = parg["checkpoint_mode"])
+    if parg["doUncals"]
+        all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
+        desc = "Reinterp exposure spectra (uncals):"
+        @showprogress desc=desc pmap(reinterp_spectra_partial, all1Da)
+    end
+
+    # very cyclic CPU usage? MEM log-jam? Some slow step I didn't notice?
+    all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")
+    desc = "Reinterp exposure spectra:"
+    @showprogress desc=desc pmap(reinterp_spectra_partial, all1Da)
 end
-
-## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
-## combine chips for single exposure onto loguniform wavelength grid
-## pushing off the question of dither combinations for now (to apMADGICS stage)
-all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
-println("Reinterpolating exposure spectra:");
-flush(stdout);
-@everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
-    fname, roughwave_dict, backupWaveSoln = night_wave_soln)
-@showprogress pmap(reinterp_spectra_partial, all1Da)
-
-all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")
-println("Reinterpolating calibrated exposure spectra:");
-flush(stdout);
-@showprogress pmap(reinterp_spectra_partial, all1Da)

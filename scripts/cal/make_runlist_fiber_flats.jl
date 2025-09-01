@@ -22,6 +22,11 @@ function parse_commandline()
         help = "path to output runlist file"
         arg_type = String
         default = ""
+        "--flat_type"
+        required = true
+        help = "flat type, i.e. dome or quartz"
+        arg_type = String
+        default = "dome"
     end
     return parse_args(s)
 end
@@ -43,7 +48,12 @@ for tele in tele2do
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
-        good_exp = (df.imagetyp .== "InternalFlat") .& (df.nreadInt .> 3)
+        good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") 
+        if parg["flat_type"] == "dome"
+            good_exp .&= (df.nreadInt .> 3)
+        else
+            good_exp .&= (df.nreadInt .>= 3)
+        end
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
             push!(mjdexp_list, tstmjd_int)

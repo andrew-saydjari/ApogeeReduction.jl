@@ -259,9 +259,14 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
     return pmat[:, mskFlux], best_offset, count(mskFlux)
 end
 
-function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
+function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_mode = "commit_same")
+    outname = replace(replace(fname, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+    if check_file(outname, mode = checkpoint_mode)
+        return
+    end
+
     sname = split(split(fname, "/")[end], "_")
-    fnameType, tele, mjd, expnum, chip, exptype = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
 
     f = jldopen(fname, "r+")
     flux_1d = f["flux_1d"]
@@ -308,28 +313,32 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines)
         msk = abs.(sky_line_mat[i, 1, :] .- medx_detect[i]) .<= 3 * sigma_detect[i]
         sky_line_mat_clean[i, :, .!msk] .= NaN
     end
-    outname = replace(replace(fname, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
-    f = h5open(outname, "w")
-    # Write cleaned data
-    write(f, "sky_line_mat_clean", sky_line_mat_clean)
-    attrs(f["sky_line_mat_clean"])["axis_1"] = "skylineID"
-    attrs(f["sky_line_mat_clean"])["axis_2"] = "fit_info"
-    attrs(f["sky_line_mat_clean"])["axis_3"] = "fibers"
+    
+    # f = h5open(outname, "w")
+    # # Write cleaned data
+    # write(f, "sky_line_mat_clean", sky_line_mat_clean)
+    # attrs(f["sky_line_mat_clean"])["axis_1"] = "skylineID"
+    # attrs(f["sky_line_mat_clean"])["axis_2"] = "fit_info"
+    # attrs(f["sky_line_mat_clean"])["axis_3"] = "fibers"
 
-    # Write original data
-    write(f, "sky_line_mat", sky_line_mat)
-    attrs(f["sky_line_mat"])["axis_1"] = "skylineID"
-    attrs(f["sky_line_mat"])["axis_2"] = "fit_info"
-    attrs(f["sky_line_mat"])["axis_3"] = "fibers"
+    # # Write original data
+    # write(f, "sky_line_mat", sky_line_mat)
+    # attrs(f["sky_line_mat"])["axis_1"] = "skylineID"
+    # attrs(f["sky_line_mat"])["axis_2"] = "fit_info"
+    # attrs(f["sky_line_mat"])["axis_3"] = "fibers"
 
-    write(f, "sky_line_trace_centers", sky_trace_centers)
-    attrs(f["sky_line_trace_centers"])["axis_1"] = "skylineID"
-    attrs(f["sky_line_trace_centers"])["axis_2"] = "fibers"
+    # write(f, "sky_line_trace_centers", sky_trace_centers)
+    # attrs(f["sky_line_trace_centers"])["axis_1"] = "skylineID"
+    # attrs(f["sky_line_trace_centers"])["axis_2"] = "fibers"
 
-    # Write boff data
-    write(f, "boff", boff)
-    attrs(f["boff"])["axis_1"] = "fibers"
-    close(f)
+    # # Write boff data
+    # write(f, "boff", boff)
+    # attrs(f["boff"])["axis_1"] = "fibers"
+    # close(f)
+
+    safe_jldsave(outname, sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, no_metadata = true)
+
+    return
 end
 
 function rough_linear_wave(pix; a = 16156.8, b = -0.282)

@@ -1,7 +1,9 @@
+# makes a runlist of all the exposures that should be run for a given night.
+# called by run_all.sh
 using Pkg;
 Pkg.instantiate();
-using JLD2, ArgParse, DataFrames, HDF5
-using ApogeeReduction: safe_jldsave, read_almanac_exp_df, long_expid_to_short
+using HDF5, JLD2, ArgParse, DataFrames
+using ApogeeReduction: read_almanac_exp_df, safe_jldsave, long_expid_to_short
 
 ## Parse command line arguments
 function parse_commandline()
@@ -43,11 +45,12 @@ for tele in tele2do
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
-        good_exp = (df.imagetyp .== "InternalFlat") .& (df.nreadInt .> 3)
+        good_exp = (df.nreadInt .> 3) .|
+                   ((df.imagetyp .== "QuartzFlat") .& (df.nreadInt .== 3))
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
             push!(mjdexp_list, tstmjd_int)
-            push!(expid_list, long_expid_to_short(tstmjd_int, df.exposure_int[dfindx]))
+            push!(expid_list, long_expid_to_short(tstmjd_int,df.exposure_int[dfindx]))
             push!(dfindx_list, dfindx)
             push!(tele_list, tele)
         end
