@@ -377,7 +377,8 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         bad_params = (new_params[:, 3] .<= min_widths .* 1.01) .|
                      (new_params[:, 3] .>= max_widths .* 0.99) .|
                      (new_params[:, 2] .<= first_guess_params[:, 2] .- max_center_move .+ 0.01) .|
-                     (new_params[:, 2] .>= first_guess_params[:, 2] .+ max_center_move .- 0.01)
+                     (new_params[:, 2] .>= first_guess_params[:, 2] .+ max_center_move .- 0.01) .|
+		     (.!dropdims(all(isfinite.(new_params),dims=2),dims=2))
         new_params[bad_params, :] .= first_guess_params[bad_params, :]
         v_hat_cov[:, :, bad_params] .= NaN
 
@@ -794,6 +795,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     #save the middle-of-detector best fit parameters for first guess
     best_fit_ave_params = copy(new_params)
 
+    good_results = isfinite.(new_params[:,2])
+    new_params = new_params[good_results,:]
+
     #work outwards from the middle of the detector
     #using the previous analyses to give good first guesses
     #when iterating over all the X pixels
@@ -859,7 +863,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     #remove the edge possible peaks if they have no throughput, because they likely don't exist
     #    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.2
-    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh
+    good_throughput_fibers = ((best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh) .& (isfinite.(best_fit_ave_params[:,2]))
     low_throughput_fibers = findall(.!good_throughput_fibers)
     if size(low_throughput_fibers, 1) > 0
         if low_throughput_fibers[1] == 1
