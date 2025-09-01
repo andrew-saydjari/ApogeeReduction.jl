@@ -505,11 +505,11 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         resids_min = poss_local_min_fluxes .- min_func.(local_min_waves)
         resids_max = poss_local_max_fluxes .- max_func.(local_max_waves)
 
-        resid_summary_min = quantile(resids_min[keep_min], [0.16, 0.5, 0.84])
+	resid_summary_min = nanzeropercentile(resids_min[keep_min],percent_vec=[16,50,84])
         resid_summary_min = [resid_summary_min[2],
             resid_summary_min[2] - resid_summary_min[1],
             resid_summary_min[3] - resid_summary_min[2]]
-        resid_summary_max = quantile(resids_max[keep_max], [0.16, 0.5, 0.84])
+	resid_summary_max = nanzeropercentile(resids_max[keep_max],percent_vec=[16,50,84])
         resid_summary_max = [resid_summary_max[2],
             resid_summary_max[2] - resid_summary_max[1],
             resid_summary_max[3] - resid_summary_max[2]]
@@ -662,7 +662,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     for r_ind in 1:2
         space_func = fit(peak_locs[keep_space], peak_spacing[keep_space], 3)
         resids = peak_spacing .- space_func.(peak_locs)
-        resid_summary = quantile(resids[keep_space], [0.16, 0.5, 0.84])
+	resid_summary = nanzeropercentile(resids[keep_space],percent_vec=[16,50,84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
             resid_summary[3] - resid_summary[2]]
@@ -671,7 +671,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
                       (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
 
         resids = new_params[:, 3] .- smoothed_widths
-        resid_summary = quantile(resids[keep_widths], [0.16, 0.5, 0.84])
+	resid_summary = nanzeropercentile(resids[keep_widths],percent_vec=[16,50,84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
             resid_summary[3] - resid_summary[2]]
@@ -683,13 +683,13 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         smoothed_widths ./= nansum(keep_widths[all_smooth_inds]' .* smooth_weights, 1)'
 
         resids = new_params[:, 1] .- smoothed_heights
-        resid_summary = quantile(resids[keep_heights], [0.16, 0.5, 0.84])
+	resid_summary = nanzeropercentile(resids[keep_heights],percent_vec=[16,50,84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
             resid_summary[3] - resid_summary[2]]
         n_sigma = 3
-        keep_widths .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
-                       (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
+        keep_heights .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
+                        (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
         smoothed_heights .= nansum(
             ((new_params[:, 1] .* keep_heights)[all_smooth_inds])' .* smooth_weights, 1)'
         smoothed_heights ./= nansum(keep_heights[all_smooth_inds]' .* smooth_weights, 1)'
@@ -708,7 +708,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         peak_func = fit(peak_ints[keep_peaks], new_params[keep_peaks, 2], 3)
 
         resids = new_params[:, 2] .- peak_func.(peak_ints)
-        resid_summary = quantile(resids[keep_peaks], [0.16, 0.5, 0.84])
+	resid_summary = nanzeropercentile(resids[keep_peaks],percent_vec=[16,50,84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
             resid_summary[3] - resid_summary[2]]
@@ -835,7 +835,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     for r_ind in 1:2
         resids = new_params[:, 3] .- smoothed_widths
-        resid_summary = quantile(resids[keep_widths], [0.16, 0.5, 0.84])
+	resid_summary = nanzeropercentile(resids[keep_widths],percent_vec=[16,50,84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
             resid_summary[3] - resid_summary[2]]
@@ -847,12 +847,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         smoothed_widths ./= nansum(keep_widths[all_smooth_inds]' .* smooth_weights, 1)'
 
         resids = new_params[:, 1] .- smoothed_heights
-        resid_summary = quantile(resids[keep_heights], [0.16, 0.5, 0.84])
+	resid_summary = nanzeropercentile(resids[keep_heights],percent_vec=[16,50,84])
         resid_summary = [resid_summary[2],
             resid_summary[2] - resid_summary[1],
             resid_summary[3] - resid_summary[2]]
         n_sigma = 3
-        keep_widths .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
+        keep_heights .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
                        (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
         smoothed_heights .= nansum(
             ((new_params[:, 1] .* keep_heights)[all_smooth_inds])' .* smooth_weights, 1)'
