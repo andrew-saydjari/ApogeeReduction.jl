@@ -155,6 +155,7 @@ end
     else
         [parg["tele"]]
     end
+    # wow this is really not robust, you HAVE to pass a runlist and a tele on the command line
     unique_teles = unique(tele_list)
     mskTele = tele_list .== parg["tele"]
 

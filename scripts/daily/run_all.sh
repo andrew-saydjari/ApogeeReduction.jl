@@ -48,13 +48,14 @@ juliaup add $julia_version
 # hardcode the mjd and expid for now
 tele=$1
 mjd=$2
-run_2d_only=${3:-false}  # Third argument, defaults to false if not provided
-outdir=${4:-"outdir/"}  # Fourth argument, defaults to "outdir/" if not provided
-caldir_darks=${5:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
-caldir_flats=${6:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
-gain_read_cal_dir=${7:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
-path2arMADGICS=${8:-"$(dirname "$base_dir")/arMADGICS.jl/"}
-checkpoint_mode=${9:-"commit_exists"}
+outdir=${3:-"outdir/"}
+path2arMADGICS=${4:-"$(dirname "$base_dir")/arMADGICS.jl/"}
+update_sdsscore=${5:-false}
+checkpoint_mode=${6:-"commit_exists"}
+run_2d_only=${7:-false}  
+caldir_darks=${8:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
+caldir_flats=${9:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
+gain_read_cal_dir=${10:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
 
 runname="allobs_${tele}_${mjd}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -80,10 +81,21 @@ print_elapsed_time() {
     LAST_TIME=$current_seconds
 }
 
-# # get the data summary file for the MJD
-# print_elapsed_time "Running Almanac"
-# # would like to switch back to -p 12 once the multinode context is fixed
-# almanac -v --mjd-start $mjd_start --mjd-end $mjd_end --output $almanac_file --fibers
+# get the data summary file for the MJD
+print_elapsed_time "Running Almanac"
+# activate shared almanac (uv python) environment
+source /mnt/home/sdssv/uv_env/almanac_v0p1p11/bin/activate 
+#  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
+sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
+# updates the sdsscore submodules (which has to be done from that directory)
+if [ "$update_sdsscore" = "true" ]; then
+    ORIG_PWD=$(pwd)
+    cd /mnt/ceph/users/sdssv/raw/APOGEE/sdsscore/
+    ./update.sh
+    cd "$ORIG_PWD"
+fi
+
+almanac -v --mjd-start $mjd --mjd-end $mjd --output $almanac_file --fibers
 
 print_elapsed_time "Building Runlist"
 julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
@@ -100,7 +112,7 @@ if [ "$run_2d_only" != "true" ]; then
     do
         flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
         print_elapsed_time "Making runlist for $flat_type Flats"
-        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --output $flatrunlist --flat_type $flat_type
+        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --tele $tele --output $flatrunlist --flat_type $flat_type
 
         print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
         mkdir -p ${outdir}${flat_type}_flats
