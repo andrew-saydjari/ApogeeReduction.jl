@@ -8,7 +8,7 @@
 #SBATCH --partition=preempt
 #SBATCH --qos=preempt
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 
 #SBATCH --time=1-00:00
 #SBATCH --job-name=ar_daily
@@ -95,10 +95,18 @@ if [ "$update_sdsscore" = "true" ]; then
     cd "$ORIG_PWD"
 fi
 
-almanac -v --mjd-start $mjd --mjd-end $mjd --output $almanac_file --fibers
+almanac -v --mjd-start $mjd --mjd-end $mjd --$tele --output $almanac_file --fibers
 
 print_elapsed_time "Building Runlist"
 julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
+exit_code=$?
+if [ $exit_code -eq 16 ]; then
+    echo "No exposures found for this night. Exiting gracefully."
+    exit 0
+elif [ $exit_code -ne 0 ]; then
+    echo "ERROR: make_runlist_all.jl failed with exit code $exit_code"
+    exit $exit_code
+fi
 
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
 ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night

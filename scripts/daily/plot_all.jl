@@ -29,9 +29,9 @@ function parse_commandline()
         help = "mjd"
         arg_type = Int
         default = 0
-        "--expid"
+        "--dfindx"
         required = false
-        help = "exposure number to be run"
+        help = "df exposure index to be run"
         arg_type = Int
         default = 1
         "--runlist"
@@ -85,10 +85,10 @@ else
 end
 unique_mjds = unique(mjd_list)
 
-expid_list = if parg["runlist"] != ""
-    load(parg["runlist"], "expid")
+dfindx_list = if parg["runlist"] != ""
+    load(parg["runlist"], "dfindx")
 else
-    [parg["expid"]]
+    [parg["dfindx"]]
 end
 
 if length(unique_mjds) == 0
@@ -132,11 +132,11 @@ for mjd in unique_mjds
                 return nothing
             end
         end
-        local1D = get_1d_name_partial.(expid_list)
+        local1D = get_1d_name_partial.(dfindx_list[mskMJD])
         push!(list1DexpObject, filter(!isnothing, local1D))
-        local1D_fpi = get_1d_name_FPI_partial.(expid_list)
+        local1D_fpi = get_1d_name_FPI_partial.(dfindx_list[mskMJD])
         push!(list1DexpFPI, filter(!isnothing, local1D_fpi))
-        local1D_arclamp = get_1d_name_ARCLAMP_partial.(expid_list)
+        local1D_arclamp = get_1d_name_ARCLAMP_partial.(dfindx_list[mskMJD])
         push!(list1DexpArclamp, filter(!isnothing, local1D_arclamp))
     end
 end
@@ -580,7 +580,8 @@ for mjd in unique_mjds
         parg["outdir"] * "/apred/$(mjd)/" *
         replace(get_1d_name(expid, df), "ar1D" => "ar2Dresidualscal") * ".h5"
     end
-    local2D = get_2d_name_partial.(expid_list)
+    mskMJD = (mjd_list .== mjd) .& (tele_list .== parg["tele"])
+    local2D = get_2d_name_partial.(dfindx_list[mskMJD])
     push!(list2Dexp, local2D)
 end
 all2Da = vcat(list2Dexp...)
@@ -634,12 +635,13 @@ end
 
 all1Da = String[] # all 1D files for chip a
 for mjd in unique_mjds
+    mskMJD = (mjd_list .== mjd) .& (tele_list .== parg["tele"])
     df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
     function get_1d_name_partial(expid)
         parg["outdir"] * "apred/$(mjd)/" * get_1d_name(expid, df, cal = true) * ".h5"
     end
 
-    file_list = get_1d_name_partial.(expid_list)
+    file_list = get_1d_name_partial.(dfindx_list[mskMJD])
     append!(all1Da, file_list)
 end
 

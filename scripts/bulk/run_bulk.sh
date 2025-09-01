@@ -102,6 +102,14 @@ almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_fi
 
 print_elapsed_time "Building Runlist"
 julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
+exit_code=$?
+if [ $exit_code -eq 16 ]; then
+    echo "No exposures found for this night. Exiting gracefully."
+    exit 0
+elif [ $exit_code -ne 0 ]; then
+    echo "ERROR: make_runlist_all.jl failed with exit code $exit_code"
+    exit $exit_code
+fi
 
 for tele in ${tele_list[@]}
 do
