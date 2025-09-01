@@ -80,7 +80,7 @@ with DAG(
 ) as dag:
 
     with TaskGroup(group_id="update") as group_git:
-        BashOperator(
+        git_ar = BashOperator(
             task_id="repo",
             bash_command=(
                 f"cd {REPO_DIR}\n"
@@ -93,7 +93,6 @@ with DAG(
             ),
         )
 
-    with TaskGroup(group_id="setup") as group_setup:
         sdsscore = BashOperator(
             task_id="sdsscore",
             bash_command=(
@@ -104,13 +103,13 @@ with DAG(
             )
         )
 
+        git_ar >> sdsscore
+
+    with TaskGroup(group_id="setup") as group_setup:
         mjd = PythonOperator(
             task_id="mjd",
             python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) -1 # +1 offset to get the most recent day
         )
-
-        # Set order: sdsscore must complete before mjd
-        sdsscore >> mjd
 
     observatory_groups = []
     for observatory in ["lco", "apo"]:  # Changed order to LCO first to allow serial case
