@@ -118,7 +118,7 @@ end
 
 if length(all1Da) > 0
     ## need to get cal_type from runlist
-    exp_type_lst = map(x -> split(split(x, "FLAT")[1], "_")[end], all1Da)
+    exp_type_lst = map(x -> split(split(x, "flat")[1], "_")[end], all1Da)
     unique_exp_lst = unique(exp_type_lst)
     if length(unique_exp_lst) > 1
         error("Multiple cal types found in runlist")

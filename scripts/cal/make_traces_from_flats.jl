@@ -79,7 +79,11 @@ end
 
     # Load in the exact set of exposures
     tele_list = load(parg["runlist"], "tele")
-    unique_teles = unique(tele_list)
+    unique_teles = if parg["tele"] == ""
+        unique(tele_list)
+    else
+        [parg["tele"]]
+    end
     mjd_list = load(parg["runlist"], "mjd")
     unique_mjds = unique(mjd_list)
     expid_list = load(parg["runlist"], "expid")
@@ -94,6 +98,7 @@ end
     end
     flist = vcat(cal_flist...)
 
+    # this is currently forcing only a single telescope at a time
     fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
 
     function make_traces(fname, flat_type; checkpoint_mode = "commit_same")
