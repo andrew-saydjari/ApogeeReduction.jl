@@ -40,6 +40,14 @@ tele2do = if parg["tele"] == "both"
 else
     [parg["tele"]]
 end
+
+# Check if almanac file is empty and exit with specific code
+if length(keys(f)) == 0
+    println("WARNING: No exposures found for the specified parameters")
+    println("Exiting with code 16 to indicate empty runlist")
+    exit(16)
+end
+
 for tele in tele2do
     mjd_list = keys(f[tele])
     for tstmjd in mjd_list
