@@ -247,5 +247,5 @@ if length(all1Da) > 0
     end
 else
     thread = SlackThread()
-    thread("No files of at least one cal type found for relFluxing")
+    thread("No files of at least one cal type found for $(parg["tele"]) relFluxing")
 end
