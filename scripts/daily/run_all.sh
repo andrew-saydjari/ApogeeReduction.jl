@@ -98,7 +98,7 @@ fi
 almanac -v --mjd-start $mjd --mjd-end $mjd --$tele --output $almanac_file --fibers
 
 print_elapsed_time "Building Runlist"
-julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
+julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
 exit_code=$?
 if [ $exit_code -eq 16 ]; then
     echo "No exposures found for this night. Exiting gracefully."
