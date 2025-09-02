@@ -99,7 +99,7 @@ with DAG(
             bash_command=(
                 "ORIG_PWD=$(pwd)\n"
                 "cd /mnt/ceph/users/sdssv/raw/APOGEE/sdsscore/\n"
-                # "./update.sh\n" 
+                "./update.sh\n" 
                 "cd $ORIG_PWD"
             )
         )
