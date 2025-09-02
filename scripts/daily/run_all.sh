@@ -98,8 +98,10 @@ fi
 almanac -v --mjd-start $mjd --mjd-end $mjd --$tele --output $almanac_file --fibers
 
 print_elapsed_time "Building Runlist"
-julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
+set +e  # Temporarily disable exit on error
+julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
 exit_code=$?
+set -e  # Re-enable exit on error
 if [ $exit_code -eq 16 ]; then
     echo "No exposures found for this night. Exiting gracefully."
     exit 0
@@ -131,7 +133,7 @@ if [ "$run_2d_only" != "true" ]; then
         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode $checkpoint_mode
 
         print_elapsed_time "Making relFlux for $flat_type Flats"
-        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname   
+        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname --tele $tele
     done
 
     ## 2D->1D
