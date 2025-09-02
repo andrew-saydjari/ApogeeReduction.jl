@@ -651,12 +651,12 @@ allimagetyp = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1],
 # Define custom sorting order for exposure types
 function get_imagetyp_priority(imagetyp::AbstractString)
     priority_map = Dict(
-        "OBJECT" => 1,
-        "DOMEFLAT" => 2,
-        "INTERNALFLAT" => 3,
-        "QUARTZFLAT" => 4,
-        "DARK" => 5,
-        "ARCLAMP" => 6
+        "Object" => 1,
+        "DomeFlat" => 2,
+        "InternalFlat" => 3,
+        "QuartzFlat" => 4,
+        "Dark" => 5,
+        "Arclamp" => 6
     )
     return get(priority_map, imagetyp, 999)  # Unknown types get high number
 end
