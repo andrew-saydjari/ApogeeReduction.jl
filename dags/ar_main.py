@@ -4,6 +4,7 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 from astropy.time import Time
+import pytz
 from airflow import DAG
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.bash import BashOperator
@@ -74,7 +75,7 @@ with DAG(
     catchup=False,
             on_failure_callback=[
             send_slack_notification_partial(
-                text="ApogeeReduction-airflow DAG failed on {{ ts }} - 1",
+                text="ApogeeReduction-airflow DAG failed on {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}",
             )
         ]    
 ) as dag:
@@ -108,7 +109,12 @@ with DAG(
     with TaskGroup(group_id="setup") as group_setup:
         mjd = PythonOperator(
             task_id="mjd",
-            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) -1 # +1 offset to get the most recent day
+            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) - 2
+        )
+
+        date_mjd = PythonOperator(
+            task_id="date_mjd",
+            python_callable=lambda data_interval_start, **_: (data_interval_start.astimezone(pytz.timezone('America/New_York')) - timedelta(days=2)).strftime('%Y-%m-%d')
         )
 
     observatory_groups = []
@@ -119,7 +125,7 @@ with DAG(
                 python_callable=lambda **_: None,  # Simple no-op function
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ ts }} - 1). Exposure list can be found at https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/gitcode/ApogeeReduction.jl/metadata/observing_log_viewer/?sjd={{ task_instance.xcom_pull(task_ids='setup.mjd') }}&site=" + observatory
+                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/gitcode/ApogeeReduction.jl/metadata/observing_log_viewer/?sjd={{ task_instance.xcom_pull(task_ids='setup.mjd') }}&site=" + observatory
                     )
                 ]
             )
@@ -134,12 +140,12 @@ with DAG(
                 },
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text=observatory + " science frames reduced for SJD {{ ti.xcom_pull(task_ids='setup.mjd') }} (night of {{ ts }} - 1).",
+                        text=observatory + " science frames reduced for SJD {{ ti.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}).",
                     )
                 ],        
                 on_failure_callback=[
                     send_slack_notification_partial(
-                        text=observatory + " science frame reduction failed for SJD {{ ti.xcom_pull(task_ids='setup.mjd') }} (night of {{ ts }} - 1). :picard_facepalm:",
+                        text=observatory + " science frame reduction failed for SJD {{ ti.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). :picard_facepalm:",
                     )
                 ]               
             )   
@@ -153,7 +159,7 @@ with DAG(
         python_callable=lambda **_: None,  # dummy function that does nothing
         on_success_callback=[
             send_slack_notification_partial(
-                text="ApogeeReduction pipeline completed successfully for SJD {{ ti.xcom_pull(task_ids='setup.mjd') }} (night of {{ ts }} - 1). Both observatories processed."
+                text="ApogeeReduction pipeline completed successfully for SJD {{ ti.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Both observatories processed."
             )
         ],
         dag=dag
