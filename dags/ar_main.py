@@ -109,7 +109,7 @@ with DAG(
     with TaskGroup(group_id="setup") as group_setup:
         mjd = PythonOperator(
             task_id="mjd",
-            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) - 2
+            python_callable=lambda data_interval_start, **_: int(Time(data_interval_start).mjd) - 1
         )
 
         date_mjd = PythonOperator(
@@ -125,7 +125,7 @@ with DAG(
                 python_callable=lambda **_: None,  # Simple no-op function
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/gitcode/ApogeeReduction.jl/metadata/observing_log_viewer/?sjd={{ task_instance.xcom_pull(task_ids='setup.mjd') }}&site=" + observatory
+                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/APOGEE/" + observatory +"/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}.log.html" 
                     )
                 ]
             )
