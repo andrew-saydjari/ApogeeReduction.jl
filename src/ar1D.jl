@@ -324,7 +324,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
     exposure_info = df_exp[findfirst(df_exp[!, "exposure_str"] .== exposure_id), :]
     configid = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.imagetyp == "OBJECT"
+    fibtargDict = if exposure_info.imagetyp == "Object"
         try
             df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configid)"]))
             # normalizes all column names to lowercase
