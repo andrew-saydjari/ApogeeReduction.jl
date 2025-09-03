@@ -294,6 +294,7 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     end
     f = h5open(filename, "r")
     if !haskey(f, "metadata")
+        close(f)
         return false
     end
     close(f)
