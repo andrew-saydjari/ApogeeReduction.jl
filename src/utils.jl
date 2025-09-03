@@ -288,6 +288,7 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
         return false
     end
     # as long as clobber is not true, existence of pngs is enough to skip
+    # Adam and Kevin want this to be false for all pngs
     if file_exists && (ext_name == "png")
         return true
     end
