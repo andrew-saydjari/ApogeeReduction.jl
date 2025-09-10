@@ -498,6 +498,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     end
 
     metadata_lst = []
+    trace_lst = []
     for (chipind, chip) in enumerate(CHIP_LIST) # This needs to be the in abc RGB order, changing that will break this section
         fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
         f = jldopen(fnameloc)
@@ -508,6 +509,10 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
         extract_trace_centers = f["extract_trace_centers"]
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))
+
+	push!(trace_lst, h5open(traceFname, "r") do f
+                (f["trace_type"],f["trace_mjd_offset"],f["trace_found_best_choice"],f["trace_match_mjd"],f["trace_found_match"],f["trace_orig_param_fname"],f["trace_used_param_fname"])
+        end)
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
@@ -528,6 +533,10 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
 
     # should add a check all entries of metadata_lst to be equal
     metadata = metadata_lst[1]
+    trace_type,trace_mjd_offset,
+    trace_found_best_choice,trace_match_mjd,
+    trace_found_match,trace_orig_param_fname,
+    trace_used_param_fname = trace_lst[1]
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
     chipBit_stack[.!(noBadBits)] .+= 2^4 # call pixels with bad bits thrown bad
@@ -584,7 +593,11 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     # Write reinterpolated data
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk,
-        extract_trace_coords = outTraceCoords, wavecal_type)
+        extract_trace_coords = outTraceCoords, wavecal_type,
+	trace_type,trace_mjd_offset,
+        trace_found_best_choice,trace_match_mjd,
+        trace_found_match,trace_orig_param_fname, 
+        trace_used_param_fname)
     return
 end
 
@@ -595,12 +608,17 @@ function process_1D(fname;
         runname::String,
         extraction::String,
         relFlux::Bool,
-        trace_type::String,
         chip_list::Vector{String} = CHIP_LIST,
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
+
+    # this seems annoying to load so often if we know we are doing a daily... need to ponder
+    traceFname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
+    if !isfile(traceFname)
+        return false
+    end
 
     # how worried should I be about loading this every time?
     falm = h5open(joinpath(outdir, "almanac/$(runname).h5"))
@@ -620,10 +638,12 @@ function process_1D(fname;
     pix_bitmask = load(fnamecal, "pix_bitmask")
     metadata = read_metadata(fname)
 
-    # this seems annoying to load so often if we know we are doing a daily... need to ponder
-    traceList = sort(glob("$(trace_type)TraceMain_$(tele)_$(mjd)_*_$(chip).h5",
-        outdir * "apred/$(mjd)/"))
-    trace_params = load(traceList[1], "trace_params")
+    trace_params = load(traceFname, "trace_params")
+    trace_type,trace_mjd_offset,
+    trace_found_best_choice,trace_match_mjd,
+    trace_found_match,trace_orig_param_fname = h5open(traceFname, "r") do f
+            (f["trace_type"],f["trace_mjd_offset"],f["trace_found_best_choice"],f["trace_match_mjd"],f["trace_found_match"],f["trace_orig_param_fname"])
+    end
 
     # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of
     # everything to some degree
@@ -647,7 +667,11 @@ function process_1D(fname;
 
     outfname = replace(fname, "ar2D" => "ar1D")
     resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
-    safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar)
+    safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar, 
+		                           trace_type,trace_mjd_offset,
+                                           trace_found_best_choice,trace_match_mjd,
+                                           trace_found_match,trace_orig_param_fname,
+					   trace_used_param_fname = traceFname)
     if relFlux
         # relative fluxing (using B (last chip) only for now)
         # this is the path to the underlying fluxing file.
@@ -686,7 +710,11 @@ function process_1D(fname;
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
-            relthrpt, bitmsk_relthrpt, fiberTypeList)
+            relthrpt, bitmsk_relthrpt, fiberTypeList,
+	    trace_type,trace_mjd_offset,
+            trace_found_best_choice,trace_match_mjd,
+            trace_found_match,trace_orig_param_fname,
+            trace_used_param_fname = traceFname)
     else
         outfname_norelflux = replace(outfname, "apred" => "apredrelflux")
         dirName = dirname(outfname_norelflux)
@@ -695,7 +723,12 @@ function process_1D(fname;
         end
         safe_jldsave(
             outfname_norelflux, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
-            extract_trace_centers = regularized_trace_params[:, :, 2])
+            extract_trace_centers = regularized_trace_params[:, :, 2],
+	    trace_type,trace_mjd_offset,
+            trace_found_best_choice,trace_match_mjd,
+            trace_found_match,trace_orig_param_fname,
+            trace_used_param_fname = traceFname)
     end
     close(falm)
+    return true
 end
