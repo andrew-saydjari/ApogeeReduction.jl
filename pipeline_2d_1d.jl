@@ -130,7 +130,7 @@ flush(stdout);
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither,
                            fpi_medwavecal_skyline_dither,
-                           safe_jldsave, process_1D, check_file
+                           safe_jldsave, process_1D, check_file, modify_saved_dict
 
     ###decide order to look for traces from these cal types (i.e. dome or quartz flats)
     trace_type_order = ["quartz","dome"]
