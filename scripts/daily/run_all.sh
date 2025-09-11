@@ -82,42 +82,42 @@ print_elapsed_time() {
     LAST_TIME=$current_seconds
 }
 
-# # get the data summary file for the MJD
-# print_elapsed_time "Running Almanac"
+# get the data summary file for the MJD
+print_elapsed_time "Running Almanac"
 
-# # Only run almanac if file doesn't exist or clobber mode is true
-# if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
-#     # activate shared almanac (uv python) environment
-#     source /mnt/home/sdssv/uv_env/almanac_v0p1p11/bin/activate 
-#     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
-#     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-#     # updates the sdsscore submodules (which has to be done from that directory)
-#     if [ "$update_sdsscore" = "true" ]; then
-#         ORIG_PWD=$(pwd)
-#         cd /mnt/ceph/users/sdssv/raw/APOGEE/sdsscore/
-#         ./update.sh
-#         cd "$ORIG_PWD"
-#     fi
+# Only run almanac if file doesn't exist or clobber mode is true
+if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
+    # activate shared almanac (uv python) environment
+    source /mnt/home/sdssv/uv_env/almanac_v0p1p11/bin/activate 
+    #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
+    sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
+    # updates the sdsscore submodules (which has to be done from that directory)
+    if [ "$update_sdsscore" = "true" ]; then
+        ORIG_PWD=$(pwd)
+        cd /mnt/ceph/users/sdssv/raw/APOGEE/sdsscore/
+        ./update.sh
+        cd "$ORIG_PWD"
+    fi
 
-#     almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
-# fi
+    almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+fi
 
-# print_elapsed_time "Building Runlist"
-# set +e  # Temporarily disable exit on error
-# julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
-# exit_code=$?
-# set -e  # Re-enable exit on error
-# if [ $exit_code -eq 16 ]; then
-#     echo "No exposures found for this night. Exiting gracefully."
-#     exit 0
-# elif [ $exit_code -ne 0 ]; then
-#     echo "ERROR: make_runlist_all.jl failed with exit code $exit_code"
-#     exit $exit_code
-# fi
+print_elapsed_time "Building Runlist"
+set +e  # Temporarily disable exit on error
+julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --tele $tele --almanac_file $almanac_file --output $runlist
+exit_code=$?
+set -e  # Re-enable exit on error
+if [ $exit_code -eq 16 ]; then
+    echo "No exposures found for this night. Exiting gracefully."
+    exit 0
+elif [ $exit_code -ne 0 ]; then
+    echo "ERROR: make_runlist_all.jl failed with exit code $exit_code"
+    exit $exit_code
+fi
 
-# print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
-# ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-# julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
+print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
+## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
+julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then

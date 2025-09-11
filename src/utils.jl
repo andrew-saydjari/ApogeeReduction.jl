@@ -295,7 +295,11 @@ function modify_saved_dict(filepath::String, dataset_name::String, modifications
             
             # Remove old dataset and write new one
             delete_object(file, dataset_name)
-            write(file, dataset_name, existing_data)
+            # add metadata group to the file
+            g = create_group(file, "metadata")
+            for (k, v) in existing_data
+                g[k] = check_type_for_jld2(v)
+            end
         end
     catch e
         println("Error modifying HDF5 file $filepath: $e")

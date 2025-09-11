@@ -201,7 +201,7 @@ end
 				       outdir = parg["outdir"],
 				       checkpoint_mode = "commit_same")
 
-    traceMain_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_(mjd)_$(chip).h5"
+    traceMain_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
     if check_file(traceMain_fname, mode = checkpoint_mode)
         return nothing
     end
