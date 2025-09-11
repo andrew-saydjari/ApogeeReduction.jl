@@ -193,6 +193,8 @@ end
     all2D = vcat(all2Dperchip...)
 end
 
+### This should move to ar1D.jl
+
 # make trace param file copies for each date
 # searching outwards from the given mjd, 
 # looking for cal types in the order of trace_type_order
@@ -216,7 +218,7 @@ end
         traceList = sort(glob("$(check_trace_type)Trace_$(tele)_$(mjd)_*_$(chip).h5",
             outdir * "$(check_trace_type)_flats/$(mjd)/"))
         if length(traceList) >= 1
-            orig_trace_param_fname = traceList[1]
+            orig_trace_param_fname = traceList[end]
             trace_type = check_trace_type
             found_match = true
             break
