@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 #SBATCH --partition=preempt
 #SBATCH --qos=preempt
-#SBATCH --constraint="[genoa]"
+#SBATCH --constraint="[genoa|icelake|rome]"
 #SBATCH --nodes=8
 
 #SBATCH --time=2-00:00
