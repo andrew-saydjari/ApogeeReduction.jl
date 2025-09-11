@@ -203,7 +203,7 @@ end
 
     traceMain_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
     if check_file(traceMain_fname, mode = checkpoint_mode)
-        return nothing
+        return
     end
     orig_trace_param_fname = nothing
     trace_type = nothing
@@ -242,7 +242,7 @@ end
     
     # come back to why this symlink does not work
     # is this causing memory bloat?
-    cp(orig_trace_param_fname, traceMain_fname)
+    cp(orig_trace_param_fname, traceMain_fname, force = true)
     trace_metadata = Dict{String, Any}()
     trace_metadata["trace_type"] = trace_type
     trace_metadata["trace_found_match"] = found_match
