@@ -206,8 +206,8 @@ end
         return nothing
     end
     orig_trace_param_fname = nothing
-    found_match = false
     trace_type = nothing
+    found_match = false
 
     for check_trace_type in trace_type_order
         # check for different cal types in preferential
@@ -216,16 +216,16 @@ end
         traceList = sort(glob("$(check_trace_type)Trace_$(tele)_$(mjd)_*_$(chip).h5",
             outdir * "$(check_trace_type)_flats/$(mjd)/"))
         if length(traceList) >= 1
+            orig_trace_param_fname = traceList[1]
             trace_type = check_trace_type
             found_match = true
-            orig_trace_param_fname = traceList[1]
             break
         end
     end
 
     if !found_match
         orig_trace_param_fname = joinpath(proj_path, "data", "fallback_traces", "quartzTraceMain_$(tele)_$(mjd)_$(chip).h5")
-        trace_type = "fallback"
+        trace_type = "fallback_quartz"
         if !isfile(orig_trace_param_fname)
             error("Fallback trace file $(orig_trace_param_fname) does not exist")
         end
