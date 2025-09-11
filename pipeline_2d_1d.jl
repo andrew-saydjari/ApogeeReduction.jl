@@ -225,7 +225,7 @@ end
 
     if !found_match
         orig_trace_param_fname = joinpath(proj_path, "data", "fallback_traces", "quartzTraceMain_$(tele)_$(mjd)_$(chip).h5")
-        trace_type = "fallback_quartz"
+        trace_type = "quartz_fallback"
         if !isfile(orig_trace_param_fname)
             error("Fallback trace file $(orig_trace_param_fname) does not exist")
         end
