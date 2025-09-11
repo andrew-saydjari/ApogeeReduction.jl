@@ -277,6 +277,36 @@ function read_metadata(filename::AbstractString)
     end
 end
 
+function modify_saved_dict(filepath::String, dataset_name::String, modifications::Dict)
+    try
+        h5open(filepath, "r+") do file
+            # Check if dataset exists
+            if !haskey(file, dataset_name)
+                error("Dataset '$dataset_name' not found in file '$filepath'")
+            end
+            
+            # Read existing data
+            existing_data = read(file, dataset_name)
+            
+            # Apply modifications
+            for (key, value) in modifications
+                existing_data[key] = value
+            end
+            
+            # Remove old dataset and write new one
+            delete_object(file, dataset_name)
+            # add metadata group to the file
+            g = create_group(file, "metadata")
+            for (k, v) in existing_data
+                g[k] = check_type_for_jld2(v)
+            end
+        end
+    catch e
+        println("Error modifying HDF5 file $filepath: $e")
+        rethrow(e)
+    end
+end
+
 function check_file(filename::AbstractString; mode = "commit_same") # mode is "clobber", "commit_exists", "commit_same"
     # the output of this file is logically "can skip"
     if mode == "clobber"

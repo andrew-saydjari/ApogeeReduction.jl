@@ -58,7 +58,7 @@ end
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction
     using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, trace_extract,
-                           safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile
+                           safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -156,9 +156,10 @@ end
                 med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
                 good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
         end
-        
+        regularized_trace_params = regularize_trace(trace_params)
+
         mkpath(dirname(savename))
-        safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, no_metadata = true)
+        safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
     
         return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = checkpoint_mode)
     end
