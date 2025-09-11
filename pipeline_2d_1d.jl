@@ -197,112 +197,68 @@ end
 # searching outwards from the given mjd, 
 # looking for cal types in the order of trace_type_order
 @everywhere function create_traceMain(mjd,chip,trace_type_order;
-				       max_mjd_offset = 7,
 				       tele = parg["tele"],
 				       outdir = parg["outdir"],
-				       clobber = true)
+				       checkpoint_mode = "commit_same")
 
-    new_trace_param_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_(mjd)_$(chip).h5"
-    if isfile(new_trace_param_fname) & (!clobber)
-        curr_trace_type,curr_mjd_offset,found_first_choice,found_on_mjd,found_match,orig_trace_param_fname = h5open(new_trace_param_fname, "r") do f
-            (f["trace_type"],f["trace_mjd_offset"],f["trace_found_best_choice"],f["trace_match_mjd"],f["trace_found_match"],f["trace_orig_param_fname"])
-        end
-
-        return curr_trace_type,curr_mjd_offset,found_first_choice,found_on_mjd,found_match,orig_trace_param_fname,new_trace_param_fname
+    traceMain_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_(mjd)_$(chip).h5"
+    if check_file(traceMain_fname, checkpoint_mode = checkpoint_mode)
+        return nothing
     end
     orig_trace_param_fname = nothing
-
-    curr_trace_type = trace_type_order[1]
-    curr_mjd_offset = 0 # number of mjd that trace parameters are away from given mjd
-    found_first_choice = true # ie same mjd, using first entry of trace_type_order
-    found_on_mjd = true # ie same mjd
     found_match = false
 
-    # best case scenario will have:
-    #    curr_trace_type = trace_type_order[1]
-    #    curr_mjd_offset = 0
-    #    found_first_choice = true
-    #    found_on_mjd = true
-    #    found_match = true
+    for check_trace_type in trace_type_order
+        # check for different cal types in preferential
+        # order given by trace_type_order
 
-    #work outwards from current MJD
-    check_mjd_offsets = zeros(Int,max_mjd_offset*2+1) 
-    check_mjd_offsets[begin+1:2:end-1] .= collect(-1:-1:-max_mjd_offset)
-    check_mjd_offsets[begin+2:2:end] .= collect(1:1:max_mjd_offset)
-
-    for mjd_ind in 1:length(check_mjd_offsets)
-        curr_mjd_offset = check_mjd_offsets[mjd_ind]
-        check_mjd = mjd + curr_mjd_offset
-
-        for check_trace_type in trace_type_order
-            # check for different cal types in preferential
-            # order given by trace_type_order
-            curr_trace_type = check_trace_type
-
-            traceList = sort(glob("$(check_trace_type)Trace_$(tele)_$(check_mjd)_*_$(chip).h5",
-                outdir * "$(check_trace_type)_flats/$(check_mjd)/"))
-            if length(traceList) >= 1
-                found_match = true
-                orig_trace_param_fname = traceList[1]
-            end
-        end
-
-        if found_match
+        traceList = sort(glob("$(check_trace_type)Trace_$(tele)_$(mjd)_*_$(chip).h5",
+            outdir * "$(check_trace_type)_flats/$(mjd)/"))
+        if length(traceList) >= 1
+            found_match = true
+            orig_trace_param_fname = traceList[1]
             break
         end
     end
 
     if !found_match
-#        @error "No trace files found for $(tele) $(mjd) $(chip). Looked in $(outdir) using +/- $(max_mjd_offset) days around given MJD looking for trace types of $(trace_type_order)."
-        @warn "No trace files found for $(tele) $(mjd) $(chip). Looked in $(outdir) using +/- $(max_mjd_offset) days around given MJD looking for trace types of $(trace_type_order)."
-        #POSSIBLE TODO: have some fallback trace parameter file 
-        return nothing
+        orig_trace_param_fname = joinpath(proj_path, "data", "fallback_traces", "quartzTraceMain_$(tele)_$(mjd)_$(chip).h5")
+        if !isfile(orig_trace_param_fname)
+            error("Fallback trace file $(orig_trace_param_fname) does not exist")
+        end
     end
 
     # TODO (probably for KM): 
     #     -use all the night's flats (quartz and dome) to define
     #          the time-evolution of trace params, then save
     #          that output (likely using this function)
-
-    found_on_mjd = (curr_mjd_offset == 0)
-    found_first_choice = found_on_mjd & (curr_trace_type == trace_type_order[1])
+    # KM says: this should be okay because ultimately we will
+	# be using information about how the trace parameters change as a function
+    # of time over a night, whose outputs we will want to save
+    # (ie final version will produce a new trace param file per tele/mjd/chip combo) 
     
-    if (!isfile(new_trace_param_fname)) | clobber
-        # come back to why this symlink does not work
-        # is this causing memory bloat?
-        cp(orig_trace_param_fname, new_trace_param_fname)
+    # come back to why this symlink does not work
+    # is this causing memory bloat?
+    cp(orig_trace_param_fname, traceMain_fname)
+    trace_metadata = Dict{String, Any}()
+    trace_metadata["trace_type"] = check_trace_type
+    trace_metadata["trace_found_match"] = found_match
+    trace_metadata["trace_orig_param_fname"] = orig_trace_param_fname
 
-	#KM says: this should be okay because ultimately we will
-	#be using information about how the trace parameters change as a function
-        #of time over a night, whose outputs we will want to save
-        #(ie final version will produce a new trace param file per tele/mjd/chip combo) 
-
-        #add in some additional information to final trace file
-        h5open(new_trace_param_fname, "r+") do f
-            write(f, "trace_type", curr_trace_type)
-            write(f, "trace_mjd_offset", curr_mjd_offset)
-            write(f, "trace_found_best_choice", found_first_choice)
-            write(f, "trace_match_mjd", found_on_mjd)
-            write(f, "trace_found_match", found_match)
-            write(f, "trace_orig_param_fname", orig_trace_param_fname)
-        end
-    end
-
-    return curr_trace_type,curr_mjd_offset,found_first_choice,found_on_mjd,found_match,orig_trace_param_fname,new_trace_param_fname
+    modify_saved_dict(traceMain_fname, "metadata", trace_metadata)
+    return
 end
 
 # we should do somthing smart to assemble the traces from a night into a single file
 # that gives us the trace of a fiber as a funciton of time or something
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
-@time "Processing trace files" for mjd in unique_mjds
+@time "Finding traceMain files" for mjd in unique_mjds # eventually this will be more like "making traceMain files"
     for chip in CHIP_LIST
         create_traceMain(mjd,chip,trace_type_order;
-#                         max_mjd_offset = 7,
-                         max_mjd_offset = 100000, #setting to a large number for now, to ensure traceMain files exist
                          tele = parg["tele"],
                          outdir = parg["outdir"],
-                         clobber = false)
+                         checkpoint_mode = parg["checkpoint_mode"])
     end
 end
 

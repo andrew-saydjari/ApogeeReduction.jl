@@ -510,10 +510,6 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))
 
-	push!(trace_lst, h5open(traceFname, "r") do f
-                (f["trace_type"],f["trace_mjd_offset"],f["trace_found_best_choice"],f["trace_match_mjd"],f["trace_found_match"],f["trace_orig_param_fname"],f["trace_used_param_fname"])
-        end)
-
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
         mask_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= mask_1d[end:-1:1, :]
@@ -533,10 +529,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
 
     # should add a check all entries of metadata_lst to be equal
     metadata = metadata_lst[1]
-    trace_type,trace_mjd_offset,
-    trace_found_best_choice,trace_match_mjd,
-    trace_found_match,trace_orig_param_fname,
-    trace_used_param_fname = trace_lst[1]
+    metadata["wavecal_type"] = wavecal_type # add wavecal type to metadata
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
     chipBit_stack[.!(noBadBits)] .+= 2^4 # call pixels with bad bits thrown bad
@@ -593,11 +586,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     # Write reinterpolated data
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk,
-        extract_trace_coords = outTraceCoords, wavecal_type,
-	trace_type,trace_mjd_offset,
-        trace_found_best_choice,trace_match_mjd,
-        trace_found_match,trace_orig_param_fname, 
-        trace_used_param_fname)
+        extract_trace_coords = outTraceCoords)
     return
 end
 
@@ -616,9 +605,6 @@ function process_1D(fname;
 
     # this seems annoying to load so often if we know we are doing a daily... need to ponder
     traceFname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
-    if !isfile(traceFname)
-        return false
-    end
 
     # how worried should I be about loading this every time?
     falm = h5open(joinpath(outdir, "almanac/$(runname).h5"))
@@ -638,16 +624,14 @@ function process_1D(fname;
     pix_bitmask = load(fnamecal, "pix_bitmask")
     metadata = read_metadata(fname)
 
-    trace_params = load(traceFname, "trace_params")
-    trace_type,trace_mjd_offset,
-    trace_found_best_choice,trace_match_mjd,
-    trace_found_match,trace_orig_param_fname = h5open(traceFname, "r") do f
-            (f["trace_type"],f["trace_mjd_offset"],f["trace_found_best_choice"],f["trace_match_mjd"],f["trace_found_match"],f["trace_orig_param_fname"])
+    regularized_trace_params = try
+        load(traceFname, "regularized_trace_params")
+    catch
+        @warn "No regularized trace params found for $(traceFname)"
+        return false
     end
-
-    # adam: should this be saved somewhere?  It's fairly simple to reproduce, but that's true of
-    # everything to some degree
-    regularized_trace_params = regularize_trace(trace_params)
+    trace_metadata = read_metadata(traceFname)
+    metadata = merge(metadata, trace_metadata)
 
     flux_1d, ivar_1d,
     mask_1d,
@@ -667,11 +651,7 @@ function process_1D(fname;
 
     outfname = replace(fname, "ar2D" => "ar1D")
     resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
-    safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar, 
-		                           trace_type,trace_mjd_offset,
-                                           trace_found_best_choice,trace_match_mjd,
-                                           trace_found_match,trace_orig_param_fname,
-					   trace_used_param_fname = traceFname)
+    safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar, trace_used_param_fname = traceFname)
     if relFlux
         # relative fluxing (using B (last chip) only for now)
         # this is the path to the underlying fluxing file.
@@ -711,9 +691,6 @@ function process_1D(fname;
         safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
             relthrpt, bitmsk_relthrpt, fiberTypeList,
-	    trace_type,trace_mjd_offset,
-            trace_found_best_choice,trace_match_mjd,
-            trace_found_match,trace_orig_param_fname,
             trace_used_param_fname = traceFname)
     else
         outfname_norelflux = replace(outfname, "apred" => "apredrelflux")
@@ -724,9 +701,6 @@ function process_1D(fname;
         safe_jldsave(
             outfname_norelflux, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
-	    trace_type,trace_mjd_offset,
-            trace_found_best_choice,trace_match_mjd,
-            trace_found_match,trace_orig_param_fname,
             trace_used_param_fname = traceFname)
     end
     close(falm)
