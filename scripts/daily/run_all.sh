@@ -98,7 +98,7 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     # activate shared almanac (uv python) environment
     source /mnt/home/sdssv/uv_env/almanac_v0p1p11/bin/activate 
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
-    # sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
+    sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
 
     almanac -p 12 -v --mjd-start $mjd --mjd-end $mjd  --output $almanac_file --fibers
 fi
