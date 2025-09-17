@@ -415,10 +415,10 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
     # override the firstind and extractMethod in special cases
     # we drop the first read, but might need to adjust for the few read cases (2,3,4,5)
     firstind,
-    extractMethod = if ((df.imagetyp[expid] == "DOMEFLAT") &
+    extractMethod = if ((df.imagetyp[expid] == "domeflat") &
                         (df.observatory[expid] == "apo")) # NREAD 5, and lamp gets shutoff too soon (needs to be DCS)
         2, "dcs"
-    elseif ((df.imagetyp[expid] == "QUARTZFLAT") & (nread_total == 3))
+    elseif ((df.imagetyp[expid] == "quartzflat") & (nread_total == 3))
         2, "dcs"
     elseif (nread_total == 3)
         #catch some weird cases (like nreads=3 with Darks)

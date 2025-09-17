@@ -104,7 +104,15 @@ with DAG(
             )
         )
 
-        git_ar >> sdsscore
+        sync_logs = BashOperator(
+            task_id="sync_logs",
+            bash_command=(
+                "time rsync -av --include='*/' --include='*.log.html' --exclude='*' /mnt/ceph/users/sdssv/raw/APOGEE/lco/ /mnt/ceph/users/sdssv/work/apogee_logs/lco/\n"
+                "time rsync -av --include='*/' --include='*.log.html' --exclude='*' /mnt/ceph/users/sdssv/raw/APOGEE/apo/ /mnt/ceph/users/sdssv/work/apogee_logs/apo/"
+            )
+        )
+
+        git_ar >> sdsscore >> sync_logs
 
     with TaskGroup(group_id="setup") as group_setup:
         mjd = PythonOperator(
@@ -125,7 +133,7 @@ with DAG(
                 python_callable=lambda **_: None,  # Simple no-op function
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at <https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/APOGEE/" + observatory +"/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}.log.html|here>" 
+                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at <https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/apogee_logs/" + observatory +"/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}.log.html|here>" 
                     )
                 ]
             )

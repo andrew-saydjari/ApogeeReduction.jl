@@ -130,11 +130,10 @@ flush(stdout);
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither,
                            fpi_medwavecal_skyline_dither,
-                           safe_jldsave, process_1D, check_file
+                           safe_jldsave, process_1D, check_file, modify_saved_dict
 
-    ###decide which type of cal to use for traces (i.e. dome or quartz flats)
-    # trace_type = "dome"
-    trace_type = "quartz" #probably should use this!
+    ###decide order to look for traces from these cal types (i.e. dome or quartz flats)
+    trace_type_order = ["quartz","dome"]
 end
 
 println(BLAS.get_config());
@@ -194,27 +193,77 @@ end
     all2D = vcat(all2Dperchip...)
 end
 
+### This should move to ar1D.jl
+
+# make trace param file copies for each date
+# searching outwards from the given mjd, 
+# looking for cal types in the order of trace_type_order
+@everywhere function create_traceMain(mjd,chip,trace_type_order;
+				       tele = parg["tele"],
+				       outdir = parg["outdir"],
+				       checkpoint_mode = "commit_same")
+
+    traceMain_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
+    if check_file(traceMain_fname, mode = checkpoint_mode)
+        return
+    end
+    orig_trace_param_fname = nothing
+    trace_type = nothing
+    found_match = false
+
+    for check_trace_type in trace_type_order
+        # check for different cal types in preferential
+        # order given by trace_type_order
+
+        traceList = sort(glob("$(check_trace_type)Trace_$(tele)_$(mjd)_*_$(chip).h5",
+            outdir * "$(check_trace_type)_flats/$(mjd)/"))
+        if length(traceList) >= 1
+            orig_trace_param_fname = traceList[end]
+            trace_type = check_trace_type
+            found_match = true
+            break
+        end
+    end
+
+    if !found_match
+        orig_trace_param_fname = joinpath(proj_path, "data", "fallback_traces", "quartzTraceMain_$(tele)_$(mjd)_$(chip).h5")
+        trace_type = "quartz_fallback"
+        if !isfile(orig_trace_param_fname)
+            error("Fallback trace file $(orig_trace_param_fname) does not exist")
+        end
+    end
+
+    # TODO (probably for KM): 
+    #     -use all the night's flats (quartz and dome) to define
+    #          the time-evolution of trace params, then save
+    #          that output (likely using this function)
+    # KM says: this should be okay because ultimately we will
+	# be using information about how the trace parameters change as a function
+    # of time over a night, whose outputs we will want to save
+    # (ie final version will produce a new trace param file per tele/mjd/chip combo) 
+    
+    # come back to why this symlink does not work
+    # is this causing memory bloat?
+    cp(orig_trace_param_fname, traceMain_fname, force = true)
+    trace_metadata = Dict{String, Any}()
+    trace_metadata["trace_type"] = trace_type
+    trace_metadata["trace_found_match"] = found_match
+    trace_metadata["trace_orig_param_fname"] = orig_trace_param_fname
+
+    modify_saved_dict(traceMain_fname, "metadata", trace_metadata)
+    return
+end
+
 # we should do somthing smart to assemble the traces from a night into a single file
 # that gives us the trace of a fiber as a funciton of time or something
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
-@time "Processing trace files" for mjd in unique_mjds
+@time "Finding traceMain files" for mjd in unique_mjds # eventually this will be more like "making traceMain files"
     for chip in CHIP_LIST
-        traceList = sort(glob("$(trace_type)Trace_$(parg["tele"])_$(mjd)_*_$(chip).h5",
-            parg["outdir"] * "$(trace_type)_flats/$(mjd)/"))
-        if length(traceList) > 1
-            @warn "Multiple $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip): $(traceList)"
-        elseif length(traceList) == 0
-            @error "No $(trace_type) trace files found for $(parg["tele"]) $(mjd) $(chip). Looked in $(parg["outdir"] * "$(trace_type)_flats/$(mjd)/")."
-        end
-        calPath = traceList[1]
-        linkPath = parg["outdir"] * "apred/$(mjd)/" *
-                   replace(basename(calPath), "$(trace_type)Trace" => "$(trace_type)TraceMain")
-        if !isfile(linkPath)
-            # come back to why this symlink does not work
-            # is this causing memory bloat?
-            cp(calPath, linkPath)
-        end
+        create_traceMain(mjd,chip,trace_type_order;
+                         tele = parg["tele"],
+                         outdir = parg["outdir"],
+                         checkpoint_mode = parg["checkpoint_mode"])
     end
 end
 
@@ -225,7 +274,6 @@ end
     runname = parg["runname"],
     extraction = parg["extraction"],
     relFlux = parg["relFlux"],
-    trace_type = trace_type,
     chip_list = CHIP_LIST,
     profile_path = joinpath(proj_path, "data"),
     plot_path = joinpath(parg["outdir"], "plots/")
@@ -351,7 +399,7 @@ if parg["relFlux"]
         fname, checkpoint_mode = parg["checkpoint_mode"])
     all1DObjectWavecal = @showprogress desc=desc pmap(
         get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
-    all1DObjectWavecal = filter(x -> !isnothing(x), all1DObjectWavecal)
+    all1DObjectWavecal = filter(!isnothing, all1DObjectWavecal)
 
     # putting this parallelized within each mjd is really not good in the bulk run context
     mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)

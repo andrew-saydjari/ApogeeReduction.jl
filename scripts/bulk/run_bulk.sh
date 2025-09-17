@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 #SBATCH --partition=preempt
 #SBATCH --qos=preempt
-#SBATCH --constraint="[genoa]"
+#SBATCH --constraint="[genoa|icelake|rome]"
 #SBATCH --nodes=8
 
 #SBATCH --time=2-00:00
@@ -58,6 +58,7 @@ run_2d_only=${7:-false}
 caldir_darks=${8:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 caldir_flats=${9:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 gain_read_cal_dir=${10:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
+almanac_clobber_mode=${11:-false}
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -84,21 +85,26 @@ print_elapsed_time() {
     LAST_TIME=$current_seconds
 }
 
-# get the data summary file for the MJD
-print_elapsed_time "Running Almanac"
-# activate shared almanac (uv python) environment
-source /mnt/home/sdssv/uv_env/almanac_v0p1p11/bin/activate 
-#  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
-sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
 # updates the sdsscore submodules (which has to be done from that directory)
-if [ "$update_sdsscore" = "true" ]; then
+if $update_sdsscore && { [ ! -f "$almanac_file" ] || $almanac_clobber_mode; }; then
+    print_elapsed_time "Updating sdsscore"
     ORIG_PWD=$(pwd)
     cd /mnt/ceph/users/sdssv/raw/APOGEE/sdsscore/
     ./update.sh
     cd "$ORIG_PWD"
 fi
 
-almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+# get the data summary file for the MJD
+# Only run almanac if file doesn't exist or clobber mode is true
+if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
+    print_elapsed_time "Running Almanac"
+    # activate shared almanac (uv python) environment
+    source /mnt/home/sdssv/uv_env/almanac_v0p1p11/bin/activate 
+    #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
+    # sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
+
+    almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+fi
 
 print_elapsed_time "Building Runlist"
 set +e  # Temporarily disable exit on error
