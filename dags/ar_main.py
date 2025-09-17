@@ -104,7 +104,15 @@ with DAG(
             )
         )
 
-        git_ar >> sdsscore
+        sync_logs = BashOperator(
+            task_id="sync_logs",
+            bash_command=(
+                "time rsync -av --include='*/' --include='*.log.html' --exclude='*' /mnt/ceph/users/sdssv/raw/APOGEE/lco/ /mnt/ceph/users/sdssv/work/apogee_logs/lco/\n"
+                "time rsync -av --include='*/' --include='*.log.html' --exclude='*' /mnt/ceph/users/sdssv/raw/APOGEE/apo/ /mnt/ceph/users/sdssv/work/apogee_logs/apo/"
+            )
+        )
+
+        git_ar >> sdsscore >> sync_logs
 
     with TaskGroup(group_id="setup") as group_setup:
         mjd = PythonOperator(
