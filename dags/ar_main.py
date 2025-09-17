@@ -125,7 +125,7 @@ with DAG(
                 python_callable=lambda **_: None,  # Simple no-op function
                 on_success_callback=[
                     send_slack_notification_partial(
-                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at <https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/APOGEE/" + observatory +"/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}.log.html|here>" 
+                        text="Starting reduction for " + observatory + " for SJD {{ task_instance.xcom_pull(task_ids='setup.mjd') }} (night of {{ task_instance.xcom_pull(task_ids='setup.date_mjd') }}). Exposure list can be found at <https://users.flatironinstitute.org/~asaydjari/" + slack_token + "/apogee_logs/" + observatory +"/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}/{{ task_instance.xcom_pull(task_ids='setup.mjd') }}.log.html|here>" 
                     )
                 ]
             )
