@@ -26,7 +26,7 @@ CATEGORY_PATTERNS = [
 # Define the order in which object types should appear
 # Leave empty to use alphabetical order
 # the empty string is for files that don't have an object type
-const OBJECT_TYPES = ["OBJECT", "DOMEFLAT", "INTERNALFLAT", "QUARTZFLAT", "DARK", "ARCLAMP", ""]
+const OBJECT_TYPES = ["object", "domeflat", "internalflat", "quartzflat", "dark", "arclamp", ""]
 const OBJECT_TYPE_ORDER = Dict(OBJECT_TYPES .=> 1:length(OBJECT_TYPES))
 
 function parse_commandline()
@@ -48,7 +48,7 @@ function extract_object_type(filename)
     # Extract object type from filename like "something_something_something_OBJECTTYPE.png"
     idx = findlast('_', basename(filename))
     obj_type = basename(filename)[(idx + 1):(end - 4)] # cut off the .png extension
-    if all(isuppercase(c) for c in obj_type)
+    if all(islowercase(c) for c in obj_type)
         obj_type
     else
         ""
