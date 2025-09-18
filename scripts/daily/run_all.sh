@@ -157,10 +157,10 @@ if [ "$run_2d_only" != "true" ]; then
     ## arMADGICS
     if [ -d ${path2arMADGICS} ]; then
         print_elapsed_time "Running arMADGICS"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw/
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
 
         print_elapsed_time "Running arMADGICS Workup"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw/
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
     fi
 fi
 
