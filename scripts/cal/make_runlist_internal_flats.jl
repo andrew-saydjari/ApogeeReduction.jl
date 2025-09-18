@@ -54,4 +54,4 @@ for tele in tele2do
     end
 end
 
-safe_jldsave(parg["output"]; tele = tele_list, mjd = mjdexp_list, expid = expid_list, dfindx = dfindx_list)
+safe_jldsave(parg["output"], Dict{String, Any}(); tele = tele_list, mjd = mjdexp_list, expid = expid_list, dfindx = dfindx_list)

@@ -293,10 +293,10 @@ function modify_saved_dict(filepath::String, dataset_name::String, modifications
                 existing_data[key] = value
             end
             
-            # Remove old dataset and write new one
+            # Remove old dataset_name and write new one
             delete_object(file, dataset_name)
-            # add metadata group to the file
-            g = create_group(file, "metadata")
+            # add new version of dataset_name group to the file
+            g = create_group(file, dataset_name)
             for (k, v) in existing_data
                 g[k] = check_type_for_jld2(v)
             end

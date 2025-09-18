@@ -66,7 +66,7 @@ for tele in tele2do
 end
 
 # Save the data even if empty
-safe_jldsave(parg["output"]; tele = tele_list, mjd = mjdexp_list, expid = expid_list, dfindx = dfindx_list)
+safe_jldsave(parg["output"], Dict{String, Any}(); tele = tele_list, mjd = mjdexp_list, expid = expid_list, dfindx = dfindx_list)
 
 # Check if list is empty and exit with specific code
 if length(mjdexp_list) == 0
