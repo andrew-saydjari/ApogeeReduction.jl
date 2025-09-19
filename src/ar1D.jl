@@ -284,7 +284,7 @@ end
 
 """
 Given an open HDF.file, `f`, and the telescope, mjd, and expnum, return a dictionary
-mapping fiber id to fiber type.
+mapping fiber index (1:300 laid out on the chip) to fiber type.
 """
 function get_fibTargDict(f, tele, mjd, expnum)
     exposure_id = short_expid_to_long(mjd, expnum)
@@ -373,7 +373,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
                 @warn "Fiber numbers are neither integers or strings"
                 fibernum_col
             end
-            Dict(fibernumvec .=> fiber_types)
+            Dict(fiberID2fiberIndx.(fibernumvec) .=> fiber_types)
         catch e
             rethrow(e)
             @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."
@@ -385,7 +385,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
     end
 
     if parse(Int, mjd) > mjdfps2plate
-        fpifib1, fpifib2 = get_fpi_guide_fiberID(tele)
+        fpifib1, fpifib2 = fiberID2fiberIndx.(get_fpi_guide_fiberID(tele))
         fibtargDict[fpifib1] = "fpiguide"
         fibtargDict[fpifib2] = "fpiguide"
     end
