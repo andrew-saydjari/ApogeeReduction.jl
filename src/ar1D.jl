@@ -339,6 +339,22 @@ function get_fibTargDict(f, tele, mjd, expnum)
                 error("fiber_id or fiberid column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
             end
 
+            # limit to only the APOGEE fiber/hole information
+            df_fib = if configName == "fps"
+                # sometimes the fiber type column is called "fiberType" and sometimes it is called "fibertype"
+                fiberType_col = if "fiberType" in names(df_fib)
+                    "fiberType"
+                elseif "fibertype" in names(df_fib)
+                    "fibertype"
+                else
+                    error("fiberType or fibertype column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
+                end
+
+                df_fib[df_fib[!, fiberType_col].=="APOGEE",:]
+            else
+                df_fib
+            end
+
             fiber_types = map(df_fib[!, target_type_col]) do t
                 if t in keys(fiber_type_names)
                     fiber_type_names[t]
