@@ -41,7 +41,7 @@ end
 function summarize_wave_solns(tele_loc,mjd_list,plotdir;
 			      dporder=2)
 
-    fname_loc = joinpath(parg["outdir"], "apred/$(mjd_list[1])/waveCalFPI_$(tele_loc)_$(mjd_list[1])_ARCLAMP.h5") 
+    fname_loc = joinpath(parg["outdir"], "apred/$(mjd_list[1])/waveCalFPI_$(tele_loc)_$(mjd_list[1])_arclamp.h5") 
     linParams = load(fname_loc, "linParams")
     nlParams = load(fname_loc, "nlParams")
     ditherParams = load(fname_loc, "ditherParams")
@@ -76,7 +76,7 @@ function summarize_wave_solns(tele_loc,mjd_list,plotdir;
     all_ditherCorr_linParams[1,:,:] .= comp_linParams
 
     for (mjd_ind,mjd_loc) in enumerate(mjd_list)
-        fname_loc = joinpath(parg["outdir"], "apred/$(mjd_loc)/waveCalFPI_$(tele_loc)_$(mjd_loc)_ARCLAMP.h5") 
+        fname_loc = joinpath(parg["outdir"], "apred/$(mjd_loc)/waveCalFPI_$(tele_loc)_$(mjd_loc)_arclamp.h5") 
 
         all_linParams[mjd_ind,:,:] .= load(fname_loc, "linParams")
         all_nlParams[mjd_ind,:,:] .= load(fname_loc, "nlParams")
@@ -350,7 +350,7 @@ good_mjds = zeros(Bool, size(poss_mjds,1))
 for tele in ["apo", "lco"]
     good_mjds[:] .= false
     for (mjd_ind,mjd) in enumerate(poss_mjds)
-        if isfile(joinpath(parg["outdir"], "apred/$(mjd)/waveCalFPI_$(tele)_$(mjd)_ARCLAMP.h5"))
+        if isfile(joinpath(parg["outdir"], "apred/$(mjd)/waveCalFPI_$(tele)_$(mjd)_arclamp.h5"))
             good_mjds[mjd_ind] = true
         end
     end
