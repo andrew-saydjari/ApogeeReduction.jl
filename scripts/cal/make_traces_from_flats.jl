@@ -130,7 +130,7 @@ end
         flux_med = flux_summary[2]
         flux_68p = 0.5*(flux_summary[3]-flux_summary[1])
         if flux_68p < flux_68p_thresh
-            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2))) was skipped for appearing to have the lamp turned off."
+            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2))) was skipped for appearing to have the lamp turned off. Used $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))% of the pixels for this calculation."
             return nothing
         end
     
@@ -150,7 +150,7 @@ end
                 good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
         catch
             println("Trace fitting failed for $(fname)")
-            println("Flux info is (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)))")
+            println("Flux info is (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%)")
             trace_params, trace_param_covs = trace_extract(
                 image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
                 med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
