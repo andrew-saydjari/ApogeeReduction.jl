@@ -48,11 +48,13 @@ for tele in tele2do
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
-        good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") 
+        good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") .&
+                   (df.lampune .== "F") .& (df.lampthar .== "F")
         if parg["flat_type"] == "dome"
-            good_exp .&= (df.nreadInt .> 3)
+            good_exp .&= (df.nreadInt .> 3) .& (df.lampqrtz .== "F")
         else
-            good_exp .&= (df.nreadInt .>= 3)
+            #i.e. quartz
+            good_exp .&= (df.nreadInt .>= 3) .& (df.lampqrtz .== "T")
         end
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc

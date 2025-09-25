@@ -307,7 +307,7 @@ for mjd_ind in 1:size(unique_mjds, 1)
         all1DObjectSkyDither, all1DObject_expid_strings, mjd, tele)
 
     outname = parg["outdir"] *
-              "/apred/$(unique_mjds[mjd_ind])/waveCalFPI_$(parg["tele"])_$(unique_mjds[mjd_ind])_ARCLAMP.h5"
+              "/apred/$(unique_mjds[mjd_ind])/waveCalFPI_$(parg["tele"])_$(unique_mjds[mjd_ind])_arclamp.h5"
     if !isfile(outname)
         println("Could not find nightly FPI wavelength solution at $(outname)")
         continue
