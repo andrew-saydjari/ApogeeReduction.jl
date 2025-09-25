@@ -693,8 +693,7 @@ for chip in chips2do
                 fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
-                    fibID = fiberIndx2fiberID(fib)
-                    fibType = fibtargDict[fibID]
+                    fibType = fibtargDict[fib]
                     dat = flux_1d[:, fib]
                     mskt = msk_loc[:, fib]
                     dat = nanify(flux_1d[mskt, fib], mskt)
@@ -736,8 +735,7 @@ println("\nGenerating reinterpolated spectra examples")
 
 function plot_1d_uni(
         fib, fibtargDict, outflux, outmsk, bname, tele, mjd, expnum, imagetyp, expuni_fname)
-    fibID = fiberIndx2fiberID(fib)
-    fibType = fibtargDict[fibID]
+    fibType = fibtargDict[fib]
 
     fig = Figure(size = (600, 1200), fontsize = 12)
 
