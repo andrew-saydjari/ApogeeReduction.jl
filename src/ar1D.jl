@@ -426,12 +426,52 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     cal_expid_list = read(f["$(tele)/$(mjd)"])
     close(f)
 
-    closest_cal_expid = cal_expid_list[argmin(abs.(cal_expid_list .- expid_num))]
+    if expid_num in cal_expid_list
+        #the current files is one of the dome flats that has a relfluxing file
+        return get_fluxing_file_name(
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex], 4), fluxing_chip, cartId)
+    end
 
+    expIndex_before = findlast(cal_expid_list .< expid_num)
+    if !isnothing(expIndex_before)
+        expIndex_before = cal_expid_list[expIndex_before]
+    end
+    expIndex_after = findfirst(cal_expid_list .> expid_num)
+    if !isnothing(expIndex_after)
+        expIndex_after = cal_expid_list[expIndex_after]
+    end
 
-    return get_fluxing_file_name(parent_dir, tele, mjd, 
-		                 last(df_mjd.exposure_str[closest_cal_expid], 4), 
-				 fluxing_chip, cartId)
+    valid_before = if !isnothing(expIndex_before)
+        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
+    elseif !isnothing(expIndex_before)
+        (df_mjd.cartidInt[expIndex_before] .== cartId) * 2
+    else
+        0
+    end
+    valid_after = if !isnothing(expIndex_after)
+        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId) * 1
+    elseif !isnothing(expIndex_after)
+        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
+    else
+        0
+    end
+
+    if valid_before == 1
+        return get_fluxing_file_name(
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
+    elseif valid_after == 1
+        return get_fluxing_file_name(
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
+        # any of the cases below here we could consider using a global file
+    elseif valid_before == 2
+        return get_fluxing_file_name(
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
+    elseif valid_after == 2
+        return get_fluxing_file_name(
+            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
+    else
+        return nothing
+    end
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
