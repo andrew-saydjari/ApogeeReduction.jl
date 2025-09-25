@@ -395,49 +395,43 @@ end
 # hardcoded to use chip c only for now
 # must use dome flats, not quartz flats (need fiber runs to telescope)
 # use full exposure_id
-function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum; fluxing_chip = "B")
+function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; fluxing_chip = "B")
     exposure_id = parse(Int, short_expid_to_long(mjd, expnum))
     df_mjd = sort(
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
         :exposure)
     expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
     cartId = df_mjd.cartidInt[expIndex]
-    # this needs to have cuts that match those in make_runlist_dome_flats.jl
-    expIndex_before = findlast((df_mjd.imagetyp .== "DomeFlat") .&
-                               (df_mjd.exposure_int .< exposure_id) .& (df_mjd.nreadInt .> 3))
-    expIndex_after = findfirst((df_mjd.imagetyp .== "DomeFlat") .&
-                               (df_mjd.exposure_int .> exposure_id) .& (df_mjd.nreadInt .> 3))
-    valid_before = if !isnothing(expIndex_before)
-        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
-    elseif !isnothing(expIndex_before)
-        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
-    else
-        0
+
+    expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
+    valid_flats4fluxing_fname = joinpath(parent_dir, "almanac/valid_domeflats4fluxing_$(runname).h5")
+    if !isfile(valid_flats4fluxing_fname)
+        @warn "Could not find any useful relfluxing files after looking for file $(valid_flats4fluxing_fname)"
+	return nothing
     end
-    valid_after = if !isnothing(expIndex_after)
-        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId) * 1
-    elseif !isnothing(expIndex_after)
-        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
-    else
-        0
+    f = h5open(valid_flats4fluxing_fname, "r")
+    found_tele_mjd = false
+    if tele in keys(f)
+        if "$(mjd)" in keys(f[tele])
+            found_tele_mjd = true
+	end
     end
 
-    if valid_before == 1
-        return get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
-    elseif valid_after == 1
-        return get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
-        # any of the cases below here we could consider using a global file
-    elseif valid_before == 2
-        return get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
-    elseif valid_after == 2
-        return get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
-    else
+    if !found_tele_mjd
+        close(f)
+        @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
         return nothing
     end
+
+    cal_expid_list = read(f["$(tele)/$(mjd)"])
+    close(f)
+
+    closest_cal_expid = cal_expid_list[argmin(abs.(cal_expid_list .- expid_num))]
+
+
+    return get_fluxing_file_name(parent_dir, tele, mjd, 
+		                 last(df_mjd.exposure_str[closest_cal_expid], 4), 
+				 fluxing_chip, cartId)
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
@@ -673,7 +667,7 @@ function process_1D(fname;
         # this is the path to the underlying fluxing file.
         # it is symlinked below to an exposure-specific file (linkPath).
         calPath = get_fluxing_file(
-            dfalmanac, outdir, tele, mjd, expnum, fluxing_chip = chip_list[end])
+            dfalmanac, outdir, tele, mjd, expnum, runname, fluxing_chip = chip_list[end])
         expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
         fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
         fiberTypeList = map(x -> fibtargDict[x], 1:300)
