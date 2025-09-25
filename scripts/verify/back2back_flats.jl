@@ -1,7 +1,8 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, BinnedStatistics
 
 using ApogeeReduction
-include("../../src/makie_plotutils.jl")
+proj_path = dirname(Base.active_project()) * "/"
+include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
 ## TODO Make sure this function is extended to check BOTH ar2D and ar2Dcal
 
@@ -99,11 +100,12 @@ mskCal = (parg["expid-start"] % 10000) .<= expnum_v .<= (parg["expid-end"] % 100
 p = sortperm(expnum_v[mskCal])
 
 @showprogress for indoff in 1:(length(flist[mskCal][p]) ÷ 6 - 1)
+    # No Reference Pixels
     fig = Figure(size = (2000, 800), fontsize = 32)
 
     expid1 = expnum_v[mskCal][p][1 + 6 * indoff]
     for (ind, chipn) in enumerate(CHIP_LIST)
-        ax = Axis(fig[1, ind], title = "Tele: $(parg["tele"]), Chip: $chipn",
+        ax = Axis(fig[1, ind], title = "Active Pixels: Tele $(parg["tele"]), Chip $chipn",
             xlabel = "Z-Score", ylabel = "Log Average Flux")
 
         dimage1 = load(flist[mskCal][p][ind + 6 * indoff], "dimage")
@@ -117,7 +119,9 @@ p = sortperm(expnum_v[mskCal])
         differr = sqrt.(1 ./ ivarimage1 .+ 1 ./ ivarimage2)
         zmat = datdiff ./ differr
 
-        msk = (abs.(zmat) .< 15) .& (-3 .<= logavgFlux .<= 4)
+        msk = zeros(Bool, size(zmat))
+        msk[5:2044, 5:2044] .= true
+        msk .&= (abs.(zmat) .< 15) .& (-3 .<= logavgFlux .<= 4)
 
         h = hexbin!(ax, zmat[msk], logavgFlux[msk],
             bins = 500,
