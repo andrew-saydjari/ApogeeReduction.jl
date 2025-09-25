@@ -408,8 +408,10 @@ function main()
     # post a link to slack
     # the link to the dashboard is relative to the current directory
     dir = abspath(joinpath(pwd(), parg["outdir"], "plots", string(mjd), "dashboard.html"))
-    url = "<"*replace(replace(replace(dir, 
+    url = "<"*replace(replace(replace(replace(replace(dir, 
         "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/"),
+        "/mnt/ceph/users/sdssv/work/kmckinnon/" => "https://users.flatironinstitute.org/~kmckinnon/$(ENV["SLACK_TOKEN"])/sdsswork/"),
+        "/mnt/ceph/users/sdssv/work/" => "https://users.flatironinstitute.org/~kmckinnon/$(ENV["SLACK_TOKEN"])/"),
         "/mnt/ceph/users/sdssv/work/asaydjari/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/sdsswork/"),
         "/mnt/ceph/users/sdssv/work/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/"
     )*"|here>"

@@ -241,7 +241,12 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
     fit_errs = copy(all_rel_errs[fit_inds])'
     fit_ivars = fit_errs .^ -2
     #    fit_ivars[fit_ivars .== 0] .= 1e-10
-    fit_ivars[fit_ivars .== 0] .= minimum(fit_ivars[fit_ivars .!= 0]) / 1000
+    good_ivars = fit_ivars .!= 0
+    if sum(good_ivars) > 0
+        fit_ivars[.!good_ivars] .= minimum(fit_ivars[good_ivars]) / 1000
+    else
+        fit_ivars[.!good_ivars] .= 1e-10
+    end
 
     curr_guess = copy(first_guess_params)
     new_params = copy(first_guess_params)
@@ -262,7 +267,12 @@ function fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
         fit_errs .= all_rel_errs[fit_inds]'
         fit_ivars = fit_errs .^ -2
         #        fit_ivars[fit_ivars .== 0] .= 1e-10
-        fit_ivars[fit_ivars .== 0] .= minimum(fit_ivars[fit_ivars .!= 0]) / 1000
+        good_ivars = fit_ivars .!= 0
+        if sum(good_ivars) > 0
+            fit_ivars[.!good_ivars] .= minimum(fit_ivars[good_ivars]) / 1000
+        else
+            fit_ivars[.!good_ivars] .= 1e-10
+        end
 
         # CDF version
         model_fluxes_unit_height, dmodel_dmu,
@@ -540,7 +550,8 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     good_max_inds = (relative_fluxes .> 0.5) .& (relative_fluxes .< 5) .&
                     (local_max_waves .>= 11) .& (local_max_waves .<= 2048 - 11)
     good_y_vals = local_max_waves[good_max_inds]
-    verbose && println("Original identified peaks ", size(good_y_vals))
+    tele_string = "$(tele)_$(mjd)_$(expid)_$(chip)"
+    verbose && println("$(tele_string) Original identified peaks ", size(good_y_vals))
 
     curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(float.(good_y_vals))))
     expect_trace_pos = prior_fiber_to_center_func.(float.(curr_fiber_inds))
@@ -595,7 +606,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     med_offset = nanmedian(expect_trace_pos - good_y_vals)
     good_y_vals = ceil.(Int, round.(expect_trace_pos .- med_offset))
 
-    verbose && println("Updated identified peaks ", size(good_y_vals))
+    verbose && println("$(tele_string) Updated identified peaks ", size(good_y_vals))
 
     fit_inds = good_y_vals .+ offset_inds'
     best_model_fit_inds = good_y_vals .+ best_model_offset_inds'
@@ -859,7 +870,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         smoothed_heights ./= nansum(keep_heights[all_smooth_inds]' .* smooth_weights, 1)'
     end
 
-    verbose && println("Possible number of peaks:", size(best_fit_ave_params))
+    verbose && println("$(tele_string) Possible number of peaks:", size(best_fit_ave_params))
 
     #remove the edge possible peaks if they have no throughput, because they likely don't exist
     #    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.2
@@ -913,9 +924,9 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     #    best_fit_ave_params = best_fit_ave_params[left_cut_ind:right_cut_ind, :]
 
-    verbose && println("possible fiber indices ", size(curr_fiber_inds), " ", curr_fiber_inds)
+    verbose && println("$(tele_string) possible fiber indices ", size(curr_fiber_inds), " ", curr_fiber_inds)
     verbose &&
-        println("truncated fiber indices ", size(curr_fiber_inds[left_cut_ind:right_cut_ind]),
+        println("$(tele_string) truncated fiber indices ", size(curr_fiber_inds[left_cut_ind:right_cut_ind]),
             " ", curr_fiber_inds[left_cut_ind:right_cut_ind])
 
     if size(best_fit_ave_params[left_cut_ind:right_cut_ind, :], 1) == 300
@@ -941,12 +952,15 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     final_param_output_covs = zeros((size(x_inds, 1), size(best_fit_ave_params, 1),
         size(best_fit_ave_params, 2), size(best_fit_ave_params, 2)))
 
-    verbose && println("Final number of good peaks:", size(best_fit_ave_params))
+    verbose && println("$(tele_string) Final number of good peaks:", size(best_fit_ave_params))
 
     best_fit_ave_params = best_fit_ave_params[good_throughput_fibers, :]
     curr_fiber_inds = curr_fiber_inds[good_throughput_fibers]
 
-    verbose && println("Final number of good throughput peaks:", size(best_fit_ave_params))
+    verbose && println("$(tele_string) Final number of good throughput peaks:", size(best_fit_ave_params))
+    if size(best_fit_ave_params,1) == 0
+        return [],[]
+    end
 
     curr_best_widths = zeros(Float64, size(best_fit_ave_params, 1))
     for j in 1:size(curr_best_widths, 1)
@@ -973,8 +987,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     all_rel_ivars_mat = 1 ./ (all_rel_errs_mat .^ 2)
     all_rel_ivars_mat[.!all_rel_masks_mat] .= 0
     #    all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= 1e-10
-    all_rel_ivars_mat[all_rel_ivars_mat .== 0] .= minimum(all_rel_ivars_mat[all_rel_ivars_mat .!= 0]) /
-                                                  1000
+    good_ivars = all_rel_ivars_mat .!= 0
+    if sum(good_ivars) > 0
+        all_rel_ivars_mat[.!good_ivars] .= minimum(all_rel_ivars_mat[good_ivars]) / 1000
+    else
+        all_rel_ivars_mat[.!good_ivars] .= 1e-10
+    end
     all_rel_errs_mat = all_rel_ivars_mat .^ -0.5
 
     first_guess_params = copy(best_fit_ave_params)
