@@ -99,6 +99,7 @@ else
     [parg["expid"]]
 end
 
+
 all1Da = String[] # all 1D files for chip a
 for tele in unique_teles
     for mjd in unique_mjds
@@ -125,6 +126,18 @@ if length(all1Da) > 0
     end
     cal_type = lowercase(unique_exp_lst[1])
     @passobj 1 workers() cal_type # make cal_type available to all workers
+
+    valid_flats4fluxing_fname = joinpath(parg["trace_dir"], "almanac/valid_$(cal_type)flats4fluxing_$(parg["runname"]).h5")
+    h5open(valid_flats4fluxing_fname, "w") do f
+        for tele in unique_teles
+            for mjd in unique_mjds
+                mskMJD = (mjd_list .== mjd) .& (tele_list .== tele)
+                if count(mskMJD) > 0
+                    f["$(tele)/$(mjd)"] = expid_list[mskMJD]
+                end
+            end
+        end
+    end
 
     flist_chips = []
     for chip in chips
