@@ -407,7 +407,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     valid_flats4fluxing_fname = joinpath(parent_dir, "almanac/valid_domeflats4fluxing_$(runname).h5")
     if !isfile(valid_flats4fluxing_fname)
         @warn "Could not find any useful relfluxing files after looking for file $(valid_flats4fluxing_fname)"
-	return nothing
+	return 2^2,nothing
     end
     f = h5open(valid_flats4fluxing_fname, "r")
     found_tele_mjd = false
@@ -420,7 +420,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     if !found_tele_mjd
         close(f)
         @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
-        return nothing
+        return 2^2,nothing
     end
 
     cal_expid_list = read(f["$(tele)/$(mjd)"])
@@ -428,7 +428,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
 
     if expid_num in cal_expid_list
         #the current files is one of the dome flats that has a relfluxing file
-        return get_fluxing_file_name(
+        return 2^0,get_fluxing_file_name(
             parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex], 4), fluxing_chip, cartId)
     end
 
@@ -441,36 +441,36 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
         expIndex_after = cal_expid_list[expIndex_after]
     end
 
-    valid_before = if !isnothing(expIndex_before)
-        all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId) * 1
-    elseif !isnothing(expIndex_before)
-        (df_mjd.cartidInt[expIndex_before] .== cartId) * 2
+    valid_before = if !isnothing(expIndex_before) & all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)
+        1
+    elseif !isnothing(expIndex_before) & (df_mjd.cartidInt[expIndex_before] .== cartId)
+        2
     else
         0
     end
-    valid_after = if !isnothing(expIndex_after)
-        all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId) * 1
-    elseif !isnothing(expIndex_after)
-        (df_mjd.cartidInt[expIndex_after] .== cartId) * 2
+    valid_after = if !isnothing(expIndex_after) & all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)
+        1
+    elseif !isnothing(expIndex_after) & (df_mjd.cartidInt[expIndex_after] .== cartId)
+        2
     else
         0
     end
 
     if valid_before == 1
-        return get_fluxing_file_name(
+        return 2^0,get_fluxing_file_name(
             parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
     elseif valid_after == 1
-        return get_fluxing_file_name(
+        return 2^0,get_fluxing_file_name(
             parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
         # any of the cases below here we could consider using a global file
     elseif valid_before == 2
-        return get_fluxing_file_name(
+        return 2^1,get_fluxing_file_name(
             parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
     elseif valid_after == 2
-        return get_fluxing_file_name(
+        return 2^1,get_fluxing_file_name(
             parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
     else
-        return nothing
+        return 2^2,nothing
     end
 end
 
@@ -706,7 +706,7 @@ function process_1D(fname;
         # relative fluxing (using B (last chip) only for now)
         # this is the path to the underlying fluxing file.
         # it is symlinked below to an exposure-specific file (linkPath).
-        calPath = get_fluxing_file(
+        relflux_bit,calPath = get_fluxing_file(
             dfalmanac, outdir, tele, mjd, expnum, runname, fluxing_chip = chip_list[end])
         expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
         fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
@@ -737,6 +737,7 @@ function process_1D(fname;
             ivar_1d[:, msk_goodwarn] .*= relthrptr[:, msk_goodwarn] .^ 2
         end
 
+	metadata["bitmsk_relFluxFile"] = relflux_bit
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
