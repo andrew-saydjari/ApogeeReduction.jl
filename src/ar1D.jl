@@ -441,14 +441,18 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
         expIndex_after = cal_expid_list[expIndex_after]
     end
 
-    valid_before = if !isnothing(expIndex_before) & all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)
-        1
+    valid_before = if isnothing(expIndex_before)
+        0
+    elseif all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)
+	1
     elseif !isnothing(expIndex_before) & (df_mjd.cartidInt[expIndex_before] .== cartId)
         2
     else
         0
     end
-    valid_after = if !isnothing(expIndex_after) & all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)
+    valid_after = if isnothing(expIndex_after) 
+        0
+    elseif all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)
         1
     elseif !isnothing(expIndex_after) & (df_mjd.cartidInt[expIndex_after] .== cartId)
         2
