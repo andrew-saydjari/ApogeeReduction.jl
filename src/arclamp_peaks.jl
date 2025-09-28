@@ -458,14 +458,58 @@ function get_initial_fpi_peaks(flux, ivar,
 
     peak_int_guess = ceil.(Int,round.(x_to_peak_func.(good_y_vals)))
     peak_x_guess = peak_to_x_func.(peak_int_guess)
-    curr_offset = nanmedian(peak_x_guess .- good_y_vals)
     min_max_peak_ints = ceil.(Int,round.(x_to_peak_func.([1,2048])))
     peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
-    if !isfinite(curr_offset)
-        curr_offset = 0
-    end
-    good_y_vals = ceil.(Int,round.(peak_to_x_func.(peak_ints) .- curr_offset)) 
 
+    offsets = (peak_x_guess .- good_y_vals)
+    keep = isfinite.(offsets)
+    offset_deg = 1
+    if sum(keep) > 1
+        curr_offset = nanmedian(offsets[keep])
+        if !isfinite(curr_offset)
+            curr_offset = 0
+        end
+        n_sigma = 3
+        resids = offsets .- curr_offset
+        resid_summary = nanzeropercentile(resids[keep], percent_vec = [16, 50, 64])
+        resid_summary = [resid_summary[2],
+            resid_summary[2] - resid_summary[1],
+            resid_summary[3] - resid_summary[2]]
+        keep .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
+                (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
+    
+        peak_int_guess .= ceil.(Int,round.(x_to_peak_func.(good_y_vals .+ curr_offset)))
+        peak_x_guess .= peak_to_x_func.(peak_int_guess)
+        offsets .= (peak_x_guess .- good_y_vals)
+        for r_ind in 1:2
+            offset_func = fit(peak_int_guess[keep],offsets[keep],offset_deg)
+            resids = offsets .- offset_func.(peak_int_guess)
+    
+            resid_summary = nanzeropercentile(resids[keep], percent_vec = [16, 50, 64])
+            resid_summary = [resid_summary[2],
+                resid_summary[2] - resid_summary[1],
+                resid_summary[3] - resid_summary[2]]
+            keep .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
+                    (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
+        
+            data_offset = offset_func.(peak_int_guess)
+            data_offset[.!isfinite.(data_offset)] .= 0
+            peak_int_guess .= ceil.(Int,round.(x_to_peak_func.(good_y_vals .+ data_offset)))
+            peak_x_guess .= peak_to_x_func.(peak_int_guess)
+            offsets .= (peak_x_guess .- good_y_vals)
+        
+        end
+        offset_func = fit(peak_int_guess[keep],offsets[keep],offset_deg)
+        curr_offset = offset_func.(peak_ints)
+        curr_offset[.!isfinite.(curr_offset)] .= 0
+    else
+        curr_offset = nanmedian(offsets)
+        if !isfinite(curr_offset)
+            curr_offset = 0
+        end
+    end
+
+    good_y_vals = ceil.(Int,round.(peak_to_x_func.(peak_ints) .- curr_offset))
     good_max_inds = (good_y_vals .>= (n_offset + 1)) .&
                     (good_y_vals .<= n_pixels - (n_offset + 1))
     good_y_vals = good_y_vals[good_max_inds]
@@ -627,10 +671,55 @@ function get_initial_fpi_peaks(flux, ivar,
     peak_ints = collect(min_max_peak_ints[1]:min_max_peak_ints[2])
     peak_int_guess = ceil.(Int,round.(x_to_peak_func.(new_params[:, 2])))
     peak_x_guess = peak_to_x_func.(peak_int_guess)
-    curr_offset = nanmedian(peak_x_guess .- new_params[:, 2])
-    if !isfinite(curr_offset)
-        curr_offset = 0
+
+    offsets = (peak_x_guess .- new_params[:, 2])
+    keep = isfinite.(offsets)
+    offset_deg = 2
+    if sum(keep) > 1
+        curr_offset = nanmedian(offsets[keep])
+        if !isfinite(curr_offset)
+            curr_offset = 0
+        end
+        n_sigma = 3
+        resids = offsets .- curr_offset
+        resid_summary = nanzeropercentile(resids[keep], percent_vec = [16, 50, 64])
+        resid_summary = [resid_summary[2],
+            resid_summary[2] - resid_summary[1],
+            resid_summary[3] - resid_summary[2]]
+        keep .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
+                (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
+    
+        peak_int_guess .= ceil.(Int,round.(x_to_peak_func.(new_params[:, 2] .+ curr_offset)))
+        peak_x_guess .= peak_to_x_func.(peak_int_guess)
+        offsets .= (peak_x_guess .- new_params[:, 2])
+        for r_ind in 1:2
+            offset_func = fit(peak_int_guess[keep],offsets[keep],offset_deg)
+            resids = offsets .- offset_func.(peak_int_guess)
+    
+            resid_summary = nanzeropercentile(resids[keep], percent_vec = [16, 50, 64])
+            resid_summary = [resid_summary[2],
+                resid_summary[2] - resid_summary[1],
+                resid_summary[3] - resid_summary[2]]
+            keep .= (resids .>= resid_summary[1] - n_sigma * resid_summary[2]) .&
+                    (resids .<= resid_summary[1] + n_sigma * resid_summary[3])
+        
+            data_offset = offset_func.(peak_int_guess)
+            data_offset[.!isfinite.(data_offset)] .= 0
+            peak_int_guess .= ceil.(Int,round.(x_to_peak_func.(new_params[:, 2] .+ data_offset)))
+            peak_x_guess .= peak_to_x_func.(peak_int_guess)
+            offsets .= (peak_x_guess .- new_params[:, 2])
+        
+        end
+        offset_func = fit(peak_int_guess[keep],offsets[keep],offset_deg)
+        curr_offset = offset_func.(peak_ints)
+        curr_offset[.!isfinite.(curr_offset)] .= 0
+    else
+        curr_offset = nanmedian(offsets)
+        if !isfinite(curr_offset)
+            curr_offset = 0
+        end
     end
+
     all_peak_locs = peak_to_x_func.(peak_ints) .- curr_offset 
     keep_peak_ints = (all_peak_locs .>= 1) .& (all_peak_locs .<= 2048)
     all_peak_ints = peak_ints[keep_peak_ints]
