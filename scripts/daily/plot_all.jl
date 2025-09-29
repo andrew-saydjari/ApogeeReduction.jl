@@ -116,7 +116,7 @@ for mjd in unique_mjds
         end
         function get_1d_name_ARCLAMP_partial(expid)
             if (df.imagetyp[expid] == "ArcLamp") &
-               ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+               ((df.lamp_thar[expid] == 1) | (df.lamp_une[expid] == 1))
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
             else
@@ -124,8 +124,8 @@ for mjd in unique_mjds
             end
         end
         function get_1d_name_FPI_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
-               (df.lampune[expid] == "F")
+            if (df.imagetyp[expid] == "ArcLamp") & (df.lamp_thar[expid] == 0) &
+               (df.lamp_une[expid] == 0)
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
             else
