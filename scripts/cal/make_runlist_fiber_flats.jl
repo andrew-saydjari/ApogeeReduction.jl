@@ -51,10 +51,10 @@ for tele in tele2do
         good_exp = (df.imagetyp .== "$(uppercasefirst(parg["flat_type"]))Flat") .&
                    (df.lampune .== "F") .& (df.lampthar .== "F")
         if parg["flat_type"] == "dome"
-            good_exp .&= (df.nreadInt .> 3) .& (df.lampqrtz .== "F")
+            good_exp .&= (df.n_read .> 3) .& (df.lampqrtz .== "F")
         else
             #i.e. quartz
-            good_exp .&= (df.nreadInt .>= 3) .& (df.lampqrtz .== "T")
+            good_exp .&= (df.n_read .>= 3) .& (df.lampqrtz .== "T")
         end
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc

@@ -43,7 +43,7 @@ for tele in tele2do
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
-        good_exp = (df.imagetyp .== "Dark") .& (df.nreadInt .> 29)
+        good_exp = (df.imagetyp .== "Dark") .& (df.n_read .> 29)
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
             if dfindx > 1 && df.imagetyp[dfindx - 1] == "Dark"

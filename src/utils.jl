@@ -284,15 +284,15 @@ function modify_saved_dict(filepath::String, dataset_name::String, modifications
             if !haskey(file, dataset_name)
                 error("Dataset '$dataset_name' not found in file '$filepath'")
             end
-            
+
             # Read existing data
             existing_data = read(file, dataset_name)
-            
+
             # Apply modifications
             for (key, value) in modifications
                 existing_data[key] = value
             end
-            
+
             # Remove old dataset_name and write new one
             delete_object(file, dataset_name)
             # add new version of dataset_name group to the file
@@ -372,7 +372,6 @@ function read_almanac_exp_df(fname, tele, mjd)
             DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
         end
     end
-    df.nreadInt = parse.(Int, df.nread)
     df.cartidInt = parseCartID.(df.cartid)
     df.exposure_int = if typeof(df.exposure) <: Array{Int}
         df.exposure
