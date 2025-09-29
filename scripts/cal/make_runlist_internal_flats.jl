@@ -47,7 +47,7 @@ for tele in tele2do
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
             push!(mjdexp_list, tstmjd_int)
-            push!(expid_list, long_expid_to_short(tstmjd_int, df.exposure_int[dfindx]))
+            push!(expid_list, long_expid_to_short(tstmjd_int, df.exposure[dfindx]))
             push!(dfindx_list, dfindx)
             push!(tele_list, tele)
         end

@@ -381,13 +381,13 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
 
     outfname = join(
         ["ar2D", df.observatory[expid], df.mjd[expid],
-            last(df.exposure_str[expid], 4), chip, lowercase(df.imagetyp[expid])],
+            last(df.exposure_string[expid], 4), chip, lowercase(df.imagetyp[expid])],
         "_")
     fname = joinpath(outdir, "apred/$(mjd)/" * outfname * ".h5")
 
     outfname3d = join(
         ["ar3Dcal", df.observatory[expid], df.mjd[expid],
-            last(df.exposure_str[expid], 4), chip, lowercase(df.imagetyp[expid])],
+            last(df.exposure_string[expid], 4), chip, lowercase(df.imagetyp[expid])],
         "_")
     fname3d = joinpath(outdir, "apred/$(mjd)/" * outfname3d * ".h5")
 

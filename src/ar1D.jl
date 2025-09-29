@@ -317,11 +317,11 @@ function get_fibTargDict(f, tele, mjd, expnum)
 
     df_exp = read_almanac_exp_df(f, tele, mjd)
 
-    if !(exposure_id in df_exp.exposure_str)
+    if !(exposure_id in df_exp.exposure_string)
         @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
     end
-    exposure_info = df_exp[findfirst(df_exp[!, "exposure_str"] .== exposure_id), :]
+    exposure_info = df_exp[findfirst(df_exp[!, "exposure_string"] .== exposure_id), :]
     configid = exposure_info[configIdCol]
 
     fibtargDict = if exposure_info.imagetyp == "Object"
@@ -400,7 +400,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     df_mjd = sort(
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
         :exposure)
-    expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
+    expIndex = findfirst(df_mjd.exposure .== exposure_id)
     cartId = df_mjd.cart_id[expIndex]
 
     expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
@@ -429,7 +429,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     if expid_num in cal_expid_list
         #the current files is one of the dome flats that has a relfluxing file
         return 2^0,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex], 4), fluxing_chip, cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_string[expIndex], 4), fluxing_chip, cartId)
     end
 
     expIndex_before = findlast(cal_expid_list .< expid_num)
@@ -462,17 +462,17 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
 
     if valid_before == 1
         return 2^0,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_string[expIndex_before], 4), fluxing_chip, cartId)
     elseif valid_after == 1
         return 2^0,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_string[expIndex_after], 4), fluxing_chip, cartId)
         # any of the cases below here we could consider using a global file
     elseif valid_before == 2
         return 2^1,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_string[expIndex_before], 4), fluxing_chip, cartId)
     elseif valid_after == 2
         return 2^1,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
+            parent_dir, tele, mjd, last(df_mjd.exposure_string[expIndex_after], 4), fluxing_chip, cartId)
     else
         return 2^2,nothing
     end

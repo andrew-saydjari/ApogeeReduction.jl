@@ -564,16 +564,6 @@ end
 list2Dexp = []
 for mjd in unique_mjds
     df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
 
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *

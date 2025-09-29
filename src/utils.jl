@@ -357,15 +357,5 @@ function read_almanac_exp_df(fname, tele, mjd)
             DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
         end
     end
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
     return df
 end
