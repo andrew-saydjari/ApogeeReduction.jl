@@ -54,7 +54,7 @@ for tele in tele2do
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.n_read .> 3) .|
-                   ((df.imagetyp .== "QuartzFlat") .& (df.n_read .== 3))
+                   ((df.image_type .== "quartzflat") .& (df.n_read .== 3))
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
             push!(mjdexp_list, tstmjd_int)

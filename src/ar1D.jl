@@ -324,20 +324,11 @@ function get_fibTargDict(f, tele, mjd, expnum)
     exposure_info = df_exp[findfirst(df_exp[!, "exposure_string"] .== exposure_id), :]
     configid = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.imagetyp == "Object"
+    fibtargDict = if exposure_info.image_type == "object"
         try
             df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configid)"]))
             # normalizes all column names to lowercase
             rename!(df_fib, lowercase.(names(df_fib)))
-
-            # sometimes the fiber id column is called "fiber_id" and sometimes it is called "fiberid"
-            fiberid_col = if "fiber_id" in names(df_fib)
-                "fiber_id"
-            elseif "fiberid" in names(df_fib)
-                "fiberid"
-            else
-                error("fiber_id or fiberid column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
-            end
 
             # limit to only the APOGEE fiber/hole information
             df_fib = if configName == "fps"
@@ -363,7 +354,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
                     "fiberTypeFail"
                 end
             end
-            fibernum_col = df_fib[!, fiberid_col]
+            fibernum_col = df_fib[!, "fiber_id"]
             # println(typeof(fibernum_col))
             fibernumvec = if fibernum_col isa AbstractVector{<:Integer}
                 fibernum_col
@@ -487,7 +478,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     end
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     mjd_int = parse(Int, mjd)
 
     # could shift this to a preallocation step
@@ -655,7 +646,7 @@ function process_1D(fname;
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
 
     # this seems annoying to load so often if we know we are doing a daily... need to ponder
     traceFname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"

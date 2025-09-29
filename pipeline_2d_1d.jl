@@ -297,7 +297,7 @@ if parg["relFlux"]
         df = read_almanac_exp_df(
             joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
         function get_1d_name_partial(expid)
-            if df.imagetyp[expid] == "Object"
+            if df.image_type[expid] == "object"
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
             else
@@ -305,7 +305,7 @@ if parg["relFlux"]
             end
         end
         function get_1d_name_ARCLAMP_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") &
+            if (df.image_type[expid] == "arclamp") &
                ((df.lamp_thar[expid] == 1) | (df.lamp_une[expid] == 1))
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
@@ -314,7 +314,7 @@ if parg["relFlux"]
             end
         end
         function get_1d_name_FPI_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") & (df.lamp_thar[expid] == 0) &
+            if (df.image_type[expid] == "arclamp") & (df.lamp_thar[expid] == 0) &
                (df.lamp_une[expid] == 0)
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
