@@ -5,7 +5,7 @@ using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
 using ApogeeReduction
 using ApogeeReduction: read_almanac_exp_df, get_1d_name, get_fibTargDict, nanzeropercentile,
-                       nanzeromedian, parseCartID, bad_pix_bits, fiberIndx2fiberID,
+                       nanzeromedian, bad_pix_bits, fiberIndx2fiberID,
                        logUniWaveAPOGEE, isnanorzero
 
 proj_path = dirname(Base.active_project()) * "/"
@@ -564,7 +564,6 @@ end
 list2Dexp = []
 for mjd in unique_mjds
     df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
-    df.cartidInt = parseCartID.(df.cartid)
     df.exposure_int = if typeof(df.exposure) <: Array{Int}
         df.exposure
     else

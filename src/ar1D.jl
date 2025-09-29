@@ -401,7 +401,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
         :exposure)
     expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
-    cartId = df_mjd.cartidInt[expIndex]
+    cartId = df_mjd.cart_id[expIndex]
 
     expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
     valid_flats4fluxing_fname = joinpath(parent_dir, "almanac/valid_domeflats4fluxing_$(runname).h5")
@@ -443,18 +443,18 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
 
     valid_before = if isnothing(expIndex_before)
         0
-    elseif all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)
+    elseif all(df_mjd.cart_id[expIndex_before:expIndex] .== cartId)
 	1
-    elseif !isnothing(expIndex_before) & (df_mjd.cartidInt[expIndex_before] .== cartId)
+    elseif !isnothing(expIndex_before) & (df_mjd.cart_id[expIndex_before] .== cartId)
         2
     else
         0
     end
     valid_after = if isnothing(expIndex_after) 
         0
-    elseif all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)
+    elseif all(df_mjd.cart_id[expIndex:expIndex_after] .== cartId)
         1
-    elseif !isnothing(expIndex_after) & (df_mjd.cartidInt[expIndex_after] .== cartId)
+    elseif !isnothing(expIndex_after) & (df_mjd.cart_id[expIndex_after] .== cartId)
         2
     else
         0

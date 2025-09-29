@@ -377,7 +377,7 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
     rawpath = build_raw_path(
         df.observatory[expid], chip, df.mjd[expid], lpad(df.exposure_int[expid], 8, "0"),
         cluster = cluster, suppress_warning = suppress_warning)
-    cartid = df.cartidInt[expid]
+    cartid = df.cart_id[expid]
 
     outfname = join(
         ["ar2D", df.observatory[expid], df.mjd[expid],

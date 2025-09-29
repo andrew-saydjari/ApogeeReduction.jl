@@ -348,21 +348,6 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     error("Made it past logic or unknown mode: $mode")
 end
 
-function parseCartID(x)
-    if x == "FPS"
-        return 0
-    elseif x == ""
-        return -1
-    elseif typeof(x) <: Union{Int32, Int64}
-        return x
-    elseif typeof(x) == String
-        return parse(Int, x)
-    elseif typeof(x) <: Union{Float32, Float64}
-        return Int(x)
-    else
-        error("Unknown cartid type: $(typeof(x))")
-    end
-end
 
 function read_almanac_exp_df(fname, tele, mjd)
     df = if fname isa HDF5.File
@@ -372,7 +357,6 @@ function read_almanac_exp_df(fname, tele, mjd)
             DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
         end
     end
-    df.cartidInt = parseCartID.(df.cartid)
     df.exposure_int = if typeof(df.exposure) <: Array{Int}
         df.exposure
     else
