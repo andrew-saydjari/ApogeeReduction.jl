@@ -309,10 +309,10 @@ function get_fibTargDict(f, tele, mjd, expnum)
     # TODO Andrew thinks the fibers with category "" might be serendipitous targets
 
     mjdfps2plate = get_fps_plate_divide(tele)
-    configName, configIdCol, target_type_col = if parse(Int, mjd) > mjdfps2plate
-        "fps", "configid", "category"
+    configIdCol, target_type_col = if parse(Int, mjd) > mjdfps2plate
+        "configid", "category"
     else
-        "plates", "plateid", "target_type" # TODO should this be source_type?
+        "plateid", "target_type" # TODO should this be source_type?
     end
 
     df_exp = read_almanac_exp_df(f, tele, mjd)
@@ -326,12 +326,12 @@ function get_fibTargDict(f, tele, mjd, expnum)
 
     fibtargDict = if exposure_info.image_type == "object"
         try
-            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configid)"]))
+            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configid)"]))
             # normalizes all column names to lowercase
             rename!(df_fib, lowercase.(names(df_fib)))
 
             # limit to only the APOGEE fiber/hole information
-            df_fib = if configName == "fps"
+            df_fib = if configIdCol == "configid"
                 df_fib[df_fib[!, "fiber_type"].=="APOGEE",:]
             else
                 df_fib
@@ -341,7 +341,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
                 if t in keys(fiber_type_names)
                     fiber_type_names[t]
                 else
-                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
+                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configid): $(repr(t))"
                     "fiberTypeFail"
                 end
             end
@@ -358,7 +358,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
             Dict(fiberID2fiberIndx.(fibernumvec) .=> fiber_types)
         catch e
             rethrow(e)
-            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."
+            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."
             show(e)
             Dict(1:300 .=> "fiberTypeFail")
         end
