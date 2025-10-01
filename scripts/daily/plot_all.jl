@@ -640,12 +640,13 @@ allimage_type = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1
 # Define custom sorting order for exposure types
 function get_image_type_priority(image_type::AbstractString)
     priority_map = Dict(
-        "object" => 1,
-        "domeflat" => 2,
-        "internalflat" => 3,
-        "quartzflat" => 4,
-        "dark" => 5,
-        "arclamp" => 6
+        "object" => 1
+        "twilightflat" => 2,
+        "domeflat" => 3,
+        "internalflat" => 4,
+        "quartzflat" => 5,
+        "dark" => 6,
+        "arclamp" => 7
     )
     return get(priority_map, image_type, 999)  # Unknown types get high number
 end
