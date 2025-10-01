@@ -37,7 +37,7 @@ function sbatchCustom() {
     scontrol write batch_script $SLURM_ID slurm_logs/slurm-$SLURM_ID.sh
 }
 
-data_dir=$(realpath "outdir/")
+data_dir=$(realpath "outdir/")"/"
 
 # set up the output directory (if does not exist)
 mkdir -p ${data_dir}/plots
@@ -79,25 +79,25 @@ while read -r line; do
         expid_start=$(echo $expid_range | cut -d'-' -f1 | sed 's/^[0-9]\{4\}//')
         expid_end=$(echo $expid_range | cut -d'-' -f2 | sed 's/^[0-9]\{4\}//')
 
-        print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
-        sbatchCustom --job-name=b2b_${tele}_${mjd} $base_dir/scripts/daily/run_all.sh ${tele} ${mjd} true ${data_dir}
+        # print_elapsed_time "Submitting Back2Back Flats job for $tele $mjd"
+        # sbatchCustom --job-name=b2b_${tele}_${mjd} $base_dir/scripts/daily/run_all.sh ${tele} ${mjd} ${data_dir} "" "" "" true
 
         # Store job ID and associated information
         job_ids+=($SLURM_ID)
         job_info+=("$tele|$mjd|$expid_start|$expid_end")
     fi
-done < "metadata/special_cal_obs.txt"
+done < "$base_dir/metadata/special_cal_obs.txt"
 
-#Wait for all jobs to complete
-print_elapsed_time "Waiting for all reduction jobs to complete"
-for job_id in "${job_ids[@]}"; do
-    # Check if job exists and starts with b2b
-    squeue -h -j $job_id -n "b2b*" > /dev/null 2>&1
-    while [ $? -eq 0 ]; do
-        sleep 1
-        squeue -h -j $job_id -n "b2b*" > /dev/null 2>&1
-    done
-done
+# #Wait for all jobs to complete
+# print_elapsed_time "Waiting for all reduction jobs to complete"
+# for job_id in "${job_ids[@]}"; do
+#     # Check if job exists and starts with b2b
+#     squeue -h -j $job_id -n "b2b*" > /dev/null 2>&1
+#     while [ $? -eq 0 ]; do
+#         sleep 1
+#         squeue -h -j $job_id -n "b2b*" > /dev/null 2>&1
+#     done
+# done
 
 # Run all back2back_flats.jl scripts
 print_elapsed_time "Running all Back2Back plots"

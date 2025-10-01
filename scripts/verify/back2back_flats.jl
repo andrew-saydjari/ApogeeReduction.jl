@@ -1,6 +1,7 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase, BinnedStatistics
 
 using ApogeeReduction
+using ApogeeReduction: log10n, nanzeroiqr
 proj_path = dirname(Base.active_project()) * "/"
 include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
