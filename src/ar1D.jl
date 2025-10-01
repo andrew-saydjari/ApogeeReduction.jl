@@ -309,10 +309,10 @@ function get_fibTargDict(f, tele, mjd, expnum)
     # TODO Andrew thinks the fibers with category "" might be serendipitous targets
 
     mjdfps2plate = get_fps_plate_divide(tele)
-    configIdCol, target_type_col = if parse(Int, mjd) > mjdfps2plate
-        "configid", "category"
+    configIdCol = if parse(Int, mjd) > mjdfps2plate
+        "configid"
     else
-        "plateid", "target_type" # TODO should this be source_type?
+        "plateid"
     end
 
     df_exp = read_almanac_exp_df(f, tele, mjd)
@@ -337,7 +337,7 @@ function get_fibTargDict(f, tele, mjd, expnum)
                 df_fib
             end
 
-            fiber_types = map(df_fib[!, target_type_col]) do t
+            fiber_types = map(df_fib[!, "category"]) do t
                 if t in keys(fiber_type_names)
                     fiber_type_names[t]
                 else
@@ -432,7 +432,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     else
         0
     end
-    valid_after = if isnothing(expIndex_after) 
+    valid_after = if isnothing(expIndex_after)
         0
     elseif all(df_mjd.cart_id[expIndex:expIndex_after] .== cartId)
         1
@@ -555,7 +555,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
             wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         catch
             println((typeof(wave_stack), typeof(N_XPIX), typeof(chipind), typeof(chipWaveSoln),fname, mjd_int, typeof(backupWaveSoln), typeof(backupWaveSoln)))
-        end 
+        end
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[
             end:-1:1, :]
