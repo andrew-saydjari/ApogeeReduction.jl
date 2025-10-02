@@ -30,16 +30,6 @@ function build_raw_path(tele, chip, mjd, exposure_id; cluster = "sdss", suppress
     return join([base, tele, mjd, fname], "/")
 end
 
-# both inputs are strings, as is the output
-function short_expid_to_long(mjd, expnum)
-    return lpad(string(parse(Int,mjd) - 55562), 4, "0") * lpad(expnum, 4, "0")
-end
-
-# both inputs are integers, as is the output
-function long_expid_to_short(mjd, expnum)
-    return expnum - (mjd - 55562) * 10000
-end
-
 function dfindx_fname_format(dfindx)
     return lpad(dfindx, 4, "0")
 end

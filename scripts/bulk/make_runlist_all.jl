@@ -3,7 +3,7 @@
 using Pkg;
 Pkg.instantiate();
 using HDF5, JLD2, ArgParse, DataFrames
-using ApogeeReduction: read_almanac_exp_df, safe_jldsave, long_expid_to_short
+using ApogeeReduction: read_almanac_exp_df, safe_jldsave
 
 ## Parse command line arguments
 function parse_commandline()
@@ -31,7 +31,7 @@ end
 parg = parse_commandline()
 
 mjdexp_list = Int[]
-expid_list = Int[]
+expid_list = String[]
 dfindx_list = Int[]
 tele_list = String[]
 f = h5open(parg["almanac_file"])
@@ -55,10 +55,11 @@ for tele in tele2do
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.n_read .> 3) .|
                    ((df.image_type .== "quartzflat") .& (df.n_read .== 3))
+        good_exp .&= (df.chip_flags .== 7)
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
             push!(mjdexp_list, tstmjd_int)
-            push!(expid_list, long_expid_to_short(tstmjd_int,df.exposure[dfindx]))
+            push!(expid_list, df.exposure_string[dfindx])
             push!(dfindx_list, dfindx)
             push!(tele_list, tele)
         end
