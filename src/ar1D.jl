@@ -343,17 +343,12 @@ function get_fibTargDict(f, tele, mjd, dfindx)
                     "fiberTypeFail"
                 end
             end
-            fibernum_col = df_fib[!, "fiber_id"]
-            # println(typeof(fibernum_col))
-            fibernumvec = if fibernum_col isa AbstractVector{<:Integer}
-                fibernum_col
-            elseif fibernum_col isa AbstractVector{<:String}
-                parse.(Int, fibernum_col)
-            else
-                @warn "Fiber numbers are neither integers or strings"
-                fibernum_col
-            end
-            Dict(fiberID2fiberIndx.(fibernumvec) .=> fiber_types)
+            fibernumvec = df_fib[!, "fiber_id"]
+
+            #this is a Hack and Andy Casey will replace this very very soon
+            fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
+            fiber_types_full[fiberID2fiberIndx.(fibernumvec)] .= fiber_types
+            Dict(1:N_FIBERS .=> fiber_types_full)
         catch e
             rethrow(e)
             @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
