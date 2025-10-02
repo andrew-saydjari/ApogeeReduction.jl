@@ -640,7 +640,7 @@ allimage_type = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1
 # Define custom sorting order for exposure types
 function get_image_type_priority(image_type::AbstractString)
     priority_map = Dict(
-        "object" => 1
+        "object" => 1,
         "twilightflat" => 2,
         "domeflat" => 3,
         "internalflat" => 4,
@@ -673,6 +673,7 @@ for chip in chips2do
             for exp_fname in all1D[msk_image_type]
                 sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
                 fnameType, tele, mjd, expnum, chiploc, image_type = sname[(end - 5):end]
+                dfindx = parse(Int, expnum)
 
                 flux_1d = load(exp_fname, "flux_1d")
                 mask_1d = load(exp_fname, "mask_1d")
@@ -680,7 +681,7 @@ for chip in chips2do
                 # msk_loc = (mask_1d .&
                 #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
-                fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+                fibtargDict = get_fibTargDict(f, tele, mjd, dfindx)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
                     fibType = fibtargDict[fib]
@@ -864,6 +865,7 @@ for image_type2plot in sorted_image_types
         for exp_fname in all1Da[msk_image_type]
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
             fnameType, tele, mjd, expnum, chiploc, image_type = sname[(end - 5):end]
+            dfindx = parse(Int, expnum)
             # expuni_fname = replace(
             #     replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
             # outflux = load(expuni_fname, "flux_1d")
@@ -875,7 +877,7 @@ for image_type2plot in sorted_image_types
             # need to switch this back when the masking is updated
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
-            fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+            fibtargDict = get_fibTargDict(f, tele, mjd, dfindx)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 # plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",

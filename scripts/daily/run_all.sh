@@ -154,14 +154,14 @@ if [ "$run_2d_only" != "true" ]; then
     print_elapsed_time "Generating plot page for web viewing"
     julia +$julia_version --project=$base_dir $base_dir/scripts/daily/generate_dashboard.jl --mjd $mjd --outdir $outdir
 
-    ## arMADGICS
-    if [ -d ${path2arMADGICS} ]; then
-        print_elapsed_time "Running arMADGICS"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
+    # ## arMADGICS
+    # if [ -d ${path2arMADGICS} ]; then
+    #     print_elapsed_time "Running arMADGICS"
+    #     julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
 
-        print_elapsed_time "Running arMADGICS Workup"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
-    fi
+    #     print_elapsed_time "Running arMADGICS Workup"
+    #     julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
+    # fi
 fi
 
 print_elapsed_time "Job Completed"

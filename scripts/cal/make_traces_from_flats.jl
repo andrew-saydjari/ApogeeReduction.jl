@@ -86,13 +86,13 @@ end
     end
     mjd_list = load(parg["runlist"], "mjd")
     unique_mjds = unique(mjd_list)
-    expid_list = load(parg["runlist"], "expid")
+    dfindx_list = load(parg["runlist"], "dfindx")
     cal_flist = String[] # all cal files for FIRST CHIP
     for tele in unique_teles
         expid2do = findall(tele_list .== tele)
         for chip in chips
             for i in expid2do
-                push!(cal_flist, get_cal_file(parg["trace_dir"], tele_list[i], mjd_list[i], expid_list[i], chip, "$(uppercase(parg["flat_type"]))FLAT", use_cal = true))
+                push!(cal_flist, get_cal_file(parg["trace_dir"], tele_list[i], mjd_list[i], dfindx_list[i], chip, "$(parg["flat_type"])flat", use_cal = true))
             end
         end
     end
