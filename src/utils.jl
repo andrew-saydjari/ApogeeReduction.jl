@@ -284,15 +284,15 @@ function modify_saved_dict(filepath::String, dataset_name::String, modifications
             if !haskey(file, dataset_name)
                 error("Dataset '$dataset_name' not found in file '$filepath'")
             end
-            
+
             # Read existing data
             existing_data = read(file, dataset_name)
-            
+
             # Apply modifications
             for (key, value) in modifications
                 existing_data[key] = value
             end
-            
+
             # Remove old dataset_name and write new one
             delete_object(file, dataset_name)
             # add new version of dataset_name group to the file
@@ -348,21 +348,6 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     error("Made it past logic or unknown mode: $mode")
 end
 
-function parseCartID(x)
-    if x == "FPS"
-        return 0
-    elseif x == ""
-        return -1
-    elseif typeof(x) <: Union{Int32, Int64}
-        return x
-    elseif typeof(x) == String
-        return parse(Int, x)
-    elseif typeof(x) <: Union{Float32, Float64}
-        return Int(x)
-    else
-        error("Unknown cartid type: $(typeof(x))")
-    end
-end
 
 function read_almanac_exp_df(fname, tele, mjd)
     df = if fname isa HDF5.File
@@ -371,18 +356,6 @@ function read_almanac_exp_df(fname, tele, mjd)
         h5open(fname) do f
             DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
         end
-    end
-    df.nreadInt = parse.(Int, df.nread)
-    df.cartidInt = parseCartID.(df.cartid)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
     end
     return df
 end

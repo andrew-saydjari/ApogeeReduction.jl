@@ -286,9 +286,7 @@ end
 Given an open HDF.file, `f`, and the telescope, mjd, and expnum, return a dictionary
 mapping fiber index (1:300 laid out on the chip) to fiber type.
 """
-function get_fibTargDict(f, tele, mjd, expnum)
-    exposure_id = short_expid_to_long(mjd, expnum)
-
+function get_fibTargDict(f, tele, mjd, dfindx)
     # translate confSummary/almanac terminology to AR.jl terminology
     fiber_type_names = Dict(
         # fps era
@@ -309,74 +307,51 @@ function get_fibTargDict(f, tele, mjd, expnum)
     # TODO Andrew thinks the fibers with category "" might be serendipitous targets
 
     mjdfps2plate = get_fps_plate_divide(tele)
-    configName, configIdCol, target_type_col = if parse(Int, mjd) > mjdfps2plate
-        "fps", "configid", "category"
+    configIdCol = if parse(Int, mjd) > mjdfps2plate
+        "config_id"
     else
-        "plates", "plateid", "target_type" # TODO should this be source_type?
+        "plate_id"
     end
 
     df_exp = read_almanac_exp_df(f, tele, mjd)
 
-    if !(exposure_id in df_exp.exposure_str)
-        @warn "Exposure $(exposure_id) not found in $(tele)/$(mjd)/exposures"
+    if !(dfindx in df_exp.exposure)
+        @warn "Exposure $(dfindx) not found in $(tele)/$(mjd)/exposures"
         return Dict(1:300 .=> "fiberTypeFail")
     end
-    exposure_info = df_exp[findfirst(df_exp[!, "exposure_str"] .== exposure_id), :]
-    configid = exposure_info[configIdCol]
+    exposure_info = df_exp[dfindx, :]
+    config_id = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.imagetyp == "Object"
+    fibtargDict = if exposure_info.image_type == "object"
         try
-            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(configName)/$(configid)"]))
+            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
             # normalizes all column names to lowercase
             rename!(df_fib, lowercase.(names(df_fib)))
 
-            # sometimes the fiber id column is called "fiber_id" and sometimes it is called "fiberid"
-            fiberid_col = if "fiber_id" in names(df_fib)
-                "fiber_id"
-            elseif "fiberid" in names(df_fib)
-                "fiberid"
-            else
-                error("fiber_id or fiberid column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
-            end
-
             # limit to only the APOGEE fiber/hole information
-            df_fib = if configName == "fps"
-                # sometimes the fiber type column is called "fiberType" and sometimes it is called "fibertype"
-                fiberType_col = if "fiberType" in names(df_fib)
-                    "fiberType"
-                elseif "fibertype" in names(df_fib)
-                    "fibertype"
-                else
-                    error("fiberType or fibertype column not found in $(configName)/$(configid). Available columns: $(names(df_fib))")
-                end
-
-                df_fib[df_fib[!, fiberType_col].=="APOGEE",:]
+            df_fib = if configIdCol == "config_id"
+                df_fib[df_fib[!, "fiber_type"].=="APOGEE",:]
             else
                 df_fib
             end
 
-            fiber_types = map(df_fib[!, target_type_col]) do t
+            fiber_types = map(df_fib[!, "category"]) do t
                 if t in keys(fiber_type_names)
                     fiber_type_names[t]
                 else
-                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(configName)/$(configid): $(repr(t))"
+                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(config_id): $(repr(t))"
                     "fiberTypeFail"
                 end
             end
-            fibernum_col = df_fib[!, fiberid_col]
-            # println(typeof(fibernum_col))
-            fibernumvec = if fibernum_col isa AbstractVector{<:Integer}
-                fibernum_col
-            elseif fibernum_col isa AbstractVector{<:String}
-                parse.(Int, fibernum_col)
-            else
-                @warn "Fiber numbers are neither integers or strings"
-                fibernum_col
-            end
-            Dict(fiberID2fiberIndx.(fibernumvec) .=> fiber_types)
+            fibernumvec = df_fib[!, "fiber_id"]
+
+            #this is a Hack and Andy Casey will replace this very very soon
+            fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
+            fiber_types_full[fiberID2fiberIndx.(fibernumvec)] .= fiber_types
+            Dict(1:N_FIBERS .=> fiber_types_full)
         catch e
             rethrow(e)
-            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(configName)/$(configid) (exposure $(exposure_id)). Returning fiberTypeFail for all fibers."
+            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
             show(e)
             Dict(1:300 .=> "fiberTypeFail")
         end
@@ -395,26 +370,24 @@ end
 # hardcoded to use chip c only for now
 # must use dome flats, not quartz flats (need fiber runs to telescope)
 # use full exposure_id
-function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; fluxing_chip = "B")
-    exposure_id = parse(Int, short_expid_to_long(mjd, expnum))
+function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; fluxing_chip = "B")
     df_mjd = sort(
         dfalmanac[(dfalmanac.mjd .== parse(Int, mjd)) .& (dfalmanac.observatory .== tele), :],
         :exposure)
-    expIndex = findfirst(df_mjd.exposure_int .== exposure_id)
-    cartId = df_mjd.cartidInt[expIndex]
+    expIndex = dfindx
+    cartId = df_mjd.cart_id[expIndex]
 
-    expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
     valid_flats4fluxing_fname = joinpath(parent_dir, "almanac/valid_domeflats4fluxing_$(runname).h5")
     if !isfile(valid_flats4fluxing_fname)
         @warn "Could not find any useful relfluxing files after looking for file $(valid_flats4fluxing_fname)"
-	return 2^2,nothing
+	    return 2^2, nothing
     end
     f = h5open(valid_flats4fluxing_fname, "r")
     found_tele_mjd = false
     if tele in keys(f)
         if "$(mjd)" in keys(f[tele])
             found_tele_mjd = true
-	end
+	    end
     end
 
     if !found_tele_mjd
@@ -426,53 +399,53 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, expnum, runname; flu
     cal_expid_list = read(f["$(tele)/$(mjd)"])
     close(f)
 
-    if expid_num in cal_expid_list
+    if dfindx in cal_expid_list
         #the current files is one of the dome flats that has a relfluxing file
         return 2^0,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex], 4), fluxing_chip, cartId)
+            parent_dir, tele, mjd, df_mjd.exposure[expIndex], fluxing_chip, cartId)
     end
 
-    expIndex_before = findlast(cal_expid_list .< expid_num)
+    expIndex_before = findlast(cal_expid_list .< dfindx)
     if !isnothing(expIndex_before)
         expIndex_before = cal_expid_list[expIndex_before]
     end
-    expIndex_after = findfirst(cal_expid_list .> expid_num)
+    expIndex_after = findfirst(cal_expid_list .> dfindx)
     if !isnothing(expIndex_after)
         expIndex_after = cal_expid_list[expIndex_after]
     end
 
     valid_before = if isnothing(expIndex_before)
         0
-    elseif all(df_mjd.cartidInt[expIndex_before:expIndex] .== cartId)
-	1
-    elseif !isnothing(expIndex_before) & (df_mjd.cartidInt[expIndex_before] .== cartId)
+    elseif all(df_mjd.cart_id[expIndex_before:expIndex] .== cartId)
+	    1
+    elseif !isnothing(expIndex_before) & (df_mjd.cart_id[expIndex_before] .== cartId)
         2
     else
         0
     end
-    valid_after = if isnothing(expIndex_after) 
+    valid_after = if isnothing(expIndex_after)
         0
-    elseif all(df_mjd.cartidInt[expIndex:expIndex_after] .== cartId)
+    elseif all(df_mjd.cart_id[expIndex:expIndex_after] .== cartId)
         1
-    elseif !isnothing(expIndex_after) & (df_mjd.cartidInt[expIndex_after] .== cartId)
+    elseif !isnothing(expIndex_after) & (df_mjd.cart_id[expIndex_after] .== cartId)
         2
     else
         0
     end
 
     if valid_before == 1
-        return 2^0,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
+        return 2^0, get_fluxing_file_name(
+            parent_dir, tele, mjd, df_mjd.exposure[expIndex_before], fluxing_chip, cartId)
     elseif valid_after == 1
-        return 2^0,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
+        return 2^0, get_fluxing_file_name(
+            parent_dir, tele, mjd, df_mjd.exposure[expIndex_after], fluxing_chip, cartId)
         # any of the cases below here we could consider using a global file
     elseif valid_before == 2
-        return 2^1,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_before], 4), fluxing_chip, cartId)
+        return 2^1, get_fluxing_file_name(
+            parent_dir, tele, mjd, df_mjd.exposure[expIndex_before], fluxing_chip, cartId)
     elseif valid_after == 2
-        return 2^1,get_fluxing_file_name(
-            parent_dir, tele, mjd, last(df_mjd.exposure_str[expIndex_after], 4), fluxing_chip, cartId)
+        return 2^1, get_fluxing_file_name(
+            parent_dir, tele, mjd, df_mjd.exposure[expIndex_after], fluxing_chip, cartId)
     else
         return 2^2,nothing
     end
@@ -487,7 +460,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     end
 
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     mjd_int = parse(Int, mjd)
 
     # could shift this to a preallocation step
@@ -573,7 +546,7 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
             wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         catch
             println((typeof(wave_stack), typeof(N_XPIX), typeof(chipind), typeof(chipWaveSoln),fname, mjd_int, typeof(backupWaveSoln), typeof(backupWaveSoln)))
-        end 
+        end
         wave_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipWaveSoln[end:-1:1, :, chipind]
         trace_center_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= extract_trace_centers[
             end:-1:1, :]
@@ -655,7 +628,8 @@ function process_1D(fname;
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
+    dfindx = parse(Int, expnum)
 
     # this seems annoying to load so often if we know we are doing a daily... need to ponder
     traceFname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
@@ -711,21 +685,20 @@ function process_1D(fname;
         # this is the path to the underlying fluxing file.
         # it is symlinked below to an exposure-specific file (linkPath).
         relflux_bit,calPath = get_fluxing_file(
-            dfalmanac, outdir, tele, mjd, expnum, runname, fluxing_chip = chip_list[end])
-        expid_num = parse(Int, last(expnum, 4)) #this is silly because we translate right back
-        fibtargDict = get_fibTargDict(falm, tele, mjd, expid_num)
+            dfalmanac, outdir, tele, mjd, dfindx, runname, fluxing_chip = chip_list[end])
+        fibtargDict = get_fibTargDict(falm, tele, mjd, dfindx)
         fiberTypeList = map(x -> fibtargDict[x], 1:300)
 
         if isnothing(calPath)
             # TODO uncomment this
-            @warn "No fluxing file available for $(tele) $(mjd) $(expnum) $(chip)"
+            @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
             relthrpt = ones(size(flux_1d, 2))
             bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
         elseif !isfile(calPath)
-            error("Fluxing file $(calPath) for $(tele) $(mjd) $(expnum) $(chip) does not exist")
+            error("Fluxing file $(calPath) for $(tele) $(mjd) $(dfindx) $(chip) does not exist")
         else
             linkPath = abspath(joinpath(
-                dirname(fname), "relFlux_$(tele)_$(mjd)_$(expnum)_$(chip).h5"))
+                dirname(fname), "relFlux_$(tele)_$(mjd)_$(dfindx_fname_format(dfindx))_$(chip).h5"))
             if !islink(linkPath)
                 symlink(abspath(calPath), linkPath)
             end
