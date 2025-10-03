@@ -82,7 +82,7 @@ print_elapsed_time() {
     LAST_TIME=$current_seconds
 }
 
-updates the sdsscore submodules (which has to be done from that directory)
+# updates the sdsscore submodules (which has to be done from that directory)
 if $update_sdsscore && { [ ! -f "$almanac_file" ] || $almanac_clobber_mode; }; then
     print_elapsed_time "Updating sdsscore"
     ORIG_PWD=$(pwd)
@@ -96,7 +96,7 @@ fi
 if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
     # activate shared almanac (uv python) environment
-    source /mnt/home/sdssv/uv_env/almanac_v0p2p4/bin/activate 
+    source /mnt/home/sdssv/uv_env/almanac_v0p2p5/bin/activate 
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
 
