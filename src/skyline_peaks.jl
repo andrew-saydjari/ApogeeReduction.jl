@@ -266,7 +266,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     end
 
     sname = split(split(fname, "/")[end], "_")
-    fnameType, tele, mjd, expnum, chip, imagetyp = sname[(end - 5):end]
+    fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
 
     f = jldopen(fname, "r+")
     flux_1d = f["flux_1d"]

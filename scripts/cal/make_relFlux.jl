@@ -93,10 +93,10 @@ else
 end
 unique_mjds = unique(mjd_list)
 
-expid_list = if parg["runlist"] != ""
-    load(parg["runlist"], "expid")
+dfindx_list = if parg["runlist"] != ""
+    load(parg["runlist"], "dfindx")
 else
-    [parg["expid"]]
+    [parg["dfindx"]]
 end
 
 
@@ -107,11 +107,11 @@ for tele in unique_teles
         if count(mskMJD) > 0
             df = read_almanac_exp_df(
                 joinpath(parg["trace_dir"], "almanac/$(parg["runname"]).h5"), tele, mjd)
-            function get_1d_name_partial(expid)
+            function get_1d_name_partial(dfindx)
                 joinpath(parg["trace_dir"], "apredrelflux/$(mjd)",
-                    get_1d_name(expid, df, cal = true) * ".h5")
+                    get_1d_name(dfindx, df, cal = true) * ".h5")
             end
-            file_list = get_1d_name_partial.(expid_list[mskMJD])
+            file_list = get_1d_name_partial.(dfindx_list[mskMJD])
             append!(all1Da, file_list)
         end
     end
@@ -133,7 +133,7 @@ if length(all1Da) > 0
             for mjd in unique_mjds
                 mskMJD = (mjd_list .== mjd) .& (tele_list .== tele)
                 if count(mskMJD) > 0
-                    f["$(tele)/$(mjd)"] = expid_list[mskMJD]
+                    f["$(tele)/$(mjd)"] = dfindx_list[mskMJD]
                 end
             end
         end
@@ -181,7 +181,7 @@ if length(all1Da) > 0
         @everywhere begin
             function plot_relFlux(fname)
                 sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
-                fnameType, tele, mjd, expnum, chiploc, imagetyp, cartid = sname[(end - 6):end]
+                fnameType, tele, mjd, expnum, chiploc, image_type, cartid = sname[(end - 6):end]
 
                 xvec = if tele == "apo"
                     1:300

@@ -5,7 +5,7 @@ using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, Random, HDF5, DataFrames
 
 using ApogeeReduction
 using ApogeeReduction: read_almanac_exp_df, get_1d_name, get_fibTargDict, nanzeropercentile,
-                       nanzeromedian, parseCartID, bad_pix_bits, fiberIndx2fiberID,
+                       nanzeromedian, bad_pix_bits, fiberIndx2fiberID,
                        logUniWaveAPOGEE, isnanorzero
 
 proj_path = dirname(Base.active_project()) * "/"
@@ -107,7 +107,7 @@ for mjd in unique_mjds
         df = read_almanac_exp_df(
             joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
         function get_1d_name_partial(expid)
-            if df.imagetyp[expid] == "Object"
+            if df.image_type[expid] == "object"
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
             else
@@ -115,8 +115,8 @@ for mjd in unique_mjds
             end
         end
         function get_1d_name_ARCLAMP_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") &
-               ((df.lampthar[expid] == "T") | (df.lampune[expid] == "T"))
+            if (df.image_type[expid] == "arclamp") &
+               ((df.lamp_thar[expid] == 1) | (df.lamp_une[expid] == 1))
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
             else
@@ -124,8 +124,8 @@ for mjd in unique_mjds
             end
         end
         function get_1d_name_FPI_partial(expid)
-            if (df.imagetyp[expid] == "ArcLamp") & (df.lampthar[expid] == "F") &
-               (df.lampune[expid] == "F")
+            if (df.image_type[expid] == "arclamp") & (df.lamp_thar[expid] == 0) &
+               (df.lamp_une[expid] == 0)
                 return parg["outdir"] * "/apred/$(mjd)/" * get_1d_name(expid, df, cal = true) *
                        ".h5"
             else
@@ -564,17 +564,6 @@ end
 list2Dexp = []
 for mjd in unique_mjds
     df = read_almanac_exp_df(parg["outdir"] * "almanac/$(parg["runname"]).h5", parg["tele"], mjd)
-    df.cartidInt = parseCartID.(df.cartid)
-    df.exposure_int = if typeof(df.exposure) <: Array{Int}
-        df.exposure
-    else
-        parse.(Int, df.exposure)
-    end
-    df.exposure_str = if typeof(df.exposure) <: Array{String}
-        df.exposure
-    else
-        lpad.(string.(df.exposure), 8, "0")
-    end
 
     function get_2d_name_partial(expid)
         parg["outdir"] * "/apred/$(mjd)/" *
@@ -600,7 +589,7 @@ for chip in chips2do
     f = h5open(joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"))
     for exp_fname in all2D
         sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
-        fnameType, tele, mjd, expnum, chiploc, imagetyp = sname[(end - 5):end]
+        fnameType, tele, mjd, expnum, chiploc, image_type = sname[(end - 5):end]
 
         flux_2d = load(exp_fname, "resid_flux")
         ivar_2d = load(exp_fname, "resid_ivar")
@@ -628,7 +617,7 @@ for chip in chips2do
         resize_to_layout!(fig)
 
         savePath = joinpath(get_save_dir(mjd),
-            "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(imagetyp).png")
+            "ar2Dresidualscal_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(image_type).png")
         save(savePath, fig, px_per_unit = 3)
     end
 end
@@ -645,24 +634,25 @@ for mjd in unique_mjds
     append!(all1Da, file_list)
 end
 
-allimagetyp = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
+allimage_type = convert.(String, map(x -> split(split(split(x, "/")[end], ".")[1], "_")[end], all1Da))
 
 # TODO this should be ripped out
 # Define custom sorting order for exposure types
-function get_imagetyp_priority(imagetyp::AbstractString)
+function get_image_type_priority(image_type::AbstractString)
     priority_map = Dict(
-        "Object" => 1,
-        "DomeFlat" => 2,
-        "InternalFlat" => 3,
-        "QuartzFlat" => 4,
-        "Dark" => 5,
-        "Arclamp" => 6
+        "object" => 1,
+        "twilightflat" => 2,
+        "domeflat" => 3,
+        "internalflat" => 4,
+        "quartzflat" => 5,
+        "dark" => 6,
+        "arclamp" => 7
     )
-    return get(priority_map, imagetyp, 999)  # Unknown types get high number
+    return get(priority_map, image_type, 999)  # Unknown types get high number
 end
 
-# Sort allimagetyp using the custom priority function
-sorted_imagetyps = sort(unique(allimagetyp), by = get_imagetyp_priority)
+# Sort allimage_type using the custom priority function
+sorted_image_types = sort(unique(allimage_type), by = get_image_type_priority)
 
 # per chip example spectra
 for chip in chips2do
@@ -674,15 +664,16 @@ for chip in chips2do
     # TODO parallelize plotting
     # we should customize this to the types of objects we want
     # for example, we want to be looking at the tellurics and pure sky
-    for imagetyp2plot in sorted_imagetyps
-        msk_imagetyp = allimagetyp .== imagetyp2plot
-        if any(msk_imagetyp)
-            # nsamp = minimum([count(msk_imagetyp), 3])
-            # sample_exposures = sample(rng, all1D[msk_imagetyp], nsamp, replace = false)
+    for image_type2plot in sorted_image_types
+        msk_image_type = allimage_type .== image_type2plot
+        if any(msk_image_type)
+            # nsamp = minimum([count(msk_image_type), 3])
+            # sample_exposures = sample(rng, all1D[msk_image_type], nsamp, replace = false)
             f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-            for exp_fname in all1D[msk_imagetyp]
+            for exp_fname in all1D[msk_image_type]
                 sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
-                fnameType, tele, mjd, expnum, chiploc, imagetyp = sname[(end - 5):end]
+                fnameType, tele, mjd, expnum, chiploc, image_type = sname[(end - 5):end]
+                dfindx = parse(Int, expnum)
 
                 flux_1d = load(exp_fname, "flux_1d")
                 mask_1d = load(exp_fname, "mask_1d")
@@ -690,7 +681,7 @@ for chip in chips2do
                 # msk_loc = (mask_1d .&
                 #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
-                fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+                fibtargDict = get_fibTargDict(f, tele, mjd, dfindx)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
                     fibType = fibtargDict[fib]
@@ -721,7 +712,7 @@ for chip in chips2do
                     ax2.ylabel = "ADU"
 
                     savePath = get_save_dir(mjd) *
-                               "$(fnameType)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(imagetyp).png"
+                               "$(fnameType)_$(tele)_$(mjd)_$(expnum)_$(chiploc)_$(fib)_$(fibType)_$(image_type).png"
                     save(savePath, fig)
                 end
             end
@@ -734,7 +725,7 @@ end
 println("\nGenerating reinterpolated spectra examples")
 
 function plot_1d_uni(
-        fib, fibtargDict, outflux, outmsk, bname, tele, mjd, expnum, imagetyp, expuni_fname)
+        fib, fibtargDict, outflux, outmsk, bname, tele, mjd, expnum, image_type, expuni_fname)
     fibType = fibtargDict[fib]
 
     fig = Figure(size = (600, 1200), fontsize = 12)
@@ -857,7 +848,7 @@ function plot_1d_uni(
     resize_to_layout!(fig)
 
     savePath = get_save_dir(mjd) *
-               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(fib)_$(fibType)_$(imagetyp).png"
+               "$(bname)_$(tele)_$(mjd)_$(expnum)_$(fib)_$(fibType)_$(image_type).png"
     save(savePath, fig)
     return
 end
@@ -865,15 +856,16 @@ end
 rng = MersenneTwister(536 + unique_mjds[1])
 
 # TODO: parallelize plotting
-for imagetyp2plot in sorted_imagetyps
-    msk_imagetyp = allimagetyp .== imagetyp2plot
-    if any(msk_imagetyp)
-        # nsamp = minimum([count(msk_imagetyp), 3])
-        # sample_exposures = sample(rng, all1Da[msk_imagetyp], nsamp, replace = false)
+for image_type2plot in sorted_image_types
+    msk_image_type = allimage_type .== image_type2plot
+    if any(msk_image_type)
+        # nsamp = minimum([count(msk_image_type), 3])
+        # sample_exposures = sample(rng, all1Da[msk_image_type], nsamp, replace = false)
         f = h5open(parg["outdir"] * "almanac/$(parg["runname"]).h5")
-        for exp_fname in all1Da[msk_imagetyp]
+        for exp_fname in all1Da[msk_image_type]
             sname = split(split(split(exp_fname, "/")[end], ".h5")[1], "_")
-            fnameType, tele, mjd, expnum, chiploc, imagetyp = sname[(end - 5):end]
+            fnameType, tele, mjd, expnum, chiploc, image_type = sname[(end - 5):end]
+            dfindx = parse(Int, expnum)
             # expuni_fname = replace(
             #     replace(exp_fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
             # outflux = load(expuni_fname, "flux_1d")
@@ -885,13 +877,13 @@ for imagetyp2plot in sorted_imagetyps
             # need to switch this back when the masking is updated
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
-            fibtargDict = get_fibTargDict(f, tele, mjd, expnum)
+            fibtargDict = get_fibTargDict(f, tele, mjd, dfindx)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 # plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",
-                #     tele, mjd, expnum, imagetyp, expuni_fname)
+                #     tele, mjd, expnum, image_type, expuni_fname)
                 plot_1d_uni(fib, fibtargDict, outfluxcal, outmskcal, "ar1Dunical",
-                    tele, mjd, expnum, imagetyp, expunical_fname)
+                    tele, mjd, expnum, image_type, expunical_fname)
             end
         end
     end
