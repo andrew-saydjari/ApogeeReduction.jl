@@ -189,8 +189,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 
                 #use large window to get model fluxes
                 full_ypixels = floor(
-                    Int, y_peak - large_window_half_size):ceil(
-                    Int, y_peak + large_window_half_size)
+                    Int, max(1,y_peak - large_window_half_size)):ceil(
+                    Int, min(N_XPIX,y_peak + large_window_half_size))
                 full_ypix_boundaries = [full_ypixels .- 0.5; full_ypixels[end] + 0.5]
                 #                full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
                 prof_fib_ind = clamp(fib, min_prof_fib, max_prof_fib)
