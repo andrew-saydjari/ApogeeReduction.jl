@@ -5,10 +5,10 @@
 # sbatch ./scripts/bulk/run_bulk.sh 60584 60591
 # 60584 60614, 60796 60826
 # constraint="[genoa|icelake|rome]"
+# --qos=preempt
 
 # ------------------------------------------------------------------------------
-#SBATCH --partition=preempt
-#SBATCH --qos=preempt
+#SBATCH --partition=cca
 #SBATCH --constraint="[genoa|icelake|rome]"
 #SBATCH --nodes=8
 
