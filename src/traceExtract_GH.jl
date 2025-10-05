@@ -962,7 +962,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     if size(best_fit_ave_params,1) == 0
         @warn "Skipping trace fitting of $(flat_fname) because 0 traces were found to have detectable flux."
         return [],[]
-    elseif size(best_fit_ave_params,1) != N_FIBERS
+    elseif n_detected_peaks != N_FIBERS
         @warn "Skipping trace fitting of $(flat_fname) because $(n_detected_peaks) traces were found instead of the expected $(N_FIBERS)"
         return [],[]
     end
