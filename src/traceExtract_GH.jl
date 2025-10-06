@@ -409,7 +409,7 @@ Returns: trace centers, widths, and heights, and their covariances.
 """
 function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
-        max_prof_fib, all_y_prof, all_y_prof_deriv;
+        max_prof_fib, all_y_prof, all_y_prof_deriv, flat_fname;
         good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
         low_throughput_thresh = 0.05, median_trace_pos_path = "./data/")
 
@@ -954,11 +954,16 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     verbose && println("$(tele_string) Final number of good peaks:", size(best_fit_ave_params))
 
+    n_detected_peaks = size(best_fit_ave_params,1)
     best_fit_ave_params = best_fit_ave_params[good_throughput_fibers, :]
     curr_fiber_inds = curr_fiber_inds[good_throughput_fibers]
 
     verbose && println("$(tele_string) Final number of good throughput peaks:", size(best_fit_ave_params))
     if size(best_fit_ave_params,1) == 0
+        @warn "Skipping trace fitting of $(flat_fname) because 0 traces were found to have detectable flux."
+        return [],[]
+    elseif n_detected_peaks != N_FIBERS
+        @warn "Skipping trace fitting of $(flat_fname) because $(n_detected_peaks) traces were found instead of the expected $(N_FIBERS)"
         return [],[]
     end
 

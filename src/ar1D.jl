@@ -186,11 +186,24 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 
             for fib in 1:n_fibers
                 _, y_peak, y_sigma = trace_params[xpix, fib, :]
+		y_peak_round = ceil(Int,round(y_peak))
+
+		if ((y_peak_round + window_half_size) < 1) | ((y_peak_round - window_half_size) > N_XPIX) 
+	            #then the peak is so far off the edge that
+		    #we can't measure it's flux from the wings
+		    #so give 0 flux and skip
+                    new_flux_1d[fib] = 0.0
+                    ivar_1d[xpix, fib] = 0.0
+                    mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
+                    mask_1d[xpix, fib] |= bad_1d_no_good_pix
+                    mask_1d[xpix, fib] |= bad_1d_failed_extract
+		    continue
+		end
 
                 #use large window to get model fluxes
-                full_ypixels = floor(
-                    Int, max(1,y_peak - large_window_half_size)):ceil(
-                    Int, min(N_XPIX,y_peak + large_window_half_size))
+		full_ypixels = max(1,y_peak_round - large_window_half_size):min(
+			              N_XPIX,y_peak_round + large_window_half_size)
+		y_peak_ind = y_peak_round - full_ypixels[begin] + 1
                 full_ypix_boundaries = [full_ypixels .- 0.5; full_ypixels[end] + 0.5]
                 #                full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
                 prof_fib_ind = clamp(fib, min_prof_fib, max_prof_fib)
@@ -198,8 +211,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                     prof_fib_ind, x_prof_min, x_prof_max_ind,
                     n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv))
 
-                ypixels = full_ypixels[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
-                model_vals = full_model_vals[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
+		ypixels = full_ypixels[max(1,y_peak_ind - window_half_size):min(size(full_ypixels,1),y_peak_ind + window_half_size)]
+		model_vals = full_model_vals[max(1,y_peak_ind - window_half_size):min(size(full_ypixels,1),y_peak_ind + window_half_size)]
                 if any(good_pixels[xpix, ypixels])
                     #then mask the bad pixels, same as setting ivar=0 there
                     model_vals[.!good_pixels[xpix, ypixels]] .= 0

@@ -146,20 +146,22 @@ end
         trace_params, trace_param_covs = try
             trace_extract(
                 image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv; 
+                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
+		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname; 
                 good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
         catch
             println("Trace fitting failed for $(fname)")
             println("Flux info is (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%)")
             trace_params, trace_param_covs = trace_extract(
                 image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv;
+                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
+		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname;
                 good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
         end
 
         if size(trace_params,1) == 0
 	    # KEVIN should look at what is going on with these weird LCO early MJD (e.g. 57801) cases more closely in future
-            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%) was skipped for not finding any good throughput fibers."
+            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%) was skipped for not having the correct amount of traces."
             return nothing
 	end
 
