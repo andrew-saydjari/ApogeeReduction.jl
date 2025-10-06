@@ -1117,6 +1117,11 @@ function trace_plots(dirNamePlots,
     end
 
     trace_params = load(fname, "trace_params")
+    n_peaks = size(trace_params,2)
+    if n_peaks != N_FIBERS
+        @warn "Skipping trace plotting of $(flat_fname) because $(n_peaks) traces were found instead of the expected $(N_FIBERS)"
+        return nothing
+    end
     
     cut = 750
     fig = Figure(size = (1600, 800), fontsize = 22)
