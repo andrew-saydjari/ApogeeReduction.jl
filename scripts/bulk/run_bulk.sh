@@ -44,17 +44,19 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
+almanac_version="0.2.6"
+
 juliaup add $julia_version
 
 # ARGUMENTS
 # hardcode the mjd and expid for now
 mjd_start=$1
 mjd_end=$2
-outdir=${3:-"outdir/"}  
+outdir=${3:-"outdir/"}
 path2arMADGICS=${4:-"$(dirname "$base_dir")/arMADGICS.jl/"}
 update_sdsscore=${5:-false}
 checkpoint_mode=${6:-"commit_exists"}
-run_2d_only=${7:-false}  
+run_2d_only=${7:-false}
 caldir_darks=${8:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 caldir_flats=${9:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 gain_read_cal_dir=${10:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
@@ -98,12 +100,9 @@ fi
 # Only run almanac if file doesn't exist or clobber mode is true
 if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
-    # activate shared almanac (uv python) environment
-    source /mnt/home/sdssv/uv_env/almanac_v0p2p6/bin/activate 
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-
-    almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+    uvx --from sdss-almanac=$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"
@@ -148,7 +147,7 @@ if [ "$run_2d_only" != "true" ]; then
         done
 
         print_elapsed_time "Making relFlux for $flat_type Flats"
-        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname   
+        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname
     done
 
     ## 2D->1D
