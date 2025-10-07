@@ -493,14 +493,17 @@ function get_ave_night_wave_soln(
     nlParam_offsets = nanmedian(all_nlParams .- med_nlParams, 2)
 
     if fit_dither
-        med_nlParams = nanmedian((all_nlParams .- nlParam_offsets), 3)[:, :, 1]
-        med_linParams = nanmedian((all_linParams .- linParam_offsets), 3)
+        med_nlParams .= nanmedian((all_nlParams .- nlParam_offsets), 3)[:, :, 1]
+        med_linParams .= nanmedian((all_linParams .- linParam_offsets), 3)
 
         #find exposure nearest to the median wave solution
-        scores = nansum(nansum((all_linParams .- med_linParams) .^ 2, 2), 1)[1, 1, :]
+        scores = sum((all_linParams .- med_linParams) .^ 2, dims=(1,2))[1, 1, :]
+	scores[.!isfinite.(scores)] .= Inf
         best_exp_ind = argmin(scores)
-        #use those parameters to measure dither offsets
-        med_linParams = copy(all_linParams[:, :, best_exp_ind])
+	if all(isfinite.(all_linParams[:, :, best_exp_ind]))
+            #use those parameters to measure dither offsets
+            med_linParams .= copy(all_linParams[:, :, best_exp_ind])
+	end
 
         #use the inverse of the dither transformation
         #to put all linParams on the same scale
