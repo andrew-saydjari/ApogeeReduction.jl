@@ -96,7 +96,7 @@ fi
 if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
     # activate shared almanac (uv python) environment
-    source /mnt/home/sdssv/uv_env/almanac_v0p2p6/bin/activate 
+    source /mnt/home/sdssv/uv_env/almanac_v0p2p7/bin/activate 
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
 
