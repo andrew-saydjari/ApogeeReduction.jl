@@ -102,7 +102,7 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-    uvx --from sdss-almanac=$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end --output $almanac_file --fibers
+    uvx --from sdss-almanac==$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"
