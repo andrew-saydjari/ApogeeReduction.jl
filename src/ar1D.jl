@@ -514,13 +514,15 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
             f = jldopen(wavefname)
             chipWaveSoln = f["chipWaveSoln"]
             close(f)
-            found_soln = true
-            break
+	    if all(isfinite.(chipWaveSoln))
+                found_soln = true
+                break
+	    end
         end
     end
     if !found_soln
         #this is not a great global fallback, but it works so we get something to look at
-        if isnothing(backupWaveSoln) || isnothing(backupWaveSoln[mjd_int])
+        if isnothing(backupWaveSoln) || ((!all(isfinite.(backupWaveSoln[mjd_int]))) | isnothing(backupWaveSoln[mjd_int]))
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
