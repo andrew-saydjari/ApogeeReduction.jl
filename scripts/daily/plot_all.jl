@@ -161,7 +161,19 @@ all1DObject_expids = map(x -> parse(Int, x), all1DObject_expid_strings)
 
 function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
     n_fnames = size(fname_list, 1)
-    fname_ind = 1
+    first_fname_ind = 0
+    for (fname_ind, fname) in enumerate(fname_list)
+        if isfile(fname)
+	    first_fname_ind = fname_ind
+            break
+	end
+    end
+    if first_fname_ind == 0
+        @warn "Could not find and expected dither files in list $(fname_list) for $(tele) MJD $(mjd)"
+	return nothing
+    end
+
+    fname_ind = first_fname_ind
     fname = fname_list[fname_ind]
 
     f = h5open(fname, "r+")
@@ -187,6 +199,10 @@ function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
     fiber_inds = collect(1:N_FIBERS)
     y_vals = 301 .- fiber_inds
     for (fname_ind, fname) in enumerate(fname_list)
+        if !isfile(fname)
+	    resid_plot_fnames[fname_ind] = ""
+            continue
+	end
         f = h5open(fname, "r+")
 
         linParams, nlParams, ditherParams, resid_vec, resid_xt = try
