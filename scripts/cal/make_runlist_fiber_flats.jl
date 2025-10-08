@@ -49,7 +49,7 @@ for tele in tele2do
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
         good_exp = (df.image_type .== "$(parg["flat_type"])flat") .&
-                   (df.lamp_une .== 0) .& (df.lamp_thar .== 0) .& (df.chip_flags .== 7)
+                   (df.lamp_une .== 0) .& (df.lamp_thar .== 0) .& (df.chip_flags .== 7) .& (df.flagged .== 0)
         if parg["flat_type"] == "dome"
             good_exp .&= (df.n_read .> 3) .& (df.lamp_quartz .== 0)
         else
