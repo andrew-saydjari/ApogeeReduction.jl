@@ -360,7 +360,13 @@ function get_fibTargDict(f, tele, mjd, dfindx)
 
             #this is a Hack and Andy Casey will replace this very very soon
             fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
-            fiber_types_full[fiberID2fiberIndx.(fibernumvec)] .= fiber_types
+            try
+                fiber_types_full[fiberID2fiberIndx.(fibernumvec)] .= fiber_types
+            catch e
+                @warn "Problem with getting fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
+                show(e)
+                fiber_types_full .= "fiberTypeFail"
+            end
             Dict(1:N_FIBERS .=> fiber_types_full)
         catch e
             rethrow(e)
