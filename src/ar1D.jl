@@ -713,7 +713,7 @@ function process_1D(fname;
 
         if isnothing(calPath)
             # TODO uncomment this
-            if (image_type == "object") | (image_type == "domeflat"))
+            if (image_type == "object") | (image_type == "domeflat")
                 @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
             end
             relthrpt = ones(size(flux_1d, 2))
