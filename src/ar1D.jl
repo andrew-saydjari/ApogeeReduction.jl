@@ -335,7 +335,9 @@ function get_fibTargDict(f, tele, mjd, dfindx)
     exposure_info = df_exp[dfindx, :]
     config_id = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.image_type == "object"
+    fibtargDict = if exposure_info.image_type != "object"
+        Dict(1:300 .=> "cal")
+    else
         try
             df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
             # normalizes all column names to lowercase
@@ -359,9 +361,10 @@ function get_fibTargDict(f, tele, mjd, dfindx)
             fibernumvec = df_fib[!, "fiber_id"]
 
             #this is a Hack and Andy Casey will replace this very very soon
+            msknofiberdefaults = (fibernumvec .!= -1)
             fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
             try
-                fiber_types_full[fiberID2fiberIndx.(fibernumvec)] .= fiber_types
+                fiber_types_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_types[msknofiberdefaults]
             catch e
                 @warn "Problem with getting fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
                 show(e)
@@ -370,12 +373,10 @@ function get_fibTargDict(f, tele, mjd, dfindx)
             Dict(1:N_FIBERS .=> fiber_types_full)
         catch e
             rethrow(e)
-            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
+            @warn "Failed to get fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
             show(e)
             Dict(1:300 .=> "fiberTypeFail")
         end
-    else
-        Dict(1:300 .=> "cal")
     end
 
     if parse(Int, mjd) > mjdfps2plate
@@ -410,7 +411,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 	    end
     end
 
-    if !found_tele_mjd
+    if !found_tele_mjd & ((image_type == "object") | (image_type == "domeflat"))
         close(f)
         @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
         return 2^2,nothing
