@@ -395,6 +395,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
         :exposure)
     expIndex = dfindx
     cartId = df_mjd.cart_id[expIndex]
+    image_type = df_mjd.image_type[expIndex]
 
     valid_flats4fluxing_fname = joinpath(parent_dir, "almanac/valid_domeflats4fluxing_$(runname).h5")
     if !isfile(valid_flats4fluxing_fname)
@@ -712,7 +713,9 @@ function process_1D(fname;
 
         if isnothing(calPath)
             # TODO uncomment this
-            @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
+            if (image_type == "object") | (image_type == "domeflat"))
+                @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
+            end
             relthrpt = ones(size(flux_1d, 2))
             bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
         elseif !isfile(calPath)

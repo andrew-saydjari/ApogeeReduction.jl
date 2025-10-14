@@ -117,12 +117,12 @@ fi
 #     exit $exit_code
 # fi
 
-for tele in ${tele_list[@]}
-do
-    # print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
-    # ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-    # julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
-done
+# for tele in ${tele_list[@]}
+# do
+#     print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
+#     ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
+#     julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
+# done
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
