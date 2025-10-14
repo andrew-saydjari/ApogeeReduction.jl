@@ -411,9 +411,11 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 	    end
     end
 
-    if !found_tele_mjd & ((image_type == "object") | (image_type == "domeflat"))
+    if !found_tele_mjd
         close(f)
-        @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
+        if ((image_type == "object") | (image_type == "domeflat"))
+            @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
+        end
         return 2^2,nothing
     end
 
