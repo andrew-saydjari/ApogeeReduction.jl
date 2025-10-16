@@ -536,7 +536,14 @@ function get_ave_night_wave_soln(
                     else
                         curr_dither_poly = Polynomial([-all_ditherParams[fibIndx, 1, fname_ind]])
                     end
-                    updated_linParams[fibIndx, :, fname_ind] .= med_wave_poly(curr_dither_poly).coeffs
+		    curr_coeffs = med_wave_poly(curr_dither_poly).coeffs
+		    n_curr_use_coeffs = min(size(curr_coeffs,1),dporder+1)
+		    if n_curr_use_coeffs == 0
+		        continue
+		    end
+
+		    updated_linParams[fibIndx, :, fname_ind] .= 0
+                    updated_linParams[fibIndx, begin:n_curr_use_coeffs, fname_ind] .= curr_coeffs[begin:n_curr_use_coeffs] 
                 end
             end
             med_linParams .= nanmedian(updated_linParams, 3)[:, :, 1]
