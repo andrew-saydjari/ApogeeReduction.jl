@@ -399,7 +399,9 @@ if parg["relFlux"]
         fname, checkpoint_mode = parg["checkpoint_mode"])
     all1DObjectWavecal = @showprogress desc=desc pmap(
         get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
-    all1DObjectWavecal = filter(!isnothing, all1DObjectWavecal)
+    good_fnames = .!isnothing.(all1DObjectWavecal)
+    all1DObjectWavecal = all1DObjectWavecal[good_fnames]
+    all1DObjectSkyPeaks = all1DObjectSkyPeaks[good_fnames]
 
     # putting this parallelized within each mjd is really not good in the bulk run context
     mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
