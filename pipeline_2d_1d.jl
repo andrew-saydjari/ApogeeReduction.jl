@@ -276,7 +276,8 @@ end
     relFlux = parg["relFlux"],
     chip_list = CHIP_LIST,
     profile_path = joinpath(proj_path, "data"),
-    plot_path = joinpath(parg["outdir"], "plots/")
+    plot_path = joinpath(parg["outdir"], "plots/",
+    checkpoint_mode = parg["checkpoint_mode"])
 )
 if parg["doUncals"]
     desc = "Extracting 2D to 1D (uncals):"

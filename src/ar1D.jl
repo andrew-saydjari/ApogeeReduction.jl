@@ -652,10 +652,21 @@ function process_1D(fname;
         relFlux::Bool,
         chip_list::Vector{String} = CHIP_LIST,
         profile_path = "./data/",
-        plot_path = "../outdir/$(sjd)/plots/")
+        plot_path = "../outdir/$(sjd)/plots/",
+        checkpoint_mode = "commit_same")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     dfindx = parse(Int, expnum)
+
+    outfname = if relFlux
+        replace(fname, "ar2D" => "ar1D")
+    else
+        replace(replace(fname, "ar2D" => "ar1D"), "apred" => "apredrelflux")
+    end
+
+    if !check_file(outfname, mode = checkpoint_mode)
+        return true
+    end
 
     # this seems annoying to load so often if we know we are doing a daily... need to ponder
     traceFname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
@@ -703,7 +714,6 @@ function process_1D(fname;
         error("Extraction method $(extraction) not recognized")
     end
 
-    outfname = replace(fname, "ar2D" => "ar1D")
     resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
     safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar, trace_used_param_fname = traceFname)
     if relFlux
@@ -749,13 +759,12 @@ function process_1D(fname;
             relthrpt, bitmsk_relthrpt, fiberTypeList,
             trace_used_param_fname = traceFname)
     else
-        outfname_norelflux = replace(outfname, "apred" => "apredrelflux")
-        dirName = dirname(outfname_norelflux)
+        dirName = dirname(outfname)
         if !ispath(dirName)
             mkpath(dirName)
         end
         safe_jldsave(
-            outfname_norelflux, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
+            outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
             trace_used_param_fname = traceFname)
     end
