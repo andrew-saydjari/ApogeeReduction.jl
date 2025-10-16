@@ -3,8 +3,8 @@ Pkg.instantiate();
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
 using ApogeeReduction
-src_dir = "../"
-include(src_dir * "/makie_plotutils.jl")
+proj_path = dirname(Base.active_project()) * "/"
+include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
 ## Parse command line arguments
 function parse_commandline()
@@ -21,13 +21,10 @@ end
 
 parg = parse_commandline()
 
-## This should be deprecated in favor of the new relFluxing
-## however, one might want to use it as a scaffold for comparisons. Revisit TODO
-
 #this just dumps everything we have in outdir into a throughput file/plot
 #runs on both quartz and dome flats and both telescopes
 function summarize_fiber_thrpt(flat_type, tele)
-    fname_list = sort(glob("$(flat_type)_flats/$(flat_type)Trace_$(tele)_*_a*", parg["outdir"]))
+    fname_list = sort(glob("$(flat_type)_flats/*/$(flat_type)Trace_$(tele)_*_R*", parg["outdir"]))
     sjd5 = map(x -> parse(Int, split(x, "_")[end - 2]), fname_list)
     expid = map(x -> parse(Int, last(split(x, "_")[end - 1], 4)), fname_list)
     traceid = 1:300
@@ -71,7 +68,7 @@ function summarize_fiber_thrpt(flat_type, tele)
 
     Colorbar(fig[1, 2], ce, width = 20, height = Relative(1.0))
     colgap!(fig.layout, 1, 20)  # Space between image 1 and colorbar 1
-    colsize!(fig.layout, 1, Aspect(1, size(dat, 2) / size(dat, 1)))
+    # colsize!(fig.layout, 1, Aspect(1, size(dat, 2) / size(dat, 1)))
 
     resize_to_layout!(fig)
     framePath = joinpath(parg["outdir"], "monitor", "$(flat_type)_thrpt_summary_$(tele).png")

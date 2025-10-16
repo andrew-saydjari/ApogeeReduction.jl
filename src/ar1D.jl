@@ -644,6 +644,7 @@ end
 
 const logUniWaveAPOGEE = 10 .^ range((start = 4.17825), step = 6.0e-6, length = 8700);
 
+#should add a check_file call for this one
 function process_1D(fname;
         outdir::String,
         runname::String,
