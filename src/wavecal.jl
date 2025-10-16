@@ -680,17 +680,22 @@ function get_sky_dither_per_fiber(
 
     if size(good_fibers, 1) == 0
         return nothing
+    elseif size(good_fibers, 1) == 1
+        for j in 1:size(bad_fibers, 1)
+            ditherPolyParams[bad_fibers[j], :] .= ditherPolyParams[good_fibers[1], :]
+        end
+    else
+        for j in 1:size(bad_fibers, 1)
+            nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
+            nearest_inds = good_fibers[nearest_inds]
+            param_slopes = (diff(ditherPolyParams[nearest_inds, :], dims = 1))[1, :] ./
+                           (nearest_inds[2] - nearest_inds[1])
+
+            ditherPolyParams[bad_fibers[j], :] .= ditherPolyParams[nearest_inds[1], :] .+
+                                                  param_slopes .* (bad_fibers[j] - nearest_inds[1])
+        end
     end
 
-    for j in 1:size(bad_fibers, 1)
-        nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
-        nearest_inds = good_fibers[nearest_inds]
-        param_slopes = (diff(ditherPolyParams[nearest_inds, :], dims = 1))[1, :] ./
-                       (nearest_inds[2] - nearest_inds[1])
-
-        ditherPolyParams[bad_fibers[j], :] .= ditherPolyParams[nearest_inds[1], :] .+
-                                              param_slopes .* (bad_fibers[j] - nearest_inds[1])
-    end
 
     if return_waveSoln
         chipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
