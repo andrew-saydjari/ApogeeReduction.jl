@@ -314,7 +314,7 @@ function check_file(filename::AbstractString; mode = "commit_same") # mode is "c
     end
     ext_name = split(filename, ".")[end]
     file_exists = isfile(filename)
-    if !file_exists
+    if (!file_exists) || (filesize(filename) == 0)
         return false
     end
     # as long as clobber is not true, existence of pngs is enough to skip
