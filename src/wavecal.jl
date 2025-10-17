@@ -1720,7 +1720,7 @@ function sky_wave_plots(
     n_nl_coeffs = size(night_nlParams, 2)
     fiber_inds = 1:N_FIBERS
 
-    clims = (1, n_fnames)
+    clims = (1, max(2,n_fnames))
 
     fig = Figure(size = (1200, 400 * n_lin_coeffs), fontsize = 22)
     axis_dict = Dict()
