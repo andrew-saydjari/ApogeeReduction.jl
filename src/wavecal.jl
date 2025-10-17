@@ -537,7 +537,7 @@ function get_ave_night_wave_soln(
                         curr_dither_poly = Polynomial([-all_ditherParams[fibIndx, 1, fname_ind]])
                     end
 		    curr_coeffs = med_wave_poly(curr_dither_poly).coeffs
-		    n_curr_use_coeffs = min(size(curr_coeffs,1),dporder+1)
+		    n_curr_use_coeffs = min(size(curr_coeffs,1),n_lin_coeffs)
 		    if n_curr_use_coeffs == 0
 		        continue
 		    end
@@ -911,7 +911,11 @@ function comb_exp_get_and_save_fpi_wavecal(
     fname_ind = 1
     for i in 1:N_FIBERS
         #change wavelength solution to account for first dither offset
-        linParams[i, :] .= Polynomial(linParams[i, :])(dither_poly).coeffs
+
+	curr_coeffs = Polynomial(linParams[i, :])(dither_poly).coeffs
+	n_curr_use_coeffs = min(size(curr_coeffs,1),n_lin_coeffs)
+	linParams[i, :] .= 0
+        linParams[i, begin:n_curr_use_coeffs] .= curr_coeffs[begin:n_curr_use_coeffs]
         for chip in CHIP_LIST
             chipIndx = getChipIndx(chip)
             on_chip = findall((fpi_line_chipInt[:, i] .== chipIndx) .&
@@ -1657,7 +1661,16 @@ function ingest_fpiLines(fname_list)
 end
 
 ## TODO local parallelization mode (which would also need to pamp inside of sky_wave_plots)
-function skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = "../outdir")
+function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir")
+
+    outname = joinpath(
+        outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
+    
+    if check_file(outname, mode = checkpoint_mode)
+        #then skip making new file
+        return outname
+    end
+
     mskMJD = (mjd_list_wavecal .== mjd)
     if size(all1DObjectWavecal[mskMJD], 1) > 0
         all1DObjectWavecal_mjd = all1DObjectWavecal[mskMJD]
@@ -1679,19 +1692,57 @@ function skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWav
             dirNamePlots = joinpath(outdir, "plots/"),
             plot_fibers = (1, 50, 100, 150, 200, 250, 300),
             plot_pixels = (1, 512, 1024, 1536, 2048))
-        return night_wave_soln, night_linParams, night_nlParams
+
+	curr_wave_type = "sky"
+        h5open(outname, "w") do f
+	    #should include metadata at some point...
+	    f["best_wave_type"] = curr_wave_type
+
+	    f["$(curr_wave_type)/used_fnames"] = all1DObjectWavecal_mjd
+            f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
+            f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
+            f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
+        end	
+
+        return outname
     else
-        return nothing, nothing, nothing
+        return nothing
     end    
 end
 
-function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict; checkpoint_mode = "commit_same")
+function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, 
+					     all1DfpiPeaks_a, all1DObjectSkyPeaks,
+					     wavecalNightAve_fname; 
+					     checkpoint_mode = "commit_same")
     mskMJD_fpi = (mjd_list_fpi .== mjd)
     mskMJD_obj = (mjd_list_wavecal .== mjd)
-    if (!isnothing(night_linParams_dict[mjd])) & (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+    
+    if isnothing(wavecalNightAve_fname)
+        @warn "Could not find nightly average wave soln at $(wavecalNightAve_fname)"
+    elseif (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+
+        f = h5open(wavecalNightAve_fname, "r")
+        curr_best_wave_type = read(f["best_wave_type"])
+	curr_linParams = read(f["$(curr_best_wave_type)/nightAve_linParams"])
+	curr_nlParams = read(f["$(curr_best_wave_type)/nightAve_nlParams"])
+	close(f)
+
         # using FPI exposures to measure high-precision nightly wavelength solution
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a[mskMJD_fpi], night_linParams_dict[mjd], night_nlParams_dict[mjd], cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, checkpoint_mode = checkpoint_mode)
+            all1DfpiPeaks_a[mskMJD_fpi], curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, checkpoint_mode = checkpoint_mode)
+
+        f = h5open(wavecalNightAve_fname, "r+")
+	if haskey(f, "best_wave_type")
+            delete_object(f, "best_wave_type")
+        end
+
+	curr_best_wave_type = "fpi"
+	f["best_wave_type"] = curr_best_wave_type
+	f["$(curr_best_wave_type)/used_fnames"] = all1DfpiPeaks_a[mskMJD_fpi]
+	f["$(curr_best_wave_type)/nightAve_wave_soln"] = night_wave_soln
+	f["$(curr_best_wave_type)/nightAve_nlParams"] = night_nlParams
+	f["$(curr_best_wave_type)/nightAve_linParams"] = night_linParams
+	close(f)
 
         # using skylines to measure dither offsets from FPI-defined wavelength solution
         get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(

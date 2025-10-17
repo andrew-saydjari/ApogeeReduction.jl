@@ -475,7 +475,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, checkpoint_mode = "commit_same")
+function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same", outdir = "../outdir")
     # might need to add in telluric div functionality here?
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     if check_file(outname, mode = checkpoint_mode)
@@ -485,6 +485,9 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     mjd_int = parse(Int, mjd)
+
+    backupWave_fname = joinpath(
+        outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
 
     # could shift this to a preallocation step
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
@@ -530,9 +533,21 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
 	    end
         end
     end
+
     if !found_soln
+        if !isfile(backupWave_fname)
+	    curr_best_wave_type = "rough"
+            backupWaveSoln = nothing
+	    backupWave_fname = nothing
+        else
+            f = h5open(backupWave_fname, "r")
+            curr_best_wave_type = read(f["best_wave_type"])
+	    backupWaveSoln = read(f["$(curr_best_wave_type)/nightAve_wave_soln"])
+	    close(f)
+        end
+
         #this is not a great global fallback, but it works so we get something to look at
-        if isnothing(backupWaveSoln) || ((!all(isfinite.(backupWaveSoln[mjd_int]))) | isnothing(backupWaveSoln[mjd_int]))
+        if isnothing(backupWave_fname) || (!all(isfinite.(backupWaveSoln)))
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
@@ -542,10 +557,10 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
             flush(stdout)
             wavecal_type = "error_fixed_fallback"
         else
-            chipWaveSoln = backupWaveSoln[mjd_int]
-            println("No wavecal found for $(fname), using nightly average as fallback")
+            chipWaveSoln = backupWaveSoln
+            println("No wavecal found for $(fname), using $(curr_best_wave_type) nightly average as fallback")
             flush(stdout)
-            wavecal_type = "error_night_ave_fallback"
+	    wavecal_type = "error_night_ave_$(curr_best_wave_type)"
         end
     end
 
@@ -664,7 +679,7 @@ function process_1D(fname;
         replace(replace(fname, "ar2D" => "ar1D"), "apred" => "apredrelflux")
     end
 
-    if !check_file(outfname, mode = checkpoint_mode)
+    if check_file(outfname, mode = checkpoint_mode)
         return true
     end
 
