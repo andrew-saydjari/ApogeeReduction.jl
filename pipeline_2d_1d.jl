@@ -279,13 +279,13 @@ end
     plot_path = joinpath(parg["outdir"], "plots/"),
     checkpoint_mode = parg["checkpoint_mode"]
 )
-# if parg["doUncals"]
-#     desc = "Extracting 2D to 1D (uncals):"
-#     @showprogress desc=desc pmap(process_1D_wrapper, all2D)
-# end
-# all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
-# desc = "Extracting 2Dcal to 1Dcal:"
-# @showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
+if parg["doUncals"]
+    desc = "Extracting 2D to 1D (uncals):"
+    @showprogress desc=desc pmap(process_1D_wrapper, all2D)
+end
+all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
+desc = "Extracting 2Dcal to 1Dcal:"
+@showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
 
 ### Only do the wavelength solution if we are relFluxing
 if parg["relFlux"]
@@ -411,27 +411,15 @@ if parg["relFlux"]
     sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
     sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
 
-    @everywhere outname = joinpath(
-        parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_$(parg["runname"])_dict.jld2")
-    if !check_file(outname, mode = parg["checkpoint_mode"])
-        desc = "Skyline medwave/skyline dither: "
-        @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
-            mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
-        pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
-
-        night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
-        night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
-        night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
-
-        mkpath(dirname(outname))
-        safe_jldsave(outname, night_wave_soln_dict = night_wave_soln_dict,
-            night_linParams_dict = night_linParams_dict,
-            night_nlParams_dict = night_nlParams_dict, no_metadata = true)
-    end
-    @everywhere begin
-        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(
-            outname, "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
-    end
+    desc = "Skyline medwave/skyline dither: "
+    @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
+        parg["tele"], mjd, mjd_list_wavecal, all1DObjectWavecal, 
+	all1DObjectSkyPeaks, parg["checkpoint_mode"]; outdir = parg["outdir"])
+    wavecalNightAve_fnames = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
+    
+    sendto(workers(), wavecalNightAve_fnames = wavecalNightAve_fnames)
+    sendto(workers(), unique_mjds = unique_mjds)
+    unique_mjd_inds = collect(1:size(unique_mjds,1))
 
     # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
     if size(all1DFPI, 1) > 0
@@ -440,10 +428,10 @@ if parg["relFlux"]
         sendto(workers(), mjd_list_fpi = mjd_list_fpi)
         sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
         sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(
-            mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
-            night_linParams_dict, night_nlParams_dict, checkpoint_mode = parg["checkpoint_mode"])
-        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
+        @everywhere fpi_medwavecal_skyline_dither_partial(mjd_ind) = fpi_medwavecal_skyline_dither(
+            unique_mjds[mjd_ind], mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
+            wavecalNightAve_fnames[mjd_ind], checkpoint_mode = parg["checkpoint_mode"])
+        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
     end
 
     ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
@@ -451,8 +439,8 @@ if parg["relFlux"]
     ## combine chips for single exposure onto loguniform wavelength grid
     ## pushing off the question of dither combinations for now (to apMADGICS stage)
     @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
-        fname, roughwave_dict, backupWaveSoln = night_wave_soln_dict,
-        checkpoint_mode = parg["checkpoint_mode"])
+        fname, roughwave_dict, 
+        checkpoint_mode = parg["checkpoint_mode"], outdir = parg["outdir"])
     if parg["doUncals"]
         all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
         desc = "Reinterp exposure spectra (uncals):"
