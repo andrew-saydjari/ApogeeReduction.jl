@@ -31,6 +31,11 @@ function returnWeights_inv(obsCoordall::AbstractVector, obsBitMsk::Vector{Int},
     end
     diffwav = diff(obsCoordall[maximum([1, (cindx - 1)]):minimum([(cindx + 1), obslen])])
     diffpixind = diff(pixindx[maximum([1, (cindx - 1)]):minimum([(cindx + 1), obslen])])
+    
+    if length(diffwav) == 0 || length(diffpixind) == 0
+        return zeros(Int, 2 * kernsize), NaN * ones(2 * kernsize)
+    end
+    
     pscale = minimum(abs.(diffwav ./ diffpixind))
     offset = (obsCoordall[cindx] .- targVal) / pscale
     cbit = obsBitMsk[cindx]
