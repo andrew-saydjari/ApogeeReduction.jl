@@ -86,6 +86,6 @@ function get_fps_plate_divide(tele)
     if (tele == "apo")
         return 59423
     elseif (tele == "lco")
-        return 59810 # still need to confirm this
+        return 59808
     end
 end
