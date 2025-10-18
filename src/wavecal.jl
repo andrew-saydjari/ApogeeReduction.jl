@@ -1138,32 +1138,42 @@ function comb_exp_get_and_save_fpi_wavecal(
             bad_fibers = findall(bad_fibers)
 
             for j in 1:size(bad_fibers, 1)
-                nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
-                nearest_inds = good_fibers[nearest_inds]
-                param_slopes = (diff(linParams[nearest_inds, :], dims = 1))[1, :] ./
-                               (nearest_inds[2] - nearest_inds[1])
-                linParams[bad_fibers[j], :] .= linParams[nearest_inds[1], :] .+
-                                               param_slopes .* (bad_fibers[j] - nearest_inds[1])
-                #for the linear 0th order term, measure change
-                #from the skyline/initial solution and use that 
+                if length(good_fibers) >= 2
+                    nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
+                    nearest_inds = good_fibers[nearest_inds]
+                    param_slopes = (diff(linParams[nearest_inds, :], dims = 1))[1, :] ./
+                                   (nearest_inds[2] - nearest_inds[1])
+                    linParams[bad_fibers[j], :] .= linParams[nearest_inds[1], :] .+
+                                                   param_slopes .* (bad_fibers[j] - nearest_inds[1])
+                    
+                    #for the linear 0th order term, measure change
+                    #from the skyline/initial solution and use that 
+                    change = diff(linParams[nearest_inds, 1] .- initial_linParams[nearest_inds, 1])[1] ./
+                             (nearest_inds[2] - nearest_inds[1])
 
-                change = diff(linParams[nearest_inds, 1] .- initial_linParams[nearest_inds, 1])[1] ./
-                         (nearest_inds[2] - nearest_inds[1])
+                    linParams[bad_fibers[j], 1] = initial_linParams[bad_fibers[j], 1] .+
+                                                  (linParams[nearest_inds[1], 1] .-
+                                                   initial_linParams[nearest_inds[1], 1]) .+
+                                                  change .* (bad_fibers[j] - nearest_inds[1])
 
-                linParams[bad_fibers[j], 1] = initial_linParams[bad_fibers[j], 1] .+
-                                              (linParams[nearest_inds[1], 1] .-
-                                               initial_linParams[nearest_inds[1], 1]) .+
-                                              change .* (bad_fibers[j] - nearest_inds[1])
-
-                param_slopes = (diff(nlParams[nearest_inds, :], dims = 1))[1, :] ./
-                               (nearest_inds[2] - nearest_inds[1])
-                nlParams[bad_fibers[j], :] .= nlParams[nearest_inds[1], :] .+
-                                              param_slopes .* (bad_fibers[j] - nearest_inds[1])
-
-                param_slopes = (diff(ditherParams[nearest_inds, :], dims = 1))[1, :] ./
-                               (nearest_inds[2] - nearest_inds[1])
-                ditherParams[bad_fibers[j], :] .= ditherParams[nearest_inds[1], :] .+
+                    param_slopes = (diff(nlParams[nearest_inds, :], dims = 1))[1, :] ./
+                                   (nearest_inds[2] - nearest_inds[1])
+                    nlParams[bad_fibers[j], :] .= nlParams[nearest_inds[1], :] .+
                                                   param_slopes .* (bad_fibers[j] - nearest_inds[1])
+                    
+                    param_slopes = (diff(ditherParams[nearest_inds, :], dims = 1))[1, :] ./
+                                   (nearest_inds[2] - nearest_inds[1])
+                    ditherParams[bad_fibers[j], :] .= ditherParams[nearest_inds[1], :] .+
+                                                      param_slopes .* (bad_fibers[j] - nearest_inds[1])
+                elseif length(good_fibers) == 1
+                    # If only one good fiber, just copy its parameters
+                    linParams[bad_fibers[j], :] .= linParams[good_fibers[1], :]
+                    nlParams[bad_fibers[j], :] .= nlParams[good_fibers[1], :]
+                    ditherParams[bad_fibers[j], :] .= ditherParams[good_fibers[1], :]
+                else
+                    # If no good fibers, keep the initial parameters (already set)
+                    continue
+                end
             end
         end
 
