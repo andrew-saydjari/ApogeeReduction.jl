@@ -438,7 +438,7 @@ if parg["relFlux"]
         sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
         @everywhere fpi_medwavecal_skyline_dither_partial(mjd_ind) = fpi_medwavecal_skyline_dither(
             unique_mjds[mjd_ind], mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
-            wavecalNightAve_fnames[mjd_ind], checkpoint_mode = parg["checkpoint_mode"])
+            wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"])
         @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
     end
 

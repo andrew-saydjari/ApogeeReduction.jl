@@ -752,8 +752,8 @@ end
 # FPI line wavecal
 function comb_exp_get_and_save_fpi_wavecal(
         fname_list, initial_linParams, initial_nlParams;
-        cporder = 1, wporder = 4, dporder = 2, verbose = true,
-        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3, checkpoint_mode = "commit_same")
+        cporder = 1, wporder = 4, dporder = 2,
+        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3, verbose = true, checkpoint_mode = "commit_same")
     n_fnames = size(fname_list, 1)
     fname = fname_list[1]
     tele, mjd, expid = split(fname, "_")[(end - 4):(end - 2)]
@@ -1712,6 +1712,7 @@ end
 function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, 
 					     all1DfpiPeaks_a, all1DObjectSkyPeaks,
 					     wavecalNightAve_fname; 
+                         verbose = true,
 					     checkpoint_mode = "commit_same")
     mskMJD_fpi = (mjd_list_fpi .== mjd)
     mskMJD_obj = (mjd_list_wavecal .== mjd)
@@ -1728,7 +1729,7 @@ function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
 
         # using FPI exposures to measure high-precision nightly wavelength solution
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a[mskMJD_fpi], curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, checkpoint_mode = checkpoint_mode)
+            all1DfpiPeaks_a[mskMJD_fpi], curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, verbose = verbose, checkpoint_mode = checkpoint_mode)
 
         f = h5open(wavecalNightAve_fname, "r+")
 	if haskey(f, "best_wave_type")
