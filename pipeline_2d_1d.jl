@@ -402,7 +402,7 @@ if parg["relFlux"]
     all1DObjectWavecal = @showprogress desc=desc pmap(
         get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
     good_fnames = .!isnothing.(all1DObjectWavecal)
-    all1DObjectWavecal = all1DObjectWavecal[good_fnames]
+    all1DObjectWavecal = convert(Vector{String}, all1DObjectWavecal[good_fnames])
     all1DObjectSkyPeaks = all1DObjectSkyPeaks[good_fnames]
 
     # putting this parallelized within each mjd is really not good in the bulk run context
