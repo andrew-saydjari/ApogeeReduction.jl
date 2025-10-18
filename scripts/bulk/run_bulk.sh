@@ -106,6 +106,7 @@ fi
 
 print_elapsed_time "Building Runlist"
 set +e  # Temporarily disable exit on error
+rm -f $runlist
 julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
 exit_code=$?
 set -e  # Re-enable exit on error
