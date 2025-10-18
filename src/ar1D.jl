@@ -338,44 +338,49 @@ function get_fibTargDict(f, tele, mjd, dfindx)
     fibtargDict = if exposure_info.image_type != "object"
         Dict(1:300 .=> "cal")
     else
-        try
-            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
-            # normalizes all column names to lowercase
-            rename!(df_fib, lowercase.(names(df_fib)))
-
-            # limit to only the APOGEE fiber/hole information
-            df_fib = if configIdCol == "config_id"
-                df_fib[df_fib[!, "fiber_type"].=="APOGEE",:]
-            else
-                df_fib
-            end
-
-            fiber_types = map(df_fib[!, "category"]) do t
-                if t in keys(fiber_type_names)
-                    fiber_type_names[t]
-                else
-                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(config_id): $(repr(t))"
-                    "fiberTypeFail"
-                end
-            end
-            fibernumvec = df_fib[!, "fiber_id"]
-
-            #this is a Hack and Andy Casey will replace this very very soon
-            msknofiberdefaults = (fibernumvec .!= -1)
-            fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
-            try
-                fiber_types_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_types[msknofiberdefaults]
-            catch e
-                @warn "Problem with getting fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
-                show(e)
-                fiber_types_full .= "fiberTypeFail"
-            end
-            Dict(1:N_FIBERS .=> fiber_types_full)
-        catch e
-            rethrow(e)
-            @warn "Failed to get fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
-            show(e)
+        # Check if config_id is -1, which should not exist in the HDF5 file
+        if config_id == -1
+            @warn "config_id is -1 for exposure $(dfindx) in $(tele)/$(mjd). This should have been filtered out as flagged_bad=1. Returning fiberTypeFail for all fibers."
             Dict(1:300 .=> "fiberTypeFail")
+        else
+            try
+                df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
+                # normalizes all column names to lowercase
+                rename!(df_fib, lowercase.(names(df_fib)))
+
+                # limit to only the APOGEE fiber/hole information
+                df_fib = if configIdCol == "config_id"
+                    df_fib[df_fib[!, "fiber_type"].=="APOGEE",:]
+                else
+                    df_fib
+                end
+
+                fiber_types = map(df_fib[!, "category"]) do t
+                    if t in keys(fiber_type_names)
+                        fiber_type_names[t]
+                    else
+                        # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(config_id): $(repr(t))"
+                        "fiberTypeFail"
+                    end
+                end
+                fibernumvec = df_fib[!, "fiber_id"]
+
+                #this is a Hack and Andy Casey will replace this very very soon
+                msknofiberdefaults = (fibernumvec .!= -1)
+                fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
+                try
+                    fiber_types_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_types[msknofiberdefaults]
+                catch e
+                    @warn "Problem with getting fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
+                    show(e)
+                    fiber_types_full .= "fiberTypeFail"
+                end
+                Dict(1:N_FIBERS .=> fiber_types_full)
+            catch e
+                @warn "Failed to get fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
+                show(e)
+                Dict(1:300 .=> "fiberTypeFail")
+            end
         end
     end
 
