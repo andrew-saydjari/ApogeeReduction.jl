@@ -302,6 +302,7 @@ if parg["relFlux"]
     list1DexpObject = []
     list1DexpFPI = []
     list1DexpArclamp = []
+    # this needs to be parallelized
     for mjd in unique_mjds
         df = read_almanac_exp_df(
             joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
