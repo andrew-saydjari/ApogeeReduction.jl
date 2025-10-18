@@ -149,30 +149,32 @@ end
 @time "include makie_plotutils" @everywhere include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
 @time "Generating file lists" begin
-    tele_list = if parg["runlist"] != ""
-        load(parg["runlist"], "tele")
-    else
-        [parg["tele"]]
-    end
-    # wow this is really not robust, you HAVE to pass a runlist and a tele on the command line
-    unique_teles = unique(tele_list)
-    mskTele = tele_list .== parg["tele"]
+    # Load everywhere so we can make list in parallel
+    @everywhere begin
+        tele_list = if parg["runlist"] != ""
+            load(parg["runlist"], "tele")
+        else
+            [parg["tele"]]
+        end
+        # wow this is really not robust, you HAVE to pass a runlist and a tele on the command line
+        unique_teles = unique(tele_list)
+        mskTele = tele_list .== parg["tele"]
 
-    mjd_list = if parg["runlist"] != ""
-        load(parg["runlist"], "mjd")
-    else
-        [parg["mjd"]]
-    end
-    unique_mjds = unique(mjd_list[mskTele])
+        mjd_list = if parg["runlist"] != ""
+            load(parg["runlist"], "mjd")
+        else
+            [parg["mjd"]]
+        end
+        unique_mjds = unique(mjd_list[mskTele])
 
-    dfindx_list = if parg["runlist"] != ""
-        load(parg["runlist"], "dfindx")
-    else
-        [parg["dfindx"]]
+        dfindx_list = if parg["runlist"] != ""
+            load(parg["runlist"], "dfindx")
+        else
+            [parg["dfindx"]]
+        end
     end
 
-    list2Dexp = []
-    for mjd in unique_mjds
+    @everywhere function get_2d_names_for_mjd(mjd)
         df = read_almanac_exp_df(
             joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
         function get_2d_name_partial(expid)
@@ -180,9 +182,10 @@ end
             replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
         end
         mskMJD = (mjd_list .== mjd) .& mskTele
-        local2D = get_2d_name_partial.(dfindx_list[mskMJD])
-        push!(list2Dexp, local2D)
+        return get_2d_name_partial.(dfindx_list[mskMJD])
     end
+    
+    list2Dexp = pmap(get_2d_names_for_mjd, unique_mjds)
     all2Da = vcat(list2Dexp...)
 
     all2Dperchip = []
@@ -258,13 +261,17 @@ end
 # that gives us the trace of a fiber as a funciton of time or something
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
-@time "Finding traceMain files" for mjd in unique_mjds # eventually this will be more like "making traceMain files"
-    for chip in CHIP_LIST
-        create_traceMain(mjd,chip,trace_type_order;
-                         tele = parg["tele"],
-                         outdir = parg["outdir"],
-                         checkpoint_mode = parg["checkpoint_mode"])
-    end
+@time "Finding traceMain files" begin
+    # Create all (mjd, chip) combinations for parallel processing
+    mjd_chip_combinations = [(mjd, chip) for mjd in unique_mjds for chip in CHIP_LIST]
+    
+    @everywhere create_traceMain_wrapper(mjd_chip) = create_traceMain(
+        mjd_chip[1], mjd_chip[2], trace_type_order;
+        tele = parg["tele"],
+        outdir = parg["outdir"],
+        checkpoint_mode = parg["checkpoint_mode"])
+    
+    pmap(create_traceMain_wrapper, mjd_chip_combinations)
 end
 flush(stdout);
 
