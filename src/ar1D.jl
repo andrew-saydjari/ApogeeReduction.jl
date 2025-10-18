@@ -553,8 +553,10 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
                     1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
             end
-            println("No wavecal found for $(fname), using rough linear fallback")
-            flush(stdout)
+            if !(image_type in ["dark", "internalflat", "quartzflat", "domeflat"])
+                println("No wavecal found for $(fname), using rough linear fallback")
+                flush(stdout)
+            end
             wavecal_type = "error_fixed_fallback"
         else
             chipWaveSoln = backupWaveSoln
@@ -629,12 +631,20 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
 
         #right now, only works for a single exposure
         if length(wave_fiber) > 1
-            outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
-                wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-            outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
-                wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-            outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
-                wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+            # Check if wave_fiber has unique, sorted values
+            if length(unique(wave_fiber)) != length(wave_fiber) || !issorted(wave_fiber)
+                @warn "Non-unique or unsorted wavelengths for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Cannot interpolate, filling trace coordinates with NaN."
+                outTraceCoords[:, fiberindx, 1] .= NaN
+                outTraceCoords[:, fiberindx, 2] .= NaN
+                outTraceCoords[:, fiberindx, 3] .= NaN
+            else
+                outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
+                    wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+                outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
+                    wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+                outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
+                    wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+            end
         else
             # If no good pixels or only 1 good pixel for this fiber, fill with NaN
             if length(wave_fiber) == 0
