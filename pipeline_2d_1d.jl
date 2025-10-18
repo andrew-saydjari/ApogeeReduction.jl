@@ -266,6 +266,7 @@ end
                          checkpoint_mode = parg["checkpoint_mode"])
     end
 end
+flush(stdout);
 
 # extract the 2D to 1D
 @everywhere process_1D_wrapper(fname) = process_1D(
