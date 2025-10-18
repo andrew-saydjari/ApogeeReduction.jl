@@ -287,13 +287,13 @@ flush(stdout);
     plot_path = joinpath(parg["outdir"], "plots/"),
     checkpoint_mode = parg["checkpoint_mode"]
 )
-if parg["doUncals"]
-    desc = "Extracting 2D to 1D (uncals):"
-    @showprogress desc=desc pmap(process_1D_wrapper, all2D)
-end
-all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
-desc = "Extracting 2Dcal to 1Dcal:"
-@showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
+# if parg["doUncals"]
+#     desc = "Extracting 2D to 1D (uncals):"
+#     @showprogress desc=desc pmap(process_1D_wrapper, all2D)
+# end
+# all2Dcal = replace.(all2D, "ar2D" => "ar2Dcal")
+# desc = "Extracting 2Dcal to 1Dcal:"
+# @showprogress desc=desc pmap(process_1D_wrapper, all2Dcal)
 
 ### Only do the wavelength solution if we are relFluxing
 if parg["relFlux"]
