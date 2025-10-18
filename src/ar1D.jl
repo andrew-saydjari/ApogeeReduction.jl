@@ -628,12 +628,20 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         cntvec[:, fiberindx] .+= msk_inter
 
         #right now, only works for a single exposure
-        outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
-            wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-        outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
-            wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-        outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
-            wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        if length(wave_fiber) > 0
+            outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
+                wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+            outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
+                wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+            outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
+                wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        else
+            # If no good pixels for this fiber, fill with NaN
+            @warn "No good pixels found for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Filling trace coordinates with NaN."
+            outTraceCoords[:, fiberindx, 1] .= NaN
+            outTraceCoords[:, fiberindx, 2] .= NaN
+            outTraceCoords[:, fiberindx, 3] .= NaN
+        end
 
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)

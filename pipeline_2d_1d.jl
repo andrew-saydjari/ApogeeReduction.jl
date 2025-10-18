@@ -366,83 +366,83 @@ if parg["relFlux"]
         df_sky_lines.linindx = 1:size(df_sky_lines, 1)
     end
 
-    ## get sky line peaks
-    @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
-        fname, roughwave_dict, df_sky_lines, checkpoint_mode = parg["checkpoint_mode"])
-    desc = "Fitting sky line peaks: "
-    @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
+    # ## get sky line peaks
+    # @everywhere get_and_save_sky_peaks_partial(fname) = get_and_save_sky_peaks(
+    #     fname, roughwave_dict, df_sky_lines, checkpoint_mode = parg["checkpoint_mode"])
+    # desc = "Fitting sky line peaks: "
+    # @showprogress desc=desc pmap(get_and_save_sky_peaks_partial, all1DObject)
 
-    # get arclamp peaks
-    if size(all1DArclamp, 1) > 0
-        ## get (non-fpi) arclamp peaks
-        desc = "Fitting arclamp peaks: "
-        @everywhere get_and_save_arclamp_peaks_partial(fname) = get_and_save_arclamp_peaks(
-            fname, checkpoint_mode = parg["checkpoint_mode"])
-        @showprogress desc=desc pmap(get_and_save_arclamp_peaks_partial, all1DArclamp)
-    end
+    # # get arclamp peaks
+    # if size(all1DArclamp, 1) > 0
+    #     ## get (non-fpi) arclamp peaks
+    #     desc = "Fitting arclamp peaks: "
+    #     @everywhere get_and_save_arclamp_peaks_partial(fname) = get_and_save_arclamp_peaks(
+    #         fname, checkpoint_mode = parg["checkpoint_mode"])
+    #     @showprogress desc=desc pmap(get_and_save_arclamp_peaks_partial, all1DArclamp)
+    # end
 
-    all1DfpiPeaks_a = replace.(
-        replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
-    all1DfpiPeaks = if size(all1DFPI, 1) > 0
-        ## get FPI peaks
-        desc = "Fitting FPI peaks: "
-        @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(
-            fname, data_path = joinpath(proj_path, "data"),
-            checkpoint_mode = parg["checkpoint_mode"])
-        @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
-    else
-        []
-    end
-    all1DfpiPeaks_out = reshape(all1DfpiPeaks, length(all1DfpiPeaks_a), length(CHIP_LIST))
-    mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
-    println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
+    # all1DfpiPeaks_a = replace.(
+    #     replace.(all1DFPIa, "ar1Dcal" => "fpiPeaks"), "ar1D" => "fpiPeaks")
+    # all1DfpiPeaks = if size(all1DFPI, 1) > 0
+    #     ## get FPI peaks
+    #     desc = "Fitting FPI peaks: "
+    #     @everywhere get_and_save_fpi_peaks_partial(fname) = get_and_save_fpi_peaks(
+    #         fname, data_path = joinpath(proj_path, "data"),
+    #         checkpoint_mode = parg["checkpoint_mode"])
+    #     @showprogress desc=desc pmap(get_and_save_fpi_peaks_partial, all1DFPI)
+    # else
+    #     []
+    # end
+    # all1DfpiPeaks_out = reshape(all1DfpiPeaks, length(all1DfpiPeaks_a), length(CHIP_LIST))
+    # mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
+    # println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
-    ## get wavecal from sky line peaks
-    #only need to give one chip's list because internal
-    #logic handles finding other chips when ingesting data
-    #Andrew says that that is a bit worrisome and would should revisit that logic
-    all1DObjectSkyPeaks = replace.(
-        replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
-    desc = "Skyline wavelength solutions:"
-    @everywhere get_and_save_sky_wavecal_partial(fname) = get_and_save_sky_wavecal(
-        fname, checkpoint_mode = parg["checkpoint_mode"])
-    all1DObjectWavecal = @showprogress desc=desc pmap(
-        get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
-    good_fnames = .!isnothing.(all1DObjectWavecal)
-    all1DObjectWavecal = convert(Vector{String}, all1DObjectWavecal[good_fnames])
-    all1DObjectSkyPeaks = all1DObjectSkyPeaks[good_fnames]
+    # ## get wavecal from sky line peaks
+    # #only need to give one chip's list because internal
+    # #logic handles finding other chips when ingesting data
+    # #Andrew says that that is a bit worrisome and would should revisit that logic
+    # all1DObjectSkyPeaks = replace.(
+    #     replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
+    # desc = "Skyline wavelength solutions:"
+    # @everywhere get_and_save_sky_wavecal_partial(fname) = get_and_save_sky_wavecal(
+    #     fname, checkpoint_mode = parg["checkpoint_mode"])
+    # all1DObjectWavecal = @showprogress desc=desc pmap(
+    #     get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
+    # good_fnames = .!isnothing.(all1DObjectWavecal)
+    # all1DObjectWavecal = convert(Vector{String}, all1DObjectWavecal[good_fnames])
+    # all1DObjectSkyPeaks = all1DObjectSkyPeaks[good_fnames]
 
-    # putting this parallelized within each mjd is really not good in the bulk run context
-    mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
+    # # putting this parallelized within each mjd is really not good in the bulk run context
+    # mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
 
-    sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
-    sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
-    sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+    # sendto(workers(), mjd_list_wavecal = mjd_list_wavecal)
+    # sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
+    # sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
 
-    desc = "Skyline medwave/skyline dither: "
-    @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
-        parg["tele"], mjd, mjd_list_wavecal, all1DObjectWavecal, 
-	all1DObjectSkyPeaks, parg["checkpoint_mode"]; outdir = parg["outdir"])
-    wavecalNightAve_fnames = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
+    # desc = "Skyline medwave/skyline dither: "
+    # @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
+    #     parg["tele"], mjd, mjd_list_wavecal, all1DObjectWavecal, 
+	# all1DObjectSkyPeaks, parg["checkpoint_mode"]; outdir = parg["outdir"])
+    # wavecalNightAve_fnames = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
     
-    sendto(workers(), wavecalNightAve_fnames = wavecalNightAve_fnames)
-    sendto(workers(), unique_mjds = unique_mjds)
-    unique_mjd_inds = collect(1:size(unique_mjds,1))
+    # sendto(workers(), wavecalNightAve_fnames = wavecalNightAve_fnames)
+    # sendto(workers(), unique_mjds = unique_mjds)
+    # unique_mjd_inds = collect(1:size(unique_mjds,1))
 
-    # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
-    if size(all1DFPI, 1) > 0
-        mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
-        desc = "FPI medwave/skyline dither: "
-        sendto(workers(), mjd_list_fpi = mjd_list_fpi)
-        sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
-        sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-        @everywhere fpi_medwavecal_skyline_dither_partial(mjd_ind) = fpi_medwavecal_skyline_dither(
-            unique_mjds[mjd_ind], mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
-            wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"])
-        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
-    end
+    # # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
+    # if size(all1DFPI, 1) > 0
+    #     mjd_list_fpi = map(x -> parse(Int, split(basename(x), "_")[3]), all1DfpiPeaks_a)
+    #     desc = "FPI medwave/skyline dither: "
+    #     sendto(workers(), mjd_list_fpi = mjd_list_fpi)
+    #     sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
+    #     sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+    #     @everywhere fpi_medwavecal_skyline_dither_partial(mjd_ind) = fpi_medwavecal_skyline_dither(
+    #         unique_mjds[mjd_ind], mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
+    #         wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"])
+    #     @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
+    # end
 
-    ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
+    # ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 
     ## combine chips for single exposure onto loguniform wavelength grid
     ## pushing off the question of dither combinations for now (to apMADGICS stage)
