@@ -628,7 +628,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         cntvec[:, fiberindx] .+= msk_inter
 
         #right now, only works for a single exposure
-        if length(wave_fiber) > 0
+        if length(wave_fiber) > 1
             outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
                 wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
             outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
@@ -636,8 +636,12 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
             outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
                 wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
         else
-            # If no good pixels for this fiber, fill with NaN
-            @warn "No good pixels found for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Filling trace coordinates with NaN."
+            # If no good pixels or only 1 good pixel for this fiber, fill with NaN
+            if length(wave_fiber) == 0
+                @warn "No good pixels found for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Filling trace coordinates with NaN."
+            else
+                @warn "Only 1 good pixel found for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Cannot interpolate, filling trace coordinates with NaN."
+            end
             outTraceCoords[:, fiberindx, 1] .= NaN
             outTraceCoords[:, fiberindx, 2] .= NaN
             outTraceCoords[:, fiberindx, 3] .= NaN
