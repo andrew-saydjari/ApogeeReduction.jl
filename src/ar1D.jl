@@ -559,15 +559,17 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
                     1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
             end
             if !(image_type in ["dark", "internalflat", "quartzflat", "domeflat"])
-                println("No wavecal found for $(fname), using rough linear fallback")
+                println("No wavecal found for $(fname), using rough linear fallback as fallback")
                 flush(stdout)
             end
             wavecal_type = "error_fixed_fallback"
         else
             chipWaveSoln = backupWaveSoln
-            println("No wavecal found for $(fname), using $(curr_best_wave_type) nightly average as fallback")
+            if !(image_type in ["dark", "internalflat", "quartzflat", "domeflat"])
+                println("No wavecal found for $(fname), using $(curr_best_wave_type) nightly average as fallback")
+            end
             flush(stdout)
-	    wavecal_type = "error_night_ave_$(curr_best_wave_type)"
+	        wavecal_type = "error_night_ave_$(curr_best_wave_type)"
         end
     end
 
