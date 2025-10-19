@@ -42,7 +42,7 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-almanac_version="0.2.10"
+almanac_version="0.3.4"
 juliaup add $julia_version
 
 # ARGUMENTS

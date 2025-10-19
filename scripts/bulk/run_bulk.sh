@@ -44,7 +44,7 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-almanac_version="0.2.10"
+almanac_version="0.3.4"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -118,37 +118,37 @@ elif [ $exit_code -ne 0 ]; then
     exit $exit_code
 fi
 
-# for tele in ${tele_list[@]}
-# do
-#     print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
-#     ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-#     julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
-# done
+for tele in ${tele_list[@]}
+do
+    print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
+    ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
+    julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
+done
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
     ### Traces and Refluxing
-    # would really like to combine the different telescopes here
-    # for flat_type in ${flat_types[@]}
-    # do
-    #     flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
-    #     print_elapsed_time "Making runlist for $flat_type Flats"
-    #     julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --output $flatrunlist --flat_type $flat_type
+    would really like to combine the different telescopes here
+    for flat_type in ${flat_types[@]}
+    do
+        flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
+        print_elapsed_time "Making runlist for $flat_type Flats"
+        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_runlist_fiber_flats.jl --almanac_file $almanac_file --output $flatrunlist --flat_type $flat_type
 
-    #     for tele in ${tele_list[@]}
-    #     do
-    #         print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
-    #         mkdir -p ${outdir}${flat_type}_flats
-    #         julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
+        for tele in ${tele_list[@]}
+        do
+            print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
+            mkdir -p ${outdir}${flat_type}_flats
+            julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
 
-    #         print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
-    #         mkdir -p ${outdir}/apredrelflux
-    #         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode $checkpoint_mode
-    #     done
+            print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
+            mkdir -p ${outdir}/apredrelflux
+            julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode $checkpoint_mode
+        done
 
-    #     print_elapsed_time "Making relFlux for $flat_type Flats"
-    #     julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname   
-    # done
+        print_elapsed_time "Making relFlux for $flat_type Flats"
+        julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_relFlux.jl --trace_dir ${outdir} --runlist $flatrunlist --runname $runname   
+    done
 
     ## 2D->1D
     for tele in ${tele_list[@]}
