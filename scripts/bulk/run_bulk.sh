@@ -44,6 +44,7 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
+almanac_version="0.3.4"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -98,16 +99,14 @@ fi
 # Only run almanac if file doesn't exist or clobber mode is true
 if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
-    # activate shared almanac (uv python) environment
-    source /mnt/home/sdssv/uv_env/almanac_v0p2p6/bin/activate 
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-
-    almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+    uvx --from sdss-almanac==$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"
 set +e  # Temporarily disable exit on error
+rm -f $runlist
 julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
 exit_code=$?
 set -e  # Re-enable exit on error
@@ -129,7 +128,7 @@ done
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
     ### Traces and Refluxing
-    # would really like to combine the different telescopes here
+    would really like to combine the different telescopes here
     for flat_type in ${flat_types[@]}
     do
         flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5

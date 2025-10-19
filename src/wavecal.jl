@@ -536,7 +536,14 @@ function get_ave_night_wave_soln(
                     else
                         curr_dither_poly = Polynomial([-all_ditherParams[fibIndx, 1, fname_ind]])
                     end
-                    updated_linParams[fibIndx, :, fname_ind] .= med_wave_poly(curr_dither_poly).coeffs
+		    curr_coeffs = med_wave_poly(curr_dither_poly).coeffs
+		    n_curr_use_coeffs = min(size(curr_coeffs,1),n_lin_coeffs)
+		    if n_curr_use_coeffs == 0
+		        continue
+		    end
+
+		    updated_linParams[fibIndx, :, fname_ind] .= 0
+                    updated_linParams[fibIndx, begin:n_curr_use_coeffs, fname_ind] .= curr_coeffs[begin:n_curr_use_coeffs] 
                 end
             end
             med_linParams .= nanmedian(updated_linParams, 3)[:, :, 1]
@@ -673,17 +680,22 @@ function get_sky_dither_per_fiber(
 
     if size(good_fibers, 1) == 0
         return nothing
+    elseif size(good_fibers, 1) == 1
+        for j in 1:size(bad_fibers, 1)
+            ditherPolyParams[bad_fibers[j], :] .= ditherPolyParams[good_fibers[1], :]
+        end
+    else
+        for j in 1:size(bad_fibers, 1)
+            nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
+            nearest_inds = good_fibers[nearest_inds]
+            param_slopes = (diff(ditherPolyParams[nearest_inds, :], dims = 1))[1, :] ./
+                           (nearest_inds[2] - nearest_inds[1])
+
+            ditherPolyParams[bad_fibers[j], :] .= ditherPolyParams[nearest_inds[1], :] .+
+                                                  param_slopes .* (bad_fibers[j] - nearest_inds[1])
+        end
     end
 
-    for j in 1:size(bad_fibers, 1)
-        nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
-        nearest_inds = good_fibers[nearest_inds]
-        param_slopes = (diff(ditherPolyParams[nearest_inds, :], dims = 1))[1, :] ./
-                       (nearest_inds[2] - nearest_inds[1])
-
-        ditherPolyParams[bad_fibers[j], :] .= ditherPolyParams[nearest_inds[1], :] .+
-                                              param_slopes .* (bad_fibers[j] - nearest_inds[1])
-    end
 
     if return_waveSoln
         chipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
@@ -740,8 +752,8 @@ end
 # FPI line wavecal
 function comb_exp_get_and_save_fpi_wavecal(
         fname_list, initial_linParams, initial_nlParams;
-        cporder = 1, wporder = 4, dporder = 2, verbose = true,
-        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3, checkpoint_mode = "commit_same")
+        cporder = 1, wporder = 4, dporder = 2,
+        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3, verbose = true, checkpoint_mode = "commit_same")
     n_fnames = size(fname_list, 1)
     fname = fname_list[1]
     tele, mjd, expid = split(fname, "_")[(end - 4):(end - 2)]
@@ -899,7 +911,11 @@ function comb_exp_get_and_save_fpi_wavecal(
     fname_ind = 1
     for i in 1:N_FIBERS
         #change wavelength solution to account for first dither offset
-        linParams[i, :] .= Polynomial(linParams[i, :])(dither_poly).coeffs
+
+	curr_coeffs = Polynomial(linParams[i, :])(dither_poly).coeffs
+	n_curr_use_coeffs = min(size(curr_coeffs,1),n_lin_coeffs)
+	linParams[i, :] .= 0
+        linParams[i, begin:n_curr_use_coeffs] .= curr_coeffs[begin:n_curr_use_coeffs]
         for chip in CHIP_LIST
             chipIndx = getChipIndx(chip)
             on_chip = findall((fpi_line_chipInt[:, i] .== chipIndx) .&
@@ -1122,32 +1138,42 @@ function comb_exp_get_and_save_fpi_wavecal(
             bad_fibers = findall(bad_fibers)
 
             for j in 1:size(bad_fibers, 1)
-                nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
-                nearest_inds = good_fibers[nearest_inds]
-                param_slopes = (diff(linParams[nearest_inds, :], dims = 1))[1, :] ./
-                               (nearest_inds[2] - nearest_inds[1])
-                linParams[bad_fibers[j], :] .= linParams[nearest_inds[1], :] .+
-                                               param_slopes .* (bad_fibers[j] - nearest_inds[1])
-                #for the linear 0th order term, measure change
-                #from the skyline/initial solution and use that 
+                if length(good_fibers) >= 2
+                    nearest_inds = sortperm(abs.(bad_fibers[j] .- good_fibers))[[1, 2]]
+                    nearest_inds = good_fibers[nearest_inds]
+                    param_slopes = (diff(linParams[nearest_inds, :], dims = 1))[1, :] ./
+                                   (nearest_inds[2] - nearest_inds[1])
+                    linParams[bad_fibers[j], :] .= linParams[nearest_inds[1], :] .+
+                                                   param_slopes .* (bad_fibers[j] - nearest_inds[1])
+                    
+                    #for the linear 0th order term, measure change
+                    #from the skyline/initial solution and use that 
+                    change = diff(linParams[nearest_inds, 1] .- initial_linParams[nearest_inds, 1])[1] ./
+                             (nearest_inds[2] - nearest_inds[1])
 
-                change = diff(linParams[nearest_inds, 1] .- initial_linParams[nearest_inds, 1])[1] ./
-                         (nearest_inds[2] - nearest_inds[1])
+                    linParams[bad_fibers[j], 1] = initial_linParams[bad_fibers[j], 1] .+
+                                                  (linParams[nearest_inds[1], 1] .-
+                                                   initial_linParams[nearest_inds[1], 1]) .+
+                                                  change .* (bad_fibers[j] - nearest_inds[1])
 
-                linParams[bad_fibers[j], 1] = initial_linParams[bad_fibers[j], 1] .+
-                                              (linParams[nearest_inds[1], 1] .-
-                                               initial_linParams[nearest_inds[1], 1]) .+
-                                              change .* (bad_fibers[j] - nearest_inds[1])
-
-                param_slopes = (diff(nlParams[nearest_inds, :], dims = 1))[1, :] ./
-                               (nearest_inds[2] - nearest_inds[1])
-                nlParams[bad_fibers[j], :] .= nlParams[nearest_inds[1], :] .+
-                                              param_slopes .* (bad_fibers[j] - nearest_inds[1])
-
-                param_slopes = (diff(ditherParams[nearest_inds, :], dims = 1))[1, :] ./
-                               (nearest_inds[2] - nearest_inds[1])
-                ditherParams[bad_fibers[j], :] .= ditherParams[nearest_inds[1], :] .+
+                    param_slopes = (diff(nlParams[nearest_inds, :], dims = 1))[1, :] ./
+                                   (nearest_inds[2] - nearest_inds[1])
+                    nlParams[bad_fibers[j], :] .= nlParams[nearest_inds[1], :] .+
                                                   param_slopes .* (bad_fibers[j] - nearest_inds[1])
+                    
+                    param_slopes = (diff(ditherParams[nearest_inds, :], dims = 1))[1, :] ./
+                                   (nearest_inds[2] - nearest_inds[1])
+                    ditherParams[bad_fibers[j], :] .= ditherParams[nearest_inds[1], :] .+
+                                                      param_slopes .* (bad_fibers[j] - nearest_inds[1])
+                elseif length(good_fibers) == 1
+                    # If only one good fiber, just copy its parameters
+                    linParams[bad_fibers[j], :] .= linParams[good_fibers[1], :]
+                    nlParams[bad_fibers[j], :] .= nlParams[good_fibers[1], :]
+                    ditherParams[bad_fibers[j], :] .= ditherParams[good_fibers[1], :]
+                else
+                    # If no good fibers, keep the initial parameters (already set)
+                    continue
+                end
             end
         end
 
@@ -1645,7 +1671,16 @@ function ingest_fpiLines(fname_list)
 end
 
 ## TODO local parallelization mode (which would also need to pamp inside of sky_wave_plots)
-function skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = "../outdir")
+function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir")
+
+    outname = joinpath(
+        outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
+    
+    if check_file(outname, mode = checkpoint_mode)
+        #then skip making new file
+        return outname
+    end
+
     mskMJD = (mjd_list_wavecal .== mjd)
     if size(all1DObjectWavecal[mskMJD], 1) > 0
         all1DObjectWavecal_mjd = all1DObjectWavecal[mskMJD]
@@ -1667,19 +1702,57 @@ function skyline_medwavecal_skyline_dither(mjd, mjd_list_wavecal, all1DObjectWav
             dirNamePlots = joinpath(outdir, "plots/"),
             plot_fibers = (1, 50, 100, 150, 200, 250, 300),
             plot_pixels = (1, 512, 1024, 1536, 2048))
-        return night_wave_soln, night_linParams, night_nlParams
+
+	    curr_wave_type = "sky"
+        h5open(outname, "w") do f
+            #should include metadata at some point...
+            f["best_wave_type"] = curr_wave_type
+            f["$(curr_wave_type)/used_fnames"] = all1DObjectWavecal_mjd
+            f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
+            f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
+            f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
+        end	
+
+        return outname
     else
-        return nothing, nothing, nothing
+        return nothing
     end    
 end
 
-function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks, night_linParams_dict, night_nlParams_dict; checkpoint_mode = "commit_same")
+function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, 
+					     all1DfpiPeaks_a, all1DObjectSkyPeaks,
+					     wavecalNightAve_fname; 
+                         verbose = true,
+					     checkpoint_mode = "commit_same")
     mskMJD_fpi = (mjd_list_fpi .== mjd)
     mskMJD_obj = (mjd_list_wavecal .== mjd)
-    if (!isnothing(night_linParams_dict[mjd])) & (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+    
+    if isnothing(wavecalNightAve_fname)
+        @warn "Could not find nightly average wave soln at $(wavecalNightAve_fname)"
+    elseif (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+
+        f = h5open(wavecalNightAve_fname, "r")
+        curr_best_wave_type = read(f["best_wave_type"])
+	curr_linParams = read(f["$(curr_best_wave_type)/nightAve_linParams"])
+	curr_nlParams = read(f["$(curr_best_wave_type)/nightAve_nlParams"])
+	close(f)
+
         # using FPI exposures to measure high-precision nightly wavelength solution
         outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a[mskMJD_fpi], night_linParams_dict[mjd], night_nlParams_dict[mjd], cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, checkpoint_mode = checkpoint_mode)
+            all1DfpiPeaks_a[mskMJD_fpi], curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, verbose = verbose, checkpoint_mode = checkpoint_mode)
+
+        f = h5open(wavecalNightAve_fname, "r+")
+	if haskey(f, "best_wave_type")
+            delete_object(f, "best_wave_type")
+        end
+
+	curr_best_wave_type = "fpi"
+	f["best_wave_type"] = curr_best_wave_type
+	f["$(curr_best_wave_type)/used_fnames"] = all1DfpiPeaks_a[mskMJD_fpi]
+	f["$(curr_best_wave_type)/nightAve_wave_soln"] = night_wave_soln
+	f["$(curr_best_wave_type)/nightAve_nlParams"] = night_nlParams
+	f["$(curr_best_wave_type)/nightAve_linParams"] = night_linParams
+	close(f)
 
         # using skylines to measure dither offsets from FPI-defined wavelength solution
         get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
@@ -1708,7 +1781,7 @@ function sky_wave_plots(
     n_nl_coeffs = size(night_nlParams, 2)
     fiber_inds = 1:N_FIBERS
 
-    clims = (1, n_fnames)
+    clims = (1, max(2,n_fnames))
 
     fig = Figure(size = (1200, 400 * n_lin_coeffs), fontsize = 22)
     axis_dict = Dict()
