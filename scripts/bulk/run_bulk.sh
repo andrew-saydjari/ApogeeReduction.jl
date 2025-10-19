@@ -64,7 +64,8 @@ almanac_clobber_mode=${11:-false}
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.h5
-tele_list=("apo" "lco")
+# tele_list=("apo" "lco")
+tele_list=("lco" "apo")
 flat_types=("quartz" "dome")
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}/almanac
