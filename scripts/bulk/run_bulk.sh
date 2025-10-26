@@ -10,7 +10,7 @@
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=16
+#SBATCH --nodes=4
 
 #SBATCH --time=2-00:00
 #SBATCH --job-name=ar_bulk
