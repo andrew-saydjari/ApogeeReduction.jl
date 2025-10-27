@@ -11,6 +11,7 @@
 # ------------------------------------------------------------------------------
 #SBATCH --partition=mem
 #SBATCH --nodes=1
+#SBATCH --nodelist=workermem02
 
 #SBATCH --time=4-00:00
 #SBATCH --job-name=ar_bulk
