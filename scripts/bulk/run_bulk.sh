@@ -6,11 +6,11 @@
 # 60584 60614, 60796 60826
 # constraint="[genoa|icelake|rome]"
 # --qos=preempt
+# --partition=cca
 
 # ------------------------------------------------------------------------------
-#SBATCH --partition=cca
-#SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=8
+#SBATCH --partition=mem
+#SBATCH --nodes=1
 
 #SBATCH --time=2-00:00
 #SBATCH --job-name=ar_bulk
