@@ -10,7 +10,7 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=mem
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 
 #SBATCH --time=4-00:00
 #SBATCH --job-name=ar_bulk
