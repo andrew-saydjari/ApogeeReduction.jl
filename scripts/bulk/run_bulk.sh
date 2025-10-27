@@ -10,9 +10,9 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=mem
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 
-#SBATCH --time=2-00:00
+#SBATCH --time=4-00:00
 #SBATCH --job-name=ar_bulk
 #SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
