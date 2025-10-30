@@ -41,7 +41,9 @@ end
 function summarize_wave_solns(tele_loc,mjd_list,plotdir;
 			      dporder=2)
 
-    fname_loc = joinpath(parg["outdir"], "apred/$(mjd_list[1])/waveCalFPI_$(tele_loc)_$(mjd_list[1])_arclamp.h5") 
+    comp_mjd_ind = 1
+    comp_mjd_ind = size(mjd_list,1)
+    fname_loc = joinpath(parg["outdir"], "apred/$(mjd_list[comp_mjd_ind])/waveCalFPI_$(tele_loc)_$(mjd_list[comp_mjd_ind])_arclamp.h5") 
     linParams = load(fname_loc, "linParams")
     nlParams = load(fname_loc, "nlParams")
     ditherParams = load(fname_loc, "ditherParams")
@@ -77,6 +79,10 @@ function summarize_wave_solns(tele_loc,mjd_list,plotdir;
 
     for (mjd_ind,mjd_loc) in enumerate(mjd_list)
         fname_loc = joinpath(parg["outdir"], "apred/$(mjd_loc)/waveCalFPI_$(tele_loc)_$(mjd_loc)_arclamp.h5") 
+        curr_m0 = load(fname_loc, "fpi_m0")
+        if (curr_m0 < 3500) | (curr_m0 > 4500)
+            continue
+        end
 
         all_linParams[mjd_ind,:,:] .= load(fname_loc, "linParams")
         all_nlParams[mjd_ind,:,:] .= load(fname_loc, "nlParams")
@@ -84,7 +90,7 @@ function summarize_wave_solns(tele_loc,mjd_list,plotdir;
         all_fpiCavityParams[mjd_ind,2] = load(fname_loc, "fpi_m0_offset")
         all_fpiCavityParams[mjd_ind,3] = load(fname_loc, "fpi_cavity_size")
 
-        if mjd_ind == 1
+        if mjd_ind == comp_mjd_ind
             continue
         end
 
@@ -118,9 +124,16 @@ function summarize_wave_solns(tele_loc,mjd_list,plotdir;
         yvals = @view all_fpiCavityParams[:, pind]
 
         if pind == 1
+            med_m0 = nanmedian(yvals)
+            if all(yvals .== med_m0)
+                limits = (nothing,(med_m0-1,med_m0+1))
+            else
+                limits = (nothing,nothing)
+            end
             ax = Axis(fig[pind, 1],
                 ylabel = "FPI Peak m0",
-                title = "Tele: $(tele_loc), FPI Cavity Parameters")
+                title = "Tele: $(tele_loc), FPI Cavity Parameters",
+		limits = limits)
         elseif pind == size(all_fpiCavityParams,2)
             ax = Axis(fig[pind, 1],
                 xlabel = "MJD",
@@ -347,6 +360,12 @@ end
 poss_mjds = sort(readdir(joinpath(parg["outdir"], "apred/")))
 good_mjds = zeros(Bool, size(poss_mjds,1))
 
+max_plot = 400
+max_plot = 100
+max_plot = 1000
+min_mjd = 59250
+min_mjd = 0
+
 for tele in ["apo", "lco"]
     good_mjds[:] .= false
     for (mjd_ind,mjd) in enumerate(poss_mjds)
@@ -354,19 +373,26 @@ for tele in ["apo", "lco"]
             good_mjds[mjd_ind] = true
         end
     end
-    good_mjd_ints = map(x -> parse(Int, x), poss_mjds[good_mjds])
+    good_mjd_ints = sort(map(x -> parse(Int, x), poss_mjds[good_mjds]))
+    good_mjd_ints = good_mjd_ints[good_mjd_ints .>= min_mjd]
 
     println("Tele $(tele) has $(size(good_mjd_ints,1)) FPI-based wavelength solutions along outdir=$(parg["outdir"])")
     if size(good_mjd_ints,1) == 0
         continue
     end
+    if size(good_mjd_ints,1) > max_plot
+        step_size = ceil(Int,round(size(good_mjd_ints,1)/max_plot))
+        good_mjd_ints = good_mjd_ints[begin:step_size:end]
+        println("Only plotting $(size(good_mjd_ints,1)) MJDs to be careful with memory.")
+    end
 
 #    plotdir = joinpath(parg["outdir"], "monitor") 
-    plotdir = "../outdir/monitor" 
+#    plotdir = "../outdir/monitor" 
+    plotdir = "/mnt/home/kmckinnon/ceph/scratch/20250923/monitor/"
     out_plot_fnames = summarize_wave_solns(tele,good_mjd_ints,plotdir)
     thread = SlackThread()
     thread("Wavelength solution time stability summary for $(tele) using data at $(parg["outdir"])")
-    thread("Found $(size(good_mjd_ints,1)) unique dates (in the MJD range of $(good_mjd_ints[begin]) to $(good_mjd_ints[end])) with useful FPI-measured wavelength solutions")
+    thread("Used $(size(good_mjd_ints,1)) unique dates (in the MJD range of $(good_mjd_ints[begin]) to $(good_mjd_ints[end])) with useful FPI-measured wavelength solutions")
 
     for (framePath,frameString) in out_plot_fnames
         thread(frameString, framePath)
