@@ -330,18 +330,18 @@ function get_fibTargDict(f, tele, mjd, dfindx)
 
     if !(dfindx in df_exp.exposure)
         @warn "Exposure $(dfindx) not found in $(tele)/$(mjd)/exposures"
-        return Dict(1:300 .=> "fiberTypeFail")
+        return Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2)
     end
     exposure_info = df_exp[dfindx, :]
     config_id = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.image_type != "object"
-        Dict(1:300 .=> "cal")
+    fibtargDict, fiber_sdss_id_Dict = if exposure_info.image_type != "object"
+        Dict(1:300 .=> "cal"), Dict(1:300 .=> -2)
     else
         # Check if config_id is -1, which should not exist in the HDF5 file
         if config_id == -1
             @warn "config_id is -1 for exposure $(dfindx) in $(tele)/$(mjd). This should have been filtered out as flagged_bad=1. Returning fiberTypeFail for all fibers."
-            Dict(1:300 .=> "fiberTypeFail")
+            Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2)
         else
             try
                 df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
@@ -364,22 +364,25 @@ function get_fibTargDict(f, tele, mjd, dfindx)
                     end
                 end
                 fibernumvec = df_fib[!, "fiber_id"]
+                fiber_sdss_id = df_fib[!, "sdss_id"]
 
                 #this is a Hack and Andy Casey will replace this very very soon
                 msknofiberdefaults = (fibernumvec .!= -1)
                 fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
+                fiber_sdss_id_full = repeat([-2], N_FIBERS)
                 try
                     fiber_types_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_types[msknofiberdefaults]
+                    fiber_sdss_id_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_sdss_id[msknofiberdefaults]
                 catch e
                     @warn "Problem with getting fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
                     show(e)
                     fiber_types_full .= "fiberTypeFail"
                 end
-                Dict(1:N_FIBERS .=> fiber_types_full)
+                Dict(1:N_FIBERS .=> fiber_types_full), Dict(1:N_FIBERS .=> fiber_sdss_id_full)
             catch e
                 @warn "Failed to get fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
                 show(e)
-                Dict(1:300 .=> "fiberTypeFail")
+                Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2)
             end
         end
     end
@@ -389,7 +392,7 @@ function get_fibTargDict(f, tele, mjd, dfindx)
         fibtargDict[fpifib1] = "fpiguide"
         fibtargDict[fpifib2] = "fpiguide"
     end
-    return fibtargDict
+    return fibtargDict, fiber_sdss_id_Dict
 end
 
 # hardcoded to use chip c only for now
@@ -766,7 +769,7 @@ function process_1D(fname;
         # it is symlinked below to an exposure-specific file (linkPath).
         relflux_bit,calPath = get_fluxing_file(
             dfalmanac, outdir, tele, mjd, dfindx, runname, fluxing_chip = chip_list[end])
-        fibtargDict = get_fibTargDict(falm, tele, mjd, dfindx)
+        fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(falm, tele, mjd, dfindx)
         fiberTypeList = map(x -> fibtargDict[x], 1:300)
 
         if isnothing(calPath)
