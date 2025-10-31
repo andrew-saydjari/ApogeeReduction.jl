@@ -65,8 +65,8 @@ almanac_clobber_mode=${11:-false}
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.h5
-# tele_list=("apo" "lco")
-tele_list=("lco" "apo")
+tele_list=("apo" "lco")
+
 flat_types=("quartz" "dome")
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}/almanac
@@ -158,13 +158,13 @@ if [ "$run_2d_only" != "true" ]; then
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode
     done
-    ## Plots
-        print_elapsed_time "Making Plots"
-        julia +$julia_version --project=$base_dir $base_dir/scripts/daily/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
+    # ## Plots
+    #     print_elapsed_time "Making Plots"
+    #     julia +$julia_version --project=$base_dir $base_dir/scripts/daily/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
 
-    ## Dashboard
-    print_elapsed_time "Generating plot page for web viewing"
-    julia +$julia_version --project=$base_dir $base_dir/scripts/daily/generate_dashboard.jl --mjd $mjd --outdir $outdir
+    # ## Dashboard
+    # print_elapsed_time "Generating plot page for web viewing"
+    # julia +$julia_version --project=$base_dir $base_dir/scripts/daily/generate_dashboard.jl --mjd $mjd --outdir $outdir
 
     ## arMADGICS
     if [ -d ${path2arMADGICS} ]; then
