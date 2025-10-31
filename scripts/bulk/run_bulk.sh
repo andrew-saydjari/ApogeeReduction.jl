@@ -6,13 +6,14 @@
 # 60584 60614, 60796 60826
 # constraint="[genoa|icelake|rome]"
 # --qos=preempt
+# --partition=cca
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
+#SBATCH --nodes=1
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=8
 
-#SBATCH --time=2-00:00
+#SBATCH --time=4-00:00
 #SBATCH --job-name=ar_bulk
 #SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
@@ -65,6 +66,7 @@ runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.h5
 tele_list=("apo" "lco")
+
 flat_types=("quartz" "dome")
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}/almanac
@@ -156,7 +158,7 @@ if [ "$run_2d_only" != "true" ]; then
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode
     done
-    ### Plots
+    # ## Plots
     #     print_elapsed_time "Making Plots"
     #     julia +$julia_version --project=$base_dir $base_dir/scripts/daily/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
 
