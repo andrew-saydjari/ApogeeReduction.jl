@@ -10,7 +10,7 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
-#SBATCH --nodes=32
+#SBATCH --nodes=4
 #SBATCH --constraint="[genoa|icelake|rome]"
 
 #SBATCH --time=4-00:00
@@ -168,11 +168,11 @@ print_elapsed_time() {
 
     ## arMADGICS
     if [ -d ${path2arMADGICS} ]; then
-        print_elapsed_time "Running arMADGICS"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
+        # print_elapsed_time "Running arMADGICS"
+        # julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
 
-        # print_elapsed_time "Running arMADGICS Workup"
-        # julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
+        print_elapsed_time "Running arMADGICS Workup"
+        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
     fi
 # fi
 
