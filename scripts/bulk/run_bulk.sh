@@ -174,6 +174,6 @@ print_elapsed_time() {
         # print_elapsed_time "Running arMADGICS Workup"
         # julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
     fi
-fi
+# fi
 
 print_elapsed_time "Job Completed"
