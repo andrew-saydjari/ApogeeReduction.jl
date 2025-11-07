@@ -1,6 +1,6 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 using ApogeeReduction: cal2df, load_gain_maps, get_cal_file, gen_design_mat, grow_msk2d, nanzeromedian, 
-                    nanzeroiqr, safe_jldsave, bad_pix_bits, get_cal_path, dark_pix_bits, bad_flat_pix_bits
+                    nanzeroiqr, safe_jldsave, bad_pix_bits, get_cal_path, bad_dark_pix_bits, bad_flat_pix_bits
 
 include("../../src/makie_plotutils.jl") # TODO: move this to ApogeeReduction.jl
 
@@ -104,7 +104,7 @@ calPath, calFlag = get_cal_path(df_dark, parg["tele"], mjd[1], chip)
 f = jldopen(calPath)
 dark_pix_bitmask = f["dark_pix_bitmask"]
 close(f)
-bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& dark_pix_bits .!= 0);
+bad_pix_dark = (dark_pix_bitmask[5:2044, 5:2044] .& bad_dark_pix_bits .!= 0);
 
 desc = "Stacking flats for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])"
 @showprogress desc=desc for (indx, fname) in enumerate(flist)
