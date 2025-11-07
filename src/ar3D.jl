@@ -540,13 +540,13 @@ function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_sam
     ivarimage[5:2044, 5:2044] .*= flat_im .^ 2
     pix_bitmask[5:2044, 5:2044] .|= flat_pix_bitmask
 
-    pix_bitmask .|= (CRimage .== 1) * 2^7
-    pix_bitmask .|= (CRimage .> 1) * 2^8
-    pix_bitmask .|= ((chisqimage ./ (last_unsaturated .- CRimage)) .> chi2perdofcut) * 2^9
+    pix_bitmask .|= (CRimage .== 1) * one_cr_diff_bits
+    pix_bitmask .|= (CRimage .> 1) * many_cr_diff_bits
+    pix_bitmask .|= ((chisqimage ./ (last_unsaturated .- CRimage)) .> chi2perdofcut) * bad_chi2_pix_bits
     # these values are now defined for all pixels including the reference array
 
-    pix_bitmask .|= (last_unsaturated .< ndiff_used) * 2^13
-    pix_bitmask .|= (last_unsaturated .<= 0) * 2^14
+    pix_bitmask .|= (last_unsaturated .< ndiff_used) * bad_partial_saturated
+    pix_bitmask .|= (last_unsaturated .<= 0) * bad_fully_saturated
 
     safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
     return
