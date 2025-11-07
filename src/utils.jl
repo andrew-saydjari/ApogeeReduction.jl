@@ -32,11 +32,33 @@ end
 # but it is a symptom of the fact that the include situation is a bit tangled
 const git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
 
-# bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
-bad_dark_pix_bits = 2^1 + 2^2 + 2^4 + 2^5 #added 2^5 back in after outlier RVs from bulk
+# 0 	1 	reference array pixels
+# 1 	2 	reference pixels
+# 2 	4 	bad reference pixels
+# 3 	8 	pixels not dark corrected
+# 4 	16 	pixels with negative dark current
+# 5 	32 	pixels with large dark current
+# 6 	64 	flat response too low
+# 7 	128 	one diff was dropped because it is a likely cosmic ray
+# 8 	256 	more than one diff was dropped because they were likely cosmic rays (sus)
+# 9 	512 	bad linear SUTR chi2
+# 10 	1024 	failed 1D extraction
+# 11 	2048 	no nearby good pixels in 1D extraction
+# 12 	4096 	neff>10 in 1D extraction
+# 13 	8192 	pixel partially saturated
+# 14 	16384 	pixel fully saturated
+
+ref_array_pix_bits = 2^0
+ref_pix_bits = 2^1
+bad_ref_pix_bits = 2^2
+pix_not_dark_corr_bits = 2^3
+pix_neg_dark_current_bits = 2^4
+pix_large_dark_current_bits = 2^5
 bad_flat_pix_bits = 2^6;
 # most multiread CR detections are bad for other reasons
-bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
+one_cr_diff_bits = 2^7
+many_cr_diff_bits = 2^8
+bad_cr_pix_bits = one_cr_diff_bits + many_cr_diff_bits; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
 bad_chi2_pix_bits = 2^9;
 
 # flags for 1d flux extraction
@@ -44,7 +66,11 @@ bad_1d_failed_extract = 2^10;
 bad_1d_no_good_pix = 2^11;
 bad_1d_neff = 2^12;
 
+bad_partial_saturated = 2^13
 bad_fully_saturated = 2^14;
+
+#added 2^5 back in after outlier RVs from bulk
+bad_dark_pix_bits = ref_pix_bits + bad_ref_pix_bits + pix_neg_dark_current_bits + pix_large_dark_current_bits 
 
 bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
                bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff + bad_fully_saturated;
