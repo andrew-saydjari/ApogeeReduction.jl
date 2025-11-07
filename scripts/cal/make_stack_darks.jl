@@ -100,9 +100,9 @@ pix_bit_mask[2045:2048, :] .|= 2^1 # refPixels
 pix_bit_mask[:, 1:4] .|= 2^1 # refPixels
 pix_bit_mask[:, (end - 3):end] .|= 2^1 # refPixels
 pix_bit_mask[:, end] .|= 2^2 # bad refPixels (this is hard coded, only for chipA and APO for now)
-pix_bit_mask .|= (abs.(dark_im) .> sig_measure .* sig_est) * 2^3
-pix_bit_mask .|= (dark_im .< -sig_bad_lower .* sig_est) * 2^4
-pix_bit_mask .|= (dark_im .> sig_bad_upper .* sig_est) * 2^5
+pix_bit_mask .|= (abs.(dark_im .- cen_dark) .> sig_measure .* sig_est) * 2^3
+pix_bit_mask .|= (dark_im .- cen_dark .< -sig_bad_lower .* sig_est) * 2^4
+pix_bit_mask .|= (dark_im .- cen_dark .> sig_bad_upper .* sig_est) * 2^5
 
 dat = dark_im[1:2048, 1:2048][pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits_local .== 0]
 sig_after = nanzeroiqr(dat)
