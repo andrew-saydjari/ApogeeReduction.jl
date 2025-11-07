@@ -1,5 +1,6 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
-using ApogeeReduction: cal2df, load_gain_maps, get_cal_file, gen_design_mat, grow_msk2d, nanzeromedian, nanzeroiqr, safe_jldsave, bad_pix_bits, get_cal_path
+using ApogeeReduction: cal2df, load_gain_maps, get_cal_file, gen_design_mat, grow_msk2d, nanzeromedian, 
+                    nanzeroiqr, safe_jldsave, bad_pix_bits, get_cal_path, bad_dark_pix_bits, bad_flat_pix_bits
 
 include("../../src/makie_plotutils.jl") # TODO: move this to ApogeeReduction.jl
 
@@ -59,8 +60,6 @@ nfirst = 1 + parg["dropfirstn"]
 thread = SlackThread();
 thread("FLAT stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
-bad_dark_pix_bits = 2^2 + 2^4 + 2^5;
-bad_flat_pix_bits = 2^6;
 flat_frac_cut = 0.2
 pcut_flat = 0.2
 fx, fy = 10, 10    # Number of frequencies in x and y
