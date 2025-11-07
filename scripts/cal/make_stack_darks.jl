@@ -1,6 +1,9 @@
 using JLD2, ProgressMeter, ArgParse, SlackThreads, Glob, StatsBase
 
-using ApogeeReduction: get_cal_file, nanzeromedian, nanzeroiqr, safe_jldsave, bad_pix_bits
+using ApogeeReduction: get_cal_file, nanzeromedian, nanzeroiqr, safe_jldsave, bad_pix_bits, 
+                            ref_array_pix_bits, ref_pix_bits, bad_ref_pix_bits, pix_not_dark_corr_bits, 
+                            pix_neg_dark_current_bits, pix_large_dark_current_bits
+
 include("../../src/makie_plotutils.jl")
 
 ## Parse command line arguments
@@ -55,7 +58,8 @@ nfirst = 1 + parg["dropfirstn"]
 thread = SlackThread();
 thread("DARK stack for $(parg["tele"]) $(chip) from $(parg["mjd-start"]) to $(parg["mjd-end"])")
 
-bad_pix_bits_local = bad_pix_bits + 2^5; # add back in 2^5 (large dark current) for the darks code for now
+# bad_pix_bits_local = bad_pix_bits + pix_large_dark_current_bits; # add back in 2^5 (large dark current) for the darks code for now
+bad_pix_bits_local = bad_pix_bits #bad_pix_bits currently contains pix_large_dark_current_bits
 sig_measure = 0
 sig_bad_lower = 5
 sig_bad_upper = 7
@@ -94,15 +98,15 @@ dat = dark_im[1:2048, 1:2048][:]
 sig_est = nanzeroiqr(dat)
 
 pix_bit_mask = zeros(Int, 2560, 2048)
-pix_bit_mask[2049:end, :] .|= 2^0 # refArray
-pix_bit_mask[1:4, :] .|= 2^1 # refPixels
-pix_bit_mask[2045:2048, :] .|= 2^1 # refPixels
-pix_bit_mask[:, 1:4] .|= 2^1 # refPixels
-pix_bit_mask[:, (end - 3):end] .|= 2^1 # refPixels
-pix_bit_mask[:, end] .|= 2^2 # bad refPixels (this is hard coded, only for chipA and APO for now)
-pix_bit_mask .|= (abs.(dark_im .- cen_dark) .> sig_measure .* sig_est) * 2^3
-pix_bit_mask .|= (dark_im .- cen_dark .< -sig_bad_lower .* sig_est) * 2^4
-pix_bit_mask .|= (dark_im .- cen_dark .> sig_bad_upper .* sig_est) * 2^5
+pix_bit_mask[2049:end, :] .|= ref_array_pix_bits # refArray
+pix_bit_mask[1:4, :] .|= ref_pix_bits # refPixels
+pix_bit_mask[2045:2048, :] .|= ref_pix_bits # refPixels
+pix_bit_mask[:, 1:4] .|= ref_pix_bits # refPixels
+pix_bit_mask[:, (end - 3):end] .|= ref_pix_bits # refPixels
+pix_bit_mask[:, end] .|= bad_ref_pix_bits # bad refPixels (this is hard coded, only for chipA and APO for now)
+pix_bit_mask .|= (abs.(dark_im .- cen_dark) .> sig_measure .* sig_est) * pix_not_dark_corr_bits
+pix_bit_mask .|= (dark_im .- cen_dark .< -sig_bad_lower .* sig_est) * pix_neg_dark_current_bits
+pix_bit_mask .|= (dark_im .- cen_dark .> sig_bad_upper .* sig_est) * pix_large_dark_current_bits
 
 dat = dark_im[1:2048, 1:2048][pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits_local .== 0]
 sig_after = nanzeroiqr(dat)
@@ -149,13 +153,13 @@ let
 end
 
 dark_im_msk = copy(dark_im)
-dark_im_msk[pix_bit_mask .& 2^3 .== 0] .= 0;
+dark_im_msk[pix_bit_mask .& pix_not_dark_corr_bits .== 0] .= 0;
 dark_im_msk[pix_bit_mask .& bad_pix_bits_local .!= 0] .= NaN;
 
 totNum = length(pix_bit_mask[1:2048, 1:2048])
 badVec = pix_bit_mask[1:2048, 1:2048] .& bad_pix_bits_local .!= 0
-corrVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .!= 0) .& .!badVec
-notCorVec = (pix_bit_mask[1:2048, 1:2048] .& 2^3 .== 0)
+corrVec = (pix_bit_mask[1:2048, 1:2048] .& pix_not_dark_corr_bits .!= 0) .& .!badVec
+notCorVec = (pix_bit_mask[1:2048, 1:2048] .& pix_not_dark_corr_bits .== 0)
 
 fracBad = count(badVec) / totNum
 fracCorr = count(corrVec) / totNum
