@@ -33,7 +33,7 @@ end
 const git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
 
 # bad_dark_pix_bits = 2^2 + 2^4 #+ 2^5; temporarily remove 2^5 from badlist for now
-bad_dark_pix_bits = 2^1 + 2^2 + 2^4
+bad_dark_pix_bits = 2^1 + 2^2 + 2^4 + 2^5 #added 2^5 back in after outlier RVs from bulk
 bad_flat_pix_bits = 2^6;
 # most multiread CR detections are bad for other reasons
 bad_cr_pix_bits = 2^7 + 2^8; # could probably drop 2^7 at least in the future (happily correct 1 read CRs)
