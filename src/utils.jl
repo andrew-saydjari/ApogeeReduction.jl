@@ -70,10 +70,9 @@ bad_partial_saturated = 2^13
 bad_fully_saturated = 2^14;
 
 #added 2^5 back in after outlier RVs from bulk
-dark_pix_bits = bad_ref_pix_bits + pix_neg_dark_current_bits + pix_large_dark_current_bits 
-bad_dark_pix_bits = ref_pix_bits + dark_pix_bits
+bad_dark_pix_bits = bad_ref_pix_bits + pix_neg_dark_current_bits + pix_large_dark_current_bits 
 
-bad_pix_bits = bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
+bad_pix_bits = ref_pix_bits + bad_dark_pix_bits + bad_flat_pix_bits + bad_cr_pix_bits + bad_chi2_pix_bits +
                bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff + bad_fully_saturated;
 
 function isnanorzero(x)
