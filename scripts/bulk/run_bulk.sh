@@ -5,14 +5,15 @@
 # sbatch ./scripts/bulk/run_bulk.sh 60584 60591
 # 60584 60614, 60796 60826
 # constraint="[genoa|icelake|rome]"
+# --qos=preempt
+# --partition=cca
 
 # ------------------------------------------------------------------------------
-#SBATCH --partition=preempt
-#SBATCH --qos=preempt
+#SBATCH --partition=cca
+#SBATCH --nodes=1
 #SBATCH --constraint="[genoa|icelake|rome]"
-#SBATCH --nodes=8
 
-#SBATCH --time=2-00:00
+#SBATCH --time=4-00:00
 #SBATCH --job-name=ar_bulk
 #SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
@@ -44,6 +45,7 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
+almanac_version="0.3.6"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -64,6 +66,7 @@ runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.h5
 tele_list=("apo" "lco")
+
 flat_types=("quartz" "dome")
 # set up the output directory (if does not exist)
 mkdir -p ${outdir}/almanac
@@ -98,16 +101,14 @@ fi
 # Only run almanac if file doesn't exist or clobber mode is true
 if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
-    # activate shared almanac (uv python) environment
-    source /mnt/home/sdssv/uv_env/almanac_v0p2p5/bin/activate 
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-
-    almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+    uvx --from sdss-almanac==$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"
 set +e  # Temporarily disable exit on error
+rm -f $runlist
 julia +$julia_version --project=$base_dir $base_dir/scripts/bulk/make_runlist_all.jl --almanac_file $almanac_file --output $runlist
 exit_code=$?
 set -e  # Re-enable exit on error
@@ -129,7 +130,7 @@ done
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
     ### Traces and Refluxing
-    # would really like to combine the different telescopes here
+    would really like to combine the different telescopes here
     for flat_type in ${flat_types[@]}
     do
         flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
@@ -157,7 +158,7 @@ if [ "$run_2d_only" != "true" ]; then
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode
     done
-    ### Plots
+    # ## Plots
     #     print_elapsed_time "Making Plots"
     #     julia +$julia_version --project=$base_dir $base_dir/scripts/daily/plot_all.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB"
 

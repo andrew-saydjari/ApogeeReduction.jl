@@ -161,7 +161,19 @@ all1DObject_expids = map(x -> parse(Int, x), all1DObject_expid_strings)
 
 function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
     n_fnames = size(fname_list, 1)
-    fname_ind = 1
+    first_fname_ind = 0
+    for (fname_ind, fname) in enumerate(fname_list)
+        if isfile(fname)
+	    first_fname_ind = fname_ind
+            break
+	end
+    end
+    if first_fname_ind == 0
+        @warn "Could not find and expected dither files in list $(fname_list) for $(tele) MJD $(mjd)"
+	return nothing
+    end
+
+    fname_ind = first_fname_ind
     fname = fname_list[fname_ind]
 
     f = h5open(fname, "r+")
@@ -187,6 +199,10 @@ function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
     fiber_inds = collect(1:N_FIBERS)
     y_vals = 301 .- fiber_inds
     for (fname_ind, fname) in enumerate(fname_list)
+        if !isfile(fname)
+	    resid_plot_fnames[fname_ind] = ""
+            continue
+	end
         f = h5open(fname, "r+")
 
         linParams, nlParams, ditherParams, resid_vec, resid_xt = try
@@ -681,7 +697,7 @@ for chip in chips2do
                 # msk_loc = (mask_1d .&
                 #         (bad_pix_bits + bad_1d_failed_extract + bad_1d_no_good_pix + bad_1d_neff) .== 0)
 
-                fibtargDict = get_fibTargDict(f, tele, mjd, dfindx)
+                fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, dfindx)
                 sample_fibers = sample(rng, 1:300, 3, replace = false)
                 for fib in sample_fibers
                     fibType = fibtargDict[fib]
@@ -877,7 +893,7 @@ for image_type2plot in sorted_image_types
             # need to switch this back when the masking is updated
             # msk_loc = (outmsk .& bad_pix_bits .== 0)
 
-            fibtargDict = get_fibTargDict(f, tele, mjd, dfindx)
+            fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(f, tele, mjd, dfindx)
             sample_fibers = sample(rng, 1:300, 3, replace = false)
             for fib in sample_fibers
                 # plot_1d_uni(fib, fibtargDict, outflux, outmsk, "ar1Duni",

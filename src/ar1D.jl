@@ -186,11 +186,24 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 
             for fib in 1:n_fibers
                 _, y_peak, y_sigma = trace_params[xpix, fib, :]
+		y_peak_round = ceil(Int,round(y_peak))
+
+		if ((y_peak_round + window_half_size) < 1) | ((y_peak_round - window_half_size) > N_XPIX) 
+	            #then the peak is so far off the edge that
+		    #we can't measure it's flux from the wings
+		    #so give 0 flux and skip
+                    new_flux_1d[fib] = 0.0
+                    ivar_1d[xpix, fib] = 0.0
+                    mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
+                    mask_1d[xpix, fib] |= bad_1d_no_good_pix
+                    mask_1d[xpix, fib] |= bad_1d_failed_extract
+		    continue
+		end
 
                 #use large window to get model fluxes
-                full_ypixels = floor(
-                    Int, y_peak - large_window_half_size):ceil(
-                    Int, y_peak + large_window_half_size)
+		full_ypixels = max(1,y_peak_round - large_window_half_size):min(
+			              N_XPIX,y_peak_round + large_window_half_size)
+		y_peak_ind = y_peak_round - full_ypixels[begin] + 1
                 full_ypix_boundaries = [full_ypixels .- 0.5; full_ypixels[end] + 0.5]
                 #                full_model_vals = diff(cdf.(Normal(y_peak, y_sigma), full_ypix_boundaries))
                 prof_fib_ind = clamp(fib, min_prof_fib, max_prof_fib)
@@ -198,8 +211,8 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
                     prof_fib_ind, x_prof_min, x_prof_max_ind,
                     n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv))
 
-                ypixels = full_ypixels[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
-                model_vals = full_model_vals[(begin + (large_window_half_size - window_half_size)):(end - (large_window_half_size - window_half_size))]
+		ypixels = full_ypixels[max(1,y_peak_ind - window_half_size):min(size(full_ypixels,1),y_peak_ind + window_half_size)]
+		model_vals = full_model_vals[max(1,y_peak_ind - window_half_size):min(size(full_ypixels,1),y_peak_ind + window_half_size)]
                 if any(good_pixels[xpix, ypixels])
                     #then mask the bad pixels, same as setting ivar=0 there
                     model_vals[.!good_pixels[xpix, ypixels]] .= 0
@@ -317,46 +330,61 @@ function get_fibTargDict(f, tele, mjd, dfindx)
 
     if !(dfindx in df_exp.exposure)
         @warn "Exposure $(dfindx) not found in $(tele)/$(mjd)/exposures"
-        return Dict(1:300 .=> "fiberTypeFail")
+        return Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2)
     end
     exposure_info = df_exp[dfindx, :]
     config_id = exposure_info[configIdCol]
 
-    fibtargDict = if exposure_info.image_type == "object"
-        try
-            df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
-            # normalizes all column names to lowercase
-            rename!(df_fib, lowercase.(names(df_fib)))
-
-            # limit to only the APOGEE fiber/hole information
-            df_fib = if configIdCol == "config_id"
-                df_fib[df_fib[!, "fiber_type"].=="APOGEE",:]
-            else
-                df_fib
-            end
-
-            fiber_types = map(df_fib[!, "category"]) do t
-                if t in keys(fiber_type_names)
-                    fiber_type_names[t]
-                else
-                    # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(config_id): $(repr(t))"
-                    "fiberTypeFail"
-                end
-            end
-            fibernumvec = df_fib[!, "fiber_id"]
-
-            #this is a Hack and Andy Casey will replace this very very soon
-            fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
-            fiber_types_full[fiberID2fiberIndx.(fibernumvec)] .= fiber_types
-            Dict(1:N_FIBERS .=> fiber_types_full)
-        catch e
-            rethrow(e)
-            @warn "Failed to get any fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
-            show(e)
-            Dict(1:300 .=> "fiberTypeFail")
-        end
+    fibtargDict, fiber_sdss_id_Dict = if exposure_info.image_type != "object"
+        Dict(1:300 .=> "cal"), Dict(1:300 .=> -2)
     else
-        Dict(1:300 .=> "cal")
+        # Check if config_id is -1, which should not exist in the HDF5 file
+        if config_id == -1
+            @warn "config_id is -1 for exposure $(dfindx) in $(tele)/$(mjd). This should have been filtered out as flagged_bad=1. Returning fiberTypeFail for all fibers."
+            Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2)
+        else
+            try
+                df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
+                # normalizes all column names to lowercase
+                rename!(df_fib, lowercase.(names(df_fib)))
+
+                # limit to only the APOGEE fiber/hole information
+                df_fib = if configIdCol == "config_id"
+                    df_fib[df_fib[!, "fiber_type"].=="APOGEE",:]
+                else
+                    df_fib
+                end
+
+                fiber_types = map(df_fib[!, "category"]) do t
+                    if t in keys(fiber_type_names)
+                        fiber_type_names[t]
+                    else
+                        # @warn "Unknown fiber type for $(tele)/$(mjd)/fibers/$(config_id): $(repr(t))"
+                        "fiberTypeFail"
+                    end
+                end
+                fibernumvec = df_fib[!, "fiber_id"]
+                fiber_sdss_id = df_fib[!, "sdss_id"]
+
+                #this is a Hack and Andy Casey will replace this very very soon
+                msknofiberdefaults = (fibernumvec .!= -1)
+                fiber_types_full = repeat(["fiberTypeFail"], N_FIBERS)
+                fiber_sdss_id_full = repeat([-2], N_FIBERS)
+                try
+                    fiber_types_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_types[msknofiberdefaults]
+                    fiber_sdss_id_full[fiberID2fiberIndx.(fibernumvec[msknofiberdefaults])] .= fiber_sdss_id[msknofiberdefaults]
+                catch e
+                    @warn "Problem with getting fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
+                    show(e)
+                    fiber_types_full .= "fiberTypeFail"
+                end
+                Dict(1:N_FIBERS .=> fiber_types_full), Dict(1:N_FIBERS .=> fiber_sdss_id_full)
+            catch e
+                @warn "Failed to get fiber type information for $(tele)/$(mjd)/fibers/$(config_id) (exposure $(dfindx)). Returning fiberTypeFail for all fibers."
+                show(e)
+                Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2)
+            end
+        end
     end
 
     if parse(Int, mjd) > mjdfps2plate
@@ -364,7 +392,7 @@ function get_fibTargDict(f, tele, mjd, dfindx)
         fibtargDict[fpifib1] = "fpiguide"
         fibtargDict[fpifib2] = "fpiguide"
     end
-    return fibtargDict
+    return fibtargDict, fiber_sdss_id_Dict
 end
 
 # hardcoded to use chip c only for now
@@ -376,6 +404,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
         :exposure)
     expIndex = dfindx
     cartId = df_mjd.cart_id[expIndex]
+    image_type = df_mjd.image_type[expIndex]
 
     valid_flats4fluxing_fname = joinpath(parent_dir, "almanac/valid_domeflats4fluxing_$(runname).h5")
     if !isfile(valid_flats4fluxing_fname)
@@ -392,7 +421,9 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 
     if !found_tele_mjd
         close(f)
-        @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
+        if ((image_type == "object") | (image_type == "domeflat"))
+            @warn "Could not find any useful relfluxing files in file $(valid_flats4fluxing_fname) for tele $(tele) mjd $(mjd)"
+        end
         return 2^2,nothing
     end
 
@@ -452,7 +483,7 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
-function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, checkpoint_mode = "commit_same")
+function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same", outdir = "../outdir")
     # might need to add in telluric div functionality here?
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     if check_file(outname, mode = checkpoint_mode)
@@ -462,6 +493,9 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     mjd_int = parse(Int, mjd)
+
+    backupWave_fname = joinpath(
+        outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
 
     # could shift this to a preallocation step
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
@@ -501,26 +535,44 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
             f = jldopen(wavefname)
             chipWaveSoln = f["chipWaveSoln"]
             close(f)
-            found_soln = true
-            break
+	    if all(isfinite.(chipWaveSoln))
+                found_soln = true
+                break
+	    end
         end
     end
+
     if !found_soln
+        if !isfile(backupWave_fname)
+	    curr_best_wave_type = "rough"
+            backupWaveSoln = nothing
+	    backupWave_fname = nothing
+        else
+            f = h5open(backupWave_fname, "r")
+            curr_best_wave_type = read(f["best_wave_type"])
+	    backupWaveSoln = read(f["$(curr_best_wave_type)/nightAve_wave_soln"])
+	    close(f)
+        end
+
         #this is not a great global fallback, but it works so we get something to look at
-        if isnothing(backupWaveSoln) || isnothing(backupWaveSoln[mjd_int])
+        if isnothing(backupWave_fname) || (!all(isfinite.(backupWaveSoln)))
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(CHIP_LIST)
                 chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
                     1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
             end
-            println("No wavecal found for $(fname), using rough linear fallback")
-            flush(stdout)
+            if !(image_type in ["dark", "internalflat", "quartzflat", "domeflat"])
+                println("No wavecal found for $(fname), using rough linear fallback as fallback")
+                flush(stdout)
+            end
             wavecal_type = "error_fixed_fallback"
         else
-            chipWaveSoln = backupWaveSoln[mjd_int]
-            println("No wavecal found for $(fname), using nightly average as fallback")
+            chipWaveSoln = backupWaveSoln
+            if !(image_type in ["dark", "internalflat", "quartzflat", "domeflat"])
+                println("No wavecal found for $(fname), using $(curr_best_wave_type) nightly average as fallback")
+            end
             flush(stdout)
-            wavecal_type = "error_night_ave_fallback"
+	        wavecal_type = "error_night_ave_$(curr_best_wave_type)"
         end
     end
 
@@ -588,12 +640,32 @@ function reinterp_spectra(fname, roughwave_dict; backupWaveSoln = nothing, check
         cntvec[:, fiberindx] .+= msk_inter
 
         #right now, only works for a single exposure
-        outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
-            wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-        outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
-            wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
-        outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
-            wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+        if length(wave_fiber) > 1
+            # Check if wave_fiber has unique, sorted values
+            if length(unique(wave_fiber)) != length(wave_fiber) || !issorted(wave_fiber)
+                @warn "Non-unique or unsorted wavelengths for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Cannot interpolate, filling trace coordinates with NaN."
+                outTraceCoords[:, fiberindx, 1] .= NaN
+                outTraceCoords[:, fiberindx, 2] .= NaN
+                outTraceCoords[:, fiberindx, 3] .= NaN
+            else
+                outTraceCoords[:, fiberindx, 1] .= linear_interpolation(
+                    wave_fiber, xpix_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+                outTraceCoords[:, fiberindx, 2] .= linear_interpolation(
+                    wave_fiber, trace_center_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+                outTraceCoords[:, fiberindx, 3] .= linear_interpolation(
+                    wave_fiber, chipInt_fiber, extrapolation_bc = Line()).(logUniWaveAPOGEE)
+            end
+        else
+            # If no good pixels or only 1 good pixel for this fiber, fill with NaN
+            if length(wave_fiber) == 0
+                @warn "No good pixels found for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Filling trace coordinates with NaN."
+            else
+                @warn "Only 1 good pixel found for fiber $fiberindx in $fnameType $tele $mjd $expnum $chip $image_type. Cannot interpolate, filling trace coordinates with NaN."
+            end
+            outTraceCoords[:, fiberindx, 1] .= NaN
+            outTraceCoords[:, fiberindx, 2] .= NaN
+            outTraceCoords[:, fiberindx, 3] .= NaN
+        end
 
         if all(isnanorzero.(flux_fiber)) && ((ingestBit[fiberindx] & 2^1) == 0)
             ingestBit[fiberindx] += 2^1 # ap1D exposure flux are all NaNs (for at least one of the exposures)
@@ -619,6 +691,7 @@ end
 
 const logUniWaveAPOGEE = 10 .^ range((start = 4.17825), step = 6.0e-6, length = 8700);
 
+#should add a check_file call for this one
 function process_1D(fname;
         outdir::String,
         runname::String,
@@ -626,10 +699,21 @@ function process_1D(fname;
         relFlux::Bool,
         chip_list::Vector{String} = CHIP_LIST,
         profile_path = "./data/",
-        plot_path = "../outdir/$(sjd)/plots/")
+        plot_path = "../outdir/$(sjd)/plots/",
+        checkpoint_mode = "commit_same")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     dfindx = parse(Int, expnum)
+
+    outfname = if relFlux
+        replace(fname, "ar2D" => "ar1D")
+    else
+        replace(replace(fname, "ar2D" => "ar1D"), "apred" => "apredrelflux")
+    end
+
+    if check_file(outfname, mode = checkpoint_mode)
+        return true
+    end
 
     # this seems annoying to load so often if we know we are doing a daily... need to ponder
     traceFname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
@@ -677,7 +761,6 @@ function process_1D(fname;
         error("Extraction method $(extraction) not recognized")
     end
 
-    outfname = replace(fname, "ar2D" => "ar1D")
     resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
     safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar, trace_used_param_fname = traceFname)
     if relFlux
@@ -686,12 +769,14 @@ function process_1D(fname;
         # it is symlinked below to an exposure-specific file (linkPath).
         relflux_bit,calPath = get_fluxing_file(
             dfalmanac, outdir, tele, mjd, dfindx, runname, fluxing_chip = chip_list[end])
-        fibtargDict = get_fibTargDict(falm, tele, mjd, dfindx)
+        fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(falm, tele, mjd, dfindx)
         fiberTypeList = map(x -> fibtargDict[x], 1:300)
 
         if isnothing(calPath)
             # TODO uncomment this
-            @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
+            if (image_type == "object") | (image_type == "domeflat")
+                @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
+            end
             relthrpt = ones(size(flux_1d, 2))
             bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
         elseif !isfile(calPath)
@@ -721,13 +806,12 @@ function process_1D(fname;
             relthrpt, bitmsk_relthrpt, fiberTypeList,
             trace_used_param_fname = traceFname)
     else
-        outfname_norelflux = replace(outfname, "apred" => "apredrelflux")
-        dirName = dirname(outfname_norelflux)
+        dirName = dirname(outfname)
         if !ispath(dirName)
             mkpath(dirName)
         end
         safe_jldsave(
-            outfname_norelflux, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
+            outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
             trace_used_param_fname = traceFname)
     end

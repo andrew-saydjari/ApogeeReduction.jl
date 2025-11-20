@@ -149,30 +149,32 @@ end
 @time "include makie_plotutils" @everywhere include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
 @time "Generating file lists" begin
-    tele_list = if parg["runlist"] != ""
-        load(parg["runlist"], "tele")
-    else
-        [parg["tele"]]
-    end
-    # wow this is really not robust, you HAVE to pass a runlist and a tele on the command line
-    unique_teles = unique(tele_list)
-    mskTele = tele_list .== parg["tele"]
+    # Load everywhere so we can make list in parallel
+    @everywhere begin
+        tele_list = if parg["runlist"] != ""
+            load(parg["runlist"], "tele")
+        else
+            [parg["tele"]]
+        end
+        # wow this is really not robust, you HAVE to pass a runlist and a tele on the command line
+        unique_teles = unique(tele_list)
+        mskTele = tele_list .== parg["tele"]
 
-    mjd_list = if parg["runlist"] != ""
-        load(parg["runlist"], "mjd")
-    else
-        [parg["mjd"]]
-    end
-    unique_mjds = unique(mjd_list[mskTele])
+        mjd_list = if parg["runlist"] != ""
+            load(parg["runlist"], "mjd")
+        else
+            [parg["mjd"]]
+        end
+        unique_mjds = unique(mjd_list[mskTele])
 
-    dfindx_list = if parg["runlist"] != ""
-        load(parg["runlist"], "dfindx")
-    else
-        [parg["dfindx"]]
+        dfindx_list = if parg["runlist"] != ""
+            load(parg["runlist"], "dfindx")
+        else
+            [parg["dfindx"]]
+        end
     end
 
-    list2Dexp = []
-    for mjd in unique_mjds
+    @everywhere function get_2d_names_for_mjd(mjd)
         df = read_almanac_exp_df(
             joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
         function get_2d_name_partial(expid)
@@ -180,9 +182,10 @@ end
             replace(get_1d_name(expid, df), "ar1D" => "ar2D") * ".h5"
         end
         mskMJD = (mjd_list .== mjd) .& mskTele
-        local2D = get_2d_name_partial.(dfindx_list[mskMJD])
-        push!(list2Dexp, local2D)
+        return get_2d_name_partial.(dfindx_list[mskMJD])
     end
+    
+    list2Dexp = pmap(get_2d_names_for_mjd, unique_mjds)
     all2Da = vcat(list2Dexp...)
 
     all2Dperchip = []
@@ -258,14 +261,19 @@ end
 # that gives us the trace of a fiber as a funciton of time or something
 # for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
 # I think dome flats needs to swtich to dome_flats/mjd/
-@time "Finding traceMain files" for mjd in unique_mjds # eventually this will be more like "making traceMain files"
-    for chip in CHIP_LIST
-        create_traceMain(mjd,chip,trace_type_order;
-                         tele = parg["tele"],
-                         outdir = parg["outdir"],
-                         checkpoint_mode = parg["checkpoint_mode"])
-    end
+@time "Finding traceMain files" begin
+    # Create all (mjd, chip) combinations for parallel processing
+    mjd_chip_combinations = [(mjd, chip) for mjd in unique_mjds for chip in CHIP_LIST]
+    
+    @everywhere create_traceMain_wrapper(mjd_chip) = create_traceMain(
+        mjd_chip[1], mjd_chip[2], trace_type_order;
+        tele = parg["tele"],
+        outdir = parg["outdir"],
+        checkpoint_mode = parg["checkpoint_mode"])
+    
+    pmap(create_traceMain_wrapper, mjd_chip_combinations)
 end
+flush(stdout);
 
 # extract the 2D to 1D
 @everywhere process_1D_wrapper(fname) = process_1D(
@@ -276,7 +284,8 @@ end
     relFlux = parg["relFlux"],
     chip_list = CHIP_LIST,
     profile_path = joinpath(proj_path, "data"),
-    plot_path = joinpath(parg["outdir"], "plots/")
+    plot_path = joinpath(parg["outdir"], "plots/"),
+    checkpoint_mode = parg["checkpoint_mode"]
 )
 if parg["doUncals"]
     desc = "Extracting 2D to 1D (uncals):"
@@ -293,6 +302,7 @@ if parg["relFlux"]
     list1DexpObject = []
     list1DexpFPI = []
     list1DexpArclamp = []
+    # this needs to be parallelized
     for mjd in unique_mjds
         df = read_almanac_exp_df(
             joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), parg["tele"], mjd)
@@ -399,7 +409,9 @@ if parg["relFlux"]
         fname, checkpoint_mode = parg["checkpoint_mode"])
     all1DObjectWavecal = @showprogress desc=desc pmap(
         get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
-    all1DObjectWavecal = filter(!isnothing, all1DObjectWavecal)
+    good_fnames = .!isnothing.(all1DObjectWavecal)
+    all1DObjectWavecal = convert(Vector{String}, all1DObjectWavecal[good_fnames])
+    all1DObjectSkyPeaks = all1DObjectSkyPeaks[good_fnames]
 
     # putting this parallelized within each mjd is really not good in the bulk run context
     mjd_list_wavecal = map(x -> parse(Int, split(basename(x), "_")[3]), all1DObjectWavecal)
@@ -408,27 +420,15 @@ if parg["relFlux"]
     sendto(workers(), all1DObjectWavecal = all1DObjectWavecal)
     sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
 
-    @everywhere outname = joinpath(
-        parg["outdir"], "wavecal", "skyline_wavecal_$(parg["tele"])_$(parg["runname"])_dict.jld2")
-    if !check_file(outname, mode = parg["checkpoint_mode"])
-        desc = "Skyline medwave/skyline dither: "
-        @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
-            mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks; outdir = parg["outdir"])
-        pout = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
-
-        night_wave_soln_dict = Dict(unique_mjds .=> map(x -> x[1], pout))
-        night_linParams_dict = Dict(unique_mjds .=> map(x -> x[2], pout))
-        night_nlParams_dict = Dict(unique_mjds .=> map(x -> x[3], pout))
-
-        mkpath(dirname(outname))
-        safe_jldsave(outname, night_wave_soln_dict = night_wave_soln_dict,
-            night_linParams_dict = night_linParams_dict,
-            night_nlParams_dict = night_nlParams_dict, no_metadata = true)
-    end
-    @everywhere begin
-        night_wave_soln_dict, night_linParams_dict, night_nlParams_dict = load(
-            outname, "night_wave_soln_dict", "night_linParams_dict", "night_nlParams_dict")
-    end
+    desc = "Skyline medwave/skyline dither: "
+    @everywhere skyline_medwavecal_skyline_dither_partial(mjd) = skyline_medwavecal_skyline_dither(
+        parg["tele"], mjd, mjd_list_wavecal, all1DObjectWavecal, 
+	all1DObjectSkyPeaks, parg["checkpoint_mode"]; outdir = parg["outdir"])
+    wavecalNightAve_fnames = @showprogress desc=desc pmap(skyline_medwavecal_skyline_dither_partial, unique_mjds)
+    
+    sendto(workers(), wavecalNightAve_fnames = wavecalNightAve_fnames)
+    sendto(workers(), unique_mjds = unique_mjds)
+    unique_mjd_inds = collect(1:size(unique_mjds,1))
 
     # the FPI/arclamp version of wavecal is still a TODO from Kevin McKinnon
     if size(all1DFPI, 1) > 0
@@ -437,19 +437,19 @@ if parg["relFlux"]
         sendto(workers(), mjd_list_fpi = mjd_list_fpi)
         sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
         sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
-        @everywhere fpi_medwavecal_skyline_dither_partial(mjd) = fpi_medwavecal_skyline_dither(
-            mjd, mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
-            night_linParams_dict, night_nlParams_dict, checkpoint_mode = parg["checkpoint_mode"])
-        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjds)
+        @everywhere fpi_medwavecal_skyline_dither_partial(mjd_ind) = fpi_medwavecal_skyline_dither(
+            unique_mjds[mjd_ind], mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
+            wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"])
+        @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
     end
 
-    ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
+    # ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 
     ## combine chips for single exposure onto loguniform wavelength grid
     ## pushing off the question of dither combinations for now (to apMADGICS stage)
     @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
-        fname, roughwave_dict, backupWaveSoln = night_wave_soln_dict,
-        checkpoint_mode = parg["checkpoint_mode"])
+        fname, roughwave_dict, 
+        checkpoint_mode = parg["checkpoint_mode"], outdir = parg["outdir"])
     if parg["doUncals"]
         all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
         desc = "Reinterp exposure spectra (uncals):"
