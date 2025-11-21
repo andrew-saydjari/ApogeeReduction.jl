@@ -130,7 +130,7 @@ done
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then
     ### Traces and Refluxing
-    would really like to combine the different telescopes here
+    # would really like to combine the different telescopes here
     for flat_type in ${flat_types[@]}
     do
         flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
