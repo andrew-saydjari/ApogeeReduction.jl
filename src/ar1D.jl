@@ -194,6 +194,9 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 		    #so give 0 flux and skip
                     new_flux_1d[fib] = 0.0
                     ivar_1d[xpix, fib] = 0.0
+		    #propagate flags from pixels near the edge of the chip
+		    #and also add new bad flags
+		    ypixels = 1:large_window_half_size
                     mask_1d[xpix, fib] = reduce(|, pix_bitmask[xpix, ypixels])
                     mask_1d[xpix, fib] |= bad_1d_no_good_pix
                     mask_1d[xpix, fib] |= bad_1d_failed_extract
