@@ -859,7 +859,7 @@ function comb_exp_get_and_save_fpi_wavecal(
             exp_m0s[fname_ind, fibIndx] = minimum(peak_ints[in_exp, fibIndx])
         end
     end
-    med_m0 = nanmedian(nanmedian(exp_m0s, 2), 1)[1, 1]
+    med_m0 = round(nanmedian(nanmedian(exp_m0s, 2), 1)[1, 1])
     expect_peak_waves = 2 .* cavity_size ./ (peak_ints .+ m_offset)
     verbose && println("First FPI peak integer m0 = $(med_m0)")
 
