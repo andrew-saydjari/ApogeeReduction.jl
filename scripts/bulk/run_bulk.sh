@@ -156,6 +156,7 @@ if [ "$run_2d_only" != "true" ]; then
     for tele in ${tele_list[@]}
     do
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
+        mkdir -p ${outdir}/wavecal
         julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode
     done
     # ## Plots
