@@ -1704,14 +1704,29 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
             plot_pixels = (1, 512, 1024, 1536, 2048))
 
 	    curr_wave_type = "sky"
-        h5open(outname, "w") do f
-            #should include metadata at some point...
-            f["best_wave_type"] = curr_wave_type
-            f["$(curr_wave_type)/used_fnames"] = all1DObjectWavecal_mjd
-            f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
-            f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
-            f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
-        end	
+
+	# REMOVE TRY/CATCH LATER. Just testing for bulk run to figure out failure
+	try
+            h5open(outname, "w") do f
+                #should include metadata at some point...
+                f["best_wave_type"] = curr_wave_type
+                f["$(curr_wave_type)/used_fnames"] = all1DObjectWavecal_mjd
+                f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
+                f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
+                f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
+            end	
+	catch
+	    #can either fail loudly after printing info, or just skip...
+	    println("Failed to open $(outname) in skyline_medwavecal_skyline_dither for $(tele) $(mjd). Previous file exists? $(isfile(outname))")
+            h5open(outname, "w") do f
+                #should include metadata at some point...
+                f["best_wave_type"] = curr_wave_type
+                f["$(curr_wave_type)/used_fnames"] = all1DObjectWavecal_mjd
+                f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
+                f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
+                f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
+            end	
+	end
 
         return outname
     else
