@@ -10,7 +10,7 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
-#SBATCH --nodes=8
+#SBATCH --nodes=4
 #SBATCH --constraint="[genoa|icelake|rome]"
 
 #SBATCH --time=4-00:00
