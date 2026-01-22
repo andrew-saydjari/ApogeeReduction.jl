@@ -859,7 +859,7 @@ function comb_exp_get_and_save_fpi_wavecal(
             exp_m0s[fname_ind, fibIndx] = minimum(peak_ints[in_exp, fibIndx])
         end
     end
-    med_m0 = nanmedian(nanmedian(exp_m0s, 2), 1)[1, 1]
+    med_m0 = round(nanmedian(nanmedian(exp_m0s, 2), 1)[1, 1])
     expect_peak_waves = 2 .* cavity_size ./ (peak_ints .+ m_offset)
     verbose && println("First FPI peak integer m0 = $(med_m0)")
 
@@ -1703,7 +1703,8 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
             plot_fibers = (1, 50, 100, 150, 200, 250, 300),
             plot_pixels = (1, 512, 1024, 1536, 2048))
 
-	    curr_wave_type = "sky"
+        curr_wave_type = "sky"
+
         h5open(outname, "w") do f
             #should include metadata at some point...
             f["best_wave_type"] = curr_wave_type
