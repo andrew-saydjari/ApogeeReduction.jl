@@ -1703,7 +1703,8 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
             plot_fibers = (1, 50, 100, 150, 200, 250, 300),
             plot_pixels = (1, 512, 1024, 1536, 2048))
 
-	    curr_wave_type = "sky"
+        curr_wave_type = "sky"
+
         h5open(outname, "w") do f
             #should include metadata at some point...
             f["best_wave_type"] = curr_wave_type

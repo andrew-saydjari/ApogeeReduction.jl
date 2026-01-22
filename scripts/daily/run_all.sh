@@ -5,8 +5,8 @@
 # sbatch /mnt/home/asaydjari/gitcode/ApogeeReduction.jl/scripts/daily/run_all.sh apo 60855
 
 # ------------------------------------------------------------------------------
-#SBATCH --partition=preempt
-#SBATCH --qos=preempt
+#SBATCH --partition=cca
+#SBATCH --qos=cca
 #SBATCH --constraint="[genoa|icelake|rome]"
 #SBATCH --nodes=1
 
