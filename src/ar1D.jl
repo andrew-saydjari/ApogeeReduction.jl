@@ -395,8 +395,6 @@ function get_fibTargDict(f, tele, mjd, dfindx)
         fibtargDict[fpifib1] = "fpiguide"
         fibtargDict[fpifib2] = "fpiguide"
     end
-    println(typeof(fibtargDict))
-    println(typeof(fiber_sdss_id_Dict)); flush(stdout)
     return (fibtargDict, fiber_sdss_id_Dict)
 end
 
