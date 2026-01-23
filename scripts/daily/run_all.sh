@@ -6,7 +6,6 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
-#SBATCH --qos=cca
 #SBATCH --constraint="[genoa|icelake|rome]"
 #SBATCH --nodes=1
 
