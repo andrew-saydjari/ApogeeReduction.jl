@@ -2,25 +2,8 @@ using HDF5
 using Statistics
 using CairoMakie
 using Printf
+using apMADGICS: pix2v
 
-"""
-    z2v(z; c=299792.458)
-
-Convert redshift to velocity.
-"""
-function z2v(z; c=299792.458)
-    return ((z + 1)^2 - 1) / ((z + 1)^2 + 1) * c
-end
-
-"""
-    pix2v(x; delLog=6e-6)
-
-Convert pixel offset to velocity.
-"""
-function pix2v(x; delLog=6e-6)
-    z = 10^(x * delLog) - 1
-    return z2v(z)
-end
 
 """
     average_rvs(rv_pixoff_file::HDF5.File, full_list_file::HDF5.File)
