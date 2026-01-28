@@ -34,12 +34,12 @@ dfindx_list = Int[]
 tele_list = String[]
 f = h5open(parg["almanac_file"])
 tele2do = if parg["tele"] == "both"
-    keys(f)
+    keys(f["raw"])
 else
     [parg["tele"]]
 end
 for tele in tele2do
-    mjd_list = keys(f[tele])
+    mjd_list = keys(f["raw/$(tele)"])
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)

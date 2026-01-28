@@ -378,10 +378,10 @@ end
 
 function read_almanac_exp_df(fname, tele, mjd)
     df = if fname isa HDF5.File
-        DataFrame(read(fname["$(tele)/$(mjd)/exposures"]))
+        DataFrame(read(fname["raw/$(tele)/$(mjd)/exposures"]))
     else
         h5open(fname) do f
-            DataFrame(read(f["$(tele)/$(mjd)/exposures"]))
+            DataFrame(read(f["raw/$(tele)/$(mjd)/exposures"]))
         end
     end
     return df
