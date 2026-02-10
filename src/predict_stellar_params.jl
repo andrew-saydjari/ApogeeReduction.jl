@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
-# predict_stellar_params_pycall.jl
-# Use Python's XGBoost from Julia via PyCall to avoid the Julia XGBoost bug
+# Example usaged:
+# julia --project=. src/predict_stellar_params.jl --input data/stellar_params/arMADGICS_out_x_starLineCof_v0_test.h5 --models data/stellar_params/xgboost_models --outdir data/stellar_params
 
 using ArgParse
 using HDF5
