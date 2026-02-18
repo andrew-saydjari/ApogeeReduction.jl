@@ -36,20 +36,20 @@ dfindx_list = Int[]
 tele_list = String[]
 f = h5open(parg["almanac_file"])
 tele2do = if parg["tele"] == "both"
-    keys(f)
+    keys(f["raw"])
 else
     [parg["tele"]]
 end
 
 # Check if almanac file is empty and exit with specific code
-if length(keys(f)) == 0
+if !haskey(f, "raw") || length(keys(f["raw"])) == 0
     println("WARNING: No exposures found for the specified parameters")
     println("Exiting with code 16 to indicate empty runlist")
     exit(16)
 end
 
 for tele in tele2do
-    mjd_list = keys(f[tele])
+    mjd_list = keys(f["raw/$(tele)"])
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)

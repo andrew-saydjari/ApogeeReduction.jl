@@ -347,7 +347,7 @@ function get_fibTargDict(f, tele, mjd, dfindx)
             (Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2))
         else
             try
-                df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
+                df_fib = DataFrame(read(f["raw/$(tele)/$(mjd)/fibers/$(config_id)"]))
                 # normalizes all column names to lowercase
                 rename!(df_fib, lowercase.(names(df_fib)))
 
