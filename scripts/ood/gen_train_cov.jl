@@ -207,6 +207,7 @@ end
 # need an outer loop over the exposure types
 for (exposure_type, exposure_1dname_function) in zip(exposure_types, exposure_1dname_functions)
     println("Making bad list for $(exposure_type) exposures"); flush(stdout);
+    GC.gc();
     for chip in CHIP_LIST
         println("... on chip $(chip)"); flush(stdout);
         list1Dexp = []
@@ -228,9 +229,9 @@ for (exposure_type, exposure_1dname_function) in zip(exposure_types, exposure_1d
         end
 
         train1Dfiles = convert(Vector{String}, vcat(list1Dexp...));
-        train2Dfiles = replace.(train1Dfiles, "ar1Dcal" => "ar2Dcal");
+        train2Dfiles = replace.(replace.(train1Dfiles, "ar1Dcal" => "ar2Dcal"), "_$(FIRST_CHIP)_" => "_$(chip)_");
         all1Dfiles = convert(Vector{String}, vcat(list1Dexp_all...));
-        all2Dfiles = replace.(all1Dfiles, "ar1Dcal" => "ar2Dcal");
+        all2Dfiles = replace.(replace.(all1Dfiles, "ar1Dcal" => "ar2Dcal"), "_$(FIRST_CHIP)_" => "_$(chip)_");
 
         oodfname = "$(exposure_type)_roughprior_$(chip)_$(nsub).h5"
 
@@ -288,6 +289,7 @@ for (exposure_type, exposure_1dname_function) in zip(exposure_types, exposure_1d
             p16_spread = load($oodfname, "p16_spread")
             p50_spread = load($oodfname, "p50_spread")
             p84_spread = load($oodfname, "p84_spread")
+            GC.gc();
         end
 
         @everywhere get_chi2_partial(fname) = get_chi2(fname, mat2D_cen, Vmat);
@@ -385,35 +387,40 @@ for (exposure_type, exposure_1dname_function) in zip(exposure_types, exposure_1d
                 dimage[.!(mask_good)] .= NaN
 
                 fig = Figure(size=(800,800),fontsize=30)
-                ax = Axis(fig[1,1], title="$(class_name): $(basename(fname))\nChi2: $(round(chi2out[indx], digits=2)) $(msk_good_chi2[indx] ? "Pass" : "Fail"), ChiFluxScatter: $(round(chifluxscatterout[indx], digits=2)) $(msk_good_chifluxscatter[indx] ? "Pass" : "Fail")")
-                hm = heatmap!(ax, dimage,
+
+                # Add an overall title centered above the 2x2 grid of axes
+                full_title = "$(class_name): $(basename(fname))\nChi2: $(round(chi2out[indx], digits=2)) $(msk_good_chi2[indx] ? "Pass" : "Fail"), ChiFluxScatter: $(round(chifluxscatterout[indx], digits=2)) $(msk_good_chifluxscatter[indx] ? "Pass" : "Fail")"
+                Label(fig[0, :], full_title, fontsize=32, halign=:center, tellwidth=false)
+
+                ax11 = Axis(fig[1,1], xticksvisible=false, yticksvisible=false, xgridvisible=false, ygridvisible=false, xticklabelsvisible=false, yticklabelsvisible=false)
+                hm = heatmap!(ax11, dimage,
                     colormap=ColorSchemes.cmr_chroma,
                     colorrange=(vmin, vmax),
                     nan_color=(93/300, 101/300, 106/300))
 
-                ax = Axis(fig[2,1],)
-                hm = heatmap!(ax, center_dimage,
+                ax21 = Axis(fig[2,1], xticksvisible=false, yticksvisible=false, xgridvisible=false, ygridvisible=false, xticklabelsvisible=false, yticklabelsvisible=false)
+                heatmap!(ax21, center_dimage,
                     colormap=ColorSchemes.cmr_chroma,
                     colorrange=(vmin, vmax),
                     nan_color=(93/300, 101/300, 106/300))
                 data_aspect = size(center_dimage,1) / size(center_dimage,2)
                 colsize!(fig.layout, 1, Aspect(1, data_aspect))
 
-                ax = Axis(fig[1,2],)
-                hm = heatmap!(ax, dimage[1024:1536,1024:1536],
+                ax12 = Axis(fig[1,2], xticksvisible=false, yticksvisible=false, xgridvisible=false, ygridvisible=false, xticklabelsvisible=false, yticklabelsvisible=false)
+                heatmap!(ax12, dimage[1024:1536,1024:1536],
                     colormap=ColorSchemes.cmr_chroma,
                     colorrange=(vmin, vmax),
                     nan_color=(93/300, 101/300, 106/300))
 
-                ax = Axis(fig[2,2],)
-                hm = heatmap!(ax, center_dimage[1024:1536,1024:1536],
+                ax22 = Axis(fig[2,2], xticksvisible=false, yticksvisible=false, xgridvisible=false, ygridvisible=false, xticklabelsvisible=false, yticklabelsvisible=false)
+                heatmap!(ax22, center_dimage[1024:1536,1024:1536],
                     colormap=ColorSchemes.cmr_chroma,
                     colorrange=(vmin, vmax),
                     nan_color=(93/300, 101/300, 106/300))
                 data_aspect = size(center_dimage[1024:1536,1024:1536],1) / size(center_dimage[1024:1536,1024:1536],2)
                 colsize!(fig.layout, 2, Aspect(1, data_aspect))
-                
-                Colorbar(fig[1:2, 3], hm, width = 10, height = Relative(1.0))
+
+                Colorbar(fig[1:2, 3], hm, width = 10, height = Relative(1.0)) # hm is from first heatmap, can just use for colorbar reference
                 resize_to_layout!(fig)
                 save(joinpath(plot_dir, "$(basename(fname))_$(class_name).png"), fig)
             end
