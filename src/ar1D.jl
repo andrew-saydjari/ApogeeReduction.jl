@@ -503,6 +503,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # could shift this to a preallocation step
     outflux = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outvar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
+    outivar = zeros(length(logUniWaveAPOGEE), N_FIBERS)
     outmsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
     outDropMsk = zeros(Int, length(logUniWaveAPOGEE), N_FIBERS)
     outTraceCoords = zeros(length(logUniWaveAPOGEE), N_FIBERS, 3) #(x,y,chipInt)
@@ -684,10 +685,12 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     outvar ./= (framecnts .^ 2)
     # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
     outmsk = (cntvec .== framecnts)
+    outivar = 1 ./ outvar
+    outivar[.!outmsk] .= 0.0
 
     # Write reinterpolated data
     safe_jldsave(
-        outname, metadata; flux_1d = outflux, ivar_1d = 1 ./ outvar, mask_1d = outmsk,
+        outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
         extract_trace_coords = outTraceCoords)
     return
 end
