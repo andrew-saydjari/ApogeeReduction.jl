@@ -519,6 +519,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     trace_center_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipInt_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
+    thrpt_stack = zeros(N_CHIPS, N_FIBERS)
 
     ingestBit = zeros(Int, N_FIBERS)
 
@@ -590,6 +591,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         mask_1d = f["mask_1d"]
         dropped_pixels_mask_1d = f["dropped_pixels_mask_1d"]
         extract_trace_centers = f["extract_trace_centers"]
+        relthrpt = f["relthrpt"]
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))
 
@@ -608,6 +610,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
             end:-1:1, :]
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
         chipInt_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipind
+        thrpt_stack[chipind, :] .= relthrpt
     end
 
     # should add a check all entries of metadata_lst to be equal
@@ -691,7 +694,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # Write reinterpolated data
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
-        extract_trace_coords = outTraceCoords)
+        extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack)
     return
 end
 
