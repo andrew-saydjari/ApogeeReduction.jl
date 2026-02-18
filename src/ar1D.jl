@@ -310,6 +310,7 @@ function get_fibTargDict(f, tele, mjd, dfindx)
         "sky_boss" => "skyB",
         "standard_apogee" => "tel",
         "sky_apogee" => "sky",
+        "" => "serendip",
 
         # Plate era
         "science" => "sci",
