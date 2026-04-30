@@ -1675,6 +1675,7 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
 
     outname = joinpath(
         outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
+    mkpath(dirname(outname))
     
     if check_file(outname, mode = checkpoint_mode)
         #then skip making new file
