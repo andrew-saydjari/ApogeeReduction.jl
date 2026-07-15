@@ -21,6 +21,14 @@ using DecisionTree: apply_forest_proba
 
 const CLASSIFIER_QUANTS = [0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999]
 const CLASSIFIER_NCHIPFEAT = length(CLASSIFIER_QUANTS) + 12
+# labels that imply the detector was illuminated; predicted dark content under
+# one of these labels means the lamp/LED/sky never delivered light
+const CLASSIFIER_ILLUMINATED = ["arclamp_q0t1u0", "arclamp_q0t0u1",
+    "arclamp_q0t0u0", "quartzflat_q1t0u0", "domeflat_q0t0u0",
+    "internalflat_q0t0u0", "twilightflat_q0t0u0"]
+# exposure types bright enough to leave persistence in the following dark
+const CLASSIFIER_PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat",
+    "arclamp"]
 
 """
 Count strict local maxima of profile `p` above `thresh`.
@@ -137,6 +145,37 @@ function classify_exposure_type(clf, chip_features::AbstractDict, tele)
 end
 
 """
+    exposure_check_category(labeled_class, res)
+
+Interpret a classification result against the commanded label (v5 content
+taxonomy: the classifier predicts what the image IS; causes are expressed
+here). Categories:
+- "unknown": image doesn't resemble any trained class
+- "faint_twilight": labeled twilightflat but content is faint line-sky
+  (counts too low to flat-field with)
+- "lamp_off_candidate": labeled as an illuminated exposure but content is a
+  dark (lamp/LED off — equivalent to having taken a dark)
+- "mislabel_candidate": confident content prediction that contradicts the
+  label (e.g. ThAr/UNe swaps)
+- "ok"
+"""
+function exposure_check_category(labeled_class, res, flag_tau = 0.7)
+    if res.decision == "unknown"
+        "unknown"
+    elseif labeled_class == "twilightflat_q0t0u0" &&
+           res.pred == "twilightflat_faint" && res.prob > flag_tau
+        "faint_twilight"
+    elseif labeled_class in CLASSIFIER_ILLUMINATED && res.pred == "dark_q0t0u0" &&
+           res.prob > flag_tau
+        "lamp_off_candidate"
+    elseif res.pred != labeled_class && res.prob > flag_tau
+        "mislabel_candidate"
+    else
+        "ok"
+    end
+end
+
+"""
     check_exposure_type!(warnings, clf, fnames, tele, mjd, expnum, image_type, lamp_flags)
 
 Post-2D hook: compute features for the three chip ar2D files `fnames`
@@ -150,13 +189,7 @@ function check_exposure_type!(warnings, clf, fnames::AbstractDict, tele, mjd, ex
     chip_features = Dict(chip => exposure_class_features(load(fnames[chip], "dimage"))
     for chip in CHIP_LIST)
     res = classify_exposure_type(clf, chip_features, tele)
-    flagged = if res.decision == "unknown"
-        "unknown"
-    elseif res.pred != labeled_class && res.prob > clf.flag_tau
-        "mislabel_candidate"
-    else
-        "ok"
-    end
+    flagged = exposure_check_category(labeled_class, res, clf.flag_tau)
     if flagged != "ok"
         @warn "Exposure-type check: $tele $mjd exp $expnum labeled '$labeled_class' but classified '$(res.pred)' (p=$(round(res.prob, digits = 3)), $flagged)"
         push!(warnings,

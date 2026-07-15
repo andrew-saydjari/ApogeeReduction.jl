@@ -240,7 +240,8 @@ if parg["exp_class_model"] != ""
     @everywhere begin
         using ApogeeReduction: exposure_class_features, load_exposure_classifier,
                                classify_exposure_type, exposure_class_label,
-                               read_almanac_exp_df, CHIP_LIST
+                               exposure_check_category, read_almanac_exp_df,
+                               CHIP_LIST
         const EXP_CLF = Ref{Any}(nothing)
         function get_exp_clf()
             if EXP_CLF[] === nothing
@@ -266,12 +267,16 @@ if parg["exp_class_model"] != ""
                                          load(fnames_by_chip[chip], "dimage"))
                 for chip in keys(fnames_by_chip))
                 res = classify_exposure_type(clf, chip_features, tele)
-                flag = if res.decision == "unknown"
-                    "unknown"
-                elseif res.pred != labeled && res.prob > clf.flag_tau
-                    "mislabel_candidate"
-                else
-                    "ok"
+                flag = exposure_check_category(labeled, res, clf.flag_tau)
+                # persistence prior: a dark taken right after a bright exposure
+                # may carry afterglow (recorded in the table, not warned)
+                if flag == "ok" && res.pred == "dark_q0t0u0" &&
+                   labeled == "dark_q0t0u0" && expnum > 1
+                    prevtype = lowercase(string(df.image_type[expnum - 1]))
+                    if prevtype in
+                       ApogeeReduction.CLASSIFIER_PERSIST_SOURCES
+                        flag = "persistence_prior"
+                    end
                 end
                 (tele = String(tele), mjd = mjd, expnum = expnum, labeled = labeled,
                     pred = res.pred, prob = res.prob, flag = flag)
@@ -309,9 +314,11 @@ if parg["exp_class_model"] != ""
                     pred = String.(sub.pred), prob = collect(sub.prob),
                     flag = String.(sub.flag))
             end
-            nbad = sum(dfc.flag .!= "ok")
+            # persistence_prior is informational (recorded, not warned)
+            warnable = (dfc.flag .!= "ok") .& (dfc.flag .!= "persistence_prior")
+            nbad = sum(warnable)
             if nbad > 0
-                bad = dfc[dfc.flag .!= "ok", :]
+                bad = dfc[warnable, :]
                 for r in eachrow(bad)
                     @warn "Exposure-type check: $(r.tele) $(r.mjd) exp $(r.expnum) labeled '$(r.labeled)' classified '$(r.pred)' (p=$(round(r.prob, digits = 3)), $(r.flag))"
                 end
