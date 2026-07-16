@@ -176,6 +176,36 @@ function exposure_check_category(labeled_class, res, flag_tau = 0.7)
 end
 
 """
+    exposure_predicted_bad(labeled_class, pred, status)
+
+Masking policy for downstream consumers (cal runlists, wavecal arc/FPI
+selection): should this exposure be excluded based on the classifier verdict?
+
+- object_q0t0u0: never masked (science frames are handled downstream)
+- dark_q0t0u0: masked when the content prediction is anything but a clean
+  dark (dark_persist, illuminated content) or the prediction is unknown.
+  Sequence-only persistence risks whose image still classifies as a clean
+  dark are kept.
+- internalflat_q0t0u0 and arclamp_q0t0u0 (FPI): masked on any
+  predicted-vs-labeled mismatch or unknown
+- all other classes: masked whenever the check status is not "ok"
+  (mislabel / lamp-off / faint-twilight / unknown / rare label)
+- exposures without reduced 2D data ("nofiles"/"unclassified") are not
+  masked here; missing products already exclude them downstream
+"""
+function exposure_predicted_bad(labeled_class, pred, status)
+    if status in ("nofiles", "unclassified")
+        false
+    elseif labeled_class == "object_q0t0u0"
+        false
+    elseif labeled_class in ("dark_q0t0u0", "internalflat_q0t0u0", "arclamp_q0t0u0")
+        (pred != labeled_class) || (status == "unknown")
+    else
+        status != "ok"
+    end
+end
+
+"""
     check_exposure_type!(warnings, clf, fnames, tele, mjd, expnum, image_type, lamp_flags)
 
 Post-2D hook: compute features for the three chip ar2D files `fnames`
