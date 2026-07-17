@@ -520,6 +520,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     chipInt_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     thrpt_stack = zeros(N_CHIPS, N_FIBERS)
+    bitmsk_thrpt_stack = zeros(Int, N_CHIPS, N_FIBERS)
 
     ingestBit = zeros(Int, N_FIBERS)
 
@@ -592,6 +593,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         dropped_pixels_mask_1d = f["dropped_pixels_mask_1d"]
         extract_trace_centers = f["extract_trace_centers"]
         relthrpt = f["relthrpt"]
+        bitmsk_relthrpt = f["bitmsk_relthrpt"]
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))
 
@@ -611,6 +613,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
         chipInt_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipind
         thrpt_stack[chipind, :] .= relthrpt
+        bitmsk_thrpt_stack[chipind, :] .= bitmsk_relthrpt
     end
 
     # should add a check all entries of metadata_lst to be equal
@@ -694,7 +697,8 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # Write reinterpolated data
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
-        extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack)
+        extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack,
+        bitmsk_relthrpt = bitmsk_thrpt_stack)
     return
 end
 
@@ -802,7 +806,11 @@ function process_1D(fname;
         end
 
         # don't flux broken fibers (don't use warn fibers for sky)
-        msk_goodwarn = (bitmsk_relthrpt .== 0) .| (bitmsk_relthrpt .& 2^0) .== 2^0
+        # broken fibers (bit 1, relthrpt < rel_val_cut) always also have the low-throughput
+        # warn bit 0 set, so the mask must exclude on bit 1 explicitly: their relthrpt is a
+        # noise-level (possibly negative) domeflat measurement and dividing by it produces
+        # arbitrarily inflated flux. Bit 2 (no fluxing file) is excluded as before.
+        msk_goodwarn = (bitmsk_relthrpt .& (2^1 | 2^2)) .== 0
         if any(msk_goodwarn)
             flux_1d[:, msk_goodwarn] ./= relthrptr[:, msk_goodwarn]
             ivar_1d[:, msk_goodwarn] .*= relthrptr[:, msk_goodwarn] .^ 2
