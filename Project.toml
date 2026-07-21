@@ -1,7 +1,7 @@
 name = "ApogeeReduction"
 uuid = "54a60710-c70b-4ca7-b418-a99a7825ced3"
-authors = ["andrew-saydjari <saydjari@g.harvard.edu> and contributors"]
 version = "1.0.0-DEV"
+authors = ["andrew-saydjari <saydjari@g.harvard.edu> and contributors"]
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
@@ -40,8 +40,9 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
-[sources]
-SlackThreads = {rev = "main", url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"}
+[sources.SlackThreads]
+rev = "main"
+url = "https://github.com/andrew-saydjari/SlackThreads.jl.git"
 
 [compat]
 ArgParse = "1"
@@ -76,7 +77,7 @@ SparseArrays = "1.11.0"
 SpecialFunctions = "2.4.0"
 Statistics = "1"
 StatsBase = "0.33, 0.34"
-TimerOutputs = "0.5"
+TimerOutputs = "0.5, 1"
 julia = "1.11"
 
 [extras]
