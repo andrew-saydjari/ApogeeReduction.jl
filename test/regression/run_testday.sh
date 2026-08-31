@@ -1,0 +1,191 @@
+#!/bin/bash
+# run_testday.sh — golden-diff regression runner: reduce one (tele, mjd) with a
+# given ApogeeReduction.jl checkout, on a workstation (no Slurm), reading raw
+# data + almanac from the 2026_05_01 bulk-run inputs.
+#
+# Usage:
+#   ./run_testday.sh <AR_checkout_dir> <tele> <mjd> <outdir>
+#
+# This mirrors scripts/daily/run_all.sh but:
+#   * does NOT run almanac (no Utah tunnel needed): the day's almanac group is
+#     extracted from an existing bulk almanac file (AR_ALMANAC_SRC) into the
+#     old pre-raw/ layout that this branch reads;
+#   * does NOT update sdsscore;
+#   * skips plots / dashboard / arMADGICS (science products only — those are
+#     what the golden diff compares);
+#   * forces local Distributed workers (Slurm env is scrubbed so the pipelines
+#     never try SlurmClusterManager).
+#
+# Configuration (env vars, all optional; a file named by AR_TESTDAY_CONFIG is
+# sourced first if set):
+#   AR_ALMANAC_SRC        bulk or per-day almanac file to extract the day from
+#                         [default: 2026_05_01 bulk allobs_57600_61160.h5]
+#   AR_RAW_CLUSTER        --cluster arg for pipeline.jl: "cca" resolves to the
+#                         raw mirror /mnt/ceph/users/sdssv/raw/APOGEE; any
+#                         other value is interpreted as a base path [cca]
+#   AR_CALDIR_DARKS       dark cal dir  [2025_07_31/outdir_ref/]
+#   AR_CALDIR_FLATS       flat cal dir  [2025_07_31/outdir_ref/]
+#   AR_GAIN_READ_CAL_DIR  gain/readnoise cal dir [2025_07_31/pass_clean/]
+#   AR_WORKERS            Distributed workers for pipeline.jl / pipeline_2d_1d
+#                         [24 — leave headroom on the 32-core ccalin051]
+#   AR_JULIA_VERSION      juliaup channel [1.11.0, matching run_all.sh]
+#   AR_CHECKPOINT_MODE    clobber | commit_exists | commit_same [commit_exists]
+#   AR_CHIPS              chips to reduce [RGB]
+#   AR_EXP_CLASS_MODEL    exposure-classifier artifact; empty = skip check []
+#
+# Exit code: 0 on success; the step that failed is the last "--------- x ---------"
+# banner in the log (${outdir}logs/run_testday_<tele>_<mjd>.log).
+
+set -e
+set -o pipefail
+
+if [ $# -ne 4 ]; then
+    echo "usage: $0 <AR_checkout_dir> <tele> <mjd> <outdir>" >&2
+    exit 2
+fi
+
+harness_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---- config ----------------------------------------------------------------
+if [ -n "${AR_TESTDAY_CONFIG:-}" ]; then
+    # shellcheck disable=SC1090
+    source "$AR_TESTDAY_CONFIG"
+fi
+AR_ALMANAC_SRC=${AR_ALMANAC_SRC:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_05_01/outdir/almanac/allobs_57600_61160.h5"}
+AR_RAW_CLUSTER=${AR_RAW_CLUSTER:-"cca"}
+AR_CALDIR_DARKS=${AR_CALDIR_DARKS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
+AR_CALDIR_FLATS=${AR_CALDIR_FLATS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
+AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
+AR_WORKERS=${AR_WORKERS:-24}
+AR_JULIA_VERSION=${AR_JULIA_VERSION:-"1.11.0"}
+AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE:-"commit_exists"}
+AR_CHIPS=${AR_CHIPS:-"RGB"}
+AR_EXP_CLASS_MODEL=${AR_EXP_CLASS_MODEL:-""}
+
+base_dir="$(cd "$1" && pwd)"
+tele=$2
+mjd=$3
+outdir=$4
+# AR code concatenates paths as outdir * "apred/..." — the trailing slash matters.
+case "$outdir" in */) : ;; *) outdir="${outdir}/" ;; esac
+mkdir -p "$outdir"
+outdir="$(cd "$outdir" && pwd)/"
+
+# Never let the pipelines think they are inside Slurm (they would try
+# SlurmClusterManager and hang/crash on a workstation).
+unset SLURM_NTASKS SLURM_JOB_ID SLURM_NNODES SLURM_CPUS_ON_NODE SLURM_JOB_NODELIST
+
+runname="allobs_${tele}_${mjd}"
+almanac_file=${outdir}almanac/${runname}.h5
+runlist=${outdir}almanac/runlist_${runname}.h5
+flat_types=("quartz" "dome")
+logdir=${outdir}logs
+mkdir -p "${outdir}almanac" "$logdir"
+logfile=${logdir}/run_testday_${tele}_${mjd}.log
+
+# Log everything (also to the terminal).
+exec > >(tee -a "$logfile") 2>&1
+
+echo "run_testday.sh starting $(date -Is) on $(hostname)"
+echo "  AR checkout: $base_dir"
+echo "  git: $(git -C "$base_dir" rev-parse HEAD 2>/dev/null || echo 'not a git checkout') ($(git -C "$base_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true))"
+echo "  tele=$tele mjd=$mjd outdir=$outdir"
+echo "  almanac_src=$AR_ALMANAC_SRC"
+echo "  raw cluster=$AR_RAW_CLUSTER darks=$AR_CALDIR_DARKS flats=$AR_CALDIR_FLATS"
+echo "  gain/read=$AR_GAIN_READ_CAL_DIR workers=$AR_WORKERS julia=$AR_JULIA_VERSION"
+echo "  checkpoint_mode=$AR_CHECKPOINT_MODE chips=$AR_CHIPS exp_class_model='${AR_EXP_CLASS_MODEL}'"
+
+juliaup add "$AR_JULIA_VERSION" 2>/dev/null || true
+
+LAST_TIME=""
+print_elapsed_time() {
+    current_seconds=$SECONDS
+    if [ -n "$LAST_TIME" ]; then
+        diff_seconds=$((current_seconds - LAST_TIME))
+        printf 'Time since last step: %dd %dh:%dm:%ds\n' $((diff_seconds/86400)) $((diff_seconds%86400/3600)) $((diff_seconds%3600/60)) $((diff_seconds%60))
+    fi
+    printf 'Elapsed time: %dd %dh:%dm:%ds\n' $((current_seconds/86400)) $((current_seconds%86400/3600)) $((current_seconds%3600/60)) $((current_seconds%60))
+    echo
+    echo "--------- $1 ---------"
+    echo
+    LAST_TIME=$current_seconds
+}
+
+# ---- almanac day extraction (replaces the almanac/tunnel step) --------------
+print_elapsed_time "Extracting almanac day from bulk file"
+julia +"$AR_JULIA_VERSION" --project="$harness_dir" "$harness_dir/extract_almanac_day.jl" \
+    "$AR_ALMANAC_SRC" "$tele" "$mjd" "$almanac_file"
+
+# ---- runlist ----------------------------------------------------------------
+print_elapsed_time "Building Runlist"
+set +e
+julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/bulk/make_runlist_all.jl" \
+    --tele "$tele" --almanac_file "$almanac_file" --output "$runlist"
+exit_code=$?
+set -e
+if [ $exit_code -eq 16 ]; then
+    echo "No exposures found for this night. Exiting gracefully."
+    exit 0
+elif [ $exit_code -ne 0 ]; then
+    echo "ERROR: make_runlist_all.jl failed with exit code $exit_code"
+    exit $exit_code
+fi
+
+# ---- 3D -> 2D / 2Dcal -------------------------------------------------------
+print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
+julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline.jl" \
+    --tele "$tele" --runlist "$runlist" --outdir "$outdir" --runname "$runname" \
+    --chips "$AR_CHIPS" --caldir_darks "$AR_CALDIR_DARKS" --caldir_flats "$AR_CALDIR_FLATS" \
+    --cluster "$AR_RAW_CLUSTER" --gain_read_cal_dir "$AR_GAIN_READ_CAL_DIR" \
+    --checkpoint_mode "$AR_CHECKPOINT_MODE" --workers_per_node "$AR_WORKERS" \
+    ${AR_EXP_CLASS_MODEL:+--exp_class_model "$AR_EXP_CLASS_MODEL"}
+
+# ---- traces + relFluxing per flat type -------------------------------------
+for flat_type in "${flat_types[@]}"; do
+    flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
+    print_elapsed_time "Making runlist for $flat_type Flats"
+    julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_runlist_fiber_flats.jl" \
+        --almanac_file "$almanac_file" --tele "$tele" --output "$flatrunlist" --flat_type "$flat_type"
+
+    print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
+    mkdir -p "${outdir}${flat_type}_flats"
+    julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_traces_from_flats.jl" \
+        --tele "$tele" --trace_dir "$outdir" --runlist "$flatrunlist" --flat_type "$flat_type" \
+        --slack_quiet true --checkpoint_mode "$AR_CHECKPOINT_MODE"
+
+    print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
+    mkdir -p "${outdir}apredrelflux"
+    julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
+        --tele "$tele" --runlist "$flatrunlist" --outdir "$outdir" --runname "$runname" \
+        --relFlux false --waveSoln false --checkpoint_mode "$AR_CHECKPOINT_MODE" \
+        --workers_per_node "$AR_WORKERS"
+
+    print_elapsed_time "Making relFlux for $flat_type Flats"
+    julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_relFlux.jl" \
+        --trace_dir "$outdir" --runlist "$flatrunlist" --runname "$runname" --tele "$tele"
+done
+
+# ---- 2D -> 1D ---------------------------------------------------------------
+print_elapsed_time "Running 2D->1D Pipeline for $tele"
+julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
+    --tele "$tele" --runlist "$runlist" --outdir "$outdir" --runname "$runname" \
+    --checkpoint_mode "$AR_CHECKPOINT_MODE" --workers_per_node "$AR_WORKERS"
+
+# ---- warnings census (regression metric, cf. REFACTOR_PLAN v1 §0) ----------
+print_elapsed_time "Warnings census"
+for pat in \
+    "No good pixels found for fiber" \
+    "Non-unique or unsorted wavelengths" \
+    "no useful arclamp peaks" \
+    "Could not find nightly average wave soln" \
+    "No fluxing file available" \
+    "no useful relfluxing files" \
+    "Problem with getting fiber type information" \
+    "Failed to get fiber type information" \
+    "Exposure-type check" \
+    ; do
+    n=$(grep -c "$pat" "$logfile" || true)
+    echo "census: ${n}x \"$pat\""
+done
+
+print_elapsed_time "Test-day run completed"
