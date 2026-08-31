@@ -14,6 +14,8 @@ proves it changed nothing. See
 | `run_testday.sh` | run the AR pipeline (runlist → 3D→2D → traces/relFlux → 2D→1D) for one `(tele, mjd)` from existing raw data + almanac, no Slurm, no Utah tunnel |
 | `extract_almanac_day.jl` | pull one `(tele, mjd)` group out of a bulk almanac file into a per-day `allobs_<tele>_<mjd>.h5` in the pre-`raw/` layout this branch reads |
 | `h5diff_tree.jl` | walk two output trees, compare every HDF5 dataset + attribute, emit a markdown diff report |
+| `submit_goldens.sh` | sbatch script generating ALL golden baselines in one multinode allocation (run_bulk.sh SlurmClusterManager pattern); see `SUBMIT.md` |
+| `SUBMIT.md` | golden-job submission instructions + filesystem-only monitoring + post-run checks |
 | `Project.toml` / `Manifest.toml` | Julia env for the two `.jl` tools (HDF5 + ArgParse only — independent of the AR package env) |
 
 One-time setup: `julia +1.11.0 --project=. -e 'using Pkg; Pkg.instantiate()'`.
@@ -37,6 +39,9 @@ All paths are configurable by env var (see the header of `run_testday.sh`):
 (default 24), `AR_JULIA_VERSION` (default 1.11.0, matching run_all.sh),
 `AR_CHECKPOINT_MODE`, `AR_CHIPS`, `AR_EXP_CLASS_MODEL`. Set
 `AR_TESTDAY_CONFIG=<file>` to source a config file with those assignments.
+`AR_SLURM` (auto/true/false) selects local Distributed workers vs the
+run_bulk.sh SlurmClusterManager pattern; inside an sbatch allocation it
+defaults to Slurm mode (`submit_goldens.sh` relies on this).
 
 The full step log lands in `<outdir>/logs/run_testday_<tele>_<mjd>.log` and
 ends with a **warnings census** (counts of the known warning classes from the
