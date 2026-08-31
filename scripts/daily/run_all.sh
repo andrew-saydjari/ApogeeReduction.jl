@@ -41,7 +41,13 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-almanac_version="0.3.6"
+# almanac source: AKS fork, L1' metadata-fix branch (writes the raw/-layout
+# this branch of AR reads; PyPI releases <=0.4.3 predate that restructure so a
+# PyPI version pin no longer works). Pinned by COMMIT, not branch name, so the
+# uvx wheel cache keys on the exact source — a branch-name pin can silently
+# serve a stale cached build after the branch moves (see
+# 2026_08_31/almanac_utah_test/RUNBOOK.md). Branch: fix/L1-metadata.
+almanac_source="git+https://github.com/andrew-saydjari/almanac.git@b6548dd94fe289b039c5e5f0c4a4df8f1d389618"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -98,7 +104,11 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
 
-    uvx --from sdss-almanac==$almanac_version almanac -p 12 -v --$tele --mjd-start $mjd --mjd-end $mjd  --output $almanac_file --fibers
+    # NOTE (2026-08-31): the fiber cross-match needs a database privilege that
+    # is currently missing from the CCA-side connection (see O1 smoke report,
+    # daily_smoke/O1_REPORT.md, "DB grant request"). Until that is fixed this
+    # step fails from CCA; add --no-x-match to run without target cross-match.
+    uvx --from $almanac_source almanac -p 12 -v --$tele --mjd-start $mjd --mjd-end $mjd  --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"
