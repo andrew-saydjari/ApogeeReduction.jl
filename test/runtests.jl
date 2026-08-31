@@ -4,4 +4,5 @@ using ApogeeReduction, Test, Random, Statistics
 @testset verbose=true "ApogeeReduction.jl" begin
     include("ar3D.jl")
     include("safe_jldsave.jl")
+    include("lsf.jl")
 end
