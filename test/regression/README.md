@@ -85,8 +85,10 @@ darkRate/flatFraction cals into `apred/<mjd>/`). Per-dataset verdicts:
 
 Provenance metadata that legitimately differs between runs is **ignored by
 default** (still compared, reported as `IGNORED`, never fails the diff):
-`metadata/{git_commit, git_branch, git_clean}` and
-`metadata/trace_orig_param_fname` (embeds the run's outdir path). Extend with
+`metadata/{git_commit, git_branch, git_clean}`,
+`metadata/trace_orig_param_fname` (embeds the checkout path), and the
+top-level `trace_used_param_fname` (embeds the run's own outdir path;
+present in ar1Dcal/ar2Dresidualscal). Extend with
 `--ignore pat1,pat2` (path-suffix match, attrs as `path@attrname`); disable the
 defaults with `--no-default-ignores`. NOTE: `metadata/mjd_mid_exposure*`,
 `ndiff_used`, `nread_total` are exposure properties, NOT provenance — if they

@@ -48,6 +48,10 @@ const DEFAULT_IGNORES = [
     "metadata/git_commit",
     "metadata/trace_orig_param_fname",
     "git_branch", "git_clean", "git_commit", # top-level variants (some products)
+    # top-level dataset in ar1Dcal/ar2Dresidualscal embedding the absolute path
+    # of the run's own outdir (always differs between two runs in different
+    # outdirs, even for identical code+data)
+    "trace_used_param_fname",
 ]
 
 function parse_commandline()
