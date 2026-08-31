@@ -27,7 +27,6 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
-#SBATCH --qos=cca
 #SBATCH --nodes=2
 #SBATCH --constraint="[genoa|icelake|rome]"
 #SBATCH --mem=900G
