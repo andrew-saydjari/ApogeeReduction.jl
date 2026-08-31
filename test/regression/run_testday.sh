@@ -13,8 +13,10 @@
 #   * does NOT update sdsscore;
 #   * skips plots / dashboard / arMADGICS (science products only — those are
 #     what the golden diff compares);
-#   * forces local Distributed workers (Slurm env is scrubbed so the pipelines
-#     never try SlurmClusterManager).
+#   * runs either on a workstation (local Distributed workers; Slurm env
+#     scrubbed) or inside an sbatch allocation (SlurmClusterManager spanning
+#     the whole allocation, mirroring scripts/bulk/run_bulk.sh) — see AR_SLURM
+#     below and test/regression/submit_goldens.sh.
 #
 # Configuration (env vars, all optional; a file named by AR_TESTDAY_CONFIG is
 # sourced first if set):
@@ -27,7 +29,8 @@
 #   AR_CALDIR_FLATS       flat cal dir  [2025_07_31/outdir_ref/]
 #   AR_GAIN_READ_CAL_DIR  gain/readnoise cal dir [2025_07_31/pass_clean/]
 #   AR_WORKERS            Distributed workers for pipeline.jl / pipeline_2d_1d
-#                         [24 — leave headroom on the 32-core ccalin051]
+#                         in local mode [24 — headroom on 32-core ccalin051]
+#   AR_SLURM              auto | true | false — see mode block below [auto]
 #   AR_JULIA_VERSION      juliaup channel [1.11.0, matching run_all.sh]
 #   AR_CHECKPOINT_MODE    clobber | commit_exists | commit_same [commit_exists]
 #   AR_CHIPS              chips to reduce [RGB]
@@ -71,9 +74,26 @@ case "$outdir" in */) : ;; *) outdir="${outdir}/" ;; esac
 mkdir -p "$outdir"
 outdir="$(cd "$outdir" && pwd)/"
 
-# Never let the pipelines think they are inside Slurm (they would try
-# SlurmClusterManager and hang/crash on a workstation).
-unset SLURM_NTASKS SLURM_JOB_ID SLURM_NNODES SLURM_CPUS_ON_NODE SLURM_JOB_NODELIST
+# Two execution modes (AR_SLURM=auto|true|false, default auto = detect):
+#   false — workstation: scrub the Slurm env so the pipelines never try
+#           SlurmClusterManager, and pass --workers_per_node explicitly.
+#   true  — inside an sbatch allocation (submit_goldens.sh): mirror
+#           scripts/bulk/run_bulk.sh exactly — export SLURM_NTASKS =
+#           CPUS_ON_NODE * NNODES so every julia stage spans the whole
+#           allocation via SlurmClusterManager; --workers_per_node is NOT
+#           passed (pipeline default -1 = keep all Slurm workers).
+AR_SLURM=${AR_SLURM:-auto}
+if [ "$AR_SLURM" = "auto" ]; then
+    if [ -n "${SLURM_JOB_ID:-}" ]; then AR_SLURM=true; else AR_SLURM=false; fi
+fi
+if [ "$AR_SLURM" = "true" ]; then
+    SLURM_NTASKS=$(($SLURM_CPUS_ON_NODE * $SLURM_NNODES))
+    export SLURM_NTASKS
+    workers_args=()
+else
+    unset SLURM_NTASKS SLURM_JOB_ID SLURM_NNODES SLURM_CPUS_ON_NODE SLURM_JOB_NODELIST
+    workers_args=(--workers_per_node "$AR_WORKERS")
+fi
 
 runname="allobs_${tele}_${mjd}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -94,6 +114,11 @@ echo "  almanac_src=$AR_ALMANAC_SRC"
 echo "  raw cluster=$AR_RAW_CLUSTER darks=$AR_CALDIR_DARKS flats=$AR_CALDIR_FLATS"
 echo "  gain/read=$AR_GAIN_READ_CAL_DIR workers=$AR_WORKERS julia=$AR_JULIA_VERSION"
 echo "  checkpoint_mode=$AR_CHECKPOINT_MODE chips=$AR_CHIPS exp_class_model='${AR_EXP_CLASS_MODEL}'"
+if [ "$AR_SLURM" = "true" ]; then
+    echo "  mode=slurm SLURM_NTASKS=$SLURM_NTASKS nodes=${SLURM_NNODES:-?} nodelist=${SLURM_JOB_NODELIST:-?}"
+else
+    echo "  mode=local workers=$AR_WORKERS"
+fi
 
 juliaup add "$AR_JULIA_VERSION" 2>/dev/null || true
 
@@ -137,7 +162,7 @@ julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline.jl" \
     --tele "$tele" --runlist "$runlist" --outdir "$outdir" --runname "$runname" \
     --chips "$AR_CHIPS" --caldir_darks "$AR_CALDIR_DARKS" --caldir_flats "$AR_CALDIR_FLATS" \
     --cluster "$AR_RAW_CLUSTER" --gain_read_cal_dir "$AR_GAIN_READ_CAL_DIR" \
-    --checkpoint_mode "$AR_CHECKPOINT_MODE" --workers_per_node "$AR_WORKERS" \
+    --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}" \
     ${AR_EXP_CLASS_MODEL:+--exp_class_model "$AR_EXP_CLASS_MODEL"}
 
 # ---- traces + relFluxing per flat type -------------------------------------
@@ -158,7 +183,7 @@ for flat_type in "${flat_types[@]}"; do
     julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
         --tele "$tele" --runlist "$flatrunlist" --outdir "$outdir" --runname "$runname" \
         --relFlux false --waveSoln false --checkpoint_mode "$AR_CHECKPOINT_MODE" \
-        --workers_per_node "$AR_WORKERS"
+        "${workers_args[@]}"
 
     print_elapsed_time "Making relFlux for $flat_type Flats"
     julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_relFlux.jl" \
@@ -169,7 +194,7 @@ done
 print_elapsed_time "Running 2D->1D Pipeline for $tele"
 julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
     --tele "$tele" --runlist "$runlist" --outdir "$outdir" --runname "$runname" \
-    --checkpoint_mode "$AR_CHECKPOINT_MODE" --workers_per_node "$AR_WORKERS"
+    --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}"
 
 # ---- warnings census (regression metric, cf. REFACTOR_PLAN v1 §0) ----------
 print_elapsed_time "Warnings census"
