@@ -408,11 +408,20 @@ function main()
     # post a link to slack
     # the link to the dashboard is relative to the current directory
     dir = abspath(joinpath(pwd(), parg["outdir"], "plots", string(mjd), "dashboard.html"))
-    url = "<"*replace(replace(replace(replace(dir, 
-        "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/"),
-        "/mnt/ceph/users/sdssv/work/kmckinnon/" => "https://users.flatironinstitute.org/~kmckinnon/$(ENV["SLACK_TOKEN"])/sdsswork/"),
-        "/mnt/ceph/users/sdssv/work/asaydjari/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/sdsswork/"),
-        "/mnt/ceph/users/sdssv/work/" => "https://users.flatironinstitute.org/~asaydjari/$(ENV["SLACK_TOKEN"])/"
+    # Public-URL path stubs come from the environment (PUBLIC_URL_SLUG for the
+    # asaydjari public_www dir; PUBLIC_URL_SLUG_KMCKINNON, optional, for
+    # kmckinnon's). Never hardcode these or derive them from API tokens.
+    public_url_slug = ENV["PUBLIC_URL_SLUG"]
+    kmckinnon_slug = get(ENV, "PUBLIC_URL_SLUG_KMCKINNON", "")
+    url = replace(dir,
+        "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/")
+    if kmckinnon_slug != ""
+        url = replace(url,
+            "/mnt/ceph/users/sdssv/work/kmckinnon/" => "https://users.flatironinstitute.org/~kmckinnon/$(kmckinnon_slug)/sdsswork/")
+    end
+    url = "<"*replace(replace(url,
+        "/mnt/ceph/users/sdssv/work/asaydjari/" => "https://users.flatironinstitute.org/~asaydjari/$(public_url_slug)/sdsswork/"),
+        "/mnt/ceph/users/sdssv/work/" => "https://users.flatironinstitute.org/~asaydjari/$(public_url_slug)/"
     )*"|here>"
 
     thread = SlackThread()
