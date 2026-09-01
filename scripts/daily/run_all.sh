@@ -41,13 +41,13 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-# almanac source: AKS fork, L1' metadata-fix branch (writes the raw/-layout
-# this branch of AR reads; PyPI releases <=0.4.3 predate that restructure so a
-# PyPI version pin no longer works). Pinned by COMMIT, not branch name, so the
-# uvx wheel cache keys on the exact source — a branch-name pin can silently
-# serve a stale cached build after the branch moves (see
-# 2026_08_31/almanac_utah_test/RUNBOOK.md). Branch: fix/L1-metadata.
-almanac_source="git+https://github.com/andrew-saydjari/almanac.git@b6548dd94fe289b039c5e5f0c4a4df8f1d389618"
+# almanac source: AKS fork main (fix/L1-metadata merged 2026-08-31; writes the
+# raw/-layout this branch of AR reads; PyPI releases <=0.4.3 predate that
+# restructure so a PyPI version pin no longer works). Pinned by COMMIT, not
+# branch name, so the uvx wheel cache keys on the exact source — a branch-name
+# pin can silently serve a stale cached build after the branch moves (see
+# 2026_08_31/almanac_utah_test/RUNBOOK.md).
+almanac_source="git+https://github.com/andrew-saydjari/almanac.git@61e0d51186e172c17c3b33cd586de1b5a61dd2cb"
 juliaup add $julia_version
 
 # ARGUMENTS
