@@ -486,6 +486,35 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
+"""
+    normalize_reinterp_spectra!(outflux, outvar, cntvec) -> (outivar, outmsk)
+
+Final normalization step of `reinterp_spectra`: divide the accumulated flux and
+variance by the per-fiber frame count (the max number of contributing frames
+over the uniform-grid pixels) and derive the inverse variance and the Bool
+good-pixel mask. `outflux` and `outvar` are mutated in place.
+
+Fibers with no good pixels at all (`framecnts == 0`, e.g. dead/broken fibers)
+come out as flux = 0, ivar = 0, msk = false. (A4 fix: they previously came out
+as flux = 0/0 = NaN, ivar = NaN, msk = (0 .== 0) = true — NaN presented as
+GOOD data, which NaN-poisoned downstream consumers such as the arMADGICS
+ingest.)
+"""
+function normalize_reinterp_spectra!(outflux, outvar, cntvec)
+    framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
+    outflux ./= framecnts
+    outvar ./= (framecnts .^ 2)
+    # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
+    outmsk = (cntvec .== framecnts) .& (framecnts .> 0)
+    outivar = 1 ./ outvar
+    outivar[.!outmsk] .= 0.0
+    # zero-good-pixel fibers: replace the 0/0 = NaN flux/var with zeros
+    zerofibs = dropdims(framecnts .== 0, dims = 1)
+    outflux[:, zerofibs] .= 0.0
+    outvar[:, zerofibs] .= 0.0
+    return outivar, outmsk
+end
+
 function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same", outdir = "../outdir")
     # might need to add in telluric div functionality here?
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
@@ -686,13 +715,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         end
     end
 
-    framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
-    outflux ./= framecnts
-    outvar ./= (framecnts .^ 2)
-    # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
-    outmsk = (cntvec .== framecnts)
-    outivar = 1 ./ outvar
-    outivar[.!outmsk] .= 0.0
+    outivar, outmsk = normalize_reinterp_spectra!(outflux, outvar, cntvec)
 
     # Write reinterpolated data
     safe_jldsave(
