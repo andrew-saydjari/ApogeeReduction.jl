@@ -87,6 +87,48 @@ Let `GROOT=/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/ApogeeReductio
 4. The goldens then serve as the diff base for every fix/cleanup branch (see
    README.md, "expected-diff-statement workflow").
 
+## Incident log: job 6969533 (2026-08-31) — missing wavecal/ dir
+
+Day 1 (apo 60000) of the first submission died at "Skyline medwave/skyline
+dither" (`pipeline_2d_1d.jl:427`): `skyline_medwavecal_skyline_dither`
+(`src/wavecal.jl:1708`) does `h5open(<outdir>/wavecal/wavecalNightAve_*.h5,
+"w")` **without mkpath-ing `<outdir>/wavecal/`**. `run_bulk.sh:159` works
+around it with `mkdir -p ${outdir}/wavecal`; `run_all.sh` omits it and
+survives only because production outdirs already contain `wavecal/`; the
+proper code fix is on `fix-broken-fiber-fluxing` (lands via R1). The apo
+59429 smoke never hit it (no object exposures → early return before the
+h5open). The confusing "HDF5.API.H5Error: Error getting stack length" is
+secondary: HDF5.jl cannot render a worker-remoted H5Error on the main
+process; the true error is the `h5f_create` failure in the "caused by" block.
+
+Mitigations applied:
+- `run_testday.sh` now does `mkdir -p ${outdir}wavecal` before the final
+  2D→1D stage (mirroring run_bulk.sh).
+- The `wavecal/` dirs of all 6 day outdirs under
+  `golden/ApogeeReduction.jl@f76194a/` were pre-created at 20:25 while job
+  6969533 was in day 2's 3D stage, so days 2–6 of that job are expected to
+  complete; only **apo 60000 needs a redo**.
+
+### Redoing apo 60000 into the existing golden tree
+
+Pipeline code is identical between `f76194a` and the fix commit (only
+`test/regression/` changed), so the redo may legitimately write into the
+`@f76194a` root — the MANIFEST appends a "Redo/partial run" section recording
+the new sha:
+
+```bash
+cd /mnt/home/asaydjari/gitcode/worktrees/AR-T1
+AR_DAYS="apo 60000" \
+AR_OUTROOT=/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/ApogeeReduction.jl@f76194a \
+sbatchAKS test/regression/submit_goldens.sh
+```
+
+(`sbatchAKS` must forward the environment, as plain `sbatch` does by
+default; if unsure use `sbatch --export=ALL,AR_DAYS="apo 60000",AR_OUTROOT=...`.)
+With `commit_exists` checkpointing the completed 3D→2D/traces/relFlux
+products of the failed attempt are reused; expect ~15–25 min. Then run the
+post-completion checks above, including the apo 59429 vs smoke cross-diff.
+
 ## The A3 gapped-almanac day (deferred)
 
 A full scan of the 2026_05_01 bulk almanac (both telescopes, all ~6,200

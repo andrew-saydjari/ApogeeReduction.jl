@@ -192,6 +192,15 @@ done
 
 # ---- 2D -> 1D ---------------------------------------------------------------
 print_elapsed_time "Running 2D->1D Pipeline for $tele"
+# REQUIRED (run_bulk.sh:159 does the same): skyline_medwavecal_skyline_dither
+# (src/wavecal.jl:1708) h5open's into <outdir>/wavecal/ WITHOUT mkpath-ing it,
+# so any night with object exposures crashes at "Skyline medwave/skyline
+# dither" if the dir is missing. run_all.sh omits this and survives only
+# because production outdirs already contain wavecal/; the proper code fix
+# lives on fix-broken-fiber-fluxing and lands via R1. Nights without object
+# exposures (e.g. apo 59429) never reach that code path, which is why the
+# ccalin051 smoke passed without it.
+mkdir -p "${outdir}wavecal"
 julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
     --tele "$tele" --runlist "$runlist" --outdir "$outdir" --runname "$runname" \
     --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}"

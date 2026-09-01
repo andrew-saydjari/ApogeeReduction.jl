@@ -66,14 +66,20 @@ export AR_EXP_CLASS_MODEL=""   # decision: goldens without the classifier
 
 # The test days (REFACTOR_PLAN v1 §4.2): 6 runs covering the 5 fixed test days
 # + both telescopes at 60000. The A3 gapped-almanac day joins later (SUBMIT.md).
-days=(
-    "apo 60000"
-    "lco 60000"
-    "apo 58588"
-    "apo 59337"
-    "apo 58011"
-    "apo 59429"
-)
+# AR_DAYS overrides for partial redos, semicolon-separated pairs, e.g.
+#   AR_DAYS="apo 60000;apo 58011"
+if [ -n "${AR_DAYS:-}" ]; then
+    IFS=';' read -r -a days <<< "$AR_DAYS"
+else
+    days=(
+        "apo 60000"
+        "lco 60000"
+        "apo 58588"
+        "apo 59337"
+        "apo 58011"
+        "apo 59429"
+    )
+fi
 
 # sha of the code the run will execute = the golden identity
 if ! git -C "$base_dir" diff --quiet || ! git -C "$base_dir" diff --cached --quiet; then
@@ -83,7 +89,11 @@ fi
 sha=$(git -C "$base_dir" rev-parse HEAD)
 branch=$(git -C "$base_dir" rev-parse --abbrev-ref HEAD)
 shortsha=${sha:0:7}
-outroot=${AR_GOLDEN_ROOT}/ApogeeReduction.jl@${shortsha}
+# AR_OUTROOT overrides the sha-derived golden root — for redoing individual
+# days into an existing golden tree when only harness files (test/regression/)
+# changed between the shas, i.e. the pipeline code is identical. Record the
+# discrepancy consciously: the MANIFEST appends a new section with the new sha.
+outroot=${AR_OUTROOT:-${AR_GOLDEN_ROOT}/ApogeeReduction.jl@${shortsha}}
 manifest=${outroot}/MANIFEST.md
 
 # ---- validation common to dry-run and real run ------------------------------
@@ -130,8 +140,20 @@ env | grep SLURM | while read -r line; do echo "$line"; done
 juliaup add "$AR_JULIA_VERSION" 2>/dev/null || true
 
 mkdir -p "$outroot"
+# Append-aware: a redo run (AR_OUTROOT/AR_DAYS) adds a new section instead of
+# clobbering the original record.
+if [ -f "$manifest" ]; then
+    manifest_mode="append"
+else
+    manifest_mode="create"
+fi
+[ "$manifest_mode" = "append" ] && { echo; echo "---"; echo; } >> "$manifest"
 {
-    echo "# Golden baselines MANIFEST"
+    if [ "$manifest_mode" = "create" ]; then
+        echo "# Golden baselines MANIFEST"
+    else
+        echo "# Redo/partial run ($(date -Is))"
+    fi
     echo
     echo "- repo: ApogeeReduction.jl"
     echo "- branch: ${branch}"
@@ -147,7 +169,7 @@ mkdir -p "$outroot"
     echo
     echo "| tele | mjd | exit code | wall time |"
     echo "|---|---|---|---|"
-} > "$manifest"
+} >> "$manifest"
 
 # Progress is fully observable from the filesystem (no Slurm queries needed):
 #   stdout sentinels        "=== GOLDEN BEGIN/END <tele> <mjd> ... ===" in the
