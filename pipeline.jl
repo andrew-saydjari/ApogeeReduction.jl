@@ -90,6 +90,11 @@ function parse_commandline()
         help = "path to the gain and read noise calibration directory"
         arg_type = String
         default = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_06_03/pass_clean/"
+        "--exp_class_model"
+        required = false
+        help = "path to the exposure-type classifier artifact (JLD2); empty string skips the post-2D exposure-type check"
+        arg_type = String
+        default = ""
     end
     return parse_args(s)
 end
@@ -223,4 +228,105 @@ if parg["doCal2d"]
     @everywhere process_2Dcal_partial(fname) = process_2Dcal(
         fname, checkpoint_mode = parg["checkpoint_mode"])
     @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
+end
+
+##### Exposure-type check (post-2D)
+# Classify each exposure from its ar2D images alone and compare to the
+# commanded image_type + lamp flags. Mislabeled cals (ThAr/UNe swaps, FPI vs
+# arclamp, lamp-on "darks") poison downstream calibrations; this writes a
+# per-mjd audit table and warns on confident disagreements. Warning-only:
+# labels are never changed automatically.
+if parg["exp_class_model"] != ""
+    @everywhere begin
+        using ApogeeReduction: exposure_class_features, load_exposure_classifier,
+                               classify_exposure_type, exposure_class_label,
+                               exposure_check_category, read_almanac_exp_df,
+                               CHIP_LIST
+        const EXP_CLF = Ref{Any}(nothing)
+        function get_exp_clf()
+            if EXP_CLF[] === nothing
+                EXP_CLF[] = load_exposure_classifier(parg["exp_class_model"])
+            end
+            EXP_CLF[]
+        end
+        function exp_type_check_one(fnames_by_chip)
+            # any chip filename parses to (tele, mjd, expnum, imtype)
+            sname = split(split(basename(first(values(fnames_by_chip))), ".h5")[1], "_")
+            _, tele, mjdstr, expnumstr, _, _ = sname[(end - 5):end]
+            mjd, expnum = parse(Int, mjdstr), parse(Int, expnumstr)
+            # the check must never break a reduction run
+            try
+                df = read_almanac_exp_df(
+                    joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5"), tele, mjd)
+                erow = df[expnum, :]
+                labeled = exposure_class_label(erow.image_type,
+                    get(erow, :lamp_quartz, "?"), get(erow, :lamp_thar, "?"),
+                    get(erow, :lamp_une, "?"))
+                clf = get_exp_clf()
+                chip_features = Dict(chip => exposure_class_features(
+                                         load(fnames_by_chip[chip], "dimage"))
+                for chip in keys(fnames_by_chip))
+                res = classify_exposure_type(clf, chip_features, tele)
+                flag = exposure_check_category(labeled, res, clf.flag_tau)
+                # persistence prior: a dark taken right after a bright exposure
+                # may carry afterglow (recorded in the table, not warned)
+                if flag == "ok" && res.pred == "dark_q0t0u0" &&
+                   labeled == "dark_q0t0u0" && expnum > 1
+                    prevtype = lowercase(string(df.image_type[expnum - 1]))
+                    if prevtype in
+                       ApogeeReduction.CLASSIFIER_PERSIST_SOURCES
+                        flag = "persistence_prior"
+                    end
+                end
+                (tele = String(tele), mjd = mjd, expnum = expnum, labeled = labeled,
+                    pred = res.pred, prob = res.prob, flag = flag)
+            catch e
+                @warn "Exposure-type check failed for $tele $mjd exp $expnum" exception=e
+                (tele = String(tele), mjd = mjd, expnum = expnum, labeled = "checkfail",
+                    pred = "checkfail", prob = NaN, flag = "checkfail")
+            end
+        end
+    end
+
+    @time "Exposure-type check" begin
+        # group ar2D filenames by exposure (drop the chip distinction)
+        groups = Dict{String, Dict{String, String}}()
+        for fname in all2D
+            isfile(fname) || continue
+            sname = split(split(basename(fname), ".h5")[1], "_")
+            chip = String(sname[end - 1])
+            key = join(vcat(sname[(end - 5):(end - 2)], sname[end]), "_")
+            get!(groups, key, Dict{String, String}())[chip] = fname
+        end
+        complete = [g for g in values(groups) if length(g) == length(CHIP_LIST)]
+        checks = @showprogress desc="Exposure-type check" pmap(exp_type_check_one, complete)
+
+        if !isempty(checks)
+            dfc = DataFrame(checks)
+            for sub in groupby(dfc, :mjd)
+                mjd = sub.mjd[1]
+                safe_jldsave(
+                    joinpath(parg["outdir"],
+                        "apred/$(mjd)/exposureTypeCheck_$(parg["tele"])_$(mjd).h5"),
+                    Dict{String, Any}();
+                    tele = String.(sub.tele), mjd = collect(sub.mjd),
+                    expnum = collect(sub.expnum), labeled = String.(sub.labeled),
+                    pred = String.(sub.pred), prob = collect(sub.prob),
+                    flag = String.(sub.flag))
+            end
+            # persistence_prior is informational (recorded, not warned)
+            warnable = (dfc.flag .!= "ok") .& (dfc.flag .!= "persistence_prior")
+            nbad = sum(warnable)
+            if nbad > 0
+                bad = dfc[warnable, :]
+                for r in eachrow(bad)
+                    @warn "Exposure-type check: $(r.tele) $(r.mjd) exp $(r.expnum) labeled '$(r.labeled)' classified '$(r.pred)' (p=$(round(r.prob, digits = 3)), $(r.flag))"
+                end
+                nflag_frac = nbad / nrow(dfc)
+                nflag_frac > 0.10 &&
+                    @warn "Exposure-type check flagged $(round(100 * nflag_frac, digits = 1))% of exposures (> 10% prior on mislabel rate) — inspect before trusting the flags."
+            end
+            println("Exposure-type check: $(nrow(dfc)) exposures checked, $nbad flagged")
+        end
+    end
 end

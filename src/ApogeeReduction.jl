@@ -17,6 +17,7 @@ const LAST_CHIP = CHIP_LIST[end]
 
 include("ar3D.jl")
 include("ar2Dcal.jl")
+include("exposureClassifier.jl")
 include("ar1D.jl")
 include("fileNameHandling.jl")
 include("utils.jl")
