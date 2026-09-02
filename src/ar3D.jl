@@ -61,9 +61,14 @@ end
 function dcs(dcubedat, gainMat, readVarMat; firstind = 1)
     ndiffs = size(dcubedat, 3) - firstind
     dimage = (dcubedat[:, :, end] .- dcubedat[:, :, firstind])
-    # bad to use measured flux as the photon noise
-    ivarimage = 1 ./ (2 .* readVarMat .+ gainMat ./ dimage)
-    ivarimage[ivarimage .< 0] .= 1e-9 # set weight to zero for pixels with negative DCS IVAR
+    # Poisson (photon) variance in DN^2 is dimage ./ gainMat: the counted
+    # electrons are gain * DN, so Var(DN) = (gain * DN) / gain^2 = DN / gain.
+    # (Using the measured flux as the photon-noise estimate is slightly biased,
+    # but it is the standard estimator.) Guard dimage <= 0 (negative
+    # fluctuations, dark pixels): drop the photon term there so the ivar stays
+    # positive and finite (read-noise-only), which also makes the old
+    # negative-ivar clamp unnecessary.
+    ivarimage = 1 ./ (2 .* readVarMat .+ max.(dimage, 0) ./ gainMat)
 
     # return dimage ./ ndiffs .* gainMat, (ndiffs .^ 2) ./ (gainMat.^2) .* ivarimage, zero(dimage) #output in electrons/read
     return dimage ./ ndiffs, (ndiffs .^ 2) .* ivarimage, zero(dimage), zeros(Int, size(dimage)) #output in DN/read

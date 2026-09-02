@@ -128,3 +128,55 @@
     @test isapprox(flux_std_z[end], 1.03251, atol = 0.06)
     flux_mean = mean(dimage, dims = 2)
 end
+
+@testset "dcs" begin
+    # A2 regression: the DCS ivar photon term must be dimage ./ gainMat (DN^2
+    # Poisson variance), not gainMat ./ dimage (which made the ivar
+    # read-noise-only and inflated DCS SNRs by 10-1000x).
+    rng = MersenneTwister(202)
+    npix = (200, 200)
+    gain = 1.9
+    readVar = 25.0
+    gainMat = fill(gain, npix)
+    readVarMat = fill(readVar, npix)
+
+    n_reads = 4
+    ndiffs = n_reads - 1
+    flux_e_per_read = 1000.0 # electrons per read: photon noise dominates read noise
+
+    # accumulated electron counts with independent (Gaussian-approximated)
+    # Poisson increments, converted to DN, plus per-read read noise
+    ncube = zeros(npix..., n_reads)
+    for r in 2:n_reads
+        ncube[:, :, r] .= ncube[:, :, r - 1] .+ flux_e_per_read .+
+                          sqrt(flux_e_per_read) .* randn(rng, npix)
+    end
+    dcube = ncube ./ gain .+ sqrt(readVar) .* randn(rng, (npix..., n_reads))
+
+    dimage, ivarimage, chisqimage, CRimage = ApogeeReduction.dcs(dcube, gainMat, readVarMat)
+
+    # exact analytic contract: per-read flux and Poisson+read ivar
+    dtot = dcube[:, :, end] .- dcube[:, :, 1]
+    @test dimage ≈ dtot ./ ndiffs
+    @test ivarimage ≈ ndiffs^2 ./ (2 * readVar .+ max.(dtot, 0) ./ gain)
+    @test all(ivarimage .> 0) && all(isfinite.(ivarimage))
+    @test all(chisqimage .== 0)
+    @test all(CRimage .== 0)
+
+    # statistical calibration: z-scores of the measured per-read flux against
+    # the truth must be ~unit normal. With the pre-fix (inverted) photon term
+    # the reported ivar is read-noise-only here and std(z) comes out ~4.2.
+    truth = flux_e_per_read / gain
+    z = (dimage .- truth) .* sqrt.(ivarimage)
+    @test isapprox(mean(z), 0.0, atol = 0.02)
+    @test isapprox(std(z), 1.0, atol = 0.03)
+
+    # dimage <= 0 guard: photon term dropped, ivar = read-noise-only, positive
+    dcube_neg = zeros(2, 2, 2)
+    dcube_neg[:, :, 2] .= [-50.0 -1e-3; 0.0 10.0]
+    d2, iv2, _, _ = ApogeeReduction.dcs(dcube_neg, fill(gain, 2, 2), fill(readVar, 2, 2))
+    @test d2 == dcube_neg[:, :, 2]
+    @test iv2[1, 1] == iv2[1, 2] == iv2[2, 1] == 1 / (2 * readVar)
+    @test iv2[2, 2] == 1 / (2 * readVar + 10.0 / gain)
+    @test all(iv2 .> 0) && all(isfinite.(iv2))
+end
