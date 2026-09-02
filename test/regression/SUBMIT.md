@@ -43,7 +43,13 @@ anything.
   (default `/mnt/ceph/users/sdssv/work/asaydjari/2026_05_01/outdir/almanac/allobs_57600_61160.h5`),
   consumed directly — see README.md. (The `@f76194a` goldens instead used
   per-day extracts under `golden/almanac_inputs/`; their MANIFEST records
-  this.)
+  this. They also predate the 2026-08-31 main merge: A2/#369 changes
+  domeflat `ivarimage`, which feeds trace fitting and legitimately cascades
+  into most 1D products on flat-bearing days — the 2026-09-02 bulk-mode
+  validation (`2026_09_02/t1_bulkmode_val/EXPECTED_DIFF.md`) proved this
+  drift is merge/machine, not bulk-mode: bulk vs single-day on the same
+  machine was bit-identical for both apo 59429 and apo 58011. Fresh bulk
+  goldens from this script supersede `@f76194a`.)
 - Raw `.apz`: cca mirror `/mnt/ceph/users/sdssv/raw/APOGEE` (via `--cluster cca`).
 - Cals: darks/flats `2025_07_31/outdir_ref/`, gain/read `2025_07_31/pass_clean/`.
 - No exposure-classifier model (decision 2026-08-31: goldens match run_all.sh
