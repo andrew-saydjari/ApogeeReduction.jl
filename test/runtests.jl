@@ -6,4 +6,5 @@ using ApogeeReduction, Test, Random, Statistics
     include("ar1D.jl")
     include("wavecal.jl")
     include("safe_jldsave.jl")
+    include("lsf.jl")
 end
