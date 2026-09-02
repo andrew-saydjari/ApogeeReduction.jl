@@ -156,9 +156,12 @@ REFERENCE_LSF_PROFILES = [
         @testset "get_lsf_matrix on-the-fly runtime" begin
             # Construction is done on the fly at runtime (no disk
             # materialization), so it must stay fast. The build above already
-            # paid compilation; time a warm rebuild. Observed ~12 s on
-            # ccalin051; the bound is generous to absorb slower/loaded CI
-            # hosts while still catching an order-of-magnitude regression.
+            # paid compilation; time a warm rebuild. NOTE: Pkg.test runs with
+            # --check-bounds=yes, which costs ~2x here (measured 9.6 s under
+            # test vs 5.6 s in a normal session on ccalin051, single thread) —
+            # production speed is the smaller number. The bound is generous to
+            # absorb the check-bounds tax and loaded CI hosts while still
+            # catching an order-of-magnitude regression.
             t_build = @elapsed ApogeeReduction.get_lsf_matrix(adjfibindx, lsf_params_file)
             @info "get_lsf_matrix warm build time" t_build
             @test t_build < 60
