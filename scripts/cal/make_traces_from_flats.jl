@@ -50,7 +50,8 @@ if parg["runlist"] != "" # only multiprocess if we have a list of exposures
         using SlurmClusterManager
         addprocs(SlurmManager(), exeflags = ["--project=$proj_path"])
     else
-        addprocs(16)
+        addprocs(parse(Int, get(ENV, "AR_LOCAL_WORKERS", "16")),
+            exeflags = ["--project=$proj_path"])
     end
 end
 
