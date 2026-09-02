@@ -159,12 +159,13 @@ REFERENCE_LSF_PROFILES = [
             # paid compilation; time a warm rebuild. NOTE: Pkg.test runs with
             # --check-bounds=yes, which costs ~2x here (measured 9.6 s under
             # test vs 5.6 s in a normal session on ccalin051, single thread) —
-            # production speed is the smaller number. The bound is generous to
-            # absorb the check-bounds tax and loaded CI hosts while still
-            # catching an order-of-magnitude regression.
+            # production speed is the smaller number. Bound = ~3x the measured
+            # under-test baseline (9.6 s): a 3x construction regression fails
+            # loudly (AKS wants to know at that level), while check-bounds tax
+            # and moderate host load do not.
             t_build = @elapsed ApogeeReduction.get_lsf_matrix(adjfibindx, lsf_params_file)
             @info "get_lsf_matrix warm build time" t_build
-            @test t_build < 60
+            @test t_build < 30
         end
     end
 end
