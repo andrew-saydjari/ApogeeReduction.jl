@@ -27,6 +27,11 @@ function parse_commandline()
         help = "flat type, i.e. dome or quartz"
         arg_type = String
         default = "dome"
+        "--mjd"
+        required = false
+        help = "restrict to this single MJD (default 0 = all MJDs in the almanac file)"
+        arg_type = Int
+        default = 0
     end
     return parse_args(s)
 end
@@ -45,6 +50,10 @@ else
 end
 for tele in tele2do
     mjd_list = keys(f["raw/$(tele)"])
+    if parg["mjd"] != 0
+        # single-day selection against a (possibly multi-day) almanac file
+        mjd_list = filter(==(string(parg["mjd"])), mjd_list)
+    end
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
