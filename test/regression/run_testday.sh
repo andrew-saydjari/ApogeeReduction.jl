@@ -7,9 +7,12 @@
 #   ./run_testday.sh <AR_checkout_dir> <tele> <mjd> <outdir>
 #
 # This mirrors scripts/daily/run_all.sh but:
-#   * does NOT run almanac (no Utah tunnel needed): the day's almanac group is
-#     extracted from an existing bulk almanac file (AR_ALMANAC_SRC) into the
-#     old pre-raw/ layout that this branch reads;
+#   * does NOT run almanac (no Utah tunnel needed): the bulk raw/-layout
+#     almanac file (AR_ALMANAC_SRC, one file covering all days) is consumed
+#     DIRECTLY — post-R1 (#365) read_almanac_exp_df reads the raw/ layout
+#     natively; it is symlinked to <outdir>almanac/allobs_<tele>_<mjd>.h5
+#     (the path every downstream stage derives from outdir+runname) and the
+#     day is selected via the runlist makers' --mjd flag;
 #   * does NOT update sdsscore;
 #   * skips plots / dashboard / arMADGICS (science products only — those are
 #     what the golden diff compares);
@@ -20,7 +23,8 @@
 #
 # Configuration (env vars, all optional; a file named by AR_TESTDAY_CONFIG is
 # sourced first if set):
-#   AR_ALMANAC_SRC        bulk or per-day almanac file to extract the day from
+#   AR_ALMANAC_SRC        raw/-layout almanac file containing the day (bulk
+#                         multi-day or per-day both work; read directly)
 #                         [default: 2026_05_01 bulk allobs_57600_61160.h5]
 #   AR_RAW_CLUSTER        --cluster arg for pipeline.jl: "cca" resolves to the
 #                         raw mirror /mnt/ceph/users/sdssv/raw/APOGEE; any
@@ -136,16 +140,23 @@ print_elapsed_time() {
     LAST_TIME=$current_seconds
 }
 
-# ---- almanac day extraction (replaces the almanac/tunnel step) --------------
-print_elapsed_time "Extracting almanac day from bulk file"
-julia +"$AR_JULIA_VERSION" --project="$harness_dir" "$harness_dir/extract_almanac_day.jl" \
-    "$AR_ALMANAC_SRC" "$tele" "$mjd" "$almanac_file"
+# ---- almanac staging (replaces the almanac/tunnel step) ---------------------
+# The bulk raw/-layout almanac is consumed directly (all stages open it
+# read-only): symlink it to the outdir+runname-derived path that pipeline.jl /
+# pipeline_2d_1d.jl / make_relFlux.jl hardcode, and select the day with the
+# runlist makers' --mjd flag.
+print_elapsed_time "Linking almanac (raw/ layout, read directly)"
+if [ ! -f "$AR_ALMANAC_SRC" ]; then
+    echo "ERROR: AR_ALMANAC_SRC not found: $AR_ALMANAC_SRC" >&2
+    exit 5
+fi
+ln -sfn "$(realpath "$AR_ALMANAC_SRC")" "$almanac_file"
 
 # ---- runlist ----------------------------------------------------------------
 print_elapsed_time "Building Runlist"
 set +e
 julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/bulk/make_runlist_all.jl" \
-    --tele "$tele" --almanac_file "$almanac_file" --output "$runlist"
+    --tele "$tele" --almanac_file "$almanac_file" --output "$runlist" --mjd "$mjd"
 exit_code=$?
 set -e
 if [ $exit_code -eq 16 ]; then
@@ -170,7 +181,8 @@ for flat_type in "${flat_types[@]}"; do
     flatrunlist=${outdir}almanac/runlist_${flat_type}_${runname}.h5
     print_elapsed_time "Making runlist for $flat_type Flats"
     julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_runlist_fiber_flats.jl" \
-        --almanac_file "$almanac_file" --tele "$tele" --output "$flatrunlist" --flat_type "$flat_type"
+        --almanac_file "$almanac_file" --tele "$tele" --output "$flatrunlist" --flat_type "$flat_type" \
+        --mjd "$mjd"
 
     print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
     mkdir -p "${outdir}${flat_type}_flats"
@@ -192,15 +204,8 @@ done
 
 # ---- 2D -> 1D ---------------------------------------------------------------
 print_elapsed_time "Running 2D->1D Pipeline for $tele"
-# REQUIRED (run_bulk.sh:159 does the same): skyline_medwavecal_skyline_dither
-# (src/wavecal.jl:1708) h5open's into <outdir>/wavecal/ WITHOUT mkpath-ing it,
-# so any night with object exposures crashes at "Skyline medwave/skyline
-# dither" if the dir is missing. run_all.sh omits this and survives only
-# because production outdirs already contain wavecal/; the proper code fix
-# lives on fix-broken-fiber-fluxing and lands via R1. Nights without object
-# exposures (e.g. apo 59429) never reach that code path, which is why the
-# ccalin051 smoke passed without it.
-mkdir -p "${outdir}wavecal"
+# (The historical mkdir -p ${outdir}wavecal workaround is gone: R1/#365 landed
+# the proper mkpath inside skyline_medwavecal_skyline_dither, src/wavecal.jl.)
 julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
     --tele "$tele" --runlist "$runlist" --outdir "$outdir" --runname "$runname" \
     --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}"

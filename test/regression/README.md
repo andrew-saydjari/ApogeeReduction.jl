@@ -12,7 +12,6 @@ proves it changed nothing. See
 | file | purpose |
 |---|---|
 | `run_testday.sh` | run the AR pipeline (runlist → 3D→2D → traces/relFlux → 2D→1D) for one `(tele, mjd)` from existing raw data + almanac, no Slurm, no Utah tunnel |
-| `extract_almanac_day.jl` | pull one `(tele, mjd)` group out of a bulk almanac file into a per-day `allobs_<tele>_<mjd>.h5` in the pre-`raw/` layout this branch reads |
 | `h5diff_tree.jl` | walk two output trees, compare every HDF5 dataset + attribute, emit a markdown diff report |
 | `submit_goldens.sh` | sbatch script generating ALL golden baselines in one multinode allocation (run_bulk.sh SlurmClusterManager pattern); see `SUBMIT.md` |
 | `SUBMIT.md` | golden-job submission instructions + filesystem-only monitoring + post-run checks |
@@ -49,11 +48,19 @@ ends with a **warnings census** (counts of the known warning classes from the
 
 Differences from `scripts/daily/run_all.sh` (deliberate):
 
-- **No almanac invocation.** The day's group is extracted from an existing
-  almanac file. The 2026_05_01 bulk almanac uses the post-PR#351 `raw/`
-  top-level layout (plus an `exposure_class/` decoration group), which this
-  branch's `read_almanac_exp_df` / `make_runlist_all.jl` cannot read directly;
-  `extract_almanac_day.jl` converts to the old `<tele>/<mjd>/...` layout.
+- **No almanac invocation.** The bulk `raw/`-layout almanac file
+  (`AR_ALMANAC_SRC`, one file covering all days) is consumed DIRECTLY:
+  since R1 (#365) `read_almanac_exp_df` reads the `raw/` layout natively, so
+  the harness just symlinks the bulk file to
+  `<outdir>almanac/allobs_<tele>_<mjd>.h5` (the path every downstream stage
+  derives from outdir+runname; all stages open it read-only) and selects the
+  day with the runlist makers' `--mjd` flag.
+  *Historical note*: the `@f76194a` golden baselines predate this — they were
+  generated via per-day extracts made by a since-deleted
+  `extract_almanac_day.jl` (their MANIFEST records the staged
+  `almanac_inputs/` directory). The extracted per-day groups were byte-copies
+  of the bulk file's groups, so runlists and products are unaffected by the
+  switch.
 - **No sdsscore update, no plots/dashboard/arMADGICS** — the golden diff
   compares science products only. (arM regression is run separately.)
 - **Slurm env is scrubbed** so `pipeline.jl` / `pipeline_2d_1d.jl` use local
@@ -75,7 +82,12 @@ julia +1.11.0 --project=. h5diff_tree.jl <goldenDir> <newDir> --out report.md
 ```
 
 Files are paired by relative path (symlinks followed — outdirs symlink
-darkRate/flatFraction cals into `apred/<mjd>/`). Per-dataset verdicts:
+darkRate/flatFraction cals into `apred/<mjd>/`). The harness-staged almanac
+INPUT (`almanac/allobs_<tele>_<mjd>.h5`) is excluded from the pairing by
+default — since the bulk-almanac switch it is a symlink to the multi-GB
+multi-day bulk file and an input, not a product (`--skip-files` overrides;
+the runlist files, which ARE products of the runlist makers, are still
+compared). Per-dataset verdicts:
 
 - `identical` — bit-for-bit (elementwise `isequal`: NaN==NaN counts as equal;
   NaN-pattern *changes* are counted and always fail tolerance);

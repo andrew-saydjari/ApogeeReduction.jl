@@ -2,9 +2,8 @@
 
 One multinode Slurm job generates all T1 golden baselines (6 runs: apo+lco
 60000, apo 58588, 59337, 58011, 59429), mirroring the run_bulk.sh
-SlurmClusterManager pattern. Preparation, validation, and almanac staging are
-already done — **only the submission itself is left, and it is manual by
-design.**
+SlurmClusterManager pattern, sequentially (one day at a time — deliberately
+NOT a job array). Submission is **manual by design.**
 
 ## Submit
 
@@ -30,13 +29,16 @@ test/regression/submit_goldens.sh --dry-run   # prints the exact 6-run sequence
 ```
 
 The job refuses to start from a dirty git tree (goldens must be attributable
-to a pushed sha) and verifies all staged almanac inputs exist before running
+to a pushed sha) and verifies the almanac file exists before running
 anything.
 
-## Inputs (pre-staged, zero DB/tunnel dependency)
+## Inputs (zero DB/tunnel dependency)
 
-- Per-day almanacs: `/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/almanac_inputs/allobs_<tele>_<mjd>.h5`
-  (extracted 2026-08-31 from the 2026_05_01 bulk almanac's `raw/` layout).
+- Almanac: the bulk `raw/`-layout file `AR_ALMANAC_SRC`
+  (default `/mnt/ceph/users/sdssv/work/asaydjari/2026_05_01/outdir/almanac/allobs_57600_61160.h5`),
+  consumed directly — see README.md. (The `@f76194a` goldens instead used
+  per-day extracts under `golden/almanac_inputs/`; their MANIFEST records
+  this.)
 - Raw `.apz`: cca mirror `/mnt/ceph/users/sdssv/raw/APOGEE` (via `--cluster cca`).
 - Cals: darks/flats `2025_07_31/outdir_ref/`, gain/read `2025_07_31/pass_clean/`.
 - No exposure-classifier model (decision 2026-08-31: goldens match run_all.sh
@@ -102,8 +104,9 @@ secondary: HDF5.jl cannot render a worker-remoted H5Error on the main
 process; the true error is the `h5f_create` failure in the "caused by" block.
 
 Mitigations applied:
-- `run_testday.sh` now does `mkdir -p ${outdir}wavecal` before the final
-  2D→1D stage (mirroring run_bulk.sh).
+- `run_testday.sh` gained `mkdir -p ${outdir}wavecal` before the final
+  2D→1D stage (mirroring run_bulk.sh). (Removed again after R1/#365 merged
+  the proper `mkpath` into `skyline_medwavecal_skyline_dither`.)
 - The `wavecal/` dirs of all 6 day outdirs under
   `golden/ApogeeReduction.jl@f76194a/` were pre-created at 20:25 while job
   6969533 was in day 2's 3D stage, so days 2–6 of that job are expected to
@@ -134,7 +137,8 @@ post-completion checks above, including the apo 59429 vs smoke cross-diff.
 A full scan of the 2026_05_01 bulk almanac (both telescopes, all ~6,200
 mjd groups) found **zero days where the `exposure` column is non-dense** —
 consistent with almanac's `organize_exposures` hole-filling contract (v1 §0).
-The A3 test day therefore has to be **synthesized**: copy a staged per-day
-almanac, delete one mid-sequence exposure row, and run it as an extra day.
+The A3 test day therefore has to be **synthesized**: copy one day's group out
+of the bulk almanac into a small `raw/`-layout file, delete one mid-sequence
+exposure row, and run it as an extra day (pointing `AR_ALMANAC_SRC` at it).
 Do this when card A3 starts (it needs no golden baseline from real data);
 it would become the 7th run in this framework.

@@ -12,10 +12,9 @@
 #   bash -n test/regression/submit_goldens.sh
 #   test/regression/submit_goldens.sh --dry-run
 #
-# Prerequisite (already staged): per-day almanac inputs extracted from the
-# 2026_05_01 bulk almanac by extract_almanac_day.jl, under
-# $AR_ALMANAC_STAGE/allobs_<tele>_<mjd>.h5 — the job has zero DB/tunnel
-# dependency.
+# Prerequisite: a raw/-layout almanac file covering all test days
+# (AR_ALMANAC_SRC; default the 2026_05_01 bulk allobs_57600_61160.h5),
+# consumed directly by run_testday.sh — the job has zero DB/tunnel dependency.
 #
 # Outputs: $AR_GOLDEN_ROOT/ApogeeReduction.jl@<shortsha>/<tele>_<mjd>/
 # plus a MANIFEST.md at the @sha root recording branch/sha/date/config and a
@@ -58,10 +57,10 @@ echo "base_dir: $base_dir"
 
 # ---- config (env-overridable) ----------------------------------------------
 AR_GOLDEN_ROOT=${AR_GOLDEN_ROOT:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden"}
-AR_ALMANAC_STAGE=${AR_ALMANAC_STAGE:-"${AR_GOLDEN_ROOT}/almanac_inputs"}
+AR_ALMANAC_SRC=${AR_ALMANAC_SRC:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_05_01/outdir/almanac/allobs_57600_61160.h5"}
 AR_JULIA_VERSION=${AR_JULIA_VERSION:-"1.11.0"}
 AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE:-"commit_exists"}
-export AR_JULIA_VERSION AR_CHECKPOINT_MODE
+export AR_ALMANAC_SRC AR_JULIA_VERSION AR_CHECKPOINT_MODE
 export AR_EXP_CLASS_MODEL=""   # decision: goldens without the classifier
 
 # The test days (REFACTOR_PLAN v1 §4.2): 6 runs covering the 5 fixed test days
@@ -97,17 +96,9 @@ outroot=${AR_OUTROOT:-${AR_GOLDEN_ROOT}/ApogeeReduction.jl@${shortsha}}
 manifest=${outroot}/MANIFEST.md
 
 # ---- validation common to dry-run and real run ------------------------------
-missing=0
-for day in "${days[@]}"; do
-    read -r tele mjd <<< "$day"
-    staged=${AR_ALMANAC_STAGE}/allobs_${tele}_${mjd}.h5
-    if [ ! -f "$staged" ]; then
-        echo "MISSING staged almanac: $staged" >&2
-        missing=1
-    fi
-done
-if [ $missing -ne 0 ]; then
-    echo "Stage them first: julia --project=$harness_dir $harness_dir/extract_almanac_day.jl <bulk_almanac> <tele> <mjd> <staged_path>" >&2
+if [ ! -f "$AR_ALMANAC_SRC" ]; then
+    echo "MISSING almanac file: $AR_ALMANAC_SRC" >&2
+    echo "Point AR_ALMANAC_SRC at a raw/-layout almanac file covering the test days." >&2
     exit 4
 fi
 
@@ -118,7 +109,7 @@ if $DRY_RUN; then
     echo "write MANIFEST: ${manifest}"
     for day in "${days[@]}"; do
         read -r tele mjd <<< "$day"
-        echo "AR_SLURM=true AR_ALMANAC_SRC=${AR_ALMANAC_STAGE}/allobs_${tele}_${mjd}.h5 \\"
+        echo "AR_SLURM=true AR_ALMANAC_SRC=${AR_ALMANAC_SRC} \\"
         echo "  AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE} AR_JULIA_VERSION=${AR_JULIA_VERSION} AR_EXP_CLASS_MODEL= \\"
         echo "  ${harness_dir}/run_testday.sh ${base_dir} ${tele} ${mjd} ${outroot}/${tele}_${mjd}/"
     done
@@ -161,7 +152,7 @@ fi
     echo "- generated: $(date -Is) by ${USER} (slurm job ${SLURM_JOB_ID}, nodes ${SLURM_JOB_NODELIST})"
     echo "- julia: ${AR_JULIA_VERSION}; checkpoint_mode: ${AR_CHECKPOINT_MODE}"
     echo "- exp_class_model: (none — production run_all.sh behavior)"
-    echo "- almanac inputs: ${AR_ALMANAC_STAGE} (extracted from the 2026_05_01 bulk almanac)"
+    echo "- almanac: ${AR_ALMANAC_SRC} (bulk raw/-layout file, consumed directly; day selected via the runlist makers' --mjd)"
     echo "- raw: cca mirror /mnt/ceph/users/sdssv/raw/APOGEE"
     echo "- cals: darks/flats $(printenv AR_CALDIR_DARKS || echo '/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/ (default)'); gain/read $(printenv AR_GAIN_READ_CAL_DIR || echo '/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/ (default)')"
     echo
@@ -203,7 +194,6 @@ for day in "${days[@]}"; do
     t0=$SECONDS
     set +e
     AR_SLURM=true \
-        AR_ALMANAC_SRC=${AR_ALMANAC_STAGE}/allobs_${tele}_${mjd}.h5 \
         "$harness_dir/run_testday.sh" "$base_dir" "$tele" "$mjd" "$outdir"
     rc=$?
     set -e
