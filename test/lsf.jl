@@ -152,5 +152,16 @@ REFERENCE_LSF_PROFILES = [
             @test all(>(0), row_sums) # implied by approx 1, but explicit
             @test length(unique(rows)) == len_outwave
         end
+
+        @testset "get_lsf_matrix on-the-fly runtime" begin
+            # Construction is done on the fly at runtime (no disk
+            # materialization), so it must stay fast. The build above already
+            # paid compilation; time a warm rebuild. Observed ~12 s on
+            # ccalin051; the bound is generous to absorb slower/loaded CI
+            # hosts while still catching an order-of-magnitude regression.
+            t_build = @elapsed ApogeeReduction.get_lsf_matrix(adjfibindx, lsf_params_file)
+            @info "get_lsf_matrix warm build time" t_build
+            @test t_build < 60
+        end
     end
 end
