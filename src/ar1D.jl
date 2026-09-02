@@ -143,7 +143,11 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     flux_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     ivar_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
-    dropped_pixel_mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
+    # must be zero-initialized: elements are only assigned when pixels are
+    # actually dropped, and undef Int64 memory otherwise leaks recycled heap
+    # contents (garbage like +/-2^62, even negative "bitmask" values) into
+    # dropped_pixels_mask_1d, nondeterministically run-to-run
+    dropped_pixel_mask_1d = zeros(Int64, n_xpix, n_fibers)
 
     good_pixels = ((pix_bitmask .& bad_pix_bits) .== 0) .& (ivarimage .> 0)
 
@@ -347,7 +351,7 @@ function get_fibTargDict(f, tele, mjd, dfindx)
             (Dict(1:300 .=> "fiberTypeFail"), Dict(1:300 .=> -2))
         else
             try
-                df_fib = DataFrame(read(f["$(tele)/$(mjd)/fibers/$(config_id)"]))
+                df_fib = DataFrame(read(f["raw/$(tele)/$(mjd)/fibers/$(config_id)"]))
                 # normalizes all column names to lowercase
                 rename!(df_fib, lowercase.(names(df_fib)))
 
@@ -486,6 +490,35 @@ function get_fluxing_file(dfalmanac, parent_dir, tele, mjd, dfindx, runname; flu
 end
 
 # TODO: switch to meta data dict and then save wavecal flags etc.
+"""
+    normalize_reinterp_spectra!(outflux, outvar, cntvec) -> (outivar, outmsk)
+
+Final normalization step of `reinterp_spectra`: divide the accumulated flux and
+variance by the per-fiber frame count (the max number of contributing frames
+over the uniform-grid pixels) and derive the inverse variance and the Bool
+good-pixel mask. `outflux` and `outvar` are mutated in place.
+
+Fibers with no good pixels at all (`framecnts == 0`, e.g. dead/broken fibers)
+come out as flux = 0, ivar = 0, msk = false. (A4 fix: they previously came out
+as flux = 0/0 = NaN, ivar = NaN, msk = (0 .== 0) = true — NaN presented as
+GOOD data, which NaN-poisoned downstream consumers such as the arMADGICS
+ingest.)
+"""
+function normalize_reinterp_spectra!(outflux, outvar, cntvec)
+    framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
+    outflux ./= framecnts
+    outvar ./= (framecnts .^ 2)
+    # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
+    outmsk = (cntvec .== framecnts) .& (framecnts .> 0)
+    outivar = 1 ./ outvar
+    outivar[.!outmsk] .= 0.0
+    # zero-good-pixel fibers: replace the 0/0 = NaN flux/var with zeros
+    zerofibs = dropdims(framecnts .== 0, dims = 1)
+    outflux[:, zerofibs] .= 0.0
+    outvar[:, zerofibs] .= 0.0
+    return outivar, outmsk
+end
+
 function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same", outdir = "../outdir")
     # might need to add in telluric div functionality here?
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
@@ -520,6 +553,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     chipInt_stack = zeros(N_CHIPS * N_XPIX, N_FIBERS)
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     thrpt_stack = zeros(N_CHIPS, N_FIBERS)
+    bitmsk_thrpt_stack = zeros(Int, N_CHIPS, N_FIBERS)
 
     ingestBit = zeros(Int, N_FIBERS)
 
@@ -592,6 +626,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         dropped_pixels_mask_1d = f["dropped_pixels_mask_1d"]
         extract_trace_centers = f["extract_trace_centers"]
         relthrpt = f["relthrpt"]
+        bitmsk_relthrpt = f["bitmsk_relthrpt"]
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))
 
@@ -611,6 +646,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         chipBit_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .+= 2^(chipind)
         chipInt_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= chipind
         thrpt_stack[chipind, :] .= relthrpt
+        bitmsk_thrpt_stack[chipind, :] .= bitmsk_relthrpt
     end
 
     # should add a check all entries of metadata_lst to be equal
@@ -683,18 +719,13 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         end
     end
 
-    framecnts = maximum(cntvec, dims = 1) #     framecnts = maximum(cntvec) # a little shocked that I throw it away if it is bad in even one frame
-    outflux ./= framecnts
-    outvar ./= (framecnts .^ 2)
-    # need to update this to a bit mask that is all or any for the pixels contributing to the reinterpolation
-    outmsk = (cntvec .== framecnts)
-    outivar = 1 ./ outvar
-    outivar[.!outmsk] .= 0.0
+    outivar, outmsk = normalize_reinterp_spectra!(outflux, outvar, cntvec)
 
     # Write reinterpolated data
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
-        extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack)
+        extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack,
+        bitmsk_relthrpt = bitmsk_thrpt_stack)
     return
 end
 
@@ -802,7 +833,11 @@ function process_1D(fname;
         end
 
         # don't flux broken fibers (don't use warn fibers for sky)
-        msk_goodwarn = (bitmsk_relthrpt .== 0) .| (bitmsk_relthrpt .& 2^0) .== 2^0
+        # broken fibers (bit 1, relthrpt < rel_val_cut) always also have the low-throughput
+        # warn bit 0 set, so the mask must exclude on bit 1 explicitly: their relthrpt is a
+        # noise-level (possibly negative) domeflat measurement and dividing by it produces
+        # arbitrarily inflated flux. Bit 2 (no fluxing file) is excluded as before.
+        msk_goodwarn = (bitmsk_relthrpt .& (2^1 | 2^2)) .== 0
         if any(msk_goodwarn)
             flux_1d[:, msk_goodwarn] ./= relthrptr[:, msk_goodwarn]
             ivar_1d[:, msk_goodwarn] .*= relthrptr[:, msk_goodwarn] .^ 2

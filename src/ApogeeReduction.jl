@@ -27,6 +27,9 @@ include("skyline_peaks.jl")
 include("arclamp_peaks.jl")
 include("spectraInterpolation.jl")
 include("traceExtract_GH.jl")
+# lsf.jl depends on traceExtract_GH.jl (int_gauss_hermite_term) and
+# fileNameHandling.jl (adjFiberIndx2FiberIndx), included above
+include("lsf.jl")
 
 #export get_fibTargDict, fiberID2fiberIndx
 end
