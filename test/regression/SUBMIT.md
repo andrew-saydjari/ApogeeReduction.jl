@@ -86,6 +86,17 @@ Let `GROOT=/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/ApogeeReductio
    pipeline code is the same; this also cross-validates workstation-vs-Slurm
    reproducibility. Any DIFFERS here means environment-dependent behavior and
    must be investigated before the goldens are trusted.
+
+   **Finding (2026-09-02, T1-rework validation)**: this cross-check DIFFERS
+   on the three `fpiPeaks_*` files (`fpi_line_mat`, `fpi_line_cov_mat`,
+   `fpi_line_trace_centers`) — the FPI peak fitting is environment-dependent
+   (Slurm compute node vs ccalin051), though deterministic per machine: two
+   ccalin051 runs (pre-merge smoke vs post-merge-validation) were
+   bit-identical there. Consequence: fpiPeaks golden diffs are only
+   meaningful when golden and candidate ran on the same machine class; every
+   other apo 59429 product is machine-independent. Reports:
+   `2026_09_02/t1_rework_val/diff_golden_vs_smoke_apo_59429.md`. Candidate
+   for its own refactor-plan card.
 4. The goldens then serve as the diff base for every fix/cleanup branch (see
    README.md, "expected-diff-statement workflow").
 
