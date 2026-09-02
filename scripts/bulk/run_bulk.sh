@@ -61,6 +61,9 @@ caldir_darks=${8:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 caldir_flats=${9:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 gain_read_cal_dir=${10:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
 almanac_clobber_mode=${11:-false}
+# Run the arMADGICS stage after the AR reduction. Set via positional arg 12 or the
+# RUN_MADGICS env var (exported at sbatch time); positional arg wins. Default: false (bulk).
+run_madgics=${12:-${RUN_MADGICS:-false}}
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -167,13 +170,19 @@ if [ "$run_2d_only" != "true" ]; then
     # print_elapsed_time "Generating plot page for web viewing"
     # julia +$julia_version --project=$base_dir $base_dir/scripts/daily/generate_dashboard.jl --mjd $mjd --outdir $outdir
 
-    ## arMADGICS
-    if [ -d ${path2arMADGICS} ]; then
-        print_elapsed_time "Running arMADGICS"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
+    ## arMADGICS (gated by run_madgics / RUN_MADGICS, default false for bulk)
+    if [ "$run_madgics" = "true" ]; then
+        if [ -d ${path2arMADGICS} ]; then
+            print_elapsed_time "Running arMADGICS"
+            julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
 
-        print_elapsed_time "Running arMADGICS Workup"
-        julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
+            print_elapsed_time "Running arMADGICS Workup"
+            julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
+        else
+            echo "run_madgics=true but arMADGICS not found at ${path2arMADGICS}; skipping"
+        fi
+    else
+        print_elapsed_time "Skipping arMADGICS (run_madgics=$run_madgics)"
     fi
 fi
 
