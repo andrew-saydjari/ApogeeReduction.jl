@@ -750,6 +750,33 @@ function get_sky_wavecal(
 end
 
 # FPI line wavecal
+"""
+    get_fpi_exp_m0s(fpi_line_expInt, peak_ints, n_fnames) -> Matrix{Float64}
+
+For each (exposure, fiber), the minimum FPI peak integer m among that fiber's
+ingested FPI peaks in that exposure. Entries where a fiber has NO ingested
+peaks for an exposure are NaN, which `nanmedian` then skips when the nightly
+median m0 is formed.
+
+The matrix is deliberately Float64: it used to be an Int array and the NaN
+assignment for a peakless (fiber, exposure) threw an InexactError that killed
+the whole night's FPI wavecal, forcing the fallback to the sky solution (A5).
+"""
+function get_fpi_exp_m0s(fpi_line_expInt, peak_ints, n_fnames)
+    n_fibers = size(fpi_line_expInt, 2)
+    exp_m0s = fill(NaN, n_fnames, n_fibers)
+    for fname_ind in 1:n_fnames
+        for fibIndx in 1:n_fibers
+            in_exp = findall(fpi_line_expInt[:, fibIndx] .== fname_ind)
+            if size(in_exp, 1) == 0
+                continue
+            end
+            exp_m0s[fname_ind, fibIndx] = minimum(peak_ints[in_exp, fibIndx])
+        end
+    end
+    return exp_m0s
+end
+
 function comb_exp_get_and_save_fpi_wavecal(
         fname_list, initial_linParams, initial_nlParams;
         cporder = 1, wporder = 4, dporder = 2,
@@ -807,7 +834,6 @@ function comb_exp_get_and_save_fpi_wavecal(
     if initial_cporder > 0
         chipPolyParams0[:, 2, 2] .= 1.0 #chip b scaling
     end
-    exp_m0s = zeros(Int, n_fnames, N_FIBERS)
     for fname_ind in 1:n_fnames
         for chip in CHIP_LIST
             chipIndx = getChipIndx(chip)
@@ -850,15 +876,8 @@ function comb_exp_get_and_save_fpi_wavecal(
             end
         end
 
-        for fibIndx in 1:N_FIBERS
-            in_exp = findall(fpi_line_expInt[:, fibIndx] .== fname_ind)
-            if size(in_exp, 1) == 0
-                exp_m0s[fname_ind, fibIndx] = NaN
-                continue
-            end
-            exp_m0s[fname_ind, fibIndx] = minimum(peak_ints[in_exp, fibIndx])
-        end
     end
+    exp_m0s = get_fpi_exp_m0s(fpi_line_expInt, peak_ints, n_fnames)
     med_m0 = round(nanmedian(nanmedian(exp_m0s, 2), 1)[1, 1])
     expect_peak_waves = 2 .* cavity_size ./ (peak_ints .+ m_offset)
     verbose && println("First FPI peak integer m0 = $(med_m0)")
