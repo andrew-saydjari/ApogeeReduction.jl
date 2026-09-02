@@ -11,11 +11,12 @@ proves it changed nothing. See
 
 | file | purpose |
 |---|---|
-| `run_testday.sh` | run the AR pipeline (runlist → 3D→2D → traces/relFlux → 2D→1D) for one `(tele, mjd)` from existing raw data + almanac, no Slurm, no Utah tunnel |
+| `run_testday.sh` | run the AR pipeline (runlist → 3D→2D → traces/relFlux → 2D→1D) for one `(tele, mjd)` from existing raw data + almanac, no Slurm, no Utah tunnel — the single-day tool for fix-branch runs |
 | `h5diff_tree.jl` | walk two output trees, compare every HDF5 dataset + attribute, emit a markdown diff report |
-| `submit_goldens.sh` | sbatch script generating ALL golden baselines in one multinode allocation (run_bulk.sh SlurmClusterManager pattern); see `SUBMIT.md` |
+| `submit_goldens.sh` | sbatch script generating ALL golden baselines as ONE true bulk run over the combined test-day exposure set (the exact run_bulk.sh chain), with per-day bookkeeping afterwards; see `SUBMIT.md` |
+| `concat_runlists.jl` | merge per-telescope runlists into the one combined runlist the bulk chain uses (the test days are tele-specific pairs; run with `--project=<AR checkout>`) |
 | `SUBMIT.md` | golden-job submission instructions + filesystem-only monitoring + post-run checks |
-| `Project.toml` / `Manifest.toml` | Julia env for the two `.jl` tools (HDF5 + ArgParse only — independent of the AR package env) |
+| `Project.toml` / `Manifest.toml` | Julia env for `h5diff_tree.jl` (HDF5 + ArgParse only — independent of the AR package env; `concat_runlists.jl` runs with the AR project instead) |
 
 One-time setup: `julia +1.11.0 --project=. -e 'using Pkg; Pkg.instantiate()'`.
 
@@ -54,7 +55,8 @@ Differences from `scripts/daily/run_all.sh` (deliberate):
   the harness just symlinks the bulk file to
   `<outdir>almanac/allobs_<tele>_<mjd>.h5` (the path every downstream stage
   derives from outdir+runname; all stages open it read-only) and selects the
-  day with the runlist makers' `--mjd` flag.
+  day with the runlist makers' `--mjds` flag (a comma-separated MJD list;
+  `submit_goldens.sh` passes each telescope's full test-day list).
   *Historical note*: the `@f76194a` golden baselines predate this — they were
   generated via per-day extracts made by a since-deleted
   `extract_almanac_day.jl` (their MANIFEST records the staged
@@ -113,6 +115,23 @@ differ between two runs of the same exposure something is genuinely wrong.
 
 Exit code: 0 when everything is identical/within-rtol (modulo ignores), 1 when
 anything DIFFERS or is missing — usable directly in CI/scripts.
+
+**Per-day diffs against a bulk-mode tree**: the bulk goldens live in ONE
+outdir whose `apred/<mjd>/` subdirs are per-day, while a single-day
+run_testday tree nests the same layout under its own outdir — so point the
+walker at the `apred/<mjd>` SUBTREES:
+
+```bash
+julia +1.11.0 --project=. h5diff_tree.jl \
+    <bulkGoldenRoot>/apred/59429 <newSingleDayOutdir>/apred/59429 --out report.md
+```
+
+At mjd 60000 both telescopes share `apred/60000/`; when the other side is
+apo-only (or lco-only), exclude the other telescope's files with
+`--skip-files "_lco_"` (resp. `"_apo_"`) — all product filenames are
+tele-tagged. Nightly wavecal solutions (`wavecal/wavecalNightAve_*`) and the
+per-mjd `dome_flats/<mjd>`/`quartz_flats/<mjd>` trace dirs can be compared
+the same way (subtree or `--skip-files` on the other days' `_<mjd>` tags).
 
 ## The expected-diff-statement workflow (v1 §1.3–1.4, §4.2)
 

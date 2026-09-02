@@ -1,9 +1,14 @@
 # Submitting the golden-baseline generation job
 
-One multinode Slurm job generates all T1 golden baselines (6 runs: apo+lco
-60000, apo 58588, 59337, 58011, 59429), mirroring the run_bulk.sh
-SlurmClusterManager pattern, sequentially (one day at a time — deliberately
-NOT a job array). Submission is **manual by design.**
+One multinode Slurm job generates all T1 golden baselines (6 test days:
+apo+lco 60000, apo 58588, 59337, 58011, 59429) as **ONE true bulk run**: a
+single combined runlist over every test-day exposure, then the exact
+run_bulk.sh chain (per-tele pipeline.jl → flat-type cal loops → per-tele
+pipeline_2d_1d.jl) — not per-day invocations, and deliberately NOT a job
+array. Products land in one outdir whose `apred/<mjd>/` subdirs are per-day
+as usual; a post-run bookkeeping step writes per-day STATUS files, the
+MANIFEST table, and the ALL_DONE sentinel. Submission is **manual by
+design.**
 
 ## Submit
 
@@ -16,16 +21,16 @@ sbatchAKS test/regression/submit_goldens.sh
 Then **paste the job ID back into the Claude session** so progress can be
 followed from the filesystem (no Slurm polling needed).
 
-Allocation requested by the script: `-p cca --qos=cca -N 2
+Allocation requested by the script: `-p cca -N 2
 -C "[genoa|icelake|rome]" --mem=900G -t 1-12:00 -J ar_goldens`.
-Expected wall time: ~1–2 h per full day (90–101 exposures) + ~20 min for the
-small days — **roughly 6–10 h total**; the 36 h limit is generous margin.
+Expected wall time comparable to the old sequential mode (**roughly 6–10 h
+total** for the full day set); the 36 h limit is generous margin.
 
 Before submitting, optional sanity checks (no Slurm needed):
 
 ```bash
 bash -n test/regression/submit_goldens.sh
-test/regression/submit_goldens.sh --dry-run   # prints the exact 6-run sequence
+test/regression/submit_goldens.sh --dry-run   # prints the bulk stage sequence
 ```
 
 The job refuses to start from a dirty git tree (goldens must be attributable
@@ -50,34 +55,48 @@ Let `GROOT=/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/ApogeeReductio
 (the shortsha of the submitted HEAD; the dry-run prints it).
 
 - **sbatch stdout log** (predictable path): `slurm_logs/ar_goldens_<jobid>.out`
-  under the submission cwd above. Per-day sentinels inside:
-  `=== GOLDEN BEGIN <tele> <mjd> <timestamp> ===` /
-  `=== GOLDEN END <tele> <mjd> exit=N elapsed=... ===`.
-- **`$GROOT/RUNSTATE`** — rewritten at every day boundary: which day is
-  running, N of 6 done.
-- **`$GROOT/<tele>_<mjd>/STATUS`** — written when that day finishes: exit
-  code, elapsed, start/end timestamps.
-- **`$GROOT/<tele>_<mjd>/logs/run_testday_<tele>_<mjd>.log`** — the live
-  per-day step log (step banners + warnings census at the end).
+  under the submission cwd above (mirrored to
+  `$GROOT/logs/submit_goldens_<runname>.log`). Per-STAGE sentinels inside:
+  `=== STAGE BEGIN <name> <timestamp> ===` /
+  `=== STAGE END <name> elapsed=... ===`, and `=== STAGE FAILED <name> ===`
+  if the chain dies (bulk mode is one chain: a failed stage aborts the rest —
+  the last BEGIN without END/FAILED marks the crash point).
+- **`$GROOT/RUNSTATE`** — rewritten at every stage boundary: which stage is
+  running (or FAILED in which stage).
+- **`$GROOT/status/STATUS_<tele>_<mjd>`** — written by the post-run
+  bookkeeping step: per-day product counts (ar2D/ar2Dcal/ar1Dcal/ar1Dunical),
+  the expected-vs-found missing-file check, and the per-day diff base paths.
 - **`$GROOT/ALL_DONE`** — exists only when the whole job finished; contains
-  the overall exit and day count.
+  the overall bookkeeping exit.
 
 ## After completion
 
-1. Check `$GROOT/MANIFEST.md`: branch/sha/config header + per-day exit-status
-   table — all exit codes must be 0.
-2. Read each day's warnings census (end of the per-day log) against the
-   2026_05_01 baseline counts (REFACTOR_PLAN v1 §0).
-3. **Sanity cross-check on apo 59429**: the ccalin051 smoke run of the same
-   pipeline code exists at
+1. Check `$GROOT/MANIFEST.md`: branch/sha/config header + the per-day product
+   table — every verdict must be `ok` (product counts match the runlist's
+   per-day exposure counts). The same numbers live in
+   `$GROOT/status/STATUS_<tele>_<mjd>`.
+2. Read the warnings census (end of the bulk log) against the 2026_05_01
+   baseline counts (REFACTOR_PLAN v1 §0).
+3. **Per-day diffs** point at the `apred/<mjd>` subtrees (see README.md):
+
+   ```bash
+   cd test/regression
+   julia +1.11.0 --project=. h5diff_tree.jl \
+       $GROOT/apred/<mjd> <candidateOutdir>/apred/<mjd> --out report.md
+   ```
+
+   At mjd 60000 both telescopes share `apred/60000/` — against an apo-only
+   (lco-only) candidate add `--skip-files "_lco_"` (`"_apo_"`).
+4. **Sanity cross-check on apo 59429**: the ccalin051 smoke run of the same
+   pipeline-code lineage exists at
    `/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden_smoke/apo_59429/`.
    Run:
 
    ```bash
    cd test/regression
    julia +1.11.0 --project=. h5diff_tree.jl \
-       $GROOT/apo_59429 \
-       /mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden_smoke/apo_59429 \
+       $GROOT/apred/59429 \
+       /mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden_smoke/apo_59429/apred/59429 \
        --out $GROOT/apo_59429_vs_smoke.md
    ```
 
@@ -97,7 +116,7 @@ Let `GROOT=/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/ApogeeReductio
    other apo 59429 product is machine-independent. Reports:
    `2026_09_02/t1_rework_val/diff_golden_vs_smoke_apo_59429.md`. Candidate
    for its own refactor-plan card.
-4. The goldens then serve as the diff base for every fix/cleanup branch (see
+5. The goldens then serve as the diff base for every fix/cleanup branch (see
    README.md, "expected-diff-statement workflow").
 
 ## Incident log: job 6969533 (2026-08-31) — missing wavecal/ dir
@@ -123,25 +142,18 @@ Mitigations applied:
   6969533 was in day 2's 3D stage, so days 2–6 of that job are expected to
   complete; only **apo 60000 needs a redo**.
 
-### Redoing apo 60000 into the existing golden tree
+### Partial/redo runs (bulk mode)
 
-Pipeline code is identical between `f76194a` and the fix commit (only
-`test/regression/` changed), so the redo may legitimately write into the
-`@f76194a` root — the MANIFEST appends a "Redo/partial run" section recording
-the new sha:
-
-```bash
-cd /mnt/home/asaydjari/gitcode/worktrees/AR-T1
-AR_DAYS="apo 60000" \
-AR_OUTROOT=/mnt/ceph/users/sdssv/work/asaydjari/2026_08_31/golden/ApogeeReduction.jl@f76194a \
-sbatchAKS test/regression/submit_goldens.sh
-```
-
+`AR_DAYS="apo 60000;apo 58011"` restricts the ONE bulk run to a day subset
+(the combined runlist then covers only those days); `AR_OUTROOT` points it
+at an existing outdir — with `commit_exists` checkpointing, products that
+already exist are reused, so a redo reprocesses only what is missing. The
+MANIFEST appends a "Redo/partial run" section recording the new sha.
 (`sbatchAKS` must forward the environment, as plain `sbatch` does by
-default; if unsure use `sbatch --export=ALL,AR_DAYS="apo 60000",AR_OUTROOT=...`.)
-With `commit_exists` checkpointing the completed 3D→2D/traces/relFlux
-products of the failed attempt are reused; expect ~15–25 min. Then run the
-post-completion checks above, including the apo 59429 vs smoke cross-diff.
+default; if unsure use `sbatch --export=ALL,AR_DAYS=...,AR_OUTROOT=...`.)
+NOTE: the old per-day-tree goldens under `@f76194a/<tele>_<mjd>/` predate
+bulk mode and cannot be extended by it — a bulk redo belongs in a bulk-mode
+outroot.
 
 ## The A3 gapped-almanac day (deferred)
 
