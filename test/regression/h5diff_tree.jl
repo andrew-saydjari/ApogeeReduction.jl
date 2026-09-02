@@ -90,6 +90,15 @@ function parse_commandline()
         help = "comma-separated file extensions to compare"
         arg_type = String
         default = ".h5,.hdf5,.jdat"
+        "--skip-files"
+        help = "comma-separated relative-path substrings; matching FILES are " *
+               "excluded from the tree pairing entirely. Default skips the " *
+               "harness-staged almanac INPUT (almanac/allobs_<tele>_<mjd>.h5 — " *
+               "since the bulk-almanac switch a symlink to the multi-GB " *
+               "multi-day file, and an input rather than a product). Pass an " *
+               "empty string to skip nothing."
+        arg_type = String
+        default = "almanac/allobs_"
     end
     return parse_args(s)
 end
@@ -354,6 +363,10 @@ function main()
 
     gfiles = collect_files(goldroot, exts)
     nfiles = collect_files(newroot, exts)
+    skips = String.(filter(!isempty, split(parg["skip-files"], ",")))
+    for files in (gfiles, nfiles)
+        filter!(p -> !any(occursin(s, p.first) for s in skips), files)
+    end
     allrel = sort(collect(union(keys(gfiles), keys(nfiles))))
 
     reports = FileReport[]
@@ -376,6 +389,8 @@ function main()
     println(io, "- new:    `$(abspath(newroot))`")
     println(io, "- rtol=$(rtol), atol=$(atol); ignore patterns: ",
         join(["`$p`" for p in patterns], ", "))
+    isempty(skips) ||
+        println(io, "- skipped files (substrings): ", join(["`$s`" for s in skips], ", "))
     println(io, "- generated: $(string(Libc.strftime("%Y-%m-%d %H:%M:%S", time()))) on $(gethostname())")
     println(io)
     nfile = length(reports)
