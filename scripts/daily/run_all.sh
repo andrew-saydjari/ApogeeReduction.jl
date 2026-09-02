@@ -107,10 +107,9 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
 
-    # NOTE (2026-08-31): the fiber cross-match needs a database privilege that
-    # is currently missing from the CCA-side connection (see O1 smoke report,
-    # daily_smoke/O1_REPORT.md, "DB grant request"). Until that is fixed this
-    # step fails from CCA; add --no-x-match to run without target cross-match.
+    # DB identity for the cross-match comes from ~/.almanac/config.yaml +
+    # ~/.pgpass (2026-09-01: interim `sdss` role until the sdss_remote GRANT
+    # on catalogdb.sdss_id_to_catalog lands; then revert the config user).
     uvx --from $almanac_source almanac -p 12 -v --$tele --mjd-start $mjd --mjd-end $mjd  --output $almanac_file --fibers
 fi
 
