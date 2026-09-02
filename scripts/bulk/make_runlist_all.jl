@@ -24,11 +24,11 @@ function parse_commandline()
         help = "path to output runlist file"
         arg_type = String
         default = ""
-        "--mjd"
+        "--mjds"
         required = false
-        help = "restrict to this single MJD (default 0 = all MJDs in the almanac file)"
-        arg_type = Int
-        default = 0
+        help = "comma-separated MJD list to restrict to (default \"0\" = all MJDs in the almanac file; a single value selects that day)"
+        arg_type = String
+        default = "0"
     end
     return parse_args(s)
 end
@@ -55,9 +55,10 @@ end
 
 for tele in tele2do
     mjd_list = keys(f["raw/$(tele)"])
-    if parg["mjd"] != 0
-        # single-day selection against a (possibly multi-day) almanac file
-        mjd_list = filter(==(string(parg["mjd"])), mjd_list)
+    if parg["mjds"] != "0"
+        # day-subset selection against a (possibly multi-day) almanac file
+        mjds_sel = Set(String.(strip.(split(parg["mjds"], ","))))
+        mjd_list = filter(in(mjds_sel), mjd_list)
     end
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)

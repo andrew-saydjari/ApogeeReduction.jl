@@ -144,7 +144,7 @@ print_elapsed_time() {
 # The bulk raw/-layout almanac is consumed directly (all stages open it
 # read-only): symlink it to the outdir+runname-derived path that pipeline.jl /
 # pipeline_2d_1d.jl / make_relFlux.jl hardcode, and select the day with the
-# runlist makers' --mjd flag.
+# runlist makers' --mjds flag.
 print_elapsed_time "Linking almanac (raw/ layout, read directly)"
 if [ ! -f "$AR_ALMANAC_SRC" ]; then
     echo "ERROR: AR_ALMANAC_SRC not found: $AR_ALMANAC_SRC" >&2
@@ -156,7 +156,7 @@ ln -sfn "$(realpath "$AR_ALMANAC_SRC")" "$almanac_file"
 print_elapsed_time "Building Runlist"
 set +e
 julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/bulk/make_runlist_all.jl" \
-    --tele "$tele" --almanac_file "$almanac_file" --output "$runlist" --mjd "$mjd"
+    --tele "$tele" --almanac_file "$almanac_file" --output "$runlist" --mjds "$mjd"
 exit_code=$?
 set -e
 if [ $exit_code -eq 16 ]; then
@@ -182,7 +182,7 @@ for flat_type in "${flat_types[@]}"; do
     print_elapsed_time "Making runlist for $flat_type Flats"
     julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_runlist_fiber_flats.jl" \
         --almanac_file "$almanac_file" --tele "$tele" --output "$flatrunlist" --flat_type "$flat_type" \
-        --mjd "$mjd"
+        --mjds "$mjd"
 
     print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
     mkdir -p "${outdir}${flat_type}_flats"
