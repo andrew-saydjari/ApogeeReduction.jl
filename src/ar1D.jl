@@ -143,7 +143,11 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
     flux_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     ivar_1d = Matrix{Float64}(undef, n_xpix, n_fibers)
     mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
-    dropped_pixel_mask_1d = Matrix{Int64}(undef, n_xpix, n_fibers)
+    # must be zero-initialized: elements are only assigned when pixels are
+    # actually dropped, and undef Int64 memory otherwise leaks recycled heap
+    # contents (garbage like +/-2^62, even negative "bitmask" values) into
+    # dropped_pixels_mask_1d, nondeterministically run-to-run
+    dropped_pixel_mask_1d = zeros(Int64, n_xpix, n_fibers)
 
     good_pixels = ((pix_bitmask .& bad_pix_bits) .== 0) .& (ivarimage .> 0)
 
