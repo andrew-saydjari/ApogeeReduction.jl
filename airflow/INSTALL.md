@@ -28,14 +28,41 @@ need the sdssv service account, secrets, or a policy decision.
 - `sla_miss_callback` was **removed in Airflow 3.0**; the SLA layer here is
   `dagrun_timeout` (16 h) + the cross-machine watchdog (step 6).
 
-## 1. Deploy the DAGs (symlink from the repo checkout)
+## 1a. ONE-TIME: migrate the production checkout to main (**AKS — deploy
+## decision, review before running**)
+
+The production clone `/mnt/home/sdssv/gitcode/ApogeeReduction.jl` (what
+`AR_REPO` defaults to and what `update.repo` pulls) is currently on the old
+`airflow` branch, whose `run_all.sh` takes the OLD 5-arg signature. The DAG
+drives the NEW 12-arg run_all.sh (R1 layout), so the clone must move to the
+consolidated `main` of andrew-saydjari/ApogeeReduction.jl (already its
+`origin`):
+
+```bash
+cd /mnt/home/sdssv/gitcode/ApogeeReduction.jl
+git fetch origin
+git checkout main
+git pull --ff-only
+```
+
+After this, the DAG's `update.repo` task keeps it current with
+`git pull --ff-only` every morning (deliberate NEW behavior — the old
+`update.repo` was status-only, so pulling was effectively off).
+
+Context (AKS 2026-09-03, confirmed): the old `airflow` branch existed to
+insulate production from comment-toggle edits during bulk runs — a churn
+class eliminated by the R1 `run_madgics`/env flags, so dailies now run off
+consolidated `main`. Fallback if main churn ever causes issues: cut a
+`production-airflow` branch and update it deliberately.
+
+## 1b. Deploy the DAGs (symlink from the repo checkout)
 
 As on Utah, DAGs live in the repo and are symlinked into the sandbox:
 
 ```bash
 cd /mnt/home/sdssv/airflow/dags
 # retire the previous production DAG (superseded feature-for-feature by the
-# new ones — see the mapping table in README.md; keep it for reference)
+# new one — see the mapping table in README.md; keep it for reference)
 mkdir -p attic && mv ar_main.py attic/
 REPO=/mnt/home/sdssv/gitcode/ApogeeReduction.jl  # once o3/airflow-dags merges
 ln -s $REPO/airflow/dags/ar_common.py .

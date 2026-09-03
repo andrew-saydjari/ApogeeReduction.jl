@@ -18,11 +18,22 @@ airflow/
 └── README.md                 this file
 ```
 
-## DAG structure (`apogee_daily_{apo,lco}`)
+## DAG structure (`apogee_daily` — ONE DAG, LCO then APO serially)
+
+One DAG, observatories chained serially (LCO first), restoring the
+production ar_main.py template per AKS review 2026-09-03: the Airflow
+metadata DB is SQLite (single-writer), so parallel per-observatory runs
+contend. A skipped observatory (no data) does not block the other
+(`none_failed` on each group's root); a FAILED LCO still blocks APO
+(ar_main.py's serial semantics).
 
 ```
-resolve_night → wait_for_raw → update_repo → update_sdsscore → sync_logs
-   → tunnel_check → almanac → runlist → start_notification → select_mode
+update(repo → sdsscore → sync_logs) → setup(mjd, date_mjd)
+  → [LCO group] → [APO group] → completion_notification
+
+per observatory group:
+resolve_night → wait_for_raw → tunnel_check → almanac → runlist
+   → start_notification → select_mode
                                                                         │
               ┌──────────────── mode="local" (testing) ─────────────────┤
               │ p3d2d → quartz_flats(runlist→traces→extract→relflux)    │
@@ -32,22 +43,31 @@ resolve_night → wait_for_raw → update_repo → update_sdsscore → sync_logs
               └─ mode="slurm" (DEFAULT): slurm_submit (sbatch run_all.sh) ┘
                                                                         │
                  join → metrics_append (N1) → daily_summary (N3)
-                      → completion_rollup            + chain_status leaf
+                                                     + chain_status gate
 ```
 
-- **Night selection**: `mjd` param (`-1` = auto: `int(current UTC MJD) - 1`,
-  i.e. the night that ended this morning).
+- **Night selection** (`setup.mjd` / `setup.date_mjd`): ar_main.py's exact
+  arithmetic — `int(Time(data_interval_start).mjd) - 1` and the ET date
+  − 2 days. The Globus Utah→CCA sync is a fixed 4:00–4:30 am daily task,
+  so the 7 am ET run processes the data that landed that morning. On this
+  Airflow 3 instance a cron schedule is a CronTriggerTimetable
+  (`data_interval_start` == trigger time), and the 300 historical daily
+  almanac files confirm the expression reproduces exactly what production
+  processed (see the compute_mjd docstring). A manual trigger with conf
+  `{"mjd": N}` overrides cleanly through the whole chain (past-day reruns).
 - **wait_for_raw** gates reduction on raw-transfer COMPLETION (the
-  `<mjd>.md5sum` marker), not just the date — ported from ar_main.py's
-  `TransferFileSensor` semantics, including "ancient night (mjd < 59148) →
-  assume transferred"; reschedule-mode pokes every 30 min, and a 12 h
-  timeout skips the run cleanly (`soft_fail`).
-- **update_repo / sync_logs**: ported from ar_main.py's `update` group —
-  repo-state report (plus opt-in `pull_repo` fast-forward) and the rsync of
-  the telescope's nightly `.log.html` pages into the public `apogee_logs`
-  mirror.
-- **update_sdsscore is default ON** (O1 punch list #2 — a fresh night after
-  any gap dies on missing confSummary otherwise).
+  `<mjd>.md5sum` marker) — ported from ar_main.py's `TransferFileSensor`
+  semantics, including "ancient night (mjd < 59148) → assume transferred".
+  Cheap insurance only: normally an instant pass (first poke true);
+  reschedule pokes every 30 min, 12 h timeout skips the observatory
+  cleanly (`soft_fail`); conf `raw_nowait` skips immediately (smoke tests).
+- **update.repo**: reports the production checkout state AND
+  `git pull --ff-only` (DELIBERATE new behavior — ar_main.py's repo task
+  was status-only); **update.sync_logs** rsyncs both observatories'
+  `.log.html` pages into the public `apogee_logs` mirror.
+- **update.sdsscore is default ON** (O1 punch list #2 — a fresh night after
+  any gap dies on missing confSummary otherwise), with new-submodule
+  bootstrap (--init + SSH→HTTPS rewrite).
 - **tunnel_check** verifies the `mwm` ControlMaster (`ssh -O check`) and
   (re)adds the 63333→operations.sdss.org:5432 forward; if the master is down
   it fails with a notification saying only AKS can reopen it.
@@ -61,18 +81,20 @@ resolve_night → wait_for_raw → update_repo → update_sdsscore → sync_logs
   `AR_LOCAL_WORKERS`/`--workers_per_node` = `workers` param and all
   `SLURM_*` env scrubbed — used for testing (`AR_AIRFLOW_MODE=local` or
   conf `{"mode": "local"}`).
-- **arMADGICS** is gated by the `run_madgics` param / `RUN_MADGICS` env
-  (default true), mirroring run_all.sh arg 12.
+- **arMADGICS** is gated by the `run_madgics` param only (no env fallback),
+  default TRUE — production ran arMADGICS + its workup unconditionally
+  every night (AKS 2026-09-03).
 - **spectra_workup** (first-class chain step per AKS 2026-09-03; was a
   manual afterstep invoked by neither driver historically): calls the
   arMADGICS-side entrypoint `workup/run_workup.sh <rawdir> <redux> <outdir>`
   (PR #26, MPI tier default) under the same madgics gate. Local mode calls
   it explicitly; slurm mode inherits the identical step from run_all.sh.
   Existence-guarded (skips with a warning until PR #26 is in the checkout).
-- **dagrun_timeout=16 h** stands in for SLAs (removed in Airflow 3.0),
-  together with the metrics-freshness check in the watchdog script; the
-  `chain_status` leaf makes the DagRun state track the chain outcome even
-  though metrics/summary always run.
+- **dagrun_timeout=20 h** (two serial observatories) stands in for SLAs
+  (removed in Airflow 3.0), together with the metrics-freshness check in
+  the watchdog script; each group's `chain_status` gate makes the DagRun
+  state track the chain outcome even though metrics/summary always run,
+  and carries the serial edge to the next observatory.
 
 ## Relationship to the previous production DAG (`dags/ar_main.py`)
 
@@ -85,23 +107,26 @@ are provider shims, and astropy/pytz/the slack provider are in the shared
 env). It is retired to `dags/attic/` ONLY because these DAGs supersede it
 feature-for-feature:
 
-| ar_main.py | new DAGs |
+| ar_main.py | apogee_daily |
 |---|---|
-| `update.repo` (git status/log/remote report) | `update_repo` (same report; `pull_repo=true` adds `git pull --ff-only`) |
-| `update.sdsscore` (`update.sh`) | `update_sdsscore` (param-gated, default ON) |
-| `update.sync_logs` (rsync both observatories' `.log.html`) | `sync_logs` (per-observatory half in each DAG) |
-| `setup.mjd` (`int(Time(interval_start).mjd) - 1`) | `resolve_night` auto-mjd (`int(current MJD) - 1`, `mjd` param override) |
-| `setup.date_mjd` (ET date − 2 d) | `resolve_night` `night_date` (MJD → civil date) |
-| `TransferFileSensor` (defined but never wired; ancient-date skip + transfer-done poke) | `wait_for_raw` (actually wired; md5sum marker; mjd < 59148 assumed complete; timeout → clean skip) |
-| `<obs>.initial_notification` (public link interpolated **SLACK_TOKEN**) | `start_notification` (link from **PUBLIC_URL_SLUG**; token/slug decoupled) |
-| `<obs>.science` (`submit_and_wait`: sbatch + `squeue -j` poll every 5 s) | `slurm_submit` (sbatch `--parsable` + 300 s polls + `sacct` verdict); in local mode the split step chain replaces it |
-| per-obs success/failure Slack (`:picard_facepalm:`) | `daily_summary` census per obs + per-task `on_failure_callback` (with `:picard_facepalm:` + per-task hints) |
-| `completion_notification` ("Both observatories processed") | `completion_rollup` (posted by whichever obs DAG finishes second, judged from the N1 metrics table) |
-| one DAG, lco→apo sequential, 7 am ET | two per-obs DAGs (9/10 am ET), independently parallel |
+| one DAG, lco→apo serial, `0 7 * * *` ET, max_active_runs=2 | SAME: one DAG, lco→apo serial, same schedule, max_active_runs=2 (SQLite single-writer) |
+| `update.repo` (git status/log/remote report; status-only) | `update.repo` (same report + `git pull --ff-only` — deliberate NEW behavior, AKS 2026-09-03) |
+| `update.sdsscore` (`update.sh`) | `update.sdsscore` (param-gated, default ON; + new-submodule bootstrap) |
+| `update.sync_logs` (rsync both observatories' `.log.html`) | `update.sync_logs` (same, both observatories) |
+| `setup.mjd` (`int(Time(data_interval_start).mjd) - 1`) | `setup.mjd` — VERBATIM arithmetic (stdlib mjd; conf `{"mjd": N}` override for past-day reruns) |
+| `setup.date_mjd` (ET date − 2 d, pytz) | `setup.date_mjd` — VERBATIM arithmetic (zoneinfo) |
+| `TransferFileSensor` (defined but never wired; ancient-date skip + transfer-done poke) | `<obs>.wait_for_raw` (wired as cheap insurance; md5sum marker; mjd < 59148 assumed complete; timeout → clean skip) |
+| `<obs>.initial_notification` (public link interpolated **SLACK_TOKEN**) | `<obs>.start_notification` (link from **PUBLIC_URL_SLUG**; token/slug decoupled) |
+| `<obs>.science` (`submit_and_wait`: sbatch `-vvv -D outdir --mail-*`, 5 s `squeue -j` polls, SLACK_CHANNEL exported) | `<obs>.slurm_submit` — same mechanics restored (sbatch prefix, 5 s polls, SLACK_CHANNEL env) + a final `sacct` verdict (new: a FAILED job fails the task); local mode replaces it with the split step chain |
+| arMADGICS + workup ran unconditionally every night | `run_madgics` param default TRUE (only knob; no env fallback); + `spectra_workup` |
+| per-obs success/failure Slack (`:picard_facepalm:`) | `daily_summary` census per obs + per-task `on_failure_callback` (`:picard_facepalm:` + per-task hints) |
+| `completion_notification` ("Both observatories processed") | `completion_notification` (single, end of DAG; implemented via the N1 metrics table) |
+| always posted to prod `#apogee-reduction-jl` | SAME default (prod channel); dev override via `AR_SLACK_CHANNEL` env / `slack_channel` conf |
 
 New relative to ar_main.py: tunnel_check, split almanac/runlist with
-exit-16 skip, the whole local mode, N1 metrics, heartbeat/watchdog/systemd,
-checkpoint-aware reruns.
+exit-16 skip, the whole local mode, spectra_workup, N1 metrics,
+heartbeat/watchdog/systemd, checkpoint-aware reruns, skipped-observatory
+pass-through (no-data LCO no longer blocks APO).
 
 ## Notifications (N3)
 
@@ -114,8 +139,9 @@ checkpoint-aware reruns.
 - `slack_mode` param: `full` (production: step posts from the Julia code +
   alerts + summary), `summary_only` (exactly one message — used by smoke
   tests; SLACK_TOKEN is scrubbed from the Julia steps), `off`.
-- Channel: dev `C07KQ7BJY5P` by default; production `C08B7FKMP16` via
-  `AR_SLACK_CHANNEL` (see INSTALL.md).
+- Channel: production `C08B7FKMP16` by default (ar_main.py always posted to
+  #apogee-reduction-jl); dev `C07KQ7BJY5P` via `AR_SLACK_CHANNEL` env or
+  `slack_channel` conf when testing.
 
 ## Metrics (N1 seed)
 
@@ -150,10 +176,11 @@ action — see INSTALL.md.
 ## Smoke-testing without spamming Slack
 
 ```bash
-airflow dags trigger apogee_daily_apo --conf '{
-  "mjd": 61284, "mode": "local",
+airflow dags trigger apogee_daily --conf '{
+  "mjd": 61284, "mode": "local", "raw_nowait": true,
   "outdir": "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_02/o3_dag_test/",
   "slack_mode": "summary_only", "test_label": true,
+  "slack_channel": "C07KQ7BJY5P",
   "run_kind": "test", "run_madgics": false, "workers": 12}'
 ```
 
