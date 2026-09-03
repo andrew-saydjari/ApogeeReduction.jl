@@ -48,11 +48,12 @@ AR_MODE_DEFAULT = os.environ.get("AR_AIRFLOW_MODE", "slurm")
 # Worker cap for local mode (feeds --workers_per_node and AR_LOCAL_WORKERS).
 AR_WORKERS_DEFAULT = int(os.environ.get("AR_WORKERS_DEFAULT", "16"))
 
-# Slack channels: dev is the default everywhere; production posting is an
-# explicit opt-in (set AR_SLACK_CHANNEL=C08B7FKMP16 in the Airflow env).
+# Slack channels: PROD is the posting default (restored 2026-09-03 per AKS —
+# ar_main.py always posted to #apogee-reduction-jl); export
+# AR_SLACK_CHANNEL=C07KQ7BJY5P (dev) in the environment when testing.
 SLACK_CHANNEL_DEV = "C07KQ7BJY5P"   # apogee-reduction-jl-dev
 SLACK_CHANNEL_PROD = "C08B7FKMP16"  # apogee-reduction-jl
-AR_SLACK_CHANNEL = os.environ.get("AR_SLACK_CHANNEL", SLACK_CHANNEL_DEV)
+AR_SLACK_CHANNEL = os.environ.get("AR_SLACK_CHANNEL", SLACK_CHANNEL_PROD)
 
 # Metrics table location (N1 seed). Schema: airflow/README.md + metrics dir.
 AR_METRICS_DIR = os.environ.get(
@@ -108,14 +109,10 @@ def current_mjd() -> float:
     return time.time() / 86400.0 + 40587.0
 
 
-def auto_mjd() -> int:
-    """Default night to reduce: the night that ended this morning.
-
-    Empirically (2026-09): when the daily fires in the ET morning of calendar
-    day D, the newest complete transfer under RAW_ROOT/<tele>/ is directory
-    int(MJD_utc(D)) - 1 for both observatories.
-    """
-    return int(current_mjd()) - 1
+def mjd_of(dt) -> float:
+    """UTC MJD of a tz-aware datetime — stdlib equivalent of
+    astropy `Time(dt).mjd` as used by ar_main.py."""
+    return dt.timestamp() / 86400.0 + 40587.0
 
 
 def night_date_str(mjd: int) -> str:
@@ -142,9 +139,8 @@ def public_log_url(tele: str, mjd: int) -> str | None:
 def both_observatories_done(mjd: int, run_kind: str,
                             metrics_dir: str | None = None) -> bool:
     """True when daily_metrics.csv holds clean rows for BOTH observatories
-    for this mjd/run_kind — the per-obs-DAG replacement for ar_main.py's
-    completion_notification (which ran at the end of its single
-    lco-then-apo DAG)."""
+    for this mjd/run_kind — the metrics-backed implementation behind the
+    single completion_notification at the end of the serial DAG."""
     metrics_dir = metrics_dir or AR_METRICS_DIR
     path = os.path.join(metrics_dir, "daily_metrics.csv")
     seen = set()
@@ -246,13 +242,18 @@ def notify_task_failure(context):
     dag_id = getattr(ti, "dag_id", "?")
     try_number = getattr(ti, "try_number", "?")
     mjd = p.get("mjd", "?")
-    try:  # prefer the resolved night over the raw param (-1 = auto)
-        paths = ti.xcom_pull(task_ids="resolve_night")
-        if paths:
-            mjd = paths.get("mjd", mjd)
+    try:  # prefer the resolved night over the raw param (-1 = auto);
+        # tasks live in per-observatory TaskGroups, so derive the group's
+        # resolve_night task id from this task's prefix.
+        grp = task_id.split(".")[0] if "." in str(task_id) else None
+        if grp in ("apo", "lco"):
+            paths = ti.xcom_pull(task_ids=f"{grp}.resolve_night")
+            if paths:
+                mjd = paths.get("mjd", mjd)
     except Exception:
         pass
-    hint = FAILURE_HINTS.get(task_id, "")
+    # hints are keyed by the bare task name (group prefixes stripped)
+    hint = FAILURE_HINTS.get(str(task_id).split(".")[-1], "")
     label = "[TEST] " if p.get("test_label") else ""
     text = (f"{label}:rotating_light: `{dag_id}` task `{task_id}` FAILED "
             f"(mjd={mjd}, try={try_number}). :picard_facepalm: {hint}")
@@ -286,13 +287,10 @@ def notify_dag_failure(context):
 # Local-mode step command builder
 # ---------------------------------------------------------------------------
 
-# Jinja fragment pulling the resolve_night xcom dict.
-XN = "{{ ti.xcom_pull(task_ids='resolve_night') }}"
-
-
-def xn(key: str) -> str:
-    """Jinja accessor into the resolve_night xcom payload."""
-    return f"{{{{ ti.xcom_pull(task_ids='resolve_night')['{key}'] }}}}"
+def xn(key: str, tele: str) -> str:
+    """Jinja accessor into the observatory group's resolve_night xcom."""
+    return (f"{{{{ ti.xcom_pull(task_ids='{tele}.resolve_night')"
+            f"['{key}'] }}}}")
 
 
 STEP_PREAMBLE = r"""set -uo pipefail
@@ -311,7 +309,8 @@ mkdir -p "$LOGDIR"
 """
 
 
-def step_cmd(step: str, cmd: str, skip_exit_codes: dict | None = None) -> str:
+def step_cmd(step: str, cmd: str, tele: str,
+             skip_exit_codes: dict | None = None) -> str:
     """Wrap a chain step: log to <logdir>/<step>.log, append
     '<step>,<rc>,<wall_s>' to steps.csv (N1 raw material), tail the log into
     the Airflow log, propagate rc. skip_exit_codes maps a tool exit code to
@@ -320,7 +319,7 @@ def step_cmd(step: str, cmd: str, skip_exit_codes: dict | None = None) -> str:
     remap = ""
     for code, _ in (skip_exit_codes or {}).items():
         remap += f'if [ "$rc" -eq {code} ]; then rc=99; fi\n'
-    preamble = STEP_PREAMBLE % {"logdir": xn("logdir")}
+    preamble = STEP_PREAMBLE % {"logdir": xn("logdir", tele)}
     return (
         preamble
         + f'START=$(date +%s)\n'
