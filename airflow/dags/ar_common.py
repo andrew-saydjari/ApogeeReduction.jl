@@ -93,7 +93,9 @@ FAILURE_HINTS = {
                         f"{SDSSCORE_DIR} (submodule auth / disk)."),
     "almanac": ("almanac failed — check the DB tunnel (port 63333), "
                 "~/.almanac/config.yaml + ~/.pgpass identity, and whether "
-                "confSummary files exist (sdsscore staleness)."),
+                "confSummary files exist: sdsscore staleness, an "
+                "uninitialized new config-range submodule, or an "
+                "upstream-empty range repo (seen for lco 10021XXX)."),
 }
 
 

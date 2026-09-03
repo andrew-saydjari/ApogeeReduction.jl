@@ -352,7 +352,19 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
                 '[ "{{ params.update_sdsscore }}" != "true" ]; then\n'
                 '  echo "update_sdsscore disabled"; exit 0\nfi\n'
                 f"cd {C.SDSSCORE_DIR}\n"
-                "./update.sh\n"),
+                "./update.sh\n"
+                # update.sh's `submodule foreach` only maintains submodules
+                # that are already initialized; a NEW config-range submodule
+                # (e.g. lco 10021XXX, found 2026-09-03) never bootstraps
+                # without an explicit --init. The .gitmodules URLs are SSH,
+                # and this account has no GitHub SSH key, so rewrite to
+                # HTTPS. Newly initialized submodules then need the same
+                # main-tip checkout update.sh gives the existing ones.
+                "git -c url.\"https://github.com/\".insteadOf=\"git@github.com:\" "
+                "submodule update --init || true\n"
+                "git -c url.\"https://github.com/\".insteadOf=\"git@github.com:\" "
+                "submodule foreach 'git checkout -q main 2>/dev/null; "
+                "git pull -q || true'\n"),
         )
 
         # Ported from ar_main.py update.sync_logs (per-observatory half):
