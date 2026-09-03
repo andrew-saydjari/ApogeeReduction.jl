@@ -192,7 +192,6 @@ def notify_task_failure(context):
     p = _ctx_params(context)
     ti = context.get("task_instance") or context.get("ti")
     task_id = getattr(ti, "task_id", "?")
-    dag_id = getattr(getattr(ti, "dag_id", None), "__str__", lambda: "?")()
     dag_id = getattr(ti, "dag_id", "?")
     try_number = getattr(ti, "try_number", "?")
     mjd = p.get("mjd", "?")

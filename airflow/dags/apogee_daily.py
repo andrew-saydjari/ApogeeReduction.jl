@@ -483,6 +483,15 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
             task_id="join",
             trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
         )
+        # Leaf mirroring the chain outcome: metrics/summary run all_done, so
+        # without this the DagRun would be marked successful even when the
+        # chain failed (DagRun state follows leaf-task states). This leaf
+        # goes upstream_failed on any chain failure -> DagRun fails ->
+        # notify_dag_failure fires.
+        t_chain_status = EmptyOperator(
+            task_id="chain_status",
+            trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+        )
         t_metrics = PythonOperator(
             task_id="metrics_append",
             python_callable=metrics_append,
@@ -500,6 +509,7 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
         t_select >> local_group
         t_select >> t_slurm
         [t_dashboard, t_madgics_workup, t_slurm] >> t_join
+        [t_dashboard, t_madgics_workup, t_slurm] >> t_chain_status
         t_join >> t_metrics >> t_summary
 
     return dag
