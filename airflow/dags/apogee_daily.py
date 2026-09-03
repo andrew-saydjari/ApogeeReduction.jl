@@ -12,10 +12,11 @@ fits): p3d2d -> quartz(runlist,traces,extract,relflux)
              -> dome(...) -> p2d1d_full -> plots -> dashboard
              -> madgics_gate -> madgics_pipeline -> madgics_workup
 
-SLURM mode: a single sbatchAKS-style submission of scripts/daily/run_all.sh
-(the whole chain in one job). WRITTEN but not enabled by default —
-automating sbatch is AKS's call per cluster etiquette; flip
-AR_AIRFLOW_MODE=slurm (or conf {"mode": "slurm"}) deliberately.
+SLURM mode (DEFAULT): a single sbatchAKS-style submission of
+scripts/daily/run_all.sh (the whole chain in one job) — production dailies
+as run historically. AKS's explicit call (2026-09-03): he launches the
+Airflow instance himself, so the chain is human-initiated. Use
+AR_AIRFLOW_MODE=local (or conf {"mode": "local"}) for on-node testing.
 
 Trigger a manual/backfill run with e.g.:
   airflow dags trigger apogee_daily_apo --conf '{"mjd": 61284}'
@@ -103,10 +104,9 @@ def madgics_enabled(**context):
 def slurm_submit_and_wait(tele, **context):
     """SLURM execution mode: one sbatchAKS-style submission of run_all.sh.
 
-    !!! NOT executed by default and never by automated smoke tests — local
-    mode is the recommended default (dedicated node, chain fits). Enabling
-    this (mode="slurm") means Airflow submits Slurm jobs unattended, which is
-    AKS's call per cluster etiquette. Polling is deliberately gentle:
+    The production default (AKS's call, 2026-09-03; the operator launches
+    the Airflow instance, so submission is human-initiated). Automated smoke
+    tests always force mode="local". Polling is deliberately gentle:
     squeue -j <id> every 5 minutes (a single job id, read-only).
     """
     p = context["params"]

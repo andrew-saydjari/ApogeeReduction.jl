@@ -37,11 +37,13 @@ AR_MADGICS_DIR = os.environ.get(
     "AR_MADGICS_DIR",
     os.path.join(os.path.dirname(AR_REPO.rstrip("/")), "arMADGICS.jl") + "/")
 
-# Execution mode default: "local" runs the chain directly on this node
-# (ccalin051, the dedicated group node); "slurm" wraps the chain in a single
-# sbatch of scripts/daily/run_all.sh. Automating sbatch is AKS's call
-# (cluster etiquette): flip AR_AIRFLOW_MODE=slurm only deliberately.
-AR_MODE_DEFAULT = os.environ.get("AR_AIRFLOW_MODE", "local")
+# Execution mode default: "slurm" wraps the chain in a single sbatch of
+# scripts/daily/run_all.sh (production dailies, as run historically — AKS's
+# explicit call 2026-09-03: he launches the Airflow instance himself, so the
+# automation chain is human-initiated and consistent with cluster
+# conventions). "local" runs the chain directly on this node (ccalin051) —
+# used for testing (AR_AIRFLOW_MODE=local).
+AR_MODE_DEFAULT = os.environ.get("AR_AIRFLOW_MODE", "slurm")
 
 # Worker cap for local mode (feeds --workers_per_node and AR_LOCAL_WORKERS).
 AR_WORKERS_DEFAULT = int(os.environ.get("AR_WORKERS_DEFAULT", "16"))
