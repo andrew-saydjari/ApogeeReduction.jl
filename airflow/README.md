@@ -151,7 +151,7 @@ action — see INSTALL.md.
 
 ```bash
 airflow dags trigger apogee_daily_apo --conf '{
-  "mjd": 61284,
+  "mjd": 61284, "mode": "local",
   "outdir": "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_02/o3_dag_test/",
   "slack_mode": "summary_only", "test_label": true,
   "run_kind": "test", "run_madgics": false, "workers": 12}'

@@ -25,9 +25,11 @@ AR_AIRFLOW_MODE=local (or conf {"mode": "local"}) for on-node testing.
 
 Trigger a manual/backfill run with e.g.:
   airflow dags trigger apogee_daily_apo --conf '{"mjd": 61284}'
-Smoke-test conf (at most ONE Slack message, from the summary task):
-  {"mjd": ..., "outdir": ".../o3_dag_test/", "slack_mode": "summary_only",
-   "test_label": true, "run_kind": "test", "run_madgics": false}
+Smoke-test conf (at most ONE Slack message, from the summary task; MUST
+force local mode — the default is slurm):
+  {"mjd": ..., "mode": "local", "outdir": ".../o3_dag_test/",
+   "slack_mode": "summary_only", "test_label": true, "run_kind": "test",
+   "run_madgics": false}
 """
 
 from __future__ import annotations
