@@ -1,16 +1,21 @@
 """apogee_daily_{apo,lco} — the APOGEE daily reduction on Airflow (card O3).
 
 One DAG per observatory, tasks split at run_all.sh's natural boundaries
-(the per-step table in 2026_08_31/daily_smoke/O1_REPORT.md):
+(the per-step table in 2026_08_31/daily_smoke/O1_REPORT.md), with the
+support tasks of the previous production DAG (dags/ar_main.py in the
+Airflow sandbox — CCA-native, ran the dailies until 2026-05) ported in:
 
-  resolve_night -> update_sdsscore -> tunnel_check -> almanac -> runlist
-    -> select_mode -> [ LOCAL chain | slurm_submit ]
+  resolve_night -> wait_for_raw -> update_repo -> update_sdsscore
+    -> sync_logs -> tunnel_check -> almanac -> runlist
+    -> start_notification -> select_mode -> [ LOCAL chain | slurm_submit ]
     -> join -> metrics_append (N1) -> daily_summary (N3)
+    -> completion_rollup
 
 LOCAL chain (default; ccalin051 is the group's dedicated node and the chain
 fits): p3d2d -> quartz(runlist,traces,extract,relflux)
              -> dome(...) -> p2d1d_full -> plots -> dashboard
              -> madgics_gate -> madgics_pipeline -> madgics_workup
+             -> spectra_workup (arMADGICS PR #26 entrypoint)
 
 SLURM mode (DEFAULT): a single sbatchAKS-style submission of
 scripts/daily/run_all.sh (the whole chain in one job) — production dailies
@@ -37,7 +42,6 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from airflow import DAG
-from airflow.exceptions import AirflowSkipException
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.operators.python import (
@@ -45,6 +49,7 @@ from airflow.providers.standard.operators.python import (
     PythonOperator,
     ShortCircuitOperator,
 )
+from airflow.providers.standard.sensors.python import PythonSensor
 from airflow.utils.task_group import TaskGroup
 from airflow.utils.trigger_rule import TriggerRule
 
@@ -56,26 +61,34 @@ import ar_common as C
 # ---------------------------------------------------------------------------
 
 def resolve_night(tele, **context):
-    """Compute the night to reduce + all derived paths; skip cleanly when the
-    raw mirror has no (complete) data for it yet."""
+    """Compute the night to reduce + all derived paths. Gating on raw-data
+    availability lives in the wait_for_raw sensor downstream."""
     p = context["params"]
     mjd = int(p.get("mjd", -1))
     if mjd < 0:
         mjd = C.auto_mjd()
     outdir = p.get("outdir") or C.AR_OUTDIR
     paths = C.night_paths(tele, mjd, outdir)
-    status = C.raw_night_status(tele, mjd)
+    paths["night_date"] = C.night_date_str(mjd)
     print(f"night resolution: tele={tele} mjd={mjd} outdir={outdir} "
-          f"raw_status={status}")
-    if status == "no_data":
-        raise AirflowSkipException(
-            f"No raw frames for {tele} {mjd} yet — skipping cleanly.")
-    if status == "incomplete":
-        raise AirflowSkipException(
-            f"Raw transfer for {tele} {mjd} incomplete (no md5sum marker) — "
-            "skipping; rerun manually or let O4 backfill catch it.")
+          f"raw_status={C.raw_night_status(tele, mjd)}")
     os.makedirs(paths["logdir"], exist_ok=True)
     return paths
+
+
+def raw_transfer_ready(tele, **context):
+    """Sensor poke: reduction gates on raw-transfer COMPLETION, not the date
+    (ported semantics of ar_main.py's TransferFileSensor: an ancient night is
+    assumed transferred; otherwise wait for the completion marker — there the
+    Globus transfer-<mjd>.done file, here the <mjd>.md5sum in the mirror)."""
+    paths = context["ti"].xcom_pull(task_ids="resolve_night")
+    mjd = paths["mjd"]
+    if mjd < 59148:  # ar_main.py: "ancient, assume transfer complete"
+        print(f"mjd {mjd} < 59148: ancient, assuming transfer complete")
+        return True
+    status = C.raw_night_status(tele, mjd)
+    print(f"raw status for {tele} {mjd}: {status}")
+    return status == "ready"
 
 
 def select_mode(**context):
@@ -171,6 +184,50 @@ def metrics_append(**context):
     return C.collect_night_metrics(paths, context)
 
 
+def start_notification(tele, **context):
+    """Ported from ar_main.py's per-observatory initial_notification: a
+    start-of-reduction message with the public exposure-list link — now built
+    from PUBLIC_URL_SLUG instead of the old token-as-slug coupling."""
+    p = context["params"]
+    paths = context["ti"].xcom_pull(task_ids="resolve_night")
+    mjd, date = paths["mjd"], paths.get("night_date", "?")
+    url = C.public_log_url(tele, mjd)
+    link = f" Exposure list <{url}|here>." if url else ""
+    label = "[TEST — please ignore] " if p.get("test_label") else ""
+    text = (f"{label}Starting reduction for {tele} SJD {mjd} "
+            f"(night of {date}).{link}")
+    if p.get("slack_mode", "full") == "full":
+        C.slack_post(text, channel=p.get("slack_channel") or None)
+    else:
+        print(f"[slack suppressed by slack_mode="
+              f"{p.get('slack_mode')}] {text}")
+
+
+def completion_rollup(tele, **context):
+    """Ported from ar_main.py's completion_notification ('Both observatories
+    processed'), adapted to per-observatory DAGs: whichever DAG finishes
+    second for a night posts the roll-up, judged from the N1 metrics table."""
+    p = context["params"]
+    paths = context["ti"].xcom_pull(task_ids="resolve_night")
+    if not paths:
+        print("rollup: no resolved night; nothing to do")
+        return
+    mjd = paths["mjd"]
+    if not C.both_observatories_done(mjd, p.get("run_kind", "daily"),
+                                     p.get("metrics_dir") or None):
+        print(f"rollup: not all observatories done for {mjd} yet")
+        return
+    label = "[TEST — please ignore] " if p.get("test_label") else ""
+    text = (f"{label}ApogeeReduction pipeline completed for SJD {mjd} "
+            f"(night of {paths.get('night_date', '?')}). "
+            "Both observatories processed.")
+    if p.get("slack_mode", "full") == "full":
+        C.slack_post(text, channel=p.get("slack_channel") or None)
+    else:
+        print(f"[slack suppressed by slack_mode={p.get('slack_mode')}] "
+              f"{text}")
+
+
 def daily_summary(tele, **context):
     """N3 daily-summary one-liner at DAG end (success/warnings census)."""
     p = context["params"]
@@ -214,6 +271,8 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
         "mode": C.AR_MODE_DEFAULT,          # "local" | "slurm"
         "workers": C.AR_WORKERS_DEFAULT,
         "update_sdsscore": True,            # O1 punch list #2: default ON
+        "pull_repo": False,                 # update_repo: report-only default
+        "sync_logs": True,                  # rsync .log.html mirror
         "almanac_clobber": False,
         "checkpoint_mode": "commit_exists",
         "run_madgics": True,                # RUN_MADGICS gate
@@ -251,6 +310,39 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
             op_kwargs={"tele": tele},
         )
 
+        # Gate on raw-transfer completion (ar_main.py TransferFileSensor
+        # semantics). soft_fail: a timeout (night never transferred) skips
+        # the run cleanly instead of failing it.
+        t_wait_raw = PythonSensor(
+            task_id="wait_for_raw",
+            python_callable=raw_transfer_ready,
+            op_kwargs={"tele": tele},
+            mode="reschedule",
+            poke_interval=1800,
+            timeout=12 * 3600,
+            soft_fail=True,
+        )
+
+        # Ported from ar_main.py update.repo: report the production
+        # checkout's state into the task log (provenance for the night);
+        # pull_repo=true additionally fast-forwards it.
+        t_repo = BashOperator(
+            task_id="update_repo",
+            bash_command=(
+                f"cd {C.AR_REPO}\n"
+                "echo '=== Git Status ==='\n"
+                "git status\n"
+                "echo '=== Git Log (last 3 commits) ==='\n"
+                "git log --oneline -3\n"
+                "echo '=== Git Remote Status ==='\n"
+                "git remote -v\n"
+                'if [ "{{ params.pull_repo }}" = "True" ] || '
+                '[ "{{ params.pull_repo }}" = "true" ]; then\n'
+                "  echo '=== git pull --ff-only ==='\n"
+                "  git pull --ff-only\n"
+                "fi\n"),
+        )
+
         t_sdsscore = BashOperator(
             task_id="update_sdsscore",
             bash_command=(
@@ -259,6 +351,21 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
                 '  echo "update_sdsscore disabled"; exit 0\nfi\n'
                 f"cd {C.SDSSCORE_DIR}\n"
                 "./update.sh\n"),
+        )
+
+        # Ported from ar_main.py update.sync_logs (per-observatory half):
+        # mirror the telescope's nightly .log.html pages into the public
+        # apogee_logs dir that the start_notification link points at.
+        t_synclogs = BashOperator(
+            task_id="sync_logs",
+            bash_command=(
+                'if [ "{{ params.sync_logs }}" != "True" ] && '
+                '[ "{{ params.sync_logs }}" != "true" ]; then\n'
+                '  echo "sync_logs disabled"; exit 0\nfi\n'
+                f"mkdir -p {C.APOGEE_LOGS_DIR}/{tele}/\n"
+                "time rsync -a --include='*/' --include='*.log.html' "
+                f"--exclude='*' {C.RAW_ROOT}/{tele}/ "
+                f"{C.APOGEE_LOGS_DIR}/{tele}/\n"),
         )
 
         t_tunnel = BashOperator(
@@ -317,6 +424,12 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
                         f"--output {C.xn('runlist')}"),
                 skip_exit_codes={16: "no exposures"},
             ),
+        )
+
+        t_start_notify = PythonOperator(
+            task_id="start_notification",
+            python_callable=start_notification,
+            op_kwargs={"tele": tele},
         )
 
         t_select = BranchPythonOperator(
@@ -468,8 +581,33 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
                     f"--outdir {C.xn('outdir')}arMADGICS/"
                     f"raw_{tele}_{C.xn('mjd')}/"),
             )
+            # Spectra workup — first-class chain step per AKS 2026-09-03
+            # (historically a manual afterstep invoked by neither driver).
+            # Local mode calls the arMADGICS-side entrypoint explicitly here;
+            # slurm mode inherits the identical step from run_all.sh. Wired
+            # against the PLANNED contract `run_workup.sh <rawdir> <redux>
+            # <outdir>` (arMADGICS PR #26, feature/W2-workup-serial — the
+            # entrypoint had not landed at wiring time; existence-guarded).
+            t_spectra_workup = BashOperator(
+                task_id="spectra_workup",
+                bash_command=C.step_cmd(
+                    "spectra_workup",
+                    "bash -c '"
+                    f"RW={C.AR_MADGICS_DIR}workup/run_workup.sh; "
+                    'if [ ! -f "$RW" ]; then echo "WARNING: spectra workup '
+                    "entrypoint $RW not found (arMADGICS PR #26 not in this "
+                    'checkout?); skipping"; exit 99; fi; '
+                    f"bash $RW {C.xn('outdir')}arMADGICS/"
+                    f"raw_{tele}_{C.xn('mjd')}/ "
+                    f"{C.xn('outdir')} "
+                    f"{C.xn('outdir')}arMADGICS/"
+                    f"workup_{tele}_{C.xn('mjd')}/'",
+                    skip_exit_codes={99: "entrypoint not present yet"},
+                ),
+            )
             (prev >> t_p2d1d >> t_plots >> t_dashboard
-             >> t_madgics_gate >> t_madgics >> t_madgics_workup)
+             >> t_madgics_gate >> t_madgics >> t_madgics_workup
+             >> t_spectra_workup)
 
         # ------------------------- SLURM mode --------------------------
         t_slurm = PythonOperator(
@@ -503,14 +641,20 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
             op_kwargs={"tele": tele},
             trigger_rule=TriggerRule.ALL_DONE,
         )
+        t_rollup = PythonOperator(
+            task_id="completion_rollup",
+            python_callable=completion_rollup,
+            op_kwargs={"tele": tele},
+            trigger_rule=TriggerRule.ALL_DONE,
+        )
 
-        (t_resolve >> t_sdsscore >> t_tunnel >> t_almanac >> t_runlist
-         >> t_select)
+        (t_resolve >> t_wait_raw >> t_repo >> t_sdsscore >> t_synclogs
+         >> t_tunnel >> t_almanac >> t_runlist >> t_start_notify >> t_select)
         t_select >> local_group
         t_select >> t_slurm
-        [t_dashboard, t_madgics_workup, t_slurm] >> t_join
-        [t_dashboard, t_madgics_workup, t_slurm] >> t_chain_status
-        t_join >> t_metrics >> t_summary
+        [t_dashboard, t_spectra_workup, t_slurm] >> t_join
+        [t_dashboard, t_spectra_workup, t_slurm] >> t_chain_status
+        t_join >> t_metrics >> t_summary >> t_rollup
 
     return dag
 

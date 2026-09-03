@@ -68,6 +68,11 @@ AR_HEARTBEAT_FILE = os.environ.get(
 RAW_ROOT = "/mnt/ceph/users/sdssv/raw/APOGEE"
 SDSSCORE_DIR = os.path.join(RAW_ROOT, "sdsscore")
 
+# Telescope-log mirror (ported from the production ar_main.py update.sync_logs
+# task): nightly .log.html pages rsynced here, publicly served through the
+# public_www slug dir (public_www/<PUBLIC_URL_SLUG>/apogee_logs -> this dir).
+APOGEE_LOGS_DIR = "/mnt/ceph/users/sdssv/work/apogee_logs"
+
 JULIA_VERSION = "1.11.0"  # keep in sync with run_all.sh
 
 # almanac source pin — keep in sync with scripts/daily/run_all.sh (pin by
@@ -109,6 +114,48 @@ def auto_mjd() -> int:
     int(MJD_utc(D)) - 1 for both observatories.
     """
     return int(current_mjd()) - 1
+
+
+def night_date_str(mjd: int) -> str:
+    """Civil UTC date (YYYY-MM-DD) on which the night's MJD began."""
+    from datetime import date, timedelta as td
+    return str(date(1858, 11, 17) + td(days=int(mjd)))
+
+
+def public_log_url(tele: str, mjd: int) -> str | None:
+    """Public exposure-list URL for a night, built from PUBLIC_URL_SLUG.
+
+    Ported from ar_main.py's initial_notification, which interpolated
+    SLACK_TOKEN into the URL back when the public_www dir was named after
+    the token; the dir is now named after the decoupled PUBLIC_URL_SLUG,
+    and public_www/<slug>/apogee_logs symlinks to APOGEE_LOGS_DIR.
+    """
+    slug = os.environ.get("PUBLIC_URL_SLUG", "")
+    if not slug:
+        return None
+    return (f"https://users.flatironinstitute.org/~asaydjari/{slug}/"
+            f"apogee_logs/{tele}/{mjd}/{mjd}.log.html")
+
+
+def both_observatories_done(mjd: int, run_kind: str,
+                            metrics_dir: str | None = None) -> bool:
+    """True when daily_metrics.csv holds clean rows for BOTH observatories
+    for this mjd/run_kind — the per-obs-DAG replacement for ar_main.py's
+    completion_notification (which ran at the end of its single
+    lco-then-apo DAG)."""
+    metrics_dir = metrics_dir or AR_METRICS_DIR
+    path = os.path.join(metrics_dir, "daily_metrics.csv")
+    seen = set()
+    try:
+        with open(path, newline="") as f:
+            for row in csv.DictReader(f):
+                if (row.get("mjd") == str(mjd)
+                        and row.get("run_kind") == run_kind
+                        and row.get("n_steps_failed") == "0"):
+                    seen.add(row.get("tele"))
+    except OSError:
+        return False
+    return {"apo", "lco"} <= seen
 
 
 def night_paths(tele: str, mjd: int, outdir: str) -> dict:
@@ -197,10 +244,16 @@ def notify_task_failure(context):
     dag_id = getattr(ti, "dag_id", "?")
     try_number = getattr(ti, "try_number", "?")
     mjd = p.get("mjd", "?")
+    try:  # prefer the resolved night over the raw param (-1 = auto)
+        paths = ti.xcom_pull(task_ids="resolve_night")
+        if paths:
+            mjd = paths.get("mjd", mjd)
+    except Exception:
+        pass
     hint = FAILURE_HINTS.get(task_id, "")
     label = "[TEST] " if p.get("test_label") else ""
     text = (f"{label}:rotating_light: `{dag_id}` task `{task_id}` FAILED "
-            f"(mjd={mjd}, try={try_number}). {hint}")
+            f"(mjd={mjd}, try={try_number}). :picard_facepalm: {hint}")
     if p.get("slack_mode", "full") == "full":
         slack_post(text, channel=p.get("slack_channel") or None)
     else:

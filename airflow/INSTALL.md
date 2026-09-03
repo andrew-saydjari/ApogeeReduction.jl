@@ -7,14 +7,24 @@ need the sdssv service account, secrets, or a policy decision.
 ## 0. State found 2026-09-02 (why some of this is needed)
 
 - `AIRFLOW_HOME=/mnt/home/sdssv/airflow` exists (owned `asaydjari:sdssv`,
-  group-writable) with an Airflow **3.0.6** sqlite db and one legacy DAG,
-  `dags/ar_main.py` — the old Utah-style DAG (Airflow-2 imports, sbatch on
-  Utah paths). It cannot import under Airflow 3 and should be retired
-  (move it aside, e.g. `dags/attic/`), not deleted.
+  group-writable) with an Airflow **3.0.6** sqlite db and the previous
+  PRODUCTION DAG, `dags/ar_main.py` — CCA-native (sbatch of run_all.sh from
+  `/mnt/home/sdssv/gitcode/ApogeeReduction.jl` into
+  `/mnt/ceph/users/sdssv/work/daily/`; zero Utah references), the DAG that
+  ran the dailies until 2026-05. Its imports are **Airflow-3-compatible**
+  (verified by importing it under 3.0.6: `airflow.operators.bash`,
+  `airflow.sensors.filesystem`, `airflow.operators.python` are provider
+  shims, and astropy/pytz/`apache-airflow-providers-slack` are all present
+  in the shared env). It is superseded feature-for-feature by the new DAGs
+  (mapping table in README.md) and should be retired to `dags/attic/` —
+  moved aside, not deleted — so the old and new daily DAGs never schedule
+  side by side.
 - The uv env `/mnt/home/sdssv/uv_env/airflow_env` is **broken**: it was
   built against `/usr/bin/python3.11` (`pyvenv.cfg: home = /usr/bin`),
   which no longer exists after the OS upgrade → every entry point fails
-  with `bad interpreter`. It must be rebuilt (step 2).
+  with `bad interpreter` (`airflow version` itself cannot run; the 3.0.6
+  version is read from the env's `apache_airflow-3.0.6.dist-info`). It must
+  be rebuilt (step 2).
 - `sla_miss_callback` was **removed in Airflow 3.0**; the SLA layer here is
   `dagrun_timeout` (16 h) + the cross-machine watchdog (step 6).
 
@@ -24,7 +34,9 @@ As on Utah, DAGs live in the repo and are symlinked into the sandbox:
 
 ```bash
 cd /mnt/home/sdssv/airflow/dags
-mkdir -p attic && mv ar_main.py attic/          # retire the Airflow-2 DAG
+# retire the previous production DAG (superseded feature-for-feature by the
+# new ones — see the mapping table in README.md; keep it for reference)
+mkdir -p attic && mv ar_main.py attic/
 REPO=/mnt/home/sdssv/gitcode/ApogeeReduction.jl  # once o3/airflow-dags merges
 ln -s $REPO/airflow/dags/ar_common.py .
 ln -s $REPO/airflow/dags/apogee_daily.py .
