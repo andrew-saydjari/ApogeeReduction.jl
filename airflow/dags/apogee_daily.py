@@ -662,7 +662,12 @@ def build_daily_dag(tele: str, schedule: str) -> DAG:
             trigger_rule=TriggerRule.ALL_DONE,
         )
 
-        (t_resolve >> t_wait_raw >> t_repo >> t_sdsscore >> t_synclogs
+        # Ordering follows ar_main.py's template (AKS review, 2026-09-03):
+        # the update group (repo -> sdsscore -> sync_logs) runs FIRST, before
+        # waiting on raw-data transfer. wait_for_raw was defined-but-unwired
+        # in ar_main.py; its position here (after updates, before the tunnel/
+        # almanac chain) is the one deliberate addition to the template.
+        (t_resolve >> t_repo >> t_sdsscore >> t_synclogs >> t_wait_raw
          >> t_tunnel >> t_almanac >> t_runlist >> t_start_notify >> t_select)
         t_select >> local_group
         t_select >> t_slurm
