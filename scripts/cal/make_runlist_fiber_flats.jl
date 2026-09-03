@@ -27,6 +27,11 @@ function parse_commandline()
         help = "flat type, i.e. dome or quartz"
         arg_type = String
         default = "dome"
+        "--mjds"
+        required = false
+        help = "comma-separated MJD list to restrict to (default \"0\" = all MJDs in the almanac file; a single value selects that day)"
+        arg_type = String
+        default = "0"
     end
     return parse_args(s)
 end
@@ -45,6 +50,11 @@ else
 end
 for tele in tele2do
     mjd_list = keys(f["raw/$(tele)"])
+    if parg["mjds"] != "0"
+        # day-subset selection against a (possibly multi-day) almanac file
+        mjds_sel = Set(String.(strip.(split(parg["mjds"], ","))))
+        mjd_list = filter(in(mjds_sel), mjd_list)
+    end
     for tstmjd in mjd_list
         tstmjd_int = parse(Int, tstmjd)
         df = read_almanac_exp_df(f, tele, tstmjd)
