@@ -45,7 +45,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 # make sibling ar_common importable regardless of how the bundle is parsed
@@ -133,6 +133,16 @@ def resolve_night(tele, **context):
     print(f"night resolution: tele={tele} mjd={mjd} outdir={outdir} "
           f"raw_status={C.raw_night_status(tele, mjd)}")
     os.makedirs(paths["logdir"], exist_ok=True)
+    # Rotate a leftover steps.csv from a previous run of this night (retrigger
+    # / past-day rerun): metrics_append censuses this file, and accumulated
+    # rows made a clean rerun report phantom failures (seen live on lco 61286:
+    # "7 steps, 1 failed" where the failure was the PREVIOUS night's exit-127
+    # almanac row). History is preserved in a timestamped sidecar.
+    steps = os.path.join(paths["logdir"], "steps.csv")
+    if os.path.exists(steps):
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        os.replace(steps, os.path.join(paths["logdir"], f"steps_prev_{stamp}.csv"))
+        print(f"rotated stale steps.csv -> steps_prev_{stamp}.csv")
     return paths
 
 
