@@ -294,6 +294,14 @@ def metrics_append(tele, **context):
     if not paths:
         print("no resolved night; no metrics row written")
         return None
+    if not C.read_steps_csv(paths["steps_csv"]):
+        # Observatory was skipped before any chain step ran (no data /
+        # no exposures): recording a 0-step row would (a) pollute the N1
+        # tables and (b) make both_observatories_done treat the skipped
+        # observatory as cleanly done (caught in the structural test).
+        print(f"no chain steps ran for {tele} {paths['mjd']} (observatory "
+              "skipped); no metrics row written")
+        return None
     return C.collect_night_metrics(paths, context)
 
 
@@ -803,10 +811,16 @@ with DAG(
     group_lco = build_observatory_group("lco")
     group_apo = build_observatory_group("apo")
 
+    # none_failed trigger — ar_main.py-parity leaf, and load-bearing:
+    # this is the DAG's only leaf, so DagRun state follows it. On a chain
+    # failure the upstream chain_status goes upstream_failed -> this leaf
+    # does too -> the run is FAILED (with all_done here, a failed chain
+    # still produced a "successful" run — caught live in the structural
+    # test). Skipped observatories pass through (none_failed).
     t_completion = PythonOperator(
         task_id="completion_notification",
         python_callable=completion_notification,
-        trigger_rule=TriggerRule.ALL_DONE,
+        trigger_rule=TriggerRule.NONE_FAILED,
     )
 
     group_update >> group_setup >> group_lco >> group_apo >> t_completion

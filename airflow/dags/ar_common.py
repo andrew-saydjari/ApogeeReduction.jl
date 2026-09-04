@@ -149,7 +149,9 @@ def both_observatories_done(mjd: int, run_kind: str,
             for row in csv.DictReader(f):
                 if (row.get("mjd") == str(mjd)
                         and row.get("run_kind") == run_kind
-                        and row.get("n_steps_failed") == "0"):
+                        and row.get("n_steps_failed") == "0"
+                        # a skipped observatory must not count as done
+                        and row.get("n_steps") not in ("0", "", None)):
                     seen.add(row.get("tele"))
     except OSError:
         return False
@@ -408,15 +410,18 @@ def census_warnings(logdir: str) -> dict:
 def product_counts(paths: dict) -> dict:
     apred = paths["apred_dir"]
     plots = paths["plots_dir"]
+    tele = paths["tele"]
 
-    def n(pat):
-        return len(glob.glob(os.path.join(apred, pat)))
+    # apred/<mjd>/ is shared by both observatories, so count only this
+    # observatory's products (filenames carry the telescope).
+    def n(prefix):
+        return len(glob.glob(os.path.join(apred, f"{prefix}_{tele}_*")))
 
     return {
-        "n_ar2D": n("ar2D_*"),
-        "n_ar2Dcal": n("ar2Dcal_*"),
-        "n_ar1Dcal": n("ar1Dcal_*"),
-        "n_ar1Dunical": n("ar1Dunical_*"),
+        "n_ar2D": n("ar2D"),
+        "n_ar2Dcal": n("ar2Dcal"),
+        "n_ar1Dcal": n("ar1Dcal"),
+        "n_ar1Dunical": n("ar1Dunical"),
         "n_plots": len(glob.glob(os.path.join(plots, "*.png"))),
         "dashboard_ok": int(os.path.exists(
             os.path.join(plots, "dashboard.html"))),
