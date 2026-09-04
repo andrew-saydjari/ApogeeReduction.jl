@@ -45,7 +45,11 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-almanac_version="0.4.3"
+# almanac: LOCAL git clone + editable env, like the daily driver (AKS
+# 2026-09-04). The old PyPI 0.4.3 pin predated the raw/-layout restructure
+# and would have broken the downstream chain. Hash logged at invocation.
+almanac_dir="${ALMANAC_DIR:-/mnt/home/sdssv/gitcode/almanac}"
+almanac_bin="${ALMANAC_BIN:-/mnt/home/sdssv/uv_env/almanac_env/bin/almanac}"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -106,7 +110,8 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-    uvx --from sdss-almanac==$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+    echo "almanac clone: $(git -C $almanac_dir rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+    $almanac_bin -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"

@@ -81,10 +81,13 @@ lco.join >> lco.metrics_append >> lco.daily_summary
   lco 61284/61285) does not hold the serial chain for the 12 h timeout;
   "incomplete" (frames present, md5sum pending) still waits.
 - **update.repo**: reports the production checkout state AND
-  `git pull --ff-only` — for BOTH the AR clone and the arMADGICS clone
-  (DELIBERATE new behavior — ar_main.py's repo task was status-only; the
-  arM pull was added after the 2026-09-04 first night ran a months-stale
-  arM main that predated the raw/-layout almanac handling);
+  `git pull --ff-only` — for the AR clone, the arMADGICS clone, AND the
+  almanac clone (DELIBERATE new behavior — ar_main.py's repo task was
+  status-only; the arM pull was added after the 2026-09-04 first night ran
+  a months-stale arM main that predated the raw/-layout almanac handling;
+  almanac runs from a local clone + editable env instead of a uvx commit
+  pin, per AKS 2026-09-04 — hash logged at every invocation, and the
+  update task re-syncs the env for dependency changes);
   **update.sync_logs** rsyncs both observatories'
   `.log.html` pages into the public `apogee_logs` mirror.
 - **update.sdsscore is default ON** (O1 punch list #2 — a fresh night after

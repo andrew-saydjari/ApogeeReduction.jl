@@ -96,6 +96,24 @@ upgrade doesn't break it again. The DAGs use only stdlib + the standard
 provider (Slack goes through `urllib`, MJD math avoids astropy), so no other
 packages are required.
 
+## 2b. ONE-TIME: almanac local clone + env (done 2026-09-04)
+
+almanac runs from a local git clone with an editable install, like the
+AR/arM pipelines — `update.repo` pulls it daily, every invocation logs
+`git rev-parse HEAD`, and the uvx wheel-cache trap cannot occur:
+
+```bash
+cd /mnt/home/sdssv/gitcode
+git clone https://github.com/andrew-saydjari/almanac.git
+cd /mnt/home/sdssv/uv_env
+uv venv --python 3.12 almanac_env
+uv pip install -p almanac_env/bin/python -e /mnt/home/sdssv/gitcode/almanac
+```
+
+Override paths via `ALMANAC_DIR` / `ALMANAC_BIN` (read by ar_common.py,
+run_all.sh, run_bulk.sh). Smoke-tested 2026-09-04 with a live DB query
+through the tunnel (raw/ layout + missing_exposures verified).
+
 ## 3. Secrets / environment (**AKS**)
 
 ```bash

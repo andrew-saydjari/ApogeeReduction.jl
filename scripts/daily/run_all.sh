@@ -41,13 +41,14 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-# almanac source: AKS fork main (fix/L1-metadata merged 2026-08-31; writes the
-# raw/-layout this branch of AR reads; PyPI releases <=0.4.3 predate that
-# restructure so a PyPI version pin no longer works). Pinned by COMMIT, not
-# branch name, so the uvx wheel cache keys on the exact source — a branch-name
-# pin can silently serve a stale cached build after the branch moves (see
-# 2026_08_31/almanac_utah_test/RUNBOOK.md).
-almanac_source="git+https://github.com/andrew-saydjari/almanac.git@61e0d51186e172c17c3b33cd586de1b5a61dd2cb"
+# almanac: run from the LOCAL git clone via its editable-install env, like
+# the AR/arM pipelines (AKS 2026-09-04; replaces the uvx commit pin — the
+# clone is pulled daily by the DAG's update.repo, invocations log the git
+# hash for provenance, and the uvx wheel-cache trap of
+# 2026_08_31/almanac_utah_test/RUNBOOK.md cannot occur with a working tree).
+# One-time setup: airflow/INSTALL.md (clone + `uv pip install -e`).
+almanac_dir="${ALMANAC_DIR:-/mnt/home/sdssv/gitcode/almanac}"
+almanac_bin="${ALMANAC_BIN:-/mnt/home/sdssv/uv_env/almanac_env/bin/almanac}"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -110,7 +111,8 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     # DB identity for the cross-match comes from ~/.almanac/config.yaml +
     # ~/.pgpass (2026-09-01: interim `sdss` role until the sdss_remote GRANT
     # on catalogdb.sdss_id_to_catalog lands; then revert the config user).
-    uvx --from $almanac_source almanac -p 12 -v --$tele --mjd-start $mjd --mjd-end $mjd  --output $almanac_file --fibers
+    echo "almanac clone: $(git -C $almanac_dir rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+    $almanac_bin -p 12 -v --$tele --mjd-start $mjd --mjd-end $mjd  --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"

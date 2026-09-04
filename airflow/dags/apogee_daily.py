@@ -450,8 +450,11 @@ def build_observatory_group(tele: str) -> TaskGroup:
                 '  echo "almanac file exists: $AF (skip; set almanac_clobber '
                 'to redo)"; exit 0\nfi\n'
                 'mkdir -p "$(dirname "$AF")"\n'
-                # DB identity comes from ~/.almanac/config.yaml + ~/.pgpass
-                f'uvx --from {C.ALMANAC_SOURCE} almanac -p 12 -v '
+                # DB identity comes from ~/.almanac/config.yaml + ~/.pgpass;
+                # provenance: log the clone's HEAD like the julia pipelines do
+                f'echo "almanac clone: $(git -C {C.ALMANAC_DIR} '
+                'rev-parse HEAD 2>/dev/null || echo UNKNOWN)"\n'
+                f'{C.ALMANAC_BIN} -p 12 -v '
                 f'--{tele} --mjd-start {C.xn("mjd", tele)} '
                 f'--mjd-end {C.xn("mjd", tele)} '
                 '--output "$AF" --fibers\'',
@@ -787,7 +790,19 @@ with DAG(
                 f"cd {C.AR_MADGICS_DIR}\n"
                 "echo '=== arMADGICS: status + git pull --ff-only ==='\n"
                 "git log --oneline -1\n"
-                "git pull --ff-only\n"),
+                "git pull --ff-only\n"
+                # almanac clone too (AKS 2026-09-04: run from a local clone
+                # like the other pipelines; hash logged at invocation). The
+                # editable install tracks code changes automatically; the
+                # `uv pip install -e` re-sync only matters when almanac's
+                # DEPENDENCIES change, and is a fast no-op otherwise.
+                f"cd {C.ALMANAC_DIR}\n"
+                "echo '=== almanac: status + git pull --ff-only ==='\n"
+                "git log --oneline -1\n"
+                "git pull --ff-only\n"
+                f"uv pip install -p {os.path.dirname(C.ALMANAC_BIN)}/python "
+                f"-e {C.ALMANAC_DIR} --quiet 2>&1 | tail -1 || "
+                "echo 'WARNING: almanac env re-sync failed (env unchanged)'\n"),
         )
 
         t_sdsscore = BashOperator(
