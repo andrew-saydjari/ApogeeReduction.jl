@@ -12,7 +12,6 @@ PATH=/mnt/home/sdssv/uv_env/airflow_env/bin:/mnt/home/sdssv/.juliaup/bin:/mnt/ho
 # --- secrets (rotate via the apogeereductionjl Slack app / public_www) ---
 SLACK_TOKEN=xoxb-REPLACE-ME
 PUBLIC_URL_SLUG=REPLACE-ME
-# optional: PUBLIC_URL_SLUG_KMCKINNON=
 
 # --- pipeline wiring (defaults shown; see airflow/dags/ar_common.py) ---
 AR_REPO=/mnt/home/sdssv/gitcode/ApogeeReduction.jl
@@ -20,12 +19,14 @@ AR_OUTDIR=/mnt/ceph/users/sdssv/work/daily/
 AR_MADGICS_DIR=/mnt/home/sdssv/gitcode/arMADGICS.jl/
 AR_METRICS_DIR=/mnt/ceph/users/sdssv/work/daily/metrics/
 
-# Execution mode: "local" (run the chain on this node — recommended default
-# on ccalin051) or "slurm" (Airflow submits run_all.sh via sbatch — AKS's
-# call per cluster etiquette).
-AR_AIRFLOW_MODE=local
+# Execution mode: the code default is "slurm" (production dailies as run
+# historically — one sbatch of run_all.sh per night; AKS launches the
+# Airflow instance himself, so submission is human-initiated). Uncomment to
+# force local mode (every step on this node under nice -n 10) for testing:
+# AR_AIRFLOW_MODE=local
 AR_WORKERS_DEFAULT=16
 
-# Slack channel for alerts/summaries: dev by default; switch to the prod
-# channel C08B7FKMP16 once the DAGs are trusted.
+# Slack channel: the CODE default is prod C08B7FKMP16 (ar_main.py's
+# behavior). This override keeps the supervised first nights on dev;
+# remove it to promote to prod once the DAG is trusted.
 AR_SLACK_CHANNEL=C07KQ7BJY5P
