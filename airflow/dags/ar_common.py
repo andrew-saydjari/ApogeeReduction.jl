@@ -92,7 +92,10 @@ FAILURE_HINTS = {
                      "on ccalin051."),
     "update_sdsscore": ("sdsscore git pull failed — check "
                         f"{SDSSCORE_DIR} (submodule auth / disk)."),
-    "almanac": ("almanac failed — check the DB tunnel (port 63333), "
+    "almanac": ("almanac failed — exit 127 ('uvx: command not found') means "
+                "the PATH in airflow_env.sh doesn't match the account "
+                "running Airflow (first-night finding 2026-09-04); "
+                "otherwise check the DB tunnel (port 63333), "
                 "~/.almanac/config.yaml + ~/.pgpass identity, and whether "
                 "confSummary files exist: sdsscore staleness, an "
                 "uninitialized new config-range submodule, or an "
