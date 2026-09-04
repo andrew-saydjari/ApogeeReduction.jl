@@ -15,8 +15,9 @@ Each observatory group:
 
 LOCAL chain (testing): p3d2d -> quartz(runlist,traces,extract,relflux)
              -> dome(...) -> p2d1d_full -> plots -> dashboard
-             -> madgics_gate -> madgics_pipeline -> madgics_workup
-             -> spectra_workup (arMADGICS PR #26 entrypoint)
+             -> madgics_gate -> madgics_pipeline -> spectra_workup
+             -> madgics_workup (legacy: aggregates AND deletes raw batches,
+                so it runs LAST among batch consumers)
 
 SLURM mode (DEFAULT): a single sbatchAKS-style submission of
 scripts/daily/run_all.sh per observatory (production dailies as run
@@ -670,9 +671,13 @@ def build_observatory_group(tele: str) -> TaskGroup:
                     skip_exit_codes={99: "entrypoint not present yet"},
                 ),
             )
+            # ORDER: spectra_workup BEFORE madgics_workup — the legacy
+            # workup.jl deletes the raw batch files after aggregating
+            # (rm.(deblendf)), and the spectra workup needs them intact
+            # (found live 2026-09-04, apo 61286).
             (prev >> t_p2d1d >> t_plots >> t_dashboard
-             >> t_madgics_gate >> t_madgics >> t_madgics_workup
-             >> t_spectra_workup)
+             >> t_madgics_gate >> t_madgics >> t_spectra_workup
+             >> t_madgics_workup)
 
         # ------------------------- SLURM mode --------------------------
         t_slurm = PythonOperator(
@@ -711,8 +716,9 @@ def build_observatory_group(tele: str) -> TaskGroup:
          >> t_start_notify >> t_select)
         t_select >> t_p3d2d
         t_select >> t_slurm
-        [t_dashboard, t_spectra_workup, t_slurm] >> t_join
-        [t_dashboard, t_spectra_workup, t_slurm] >> t_chain_status
+        # madgics_workup is now the local madgics-chain leaf (order swap above)
+        [t_dashboard, t_madgics_workup, t_slurm] >> t_join
+        [t_dashboard, t_madgics_workup, t_slurm] >> t_chain_status
         t_join >> t_metrics >> t_summary
 
     return group

@@ -29,8 +29,9 @@ contend. A skipped observatory (no data) does not block the other
 (ar_main.py's serial semantics).
 
 ```
-# Regenerated from the DAG's actual edge wiring (62 tasks; edge-set
-# sha256 275ec83d2857e1c7, identical under Airflow 3.0.6 and 3.3.1):
+# Regenerated from the DAG's actual edge wiring (62 tasks, 72 edges;
+# edge-set sha256[:16] 29632046ff585da0 after the 2026-09-04 workup-order
+# swap; sha = sha256 of sorted "up>down" lines):
 update.repo >> update.sdsscore >> update.sync_logs >> setup.{mjd, date_mjd}
 setup.{mjd, date_mjd} >> lco.resolve_night
 
@@ -44,8 +45,10 @@ lco.local.p3d2d >> lco.local.quartz_flats.(runlist >> traces >> extract
   >> lco.local.dashboard
 lco.local.dashboard >> {lco.local.madgics_gate, lco.join, lco.chain_status}
 lco.local.madgics_gate >> lco.local.madgics_pipeline
-  >> lco.local.madgics_workup >> lco.local.spectra_workup
-lco.local.spectra_workup >> {lco.join, lco.chain_status}
+  >> lco.local.spectra_workup >> lco.local.madgics_workup
+  # spectra_workup FIRST: the legacy madgics_workup (workup.jl) deletes the
+  # raw batch files after aggregating (rm.(deblendf)) — found live 2026-09-04
+lco.local.madgics_workup >> {lco.join, lco.chain_status}
 lco.slurm_submit >> {lco.join, lco.chain_status}
 lco.join >> lco.metrics_append >> lco.daily_summary
 

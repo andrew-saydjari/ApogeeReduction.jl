@@ -172,21 +172,24 @@ if [ "$run_2d_only" != "true" ]; then
             print_elapsed_time "Running arMADGICS"
             julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
 
-            print_elapsed_time "Running arMADGICS Workup"
-            julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
-
-            ## Spectra workup (first-class chain step per AKS 2026-09-03; was a
-            ## manual afterstep historically). Entrypoint from arMADGICS PR #26
-            ## (workup/run_workup.sh, MPI tier default). NOTE: wired against the
-            ## PLANNED contract `run_workup.sh <rawdir> <redux> <outdir>` — the
-            ## script had not yet landed on feature/W2-workup-serial at wiring
-            ## time; existence-guarded so the chain works either way.
+            ## Spectra workup (first-class chain step per AKS 2026-09-03).
+            ## ORDER MATTERS: this MUST run BEFORE the legacy workup.jl —
+            ## workup.jl ends with `rm.(deblendf)`, deleting every raw batch
+            ## file after aggregating, and the spectra workup needs those
+            ## batches intact (found live 2026-09-04, apo 61286: legacy ran
+            ## first, deleted 298 batches, auto_ranks then found none).
             if [ -f "${path2arMADGICS}workup/run_workup.sh" ]; then
                 print_elapsed_time "Running Spectra Workup"
                 bash ${path2arMADGICS}workup/run_workup.sh ${outdir}arMADGICS/raw_${tele}_${mjd}/ ${outdir} ${outdir}arMADGICS/workup_${tele}_${mjd}/
             else
                 echo "WARNING: spectra workup entrypoint ${path2arMADGICS}workup/run_workup.sh not found (arMADGICS PR #26 not in this checkout?); skipping spectra workup"
             fi
+
+            ## Legacy workup (wu_th product) — aggregates AND deletes the raw
+            ## batch files (its historical dailies-cleanup role), so it stays
+            ## LAST among batch consumers.
+            print_elapsed_time "Running arMADGICS Workup"
+            julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
         else
             echo "run_madgics=true but arMADGICS not found at ${path2arMADGICS}; skipping"
         fi
