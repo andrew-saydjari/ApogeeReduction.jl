@@ -342,6 +342,18 @@ def daily_summary(tele, **context):
     mjd = paths["mjd"]
     nfail = row.get("n_steps_failed", "?")
     wall = row.get("total_wall_s", 0)
+    # wall = sum of THIS run's step walls; a checkpoint-skip rerun sums to
+    # seconds, which the old h/m format displayed as a confusing "0h00m"
+    # (AKS 2026-09-04). Show seconds below an hour, and add the DAG's own
+    # elapsed time so reruns read sensibly.
+    wall_str = (f"{wall // 3600}h{(wall % 3600) // 60:02d}m" if wall >= 3600
+                else f"{wall // 60}m{wall % 60:02d}s")
+    dag_run = context.get("dag_run")
+    start = getattr(dag_run, "start_date", None)
+    if start is not None:
+        el = int((datetime.now(timezone.utc) - start).total_seconds())
+        wall_str += (f" (dag {el // 3600}h{(el % 3600) // 60:02d}m)"
+                     if el >= 3600 else f" (dag {el // 60}m{el % 60:02d}s)")
     warn = (row.get("warn_no_wavecal", 0), row.get("warn_no_relflux", 0),
             row.get("warn_other", 0))
     prod = (row.get("n_ar2D", 0), row.get("n_ar1Dcal", 0),
@@ -349,7 +361,7 @@ def daily_summary(tele, **context):
     ok = ":white_check_mark:" if nfail == 0 else ":warning:"
     text = (f"{label}{ok} `apogee_daily` {tele} {mjd}: "
             f"{row.get('n_steps', '?')} steps, {nfail} failed, "
-            f"wall {wall // 3600}h{(wall % 3600) // 60:02d}m | warnings "
+            f"wall {wall_str} | warnings "
             f"nowavecal={warn[0]} norelflux={warn[1]} other={warn[2]} | "
             f"products ar2D={prod[0]} ar1Dcal={prod[1]} plots={prod[2]} "
             f"dashboard={'yes' if row.get('dashboard_ok') else 'NO'}")
