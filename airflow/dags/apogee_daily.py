@@ -15,8 +15,9 @@ Each observatory group:
 
 LOCAL chain (testing): p3d2d -> quartz(runlist,traces,extract,relflux)
              -> dome(...) -> p2d1d_full -> plots -> dashboard
-             -> madgics_gate -> madgics_pipeline -> madgics_workup
-             -> spectra_workup (arMADGICS PR #26 entrypoint)
+             -> madgics_gate -> madgics_pipeline -> spectra_workup
+             -> workup_cleanup (W3 validate, then rm raw batch dirs;
+                legacy workup.jl retired 2026-09-04 — single workup)
 
 SLURM mode (DEFAULT): a single sbatchAKS-style submission of
 scripts/daily/run_all.sh per observatory (production dailies as run
@@ -637,21 +638,9 @@ def build_observatory_group(tele: str) -> TaskGroup:
                     tele,
                 ),
             )
-            t_madgics_workup = BashOperator(
-                task_id="madgics_workup",
-                bash_command=C.step_cmd(
-                    "madgics_workup",
-                    f"julia +{C.JULIA_VERSION} "
-                    f"--project={C.AR_MADGICS_DIR} "
-                    f"{C.AR_MADGICS_DIR}workup.jl "
-                    f"--outdir {C.xn('outdir', tele)}arMADGICS/"
-                    f"raw_{tele}_{C.xn('mjd', tele)}/",
-                    tele,
-                ),
-            )
-            # Spectra workup — first-class chain step per AKS 2026-09-03.
-            # Wired against the PLANNED contract `run_workup.sh <rawdir>
-            # <redux> <outdir>` (arMADGICS PR #26); existence-guarded.
+            # Spectra workup — the SINGLE workup (AKS 2026-09-04: legacy
+            # workup.jl retired from the chain — no row contract, and it
+            # deleted the raw batches before this step could read them).
             t_spectra_workup = BashOperator(
                 task_id="spectra_workup",
                 bash_command=C.step_cmd(
@@ -670,9 +659,40 @@ def build_observatory_group(tele: str) -> TaskGroup:
                     skip_exit_codes={99: "entrypoint not present yet"},
                 ),
             )
+            # Validated cleanup — replaces workup.jl's rm role: the W3
+            # validator must PASS (nonzero exit fails this task, batches
+            # stay intact) before the raw batch fiber dirs are deleted.
+            # AR_KEEP_MADGICS_BATCHES=true keeps them for debugging. A
+            # 0-batch night (cal-only) skips both validator and rm.
+            t_workup_cleanup = BashOperator(
+                task_id="workup_cleanup",
+                bash_command=C.step_cmd(
+                    "workup_cleanup",
+                    "bash -c '"
+                    f"RAW={C.xn('outdir', tele)}arMADGICS/"
+                    f"raw_{tele}_{C.xn('mjd', tele)}/; "
+                    'if [ ! -f "${RAW}batch_info.txt" ] || '
+                    'grep -qE "^# Total batches: 0$" "${RAW}batch_info.txt"; '
+                    'then echo "no batches (cal-only/empty night) - nothing '
+                    'to validate or clean"; exit 0; fi; '
+                    f"julia +{C.JULIA_VERSION} "
+                    f"--project={C.AR_MADGICS_DIR}workup "
+                    f"{C.AR_MADGICS_DIR}workup/validate_workup.jl "
+                    f'--rawdir "$RAW" --redux {C.xn("outdir", tele)} --K 500 '
+                    f"--out {C.xn('outdir', tele)}arMADGICS/"
+                    f"workup_{tele}_{C.xn('mjd', tele)}/W3_report.md; "
+                    'if [ "${AR_KEEP_MADGICS_BATCHES:-false}" != "true" ]; '
+                    'then echo "W3 passed - cleaning raw batch fiber dirs"; '
+                    'rm -rf "$RAW"[0-9][0-9][0-9]; '
+                    'else echo "AR_KEEP_MADGICS_BATCHES=true: keeping raw '
+                    'batch files"; fi'
+                    "'",
+                    tele,
+                ),
+            )
             (prev >> t_p2d1d >> t_plots >> t_dashboard
-             >> t_madgics_gate >> t_madgics >> t_madgics_workup
-             >> t_spectra_workup)
+             >> t_madgics_gate >> t_madgics >> t_spectra_workup
+             >> t_workup_cleanup)
 
         # ------------------------- SLURM mode --------------------------
         t_slurm = PythonOperator(
@@ -711,8 +731,9 @@ def build_observatory_group(tele: str) -> TaskGroup:
          >> t_start_notify >> t_select)
         t_select >> t_p3d2d
         t_select >> t_slurm
-        [t_dashboard, t_spectra_workup, t_slurm] >> t_join
-        [t_dashboard, t_spectra_workup, t_slurm] >> t_chain_status
+        # workup_cleanup is the local madgics-chain leaf (single-workup design)
+        [t_dashboard, t_workup_cleanup, t_slurm] >> t_join
+        [t_dashboard, t_workup_cleanup, t_slurm] >> t_chain_status
         t_join >> t_metrics >> t_summary
 
     return group
