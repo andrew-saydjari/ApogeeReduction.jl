@@ -28,22 +28,34 @@ contend. A skipped observatory (no data) does not block the other
 (ar_main.py's serial semantics).
 
 ```
-update(repo → sdsscore → sync_logs) → setup(mjd, date_mjd)
-  → [LCO group] → [APO group] → completion_notification
+# Regenerated from the DAG's actual edge wiring (62 tasks; edge-set
+# sha256 275ec83d2857e1c7, identical under Airflow 3.0.6 and 3.3.1):
+update.repo >> update.sdsscore >> update.sync_logs >> setup.{mjd, date_mjd}
+setup.{mjd, date_mjd} >> lco.resolve_night
 
-per observatory group:
-resolve_night → wait_for_raw → tunnel_check → almanac → runlist
-   → start_notification → select_mode
-                                                                        │
-              ┌──────────────── mode="local" (testing) ─────────────────┤
-              │ p3d2d → quartz_flats(runlist→traces→extract→relflux)    │
-              │       → dome_flats(...) → p2d1d_full → plots            │
-              │       → dashboard → madgics_gate → madgics_pipeline     │
-              │       → madgics_workup → spectra_workup                 │
-              └─ mode="slurm" (DEFAULT): slurm_submit (sbatch run_all.sh) ┘
-                                                                        │
-                 join → metrics_append (N1) → daily_summary (N3)
-                                                     + chain_status gate
+# per observatory group (lco shown; apo identical):
+lco.resolve_night >> lco.wait_for_raw >> lco.tunnel_check >> lco.almanac
+  >> lco.runlist >> lco.start_notification >> lco.select_mode
+lco.select_mode >> {lco.local.p3d2d | lco.slurm_submit}          # branch
+lco.local.p3d2d >> lco.local.quartz_flats.(runlist >> traces >> extract
+  >> relflux) >> lco.local.dome_flats.(runlist >> traces >> extract
+  >> relflux) >> lco.local.p2d1d_full >> lco.local.plots
+  >> lco.local.dashboard
+lco.local.dashboard >> {lco.local.madgics_gate, lco.join, lco.chain_status}
+lco.local.madgics_gate >> lco.local.madgics_pipeline
+  >> lco.local.madgics_workup >> lco.local.spectra_workup
+lco.local.spectra_workup >> {lco.join, lco.chain_status}
+lco.slurm_submit >> {lco.join, lco.chain_status}
+lco.join >> lco.metrics_append >> lco.daily_summary
+
+# serial edge + tail:
+{lco.chain_status, lco.daily_summary} >> apo.resolve_night
+{apo.chain_status, apo.daily_summary} >> completion_notification  # only leaf
+
+# non-default trigger rules:
+#   *.resolve_night, completion_notification         none_failed
+#   *.join, *.chain_status              none_failed_min_one_success
+#   *.metrics_append, *.daily_summary                     all_done
 ```
 
 - **Night selection** (`setup.mjd` / `setup.date_mjd`): ar_main.py's exact
@@ -92,9 +104,17 @@ resolve_night → wait_for_raw → tunnel_check → almanac → runlist
   Existence-guarded (skips with a warning until PR #26 is in the checkout).
 - **dagrun_timeout=20 h** (two serial observatories) stands in for SLAs
   (removed in Airflow 3.0), together with the metrics-freshness check in
-  the watchdog script; each group's `chain_status` gate makes the DagRun
-  state track the chain outcome even though metrics/summary always run,
-  and carries the serial edge to the next observatory.
+  the watchdog script. Run-state correctness: metrics/summary run
+  `all_done`, so each group's `chain_status` gate (which also carries the
+  serial edge to the next observatory) propagates a chain failure into
+  `completion_notification` — the DAG's only leaf, `none_failed` — and the
+  DagRun is marked FAILED (verified live: an `all_done` leaf here masked a
+  failed chain in the structural test).
+- **Skipped-observatory hygiene**: an observatory skipped before any chain
+  step (no data / no exposures) writes NO metrics row, and
+  `both_observatories_done` requires `n_steps > 0`, so
+  `completion_notification` cannot post a false "both observatories
+  processed" (also a structural-test catch).
 
 ## Relationship to the previous production DAG (`dags/ar_main.py`)
 
@@ -102,10 +122,10 @@ resolve_night → wait_for_raw → tunnel_check → almanac → runlist
 CCA-NATIVE production DAG (`ApogeeReduction-airflow`) that ran the dailies
 until 2026-05 — sbatch of run_all.sh from the sdssv checkout into
 `/mnt/ceph/users/sdssv/work/daily/`. Its imports are Airflow-3-compatible
-(verified under 3.0.6 — the `airflow.operators.*`/`airflow.sensors.*` paths
-are provider shims, and astropy/pytz/the slack provider are in the shared
-env). It is retired to `dags/attic/` ONLY because these DAGs supersede it
-feature-for-feature:
+(verified under both 3.0.6 and the 3.3.1 deploy target — the
+`airflow.operators.*`/`airflow.sensors.*` paths are provider shims, and
+astropy/pytz/the slack provider are in the shared env). It is retired to
+`dags/attic/` ONLY because this DAG supersedes it feature-for-feature:
 
 | ar_main.py | apogee_daily |
 |---|---|

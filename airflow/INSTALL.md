@@ -7,12 +7,14 @@ need the sdssv service account, secrets, or a policy decision.
 ## 0. State found 2026-09-02 (why some of this is needed)
 
 - `AIRFLOW_HOME=/mnt/home/sdssv/airflow` exists (owned `asaydjari:sdssv`,
-  group-writable) with an Airflow **3.0.6** sqlite db and the previous
+  group-writable) with a sqlite db from the broken env's Airflow **3.0.6**
+  (rebuild target below is **3.3.1**, AKS 2026-09-03) and the previous
   PRODUCTION DAG, `dags/ar_main.py` — CCA-native (sbatch of run_all.sh from
   `/mnt/home/sdssv/gitcode/ApogeeReduction.jl` into
   `/mnt/ceph/users/sdssv/work/daily/`; zero Utah references), the DAG that
   ran the dailies until 2026-05. Its imports are **Airflow-3-compatible**
-  (verified by importing it under 3.0.6: `airflow.operators.bash`,
+  (verified by importing it under both 3.0.6 and 3.3.1:
+  `airflow.operators.bash`,
   `airflow.sensors.filesystem`, `airflow.operators.python` are provider
   shims, and astropy/pytz/`apache-airflow-providers-slack` are all present
   in the shared env). It is superseded feature-for-feature by the new DAGs
@@ -72,15 +74,22 @@ ln -s $REPO/airflow/dags/apogee_heartbeat.py .
 
 ## 2. Rebuild the uv env (**AKS**, or anyone in group sdssv)
 
+Target (AKS 2026-09-03): **apache-airflow==3.3.1 on Python 3.12** — the
+version pair the DAGs were validated against in staging (parse + full
+`dags test`).
+
 ```bash
 cd /mnt/home/sdssv/uv_env
 mv airflow_env airflow_env.broken_2026_09       # keep for forensics
-uv python install 3.11
-uv venv --python 3.11 airflow_env
+uv python install 3.12
+uv venv --python 3.12 airflow_env
 uv pip install -p airflow_env/bin/python \
-    "apache-airflow==3.0.6" apache-airflow-providers-standard \
-    --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.0.6/constraints-3.11.txt
+    "apache-airflow==3.3.1" apache-airflow-providers-standard \
+    --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt
 ```
+
+Migrating the existing sqlite db (created by 3.0.6) is handled by
+`airflow db migrate` on first start; the on-disk DAG-run history survives.
 
 Notes: pin to a **uv-managed** python (not `/usr/bin/...`) so the next OS
 upgrade doesn't break it again. The DAGs use only stdlib + the standard
