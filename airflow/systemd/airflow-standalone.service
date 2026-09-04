@@ -1,0 +1,39 @@
+# systemd USER unit for the ApogeeReduction Airflow instance (card O3).
+# PREPARED, NOT INSTALLED — see airflow/INSTALL.md (requires AKS action:
+# loginctl enable-linger, secrets env file, repaired uv env).
+#
+# Install (as the account that owns AIRFLOW_HOME, on ccalin051):
+#   mkdir -p ~/.config/systemd/user
+#   cp airflow-standalone.service airflow-failure-notify.service \
+#      ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now airflow-standalone.service
+
+[Unit]
+Description=Airflow standalone (APOGEE daily reduction orchestrator)
+# Fires the Slack alert unit if this service enters a failed state
+# (i.e. Restart= gave up or the service failed permanently).
+OnFailure=airflow-failure-notify.service
+After=network-online.target
+
+[Service]
+Type=simple
+# All environment (AIRFLOW_HOME, PATH incl. juliaup+uv, SLACK_TOKEN,
+# PUBLIC_URL_SLUG, AR_* overrides) comes from this file — create it from
+# airflow/scripts/airflow_env.sh.example; it holds secrets, chmod 600,
+# NEVER commit it.
+EnvironmentFile=%h/airflow/airflow_env.sh
+WorkingDirectory=%h/airflow
+ExecStart=/mnt/home/sdssv/uv_env/airflow_env/bin/airflow standalone
+Restart=on-failure
+RestartSec=60
+# don't loop forever on a broken config: 5 tries per 30 min, then fail
+# (which triggers OnFailure= -> Slack)
+StartLimitIntervalSec=1800
+StartLimitBurst=5
+# airflow standalone spawns scheduler+api-server+triggerer; kill the tree
+KillMode=mixed
+TimeoutStopSec=120
+
+[Install]
+WantedBy=default.target

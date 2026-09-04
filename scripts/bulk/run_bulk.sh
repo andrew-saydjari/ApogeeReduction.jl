@@ -178,6 +178,19 @@ if [ "$run_2d_only" != "true" ]; then
 
             print_elapsed_time "Running arMADGICS Workup"
             julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
+
+            ## Spectra workup (first-class chain step per AKS 2026-09-03; was a
+            ## manual afterstep historically). Entrypoint from arMADGICS PR #26
+            ## (workup/run_workup.sh, MPI tier default). NOTE: wired against the
+            ## PLANNED contract `run_workup.sh <rawdir> <redux> <outdir>` — the
+            ## script had not yet landed on feature/W2-workup-serial at wiring
+            ## time; existence-guarded so the chain works either way.
+            if [ -f "${path2arMADGICS}workup/run_workup.sh" ]; then
+                print_elapsed_time "Running Spectra Workup"
+                bash ${path2arMADGICS}workup/run_workup.sh ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/ ${outdir} ${outdir}arMADGICS/workup_${mjd_start}_${mjd_end}/
+            else
+                echo "WARNING: spectra workup entrypoint ${path2arMADGICS}workup/run_workup.sh not found (arMADGICS PR #26 not in this checkout?); skipping spectra workup"
+            fi
         else
             echo "run_madgics=true but arMADGICS not found at ${path2arMADGICS}; skipping"
         fi

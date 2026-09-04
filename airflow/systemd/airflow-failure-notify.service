@@ -1,0 +1,13 @@
+# Oneshot Slack alert fired by airflow-standalone.service's OnFailure=.
+# PREPARED, NOT INSTALLED — see airflow/INSTALL.md.
+
+[Unit]
+Description=Slack alert: airflow-standalone entered failed state
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/airflow/airflow_env.sh
+ExecStart=/bin/bash -c 'curl -sS -X POST https://slack.com/api/chat.postMessage \
+  -H "Authorization: Bearer ${SLACK_TOKEN}" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d "{\"channel\": \"${AR_SLACK_CHANNEL:-C07KQ7BJY5P}\", \"text\": \":rotating_light: airflow-standalone.service on $(hostname) entered FAILED state — the APOGEE daily orchestrator is down. journalctl --user -u airflow-standalone for details.\"}"'

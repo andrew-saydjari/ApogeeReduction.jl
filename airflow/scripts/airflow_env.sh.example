@@ -1,0 +1,31 @@
+# Environment for the APOGEE Airflow instance (systemd EnvironmentFile
+# syntax: KEY=value lines, no `export`, no shell expansion).
+#
+# Copy to /mnt/home/sdssv/airflow/airflow_env.sh, fill in the secrets,
+# chmod 600. NEVER commit the filled-in copy.
+
+AIRFLOW_HOME=/mnt/home/sdssv/airflow
+
+# PATH must provide: julia+juliaup, uv/uvx, ssh, git. Adjust the account bits.
+PATH=/mnt/home/sdssv/uv_env/airflow_env/bin:/mnt/home/sdssv/.juliaup/bin:/mnt/home/sdssv/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# --- secrets (rotate via the apogeereductionjl Slack app / public_www) ---
+SLACK_TOKEN=xoxb-REPLACE-ME
+PUBLIC_URL_SLUG=REPLACE-ME
+# optional: PUBLIC_URL_SLUG_KMCKINNON=
+
+# --- pipeline wiring (defaults shown; see airflow/dags/ar_common.py) ---
+AR_REPO=/mnt/home/sdssv/gitcode/ApogeeReduction.jl
+AR_OUTDIR=/mnt/ceph/users/sdssv/work/daily/
+AR_MADGICS_DIR=/mnt/home/sdssv/gitcode/arMADGICS.jl/
+AR_METRICS_DIR=/mnt/ceph/users/sdssv/work/daily/metrics/
+
+# Execution mode: "local" (run the chain on this node — recommended default
+# on ccalin051) or "slurm" (Airflow submits run_all.sh via sbatch — AKS's
+# call per cluster etiquette).
+AR_AIRFLOW_MODE=local
+AR_WORKERS_DEFAULT=16
+
+# Slack channel for alerts/summaries: dev by default; switch to the prod
+# channel C08B7FKMP16 once the DAGs are trusted.
+AR_SLACK_CHANNEL=C07KQ7BJY5P
