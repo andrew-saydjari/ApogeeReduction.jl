@@ -45,7 +45,11 @@ base_dir="$(dirname "$(dirname "$(dirname "$script_path")")")"
 echo "base_dir: $base_dir"
 
 julia_version="1.11.0" # 1.11.6
-almanac_version="0.4.3"
+# almanac: pin by COMMIT on the fork, matching scripts/daily/run_all.sh —
+# the uvx wheel cache keys on the source string, and the old PyPI 0.4.3
+# pin predates the raw/-layout output restructure (would break the whole
+# downstream chain, found in the 2026-09-04 docs audit).
+almanac_source="git+https://github.com/andrew-saydjari/almanac.git@61e0d51186e172c17c3b33cd586de1b5a61dd2cb"
 juliaup add $julia_version
 
 # ARGUMENTS
@@ -106,7 +110,7 @@ if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
     #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
     sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
-    uvx --from sdss-almanac==$almanac_version almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
+    uvx --from "$almanac_source" almanac -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
 fi
 
 print_elapsed_time "Building Runlist"
