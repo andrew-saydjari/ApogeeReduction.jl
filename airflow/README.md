@@ -30,8 +30,8 @@ contend. A skipped observatory (no data) does not block the other
 
 ```
 # Regenerated from the DAG's actual edge wiring (62 tasks, 72 edges;
-# edge-set sha256[:16] 29632046ff585da0 after the 2026-09-04 workup-order
-# swap; sha = sha256 of sorted "up>down" lines):
+# edge-set sha256[:16] bd4f725f8cbb5108 after the 2026-09-04 single-workup
+# change; sha = sha256 of sorted "up>down" lines):
 update.repo >> update.sdsscore >> update.sync_logs >> setup.{mjd, date_mjd}
 setup.{mjd, date_mjd} >> lco.resolve_night
 
@@ -45,10 +45,10 @@ lco.local.p3d2d >> lco.local.quartz_flats.(runlist >> traces >> extract
   >> lco.local.dashboard
 lco.local.dashboard >> {lco.local.madgics_gate, lco.join, lco.chain_status}
 lco.local.madgics_gate >> lco.local.madgics_pipeline
-  >> lco.local.spectra_workup >> lco.local.madgics_workup
-  # spectra_workup FIRST: the legacy madgics_workup (workup.jl) deletes the
-  # raw batch files after aggregating (rm.(deblendf)) — found live 2026-09-04
-lco.local.madgics_workup >> {lco.join, lco.chain_status}
+  >> lco.local.spectra_workup >> lco.local.workup_cleanup
+  # single workup (legacy workup.jl retired 2026-09-04); workup_cleanup =
+  # W3 validator gate, then rm of the raw batch fiber dirs
+lco.local.workup_cleanup >> {lco.join, lco.chain_status}
 lco.slurm_submit >> {lco.join, lco.chain_status}
 lco.join >> lco.metrics_append >> lco.daily_summary
 
@@ -113,12 +113,21 @@ lco.join >> lco.metrics_append >> lco.daily_summary
 - **arMADGICS** is gated by the `run_madgics` param only (no env fallback),
   default TRUE — production ran arMADGICS + its workup unconditionally
   every night (AKS 2026-09-03).
-- **spectra_workup** (first-class chain step per AKS 2026-09-03; was a
-  manual afterstep invoked by neither driver historically): calls the
+- **spectra_workup** — the SINGLE workup (AKS 2026-09-04: the legacy
+  `workup.jl` is retired from the chain — same aggregation job but no row
+  contract, no integrity checks, and it deleted the raw batches out from
+  under the new workup, the apo 61286 first-night failure): calls the
   arMADGICS-side entrypoint `workup/run_workup.sh <rawdir> <redux> <outdir>`
   (PR #26, MPI tier default) under the same madgics gate. Local mode calls
   it explicitly; slurm mode inherits the identical step from run_all.sh.
   Existence-guarded (skips with a warning until PR #26 is in the checkout).
+- **workup_cleanup** — validated deletion, replacing workup.jl's rm role:
+  the W3 validator (`workup/validate_workup.jl --K 500`) must PASS, then
+  the raw batch fiber dirs are removed (batch_info.txt / full_list_info.h5
+  kept as provenance). `AR_KEEP_MADGICS_BATCHES=true` skips deletion
+  (dailies). Bulk keeps batches by DEFAULT per the W5 decision
+  (`AR_CLEAN_MADGICS_BATCHES=true` opts in to validated cleanup there).
+  Cal-only nights (0 batches) skip both validator and rm.
 - **dagrun_timeout=20 h** (two serial observatories) stands in for SLAs
   (removed in Airflow 3.0), together with the metrics-freshness check in
   the watchdog script. Run-state correctness: metrics/summary run

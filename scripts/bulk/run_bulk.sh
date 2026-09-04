@@ -181,20 +181,26 @@ if [ "$run_2d_only" != "true" ]; then
             print_elapsed_time "Running arMADGICS"
             julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
 
-            print_elapsed_time "Running arMADGICS Workup"
-            julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/
-
-            ## Spectra workup (first-class chain step per AKS 2026-09-03; was a
-            ## manual afterstep historically). Entrypoint from arMADGICS PR #26
-            ## (workup/run_workup.sh, MPI tier default). NOTE: wired against the
-            ## PLANNED contract `run_workup.sh <rawdir> <redux> <outdir>` — the
-            ## script had not yet landed on feature/W2-workup-serial at wiring
-            ## time; existence-guarded so the chain works either way.
+            ## Spectra workup — the SINGLE workup (AKS 2026-09-04: legacy
+            ## workup.jl retired; it had no row contract and deleted the raw
+            ## batches after aggregating, which broke the chain and violated
+            ## the W5 bulk no-delete decision). BULK DEFAULT: raw batches are
+            ## KEPT (W5); set AR_CLEAN_MADGICS_BATCHES=true to delete them
+            ## after the W3 validator passes.
             if [ -f "${path2arMADGICS}workup/run_workup.sh" ]; then
                 print_elapsed_time "Running Spectra Workup"
                 bash ${path2arMADGICS}workup/run_workup.sh ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/ ${outdir} ${outdir}arMADGICS/workup_${mjd_start}_${mjd_end}/
+
+                if [ "${AR_CLEAN_MADGICS_BATCHES:-false}" = "true" ]; then
+                    print_elapsed_time "Validating Workup (W3 row contract)"
+                    julia +$julia_version --project=${path2arMADGICS}workup ${path2arMADGICS}workup/validate_workup.jl \
+                        --rawdir ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/ --redux ${outdir} --K 500 \
+                        --out ${outdir}arMADGICS/workup_${mjd_start}_${mjd_end}/W3_report.md
+                    print_elapsed_time "Cleaning validated raw batch files"
+                    rm -rf ${outdir}arMADGICS/raw_${mjd_start}_${mjd_end}/[0-9][0-9][0-9]
+                fi
             else
-                echo "WARNING: spectra workup entrypoint ${path2arMADGICS}workup/run_workup.sh not found (arMADGICS PR #26 not in this checkout?); skipping spectra workup"
+                echo "WARNING: spectra workup entrypoint ${path2arMADGICS}workup/run_workup.sh not found (arMADGICS PR #26 not in this checkout?); skipping spectra workup (raw batches kept)"
             fi
         else
             echo "run_madgics=true but arMADGICS not found at ${path2arMADGICS}; skipping"

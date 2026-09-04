@@ -172,24 +172,34 @@ if [ "$run_2d_only" != "true" ]; then
             print_elapsed_time "Running arMADGICS"
             julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}pipeline.jl --redux_base $outdir --almanac_file $almanac_file --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
 
-            ## Spectra workup (first-class chain step per AKS 2026-09-03).
-            ## ORDER MATTERS: this MUST run BEFORE the legacy workup.jl —
-            ## workup.jl ends with `rm.(deblendf)`, deleting every raw batch
-            ## file after aggregating, and the spectra workup needs those
-            ## batches intact (found live 2026-09-04, apo 61286: legacy ran
-            ## first, deleted 298 batches, auto_ranks then found none).
+            ## Spectra workup — the SINGLE workup (AKS 2026-09-04: legacy
+            ## workup.jl retired from the chain; same aggregation job but no
+            ## row contract, no integrity checks, and it deleted the raw
+            ## batches before this step could read them — apo 61286 failure).
             if [ -f "${path2arMADGICS}workup/run_workup.sh" ]; then
                 print_elapsed_time "Running Spectra Workup"
                 bash ${path2arMADGICS}workup/run_workup.sh ${outdir}arMADGICS/raw_${tele}_${mjd}/ ${outdir} ${outdir}arMADGICS/workup_${tele}_${mjd}/
-            else
-                echo "WARNING: spectra workup entrypoint ${path2arMADGICS}workup/run_workup.sh not found (arMADGICS PR #26 not in this checkout?); skipping spectra workup"
-            fi
 
-            ## Legacy workup (wu_th product) — aggregates AND deletes the raw
-            ## batch files (its historical dailies-cleanup role), so it stays
-            ## LAST among batch consumers.
-            print_elapsed_time "Running arMADGICS Workup"
-            julia +$julia_version --project=${path2arMADGICS} ${path2arMADGICS}workup.jl --outdir ${outdir}arMADGICS/raw_${tele}_${mjd}/
+                ## Validated cleanup — replaces workup.jl's rm role. The W3
+                ## validator must PASS before any deletion (set -e makes a
+                ## validation failure abort the chain with batches intact).
+                ## AR_KEEP_MADGICS_BATCHES=true keeps them for debugging.
+                if [ -f "${outdir}arMADGICS/raw_${tele}_${mjd}/batch_info.txt" ] && \
+                        ! grep -qE '^# Total batches: 0$' "${outdir}arMADGICS/raw_${tele}_${mjd}/batch_info.txt"; then
+                    print_elapsed_time "Validating Workup (W3 row contract)"
+                    julia +$julia_version --project=${path2arMADGICS}workup ${path2arMADGICS}workup/validate_workup.jl \
+                        --rawdir ${outdir}arMADGICS/raw_${tele}_${mjd}/ --redux ${outdir} --K 500 \
+                        --out ${outdir}arMADGICS/workup_${tele}_${mjd}/W3_report.md
+                    if [ "${AR_KEEP_MADGICS_BATCHES:-false}" != "true" ]; then
+                        print_elapsed_time "Cleaning validated raw batch files"
+                        rm -rf ${outdir}arMADGICS/raw_${tele}_${mjd}/[0-9][0-9][0-9]
+                    else
+                        echo "AR_KEEP_MADGICS_BATCHES=true: keeping raw batch files"
+                    fi
+                fi
+            else
+                echo "WARNING: spectra workup entrypoint ${path2arMADGICS}workup/run_workup.sh not found (arMADGICS PR #26 not in this checkout?); skipping spectra workup (raw batches kept)"
+            fi
         else
             echo "run_madgics=true but arMADGICS not found at ${path2arMADGICS}; skipping"
         fi
