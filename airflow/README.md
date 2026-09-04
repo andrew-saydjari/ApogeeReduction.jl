@@ -74,6 +74,12 @@ lco.join >> lco.metrics_append >> lco.daily_summary
   Cheap insurance only: normally an instant pass (first poke true);
   reschedule pokes every 30 min, 12 h timeout skips the observatory
   cleanly (`soft_fail`); conf `raw_nowait` skips immediately (smoke tests).
+  No-data fast path: a frameless night skips on the first poke once the
+  sync round that would have carried it has demonstrably run (the other
+  observatory's same-night marker, or a later night's marker for this one)
+  — so an observatory that took no APOGEE data (weather/engineering, e.g.
+  lco 61284/61285) does not hold the serial chain for the 12 h timeout;
+  "incomplete" (frames present, md5sum pending) still waits.
 - **update.repo**: reports the production checkout state AND
   `git pull --ff-only` (DELIBERATE new behavior — ar_main.py's repo task
   was status-only); **update.sync_logs** rsyncs both observatories'

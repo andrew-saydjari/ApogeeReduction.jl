@@ -167,6 +167,17 @@ def raw_transfer_ready(tele, **context):
         raise AirflowSkipException(
             f"raw_nowait: {tele} {mjd} is '{status}' — skipping this "
             "observatory immediately instead of waiting")
+    # No-data fast path: if the sync round that would have delivered this
+    # night has already run (other observatory's same-night marker, or a
+    # later night's marker for this one), a frameless dir means the
+    # observatory took no APOGEE data — skip now instead of holding the
+    # serial chain for the 12 h timeout. "incomplete" (frames present, no
+    # md5sum yet) still waits: that is a transfer in flight.
+    if status == "no_data" and C.raw_sync_has_run(tele, mjd):
+        raise AirflowSkipException(
+            f"{tele} {mjd}: no APOGEE frames, and the nightly sync round "
+            "for this night has already completed — observatory took no "
+            "data; skipping")
     return False
 
 
