@@ -770,6 +770,13 @@ with DAG(
                 # production checkout on its branch. ar_main.py's repo task
                 # was status-only (pulling was effectively off).
                 "echo '=== git pull --ff-only ==='\n"
+                "git pull --ff-only\n"
+                # arMADGICS clone too (first-night finding 2026-09-04: the
+                # madgics step ran a months-stale arM main that predated the
+                # raw/-layout almanac handling; AR was pulled, arM never was).
+                f"cd {C.AR_MADGICS_DIR}\n"
+                "echo '=== arMADGICS: status + git pull --ff-only ==='\n"
+                "git log --oneline -1\n"
                 "git pull --ff-only\n"),
         )
 
