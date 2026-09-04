@@ -415,10 +415,17 @@ WARN_CLASSES = {
 }
 
 
-def census_warnings(logdir: str) -> dict:
+def census_warnings(logdir: str, since: float | None = None) -> dict:
+    """Warning census over the night's step logs. `since` (epoch seconds):
+    only logs modified at/after it are counted — step logs persist across
+    retriggers of a night (only steps.csv is rotated), so without this a
+    rerun's census would include stale logs from failed earlier attempts
+    (cousin of the steps.csv phantom-failure bug, 2026-09-04)."""
     counts = {"warn_no_wavecal": 0, "warn_no_relflux": 0, "warn_other": 0}
     for log in sorted(glob.glob(os.path.join(logdir, "*.log"))):
         try:
+            if since is not None and os.path.getmtime(log) < since:
+                continue
             with open(log, errors="replace") as f:
                 for line in f:
                     low = line.lower()
@@ -450,7 +457,10 @@ def product_counts(paths: dict) -> dict:
         "n_ar2Dcal": n("ar2Dcal"),
         "n_ar1Dcal": n("ar1Dcal"),
         "n_ar1Dunical": n("ar1Dunical"),
-        "n_plots": len(glob.glob(os.path.join(plots, "*.png"))),
+        # plots/<mjd>/ is also shared by both observatories (found live on
+        # lco 61286: its row counted apo's 1,135 plots too) — filter by the
+        # telescope carried in every plot filename.
+        "n_plots": len(glob.glob(os.path.join(plots, f"*_{tele}_*.png"))),
         "dashboard_ok": int(os.path.exists(
             os.path.join(plots, "dashboard.html"))),
     }
@@ -465,7 +475,9 @@ def collect_night_metrics(paths: dict, context) -> dict:
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     steps = read_steps_csv(paths["steps_csv"])
-    warn = census_warnings(paths["logdir"])
+    start = getattr(dag_run, "start_date", None)
+    warn = census_warnings(paths["logdir"],
+                           since=start.timestamp() if start else None)
     prod = product_counts(paths)
 
     metrics_dir = p.get("metrics_dir") or AR_METRICS_DIR
