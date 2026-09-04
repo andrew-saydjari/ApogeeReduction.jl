@@ -76,10 +76,16 @@ APOGEE_LOGS_DIR = "/mnt/ceph/users/sdssv/work/apogee_logs"
 
 JULIA_VERSION = "1.11.0"  # keep in sync with run_all.sh
 
-# almanac source pin — keep in sync with scripts/daily/run_all.sh (pin by
-# COMMIT, not branch: the uvx wheel cache keys on the source string).
-ALMANAC_SOURCE = ("git+https://github.com/andrew-saydjari/almanac.git"
-                  "@61e0d51186e172c17c3b33cd586de1b5a61dd2cb")
+# almanac: run from a LOCAL git clone with an editable-install env, exactly
+# like the AR/arM pipelines (AKS 2026-09-04). This replaces the uvx
+# commit-pin: update.repo pulls the clone daily, invocations log
+# `git rev-parse HEAD` for provenance, and the uvx wheel-cache trap (source
+# string unchanged -> stale cached build served) cannot occur. One-time
+# setup in INSTALL.md (clone + `uv pip install -e`).
+ALMANAC_DIR = os.environ.get(
+    "ALMANAC_DIR", "/mnt/home/sdssv/gitcode/almanac")
+ALMANAC_BIN = os.environ.get(
+    "ALMANAC_BIN", "/mnt/home/sdssv/uv_env/almanac_env/bin/almanac")
 
 CALDIR_DARKS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
 CALDIR_FLATS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
