@@ -190,6 +190,25 @@ def raw_night_status(tele: str, mjd: int) -> str:
     return "ready"
 
 
+def raw_sync_has_run(tele: str, mjd: int) -> bool:
+    """True when the nightly Utah->CCA sync round that would have carried
+    this night has demonstrably already completed, so a frameless night dir
+    means the observatory took no APOGEE data (not that the transfer is
+    late). Evidence, either of: the OTHER observatory's transfer-complete
+    marker for the SAME mjd, or this observatory's marker for a LATER night
+    (mjd+1/mjd+2 — the run processes yesterday's night, so the next night's
+    data normally landed this same morning). Verified live on lco 61284/
+    61285 (du Pont took no APOGEE exposures; Utah canonical + staging dirs
+    both empty while apo delivered normally)."""
+    other = "lco" if tele == "apo" else "apo"
+    if os.path.exists(f"{RAW_ROOT}/{other}/{mjd}/{mjd}.md5sum"):
+        return True
+    for later in (mjd + 1, mjd + 2):
+        if os.path.exists(f"{RAW_ROOT}/{tele}/{later}/{later}.md5sum"):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Slack (N3)
 # ---------------------------------------------------------------------------
