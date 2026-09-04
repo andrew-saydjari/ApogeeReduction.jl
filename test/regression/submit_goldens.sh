@@ -395,8 +395,13 @@ fi
 } >> "$manifest"
 
 count_products() {
-    # $1 = class prefix, $2 = tele, $3 = mjd
-    ls "${outroot}apred/$3/$1_$2_$3_"* 2> /dev/null | wc -l
+    # $1 = class prefix, $2 = tele, $3 = mjd. Glob count, NOT `ls | wc -l`:
+    # under this script's `set -e -o pipefail`, a day with no products dir
+    # (e.g. a dark-only night with zero runlist entries — apo 59136 killed
+    # testbed job 6980442 here) made the failed `ls` abort the whole
+    # bookkeeping loop.
+    local g=("${outroot}apred/$3/$1_$2_$3_"*)
+    if [ -e "${g[0]}" ]; then echo "${#g[@]}"; else echo 0; fi
 }
 overall=0
 for day in "${days[@]}"; do
