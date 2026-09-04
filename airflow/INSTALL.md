@@ -17,10 +17,10 @@ need the sdssv service account, secrets, or a policy decision.
   `airflow.operators.bash`,
   `airflow.sensors.filesystem`, `airflow.operators.python` are provider
   shims, and astropy/pytz/`apache-airflow-providers-slack` are all present
-  in the shared env). It is superseded feature-for-feature by the new DAGs
-  (mapping table in README.md) and should be retired to `dags/attic/` —
-  moved aside, not deleted — so the old and new daily DAGs never schedule
-  side by side.
+  in the shared env). It is superseded feature-for-feature by the new
+  `apogee_daily` DAG (mapping table in README.md) and should be retired to
+  `dags/attic/` — moved aside, not deleted — so the old and new daily DAGs
+  never schedule side by side.
 - The uv env `/mnt/home/sdssv/uv_env/airflow_env` is **broken**: it was
   built against `/usr/bin/python3.11` (`pyvenv.cfg: home = /usr/bin`),
   which no longer exists after the OS upgrade → every entry point fails
@@ -28,7 +28,7 @@ need the sdssv service account, secrets, or a policy decision.
   version is read from the env's `apache_airflow-3.0.6.dist-info`). It must
   be rebuilt (step 2).
 - `sla_miss_callback` was **removed in Airflow 3.0**; the SLA layer here is
-  `dagrun_timeout` (16 h) + the cross-machine watchdog (step 6).
+  `dagrun_timeout` (20 h) + the cross-machine watchdog (step 6).
 
 ## 1a. ONE-TIME: migrate the production checkout to main (**AKS — deploy
 ## decision, review before running**)
@@ -141,13 +141,18 @@ lingering for the service account (this is the one hard admin dependency).
 
 ## 5. Unpause + first supervised run
 
+There is ONE daily DAG (`apogee_daily`, LCO then APO serially) plus the
+heartbeat:
+
 ```bash
-airflow dags list
+airflow dags list                      # expect: apogee_daily, apogee_heartbeat
 airflow dags unpause apogee_heartbeat
-airflow dags unpause apogee_daily_apo
-airflow dags unpause apogee_daily_lco
-# supervised first night (dev Slack channel is the default):
-airflow dags trigger apogee_daily_apo --conf '{"mjd": <recent>, "run_kind": "test"}'
+airflow dags unpause apogee_daily
+# supervised first night — posts go to the PROD channel unless
+# AR_SLACK_CHANNEL=C07KQ7BJY5P is set in airflow_env.sh (step 3) or passed
+# as conf. Runs in slurm mode (the default) unless overridden:
+airflow dags trigger apogee_daily --conf \
+  '{"mjd": <recent>, "run_kind": "test", "slack_channel": "C07KQ7BJY5P"}'
 ```
 
 ## 6. Cross-machine watchdog (**AKS**: scrontab on rusty)
@@ -172,13 +177,16 @@ alert/6 h per condition.
    mwm ControlMaster, `~/.almanac` identity, juliaup, and public_www slug
    currently live on asaydjari. Either move those onto sdssv (cleaner) or
    run the systemd unit as asaydjari with AIRFLOW_HOME=/mnt/home/sdssv/airflow.
-2. **local vs slurm mode** — `local` (default) runs the chain under
-   `nice -n 10` on ccalin051; recommended: the node is dedicated, the chain
-   fits (~1h50m at 8 workers, less at 16), and no scheduler round-trips.
-   `slurm` mode (one sbatch of run_all.sh per night, 5-min squeue polls) is
-   fully written but OFF: automating sbatch is your call per cluster
-   etiquette. Flip with `AR_AIRFLOW_MODE=slurm` when/if desired.
-3. **Slack channel promotion** dev → prod (`AR_SLACK_CHANNEL=C08B7FKMP16`)
-   once a few supervised nights look right.
+2. **local vs slurm mode** — `slurm` is the DEFAULT (production dailies as
+   run historically: one sbatch of run_all.sh per night, 5-s squeue polls;
+   AKS launches the Airflow instance himself, so submission is
+   human-initiated per cluster etiquette). `local` runs every step under
+   `nice -n 10` on ccalin051 (~1h50m at 8 workers) — the testing mode, or a
+   deliberate alternative on the dedicated node. Flip with
+   `AR_AIRFLOW_MODE=local` or conf `{"mode": "local"}`.
+3. **Slack channel** — the code default is PROD (`C08B7FKMP16`,
+   ar_main.py's behavior). For the supervised first nights, set
+   `AR_SLACK_CHANNEL=C07KQ7BJY5P` (dev) in airflow_env.sh (step 3);
+   promotion to prod = removing that override once things look right.
 4. **sqlite + LocalExecutor**: fine at this scale (2 DAG runs/day + a
    heartbeat); if concurrency is ever raised, move to postgres.

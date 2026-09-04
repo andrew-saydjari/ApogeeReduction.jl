@@ -1,6 +1,7 @@
 # APOGEE daily pipeline on Airflow (cards O3 / N1 / N3)
 
-Airflow layer for the daily reduction: per-observatory DAGs split at
+Airflow layer for the daily reduction: ONE serial DAG (`apogee_daily`, LCO
+then APO) whose per-observatory task groups split at
 `scripts/daily/run_all.sh`'s natural step boundaries, Slack notifications, a
 heartbeat/watchdog layer, and the N1 per-night metrics seed.
 
@@ -8,7 +9,7 @@ heartbeat/watchdog layer, and the N1 per-night metrics seed.
 airflow/
 ├── dags/
 │   ├── ar_common.py          shared config/helpers (Slack, paths, metrics)
-│   ├── apogee_daily.py       apogee_daily_apo + apogee_daily_lco
+│   ├── apogee_daily.py       apogee_daily (ONE DAG, lco→apo serial)
 │   └── apogee_heartbeat.py   10-min liveness beacon
 ├── systemd/                  user units (prepared, NOT installed)
 ├── scripts/
@@ -88,7 +89,8 @@ lco.join >> lco.metrics_append >> lco.daily_summary
 - **Execution modes**: `slurm` (DEFAULT — production dailies as run
   historically; AKS launches the Airflow instance himself, so submission is
   human-initiated) submits the whole run_all.sh chain as one sbatch job with
-  gentle 5-min single-job polling; `local` runs every step directly on the
+  ar_main.py's 5-second `squeue -j` polls + a final `sacct` verdict;
+  `local` runs every step directly on the
   host (ccalin051) under `nice -n 10` with
   `AR_LOCAL_WORKERS`/`--workers_per_node` = `workers` param and all
   `SLURM_*` env scrubbed — used for testing (`AR_AIRFLOW_MODE=local` or
