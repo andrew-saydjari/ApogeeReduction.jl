@@ -45,7 +45,54 @@ defaults to Slurm mode (`submit_goldens.sh` relies on this).
 
 The full step log lands in `<outdir>/logs/run_testday_<tele>_<mjd>.log` and
 ends with a **warnings census** (counts of the known warning classes from the
-2026_05_01 bulk log — regression metrics per v1 §0).
+2026_05_01 bulk log — regression metrics per v1 §0) followed by a
+**warnings triage** stage.
+
+### Warnings census vs. warnings triage
+
+The census greps a fixed list of hand-named substrings. It is a convenience
+view and it has two blind spots by construction: it cannot count a category
+nobody named, and if a pattern drifts from the message text it reports `0`
+rather than an error. Both bit us in job 6980442 — 88 "lamp turned off"
+warnings were entirely uncounted, and `"no useful relfluxing files"` reported
+`0x` against a real count of 3 because the message says *any* useful
+relfluxing files.
+
+`warnings_triage.sh` is the authoritative inventory. It enumerates every Julia
+`@warn`/`@error` record in a log and groups them by **emit site**
+(`Module src/file.jl:LINE`), which is exact, survives message-text edits, and
+survives ProgressMeter re-renders being glued onto the message text.
+
+```bash
+# inventory for a run, with the per-(tele, mjd) distribution per site
+test/regression/warnings_triage.sh --units <outdir>/logs/
+
+# inventory + diff against the reference set (exit 1 iff a NEW site appeared)
+test/regression/warnings_triage.sh -r test/regression/warnings_reference_6980442.tsv <log>
+
+# start a fresh reference set (verdict/expect/note are filled in by hand)
+test/regression/warnings_triage.sh --emit-reference <log> > new_reference.tsv
+```
+
+`warnings_reference_6980442.tsv` is the adjudicated reference set from the
+200-MJD DR21 testbed (slurm 6980442, AR @ 824fd978): 454 records across 7 emit
+sites, each with a verdict (`EXPECTED` / `ACTIONABLE` / `UNKNOWN`) and an
+`expect` field saying how the count should move in the next run. Override the
+file the harness diffs against with `AR_WARN_REFERENCE=<file>`.
+
+**It is a reference set, not a baseline of acceptability.** Nobody had
+adjudicated the previous run's warnings before 2026-09-07; the counts were
+simply what happened. A category earns `EXPECTED` from a demonstrated
+mechanism — the code path, the data condition that triggers it, and evidence
+that the condition is legitimately present in this data — never from having
+been there before. `UNKNOWN` is the correct verdict for anything whose
+mechanism has not been established, and the diff re-prints those every run so
+they do not quietly become furniture. Three of the seven sites in the current
+reference set are `ACTIONABLE`; the adjudication and its evidence are at
+`/mnt/ceph/users/sdssv/work/asaydjari/2026_09_07/warnings_baseline/WARNINGS.md`.
+
+The triage stage never fails a run — a new emit site is for a human to read,
+not a reason to discard ten hours of reduction.
 
 Differences from `scripts/daily/run_all.sh` (deliberate):
 
