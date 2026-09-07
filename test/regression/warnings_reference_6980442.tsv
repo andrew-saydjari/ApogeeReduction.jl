@@ -1,0 +1,32 @@
+# warnings REFERENCE SET for the DR21 200-MJD testbed
+#
+# This is a reference set for diffing, NOT a baseline of acceptability.
+# The counts below are what the previous run happened to produce; nobody had
+# adjudicated them before 2026-09-07. A category earns EXPECTED only from a
+# demonstrated mechanism -- the code path, the data condition that triggers it,
+# and evidence that the condition is legitimately present in this data.
+# "It has always done this" is not evidence. UNKNOWN is the correct verdict for
+# anything whose mechanism has not been established.
+#
+# Source run : slurm job 6980442, ApogeeReduction.jl @ 824fd978
+#              log slurm_logs/ar_testbed_6980442.out
+#              outputs /mnt/ceph/users/sdssv/work/asaydjari/2026_09_03/testbed_run/
+# Adjudicated: 2026-09-07 -- see 2026_09_07/warnings_baseline/WARNINGS.md for the
+#              measurement behind every verdict.
+#
+# Totals: 454 records across 7 emit sites (452 Warning + 2 Error).
+# The harness "warnings census" stage saw only 360 of these.
+# 3 of the 7 sites are ACTIONABLE. None is UNKNOWN.
+#
+# columns: site<TAB>count<TAB>verdict<TAB>expect<TAB>note
+#   verdict: EXPECTED | ACTIONABLE | UNKNOWN
+#   expect:  stable | up | down | either   (how the count should move next run)
+#
+#site	count	verdict	expect	note
+ApogeeReduction src/arclamp_peaks.jl:986	260	ACTIONABLE	down	ONE exposure: apo 60255 exp 0007 (242 G + 17 R + 1 B fibers). MEASURED: UNe arc, n_read=40, identical setup to exps 0005/0089/0091 the same night, but median flux 305/1018/1976 vs 2.4-6.4 for those three -- 200-400x. Reproduced 242/17/1 by re-running the finder; dominant path is 'no local max above the fiber's own p95', NOT saturation. That night's delivered wave soln is FPI-based (exps 0009+0097) and does not use 0007, so no science lost HERE. Actions: flag the exposure (flagged_bad=0 today); collapse the per-fiber warn into one per-file N/300 warn.
+Main scripts/cal/make_traces_from_flats.jl:134	88	ACTIONABLE	either	30 flat exposures over 14 nights. MEASURED: 19/19 rejected quartz flats had lamp_quartz=1 (lamp COMMANDED ON) and delivered ~zero light -- this warning is real hardware-fault detection, not noise. 29/30 are unambiguous (med_flux ~0 or negative). Actions: (1) 0/30 are flagged_bad upstream; (2) lco 60078 exp 0044 tripped on R only (68p 9.35 vs threshold 10) while G and B passed -- probable FALSE rejection from a chip-blind, n_read-blind LCO threshold. AR #387 rescales flux_68p via the LCO gain map, so LCO counts may move +-1 to +-3.
+ApogeeReduction src/wavecal.jl:1752	76	ACTIONABLE	stable	Fires once per night with ZERO object exposures (212/78 split vs object products, zero exceptions; 78 minus 2 dark-only nights = 76). SPLIT VERDICT. 40 nights are plate-era (apo<=59423, lco<=59808) with 0 FPI exposures -- genuinely nothing to calibrate with, EXPECTED. But 35 nights are FPS-era and carry 111 FPI arclamp exposures whose wavelength information is DISCARDED, because fpi_medwavecal_skyline_dither requires a sky-based nightly average to seed from and an object-free night can never have one. That dependency is backwards for cal-only nights. Needs an AKS decision, not a benign stamp.
+ApogeeReduction src/ar1D.jl:818	24	EXPECTED	stable	8 exposures x 3 chips on 4 nights. Mechanism MEASURED per exposure from the almanac, not inferred: apo 57674 exps 56/57 cart_id=3 vs dome flats on carts 6/5/4; apo 59084 exp 13 cart_id=5 vs domes on 4/3/2/1/6; lco 57802 exps 209-212 cart_id=22 vs 173 domes on carts 24/23/25; apo 59573 exp 1 has no dome flats at all. No dome flat was taken on that exposure's cartridge -- an observing-log gap, and the pipeline correctly falls back to relthrpt=1 with bit 2^2 set. OPEN policy question: those 8 science exposures ship un-relative-fluxed; get_fluxing_file's own comment says 'we could consider using a global file'.
+ApogeeReduction src/ar1D.jl:432	3	EXPECTED	stable	apo 59573 only: 3 object products (1 exposure x 3 chips) and MEASURED zero dome flats, so no tele/mjd key exists in valid_domeflats4fluxing. Strictly implies 3 of the 24 ar1D.jl:818 warnings -- one underlying fact, not two.
+SlackThreads [depot] src/SlackThreads.jl:40	2	EXPECTED	either	SlackError(invalid_auth) from the two relFlux stages; run launched from a worktree with no valid SLACK_TOKEN. Notification only, both stages completed. Goes to 0 with a valid token.
+ApogeeReduction src/ar1D.jl:706	1	EXPECTED	either	apo 60658 exp 0086 R object, fiber 195: only 1 good pixel, so interpolation is impossible and trace coords are NaN-filled and bitmasked. Failure is handled, not silent. 1 occurrence in 290 nights.

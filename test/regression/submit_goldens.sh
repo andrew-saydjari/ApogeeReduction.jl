@@ -339,21 +339,52 @@ for tele in "${teles[@]}"; do
 done
 
 # ---- stage: warnings census (regression metric, cf. REFACTOR_PLAN v1 §0) ----
+# NOTE: this named-substring census is a convenience view only. It counts what
+# somebody thought to name, and a pattern that has drifted from the message text
+# silently reports 0 (as "no useful relfluxing files" did in job 6980442: the
+# message reads "any useful relfluxing files", so a real count of 3 read as 0).
+# The authoritative inventory is the triage stage below, which enumerates every
+# @warn/@error emit site whether or not it is named here.
 stage_begin "warnings census"
 for pat in \
     "No good pixels found for fiber" \
+    "Only 1 good pixel found for fiber" \
     "Non-unique or unsorted wavelengths" \
     "no useful arclamp peaks" \
+    "found no useful arclamp peaks in ANY fibers" \
     "Could not find nightly average wave soln" \
     "No fluxing file available" \
-    "no useful relfluxing files" \
+    "useful relfluxing files" \
+    "was skipped for appearing to have the lamp turned off" \
+    "was skipped for not having the correct amount of traces" \
+    "Skipping trace fitting of" \
+    "Skipping trace plotting of" \
+    "No regularized trace params found" \
+    "Gain calibration file not found" \
+    "Read noise calibration file not found" \
     "Problem with getting fiber type information" \
     "Failed to get fiber type information" \
+    "Unknown fiber type for" \
+    "config_id is -1 for exposure" \
     "Exposure-type check" \
+    "Error reported by Slack API" \
     ; do
     n=$(grep -c "$pat" "$logfile" || true)
     echo "census: ${n}x \"$pat\""
 done
+stage_end
+
+# ---- stage: warnings triage (full inventory + diff vs adjudicated baseline) --
+stage_begin "warnings triage"
+triage=${base_dir}/test/regression/warnings_triage.sh
+triage_reference=${AR_WARN_REFERENCE:-${base_dir}/test/regression/warnings_reference_6980442.tsv}
+if [ -x "$triage" ]; then
+    # Never fail the run on this: a new emit site is for a human to read, not a
+    # reason to discard ten hours of reduction.
+    "$triage" --units -r "$triage_reference" "$logfile" || true
+else
+    echo "triage script not found at $triage — skipping"
+fi
 stage_end
 
 # ---- stage: per-day bookkeeping ---------------------------------------------

@@ -211,20 +211,43 @@ julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline_2d_1d.jl" \
     --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}"
 
 # ---- warnings census (regression metric, cf. REFACTOR_PLAN v1 §0) ----------
+# Convenience view only — see the note in submit_goldens.sh. The triage stage
+# below is the authoritative inventory.
 print_elapsed_time "Warnings census"
 for pat in \
     "No good pixels found for fiber" \
+    "Only 1 good pixel found for fiber" \
     "Non-unique or unsorted wavelengths" \
     "no useful arclamp peaks" \
+    "found no useful arclamp peaks in ANY fibers" \
     "Could not find nightly average wave soln" \
     "No fluxing file available" \
-    "no useful relfluxing files" \
+    "useful relfluxing files" \
+    "was skipped for appearing to have the lamp turned off" \
+    "was skipped for not having the correct amount of traces" \
+    "Skipping trace fitting of" \
+    "Skipping trace plotting of" \
+    "No regularized trace params found" \
+    "Gain calibration file not found" \
+    "Read noise calibration file not found" \
     "Problem with getting fiber type information" \
     "Failed to get fiber type information" \
+    "Unknown fiber type for" \
+    "config_id is -1 for exposure" \
     "Exposure-type check" \
+    "Error reported by Slack API" \
     ; do
     n=$(grep -c "$pat" "$logfile" || true)
     echo "census: ${n}x \"$pat\""
 done
+
+# ---- warnings triage (full inventory; no baseline diff for a single day) ----
+print_elapsed_time "Warnings triage"
+triage=${base_dir}/test/regression/warnings_triage.sh
+if [ -x "$triage" ]; then
+    "$triage" --units "$logfile" || true
+else
+    echo "triage script not found at $triage — skipping"
+fi
 
 print_elapsed_time "Test-day run completed"
