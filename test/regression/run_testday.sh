@@ -31,7 +31,7 @@
 #                         other value is interpreted as a base path [cca]
 #   AR_CALDIR_DARKS       dark cal dir  [2025_07_31/outdir_ref/]
 #   AR_CALDIR_FLATS       flat cal dir  [2025_07_31/outdir_ref/]
-#   AR_GAIN_READ_CAL_DIR  gain/readnoise cal dir [2025_07_31/pass_clean/]
+#   AR_GAIN_READ_CAL_DIR  gain/readnoise cal dir [2026_09_06/pass_clean/]
 #   AR_WORKERS            Distributed workers for pipeline.jl / pipeline_2d_1d
 #                         in local mode [24 — headroom on 32-core ccalin051]
 #   AR_SLURM              auto | true | false — see mode block below [auto]
@@ -62,7 +62,7 @@ AR_ALMANAC_SRC=${AR_ALMANAC_SRC:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_05_0
 AR_RAW_CLUSTER=${AR_RAW_CLUSTER:-"cca"}
 AR_CALDIR_DARKS=${AR_CALDIR_DARKS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 AR_CALDIR_FLATS=${AR_CALDIR_FLATS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
-AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
+AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"}
 AR_WORKERS=${AR_WORKERS:-24}
 AR_JULIA_VERSION=${AR_JULIA_VERSION:-"1.11.0"}
 AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE:-"commit_exists"}

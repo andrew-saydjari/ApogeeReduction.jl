@@ -87,7 +87,7 @@ AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE:-"commit_exists"}
 AR_RAW_CLUSTER=${AR_RAW_CLUSTER:-"cca"}
 AR_CALDIR_DARKS=${AR_CALDIR_DARKS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 AR_CALDIR_FLATS=${AR_CALDIR_FLATS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
-AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
+AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"}
 AR_WORKERS=${AR_WORKERS:-24}    # local (AR_SLURM=false) mode only
 AR_EXP_CLASS_MODEL=""           # decision: goldens without the classifier
 

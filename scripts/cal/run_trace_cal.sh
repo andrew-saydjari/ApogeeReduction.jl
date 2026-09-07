@@ -42,7 +42,7 @@ domerunlist=${outdir}almanac/runlist_dome_${runname}.h5
 quartzrunlist=${outdir}almanac/runlist_quartz_${runname}.h5
 caldir_darks=${4:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
 caldir_flats=${5:-"/mnt/ceph/users/asaydjari/working/2025_07_31/outdir_ref/"}
-gain_read_cal_dir=${6:-"/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"}
+gain_read_cal_dir=${6:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"}
 
 # nice function to print the elapsed time at each step
 print_elapsed_time() {
