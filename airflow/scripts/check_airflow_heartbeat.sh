@@ -14,13 +14,17 @@
 #   */30 * * * * /mnt/home/sdssv/gitcode/ApogeeReduction.jl/airflow/scripts/check_airflow_heartbeat.sh
 #
 # Env (or edit defaults below): SLACK_TOKEN required for posting;
-# AR_SLACK_CHANNEL optional (defaults to the dev channel).
+# AR_SLACK_ALERT_CHANNEL optional — defaults to PROD C08B7FKMP16. Like the
+# airflow-failure-notify unit, this watchdog deliberately does NOT read
+# AR_SLACK_CHANNEL: that knob demotes the DAG's routine posts to dev for
+# testing, and an outage alert must not follow it into a channel nobody
+# watches. Set AR_SLACK_ALERT_CHANNEL=C07KQ7BJY5P to test this script.
 
 set -u
 
 HEARTBEAT_FILE="${AR_HEARTBEAT_FILE:-/mnt/ceph/users/sdssv/work/daily/metrics/airflow_heartbeat.txt}"
 METRICS_FILE="${AR_METRICS_FILE:-/mnt/ceph/users/sdssv/work/daily/metrics/daily_metrics.csv}"
-CHANNEL="${AR_SLACK_CHANNEL:-C07KQ7BJY5P}"   # dev; prod = C08B7FKMP16
+CHANNEL="${AR_SLACK_ALERT_CHANNEL:-C08B7FKMP16}"   # prod; dev = C07KQ7BJY5P
 HEARTBEAT_STALE_MIN="${HEARTBEAT_STALE_MIN:-45}"    # 10-min beat + slack
 SLA_HOURS="${SLA_HOURS:-30}"                         # daily row expected
 ALERT_COOLDOWN_HOURS="${ALERT_COOLDOWN_HOURS:-6}"

@@ -26,7 +26,22 @@ AR_METRICS_DIR=/mnt/ceph/users/sdssv/work/daily/metrics/
 # AR_AIRFLOW_MODE=local
 AR_WORKERS_DEFAULT=16
 
-# Slack channel: the CODE default is prod C08B7FKMP16 (ar_main.py's
-# behavior). This override keeps the supervised first nights on dev;
-# remove it to promote to prod once the DAG is trusted.
-AR_SLACK_CHANNEL=C07KQ7BJY5P
+# Slack channel for the DAG's routine posts. Promoted to prod 2026-09-06
+# (AKS) after the supervised nights on dev; the code default is prod
+# C08B7FKMP16 anyway (ar_main.py's behavior, ar_common.py SLACK_CHANNEL_PROD).
+#
+# It is set EXPLICITLY rather than left unset on purpose: leaving it unset
+# used to route the "orchestrator is DOWN" systemd alert to dev, and being
+# explicit here keeps the deployed channel greppable in one place.
+# To demote to dev for testing, swap the comment on the two lines below
+# (and remember it does NOT move the outage alerts — see below).
+AR_SLACK_CHANNEL=C08B7FKMP16
+# AR_SLACK_CHANNEL=C07KQ7BJY5P
+
+# Channel for OUTAGE alerts only: the airflow-failure-notify systemd unit
+# ("airflow-standalone entered FAILED state") and the cross-machine
+# check_airflow_heartbeat.sh watchdog. Separate from AR_SLACK_CHANNEL so
+# demoting the DAG's routine posts to dev cannot silently demote the alert
+# that says the pipeline is down. Defaults to prod C08B7FKMP16 in both
+# consumers; uncomment only to test the alerting path itself.
+# AR_SLACK_ALERT_CHANNEL=C07KQ7BJY5P
