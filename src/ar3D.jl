@@ -274,6 +274,120 @@ function sutr_wood(dimages, gain_mat, read_var_mat, last_unsaturated, not_cosmic
     return rates, ivars, chi2s # outputs in DN/read (not multiplied by gain)
 end
 
+"""
+Fraction of pixels that must agree bit-for-bit between two telescopes' calibration maps
+before we declare one to be a copy of the other. Deliberately below 1 so that a copy which
+has been perturbed in a handful of pixels (e.g. by a bad-pixel cleaning pass run after the
+copy) is still caught -- the guard must not be defeatable by editing one pixel.
+"""
+const CALIB_COPY_FRACTION_THRESHOLD = 0.99
+
+"""
+Physically allowed range for the *median* of an APOGEE H2RG gain map, in e-/DN.
+Deliberately wide: this is a units/corruption trip-wire, not a per-telescope acceptance
+band. See `assert_calib_map_plausible`.
+"""
+const GAIN_MEDIAN_BOUNDS_E_PER_DN = (0.5, 10.0)
+
+"""
+Physically allowed range for the *median* of an APOGEE H2RG read-noise map, in DN
+(the file stores read noise, not read variance). Deliberately wide; see
+`assert_calib_map_plausible`.
+"""
+const READ_NOISE_MEDIAN_BOUNDS_DN = (1.0, 50.0)
+
+"""
+    assert_calib_map_telescope_specific(path, kind, tele, chip, dat)
+
+Error if the just-loaded detector calibration map `dat` for telescope `tele` is (a copy of)
+another telescope's map living in the same calibration directory.
+
+Every other file in the directory named `\$(kind)_<tele>_\$(chip).fits` is read and compared
+against `dat` pixel-by-pixel. If at least `CALIB_COPY_FRACTION_THRESHOLD` of the pixels agree
+bit-for-bit, this throws.
+
+Why this is an error and not a warning: from 2025-06-11 to 2026-09-06, every LCO reduction ran
+its entire 2D error model on byte-identical copies of APO's gain and read-noise maps, because a
+notebook cell wrote the LCO products from the APO arrays. The pre-existing `@warn`-plus-fallback
+in `load_gain_maps` / `load_read_var_maps` only fires when a file is *missing*; a placeholder
+file defeats it silently, which is exactly what happened for 15 months. The comparison is on
+pixel content rather than file bytes so that a re-write with a different FITS header does not
+sneak past, and the threshold is a fraction rather than exact equality so that a lightly-edited
+copy does not either.
+"""
+function assert_calib_map_telescope_specific(path, kind, tele, chip, dat)
+    dir = dirname(path)
+    isdir(dir) || return nothing
+    pat = Regex("^" * kind * "_(.+)_" * chip * "\\.fits\$")
+    for fname in readdir(dir)
+        m = match(pat, fname)
+        isnothing(m) && continue
+        otherTele = m.captures[1]
+        lowercase(otherTele) == lowercase(tele) && continue
+        otherPath = joinpath(dir, fname)
+        fOther = FITS(otherPath)
+        otherDat = read(fOther[1])
+        close(fOther)
+        size(otherDat) == size(dat) || continue
+        # bit-for-bit comparison; isequal so that NaN == NaN, which `==` would miss
+        fracSame = count(isequal.(dat, otherDat)) / length(dat)
+        if fracSame >= CALIB_COPY_FRACTION_THRESHOLD
+            relation = (fracSame == 1) ? "identical to" : "a near-copy of"
+            pct = round(100 * fracSame, digits = 4)
+            tol = round(100 * (1 - CALIB_COPY_FRACTION_THRESHOLD), digits = 2)
+            error("""
+                  Detector calibration map for telescope "$tele" is $relation "$otherTele"'s map.
+
+                      $(kind) chip $(chip), $pct% of pixels agree bit-for-bit
+                      this telescope : $path
+                      other telescope: $otherPath
+
+                  Each telescope has its own detector and therefore its own gain and read-noise
+                  maps; identical maps mean one telescope's reductions are running on the other
+                  telescope's detector constants, which silently corrupts every ar2D uncertainty
+                  and everything derived from it.
+
+                  What to do: rebuild the calibration directory so that "$tele" gets its own
+                  measured $(kind) maps, and point --gain_read_cal_dir at it. Confirm with
+                      md5sum $(joinpath(dir, kind))_*_$(chip).fits
+                  (all entries must differ). Do NOT silence this by perturbing the file: the
+                  check is on pixel content and tolerates up to $tol% of pixels differing.
+                  """)
+        end
+    end
+    return nothing
+end
+
+"""
+    assert_calib_map_plausible(path, kind, tele, chip, med, bounds, unit)
+
+Error if the median of a detector calibration map falls outside a physically possible range.
+
+This is a coarse trip-wire for a units error, a reciprocal, or a corrupt/truncated file --
+NOT a per-telescope acceptance band. It is deliberately loose, because the failure it is
+paired with (`assert_calib_map_telescope_specific`) is *not* one a plausibility range can
+catch: APO's gains (1.45-1.81 e-/DN) and LCO's (2.56-2.70 e-/DN) are both entirely reasonable
+H2RG values, so a tight per-telescope band would be the only kind that fires -- and a band tight
+enough to fire would also have to be edited every time the detectors are legitimately
+recalibrated, which turns a safety check into a maintenance trap and invites someone to widen it
+under deadline. The wide bound costs nothing and only fires on values no APOGEE detector can have.
+"""
+function assert_calib_map_plausible(path, kind, tele, chip, med, bounds, unit)
+    if !isfinite(med) || !(bounds[1] <= med <= bounds[2])
+        error("""
+              Detector calibration map for telescope "$tele" is not physically plausible.
+
+                  $(kind) chip $(chip), median = $med $unit, allowed range $(bounds[1]) to $(bounds[2]) $unit
+                  file: $path
+
+              A median outside this (deliberately wide) range indicates a units error, an
+              inverted quantity, or a corrupt file rather than a real recalibration. Check the
+              file and the calibration directory passed to --gain_read_cal_dir.
+              """)
+    end
+    return nothing
+end
+
 function load_gain_maps(gainReadCalDir, tele, chips)
     gainMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
@@ -282,7 +396,11 @@ function load_gain_maps(gainReadCalDir, tele, chips)
             f = FITS(gainMatPath)
             dat = read(f[1])
             close(f)
-            gainView = nanzeromedian(dat) .* ones(Float64, 2560, 2048)
+            assert_calib_map_telescope_specific(gainMatPath, "gain", tele, chip, dat)
+            gainMed = nanzeromedian(dat)
+            assert_calib_map_plausible(
+                gainMatPath, "gain", tele, chip, gainMed, GAIN_MEDIAN_BOUNDS_E_PER_DN, "e-/DN")
+            gainView = gainMed .* ones(Float64, 2560, 2048)
             view(gainView, 5:2044, 5:2044) .= dat
             gainMatDict[chip] = gainView
         else
@@ -300,10 +418,15 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
         readVarMatPath = gainReadCalDir * "rdnoise_" * tele * "_" * chip * ".fits"
         if isfile(readVarMatPath)
             f = FITS(readVarMatPath)
-            # TODO: Tim and I need to sort out this factor of 2
-            #            dat = (read(f[1]) .^ 2) ./ 2
-            dat = (read(f[1]) .^ 2)
+            rawdat = read(f[1]) # read noise in DN, before squaring
             close(f)
+            assert_calib_map_telescope_specific(
+                readVarMatPath, "rdnoise", tele, chip, rawdat)
+            assert_calib_map_plausible(readVarMatPath, "rdnoise", tele, chip,
+                nanzeromedian(rawdat), READ_NOISE_MEDIAN_BOUNDS_DN, "DN")
+            # TODO: Tim and I need to sort out this factor of 2
+            #            dat = (rawdat .^ 2) ./ 2
+            dat = (rawdat .^ 2)
             refval = nanzeromedian(dat)
             readVarView = refval .* ones(Float64, 2560, 2048)
             view(readVarView, 5:2044, 5:2044) .= dat
