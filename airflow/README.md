@@ -187,7 +187,12 @@ pass-through (no-data LCO no longer blocks APO).
   tests; SLACK_TOKEN is scrubbed from the Julia steps), `off`.
 - Channel: production `C08B7FKMP16` by default (ar_main.py always posted to
   #apogee-reduction-jl); dev `C07KQ7BJY5P` via `AR_SLACK_CHANNEL` env or
-  `slack_channel` conf when testing.
+  `slack_channel` conf when testing. The deployed airflow_env.sh has set prod
+  explicitly since the 2026-09-06 promotion (INSTALL.md step 7.3).
+- Outage alerts (`airflow-failure-notify.service`,
+  `check_airflow_heartbeat.sh`) are on a **separate** knob,
+  `AR_SLACK_ALERT_CHANNEL`, also defaulting to prod: demoting the routine
+  posts to dev must not silently demote "the orchestrator is down".
 
 ## Metrics (N1 seed)
 

@@ -1,5 +1,17 @@
 # Oneshot Slack alert fired by airflow-standalone.service's OnFailure=.
 # PREPARED, NOT INSTALLED — see airflow/INSTALL.md.
+#
+# CHANNEL POLICY (this is an OUTAGE alert, not routine chatter):
+#   * The channel is AR_SLACK_ALERT_CHANNEL, which defaults to PROD
+#     C08B7FKMP16 (#apogee-reduction-jl) — the same prod constant the DAGs
+#     default to (ar_common.py SLACK_CHANNEL_PROD).
+#   * It is deliberately NOT AR_SLACK_CHANNEL. That knob demotes the DAG's
+#     routine posts to the dev channel for testing; demoting routine posts
+#     must not silently demote "the orchestrator is down" to a channel
+#     nobody watches. Set AR_SLACK_ALERT_CHANNEL explicitly (e.g. to dev
+#     C07KQ7BJY5P) only when testing this unit itself.
+#   * The default is prod rather than "refuse to post when unset": the only
+#     thing worse than this alert landing in dev is it not landing at all.
 
 [Unit]
 Description=Slack alert: airflow-standalone entered failed state
@@ -10,4 +22,4 @@ EnvironmentFile=%h/airflow/airflow_env.sh
 ExecStart=/bin/bash -c 'curl -sS -X POST https://slack.com/api/chat.postMessage \
   -H "Authorization: Bearer ${SLACK_TOKEN}" \
   -H "Content-Type: application/json; charset=utf-8" \
-  -d "{\"channel\": \"${AR_SLACK_CHANNEL:-C07KQ7BJY5P}\", \"text\": \":rotating_light: airflow-standalone.service on $(hostname) entered FAILED state — the APOGEE daily orchestrator is down. journalctl --user -u airflow-standalone for details.\"}"'
+  -d "{\"channel\": \"${AR_SLACK_ALERT_CHANNEL:-C08B7FKMP16}\", \"text\": \":rotating_light: airflow-standalone.service on $(hostname) entered FAILED state — the APOGEE daily orchestrator is down. journalctl --user -u airflow-standalone for details.\"}"'

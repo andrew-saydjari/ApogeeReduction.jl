@@ -49,8 +49,14 @@ AR_MODE_DEFAULT = os.environ.get("AR_AIRFLOW_MODE", "slurm")
 AR_WORKERS_DEFAULT = int(os.environ.get("AR_WORKERS_DEFAULT", "16"))
 
 # Slack channels: PROD is the posting default (restored 2026-09-03 per AKS —
-# ar_main.py always posted to #apogee-reduction-jl); export
-# AR_SLACK_CHANNEL=C07KQ7BJY5P (dev) in the environment when testing.
+# ar_main.py always posted to #apogee-reduction-jl), and as of the 2026-09-06
+# promotion the deployed airflow_env.sh sets AR_SLACK_CHANNEL to prod
+# explicitly, so both the env and the default now say prod. Export
+# AR_SLACK_CHANNEL=C07KQ7BJY5P (dev), or pass conf {"slack_channel": ...},
+# to demote these routine posts when testing. Note that this knob does NOT
+# move the outage alerts (airflow-failure-notify.service,
+# check_airflow_heartbeat.sh) — those read AR_SLACK_ALERT_CHANNEL and
+# default to prod, so "the orchestrator is down" cannot land in dev.
 SLACK_CHANNEL_DEV = "C07KQ7BJY5P"   # apogee-reduction-jl-dev
 SLACK_CHANNEL_PROD = "C08B7FKMP16"  # apogee-reduction-jl
 AR_SLACK_CHANNEL = os.environ.get("AR_SLACK_CHANNEL", SLACK_CHANNEL_PROD)

@@ -119,8 +119,9 @@ through the tunnel (raw/ layout + missing_exposures verified).
 ```bash
 cp $REPO/airflow/scripts/airflow_env.sh.example /mnt/home/sdssv/airflow/airflow_env.sh
 chmod 600 /mnt/home/sdssv/airflow/airflow_env.sh
-# then fill in: SLACK_TOKEN (bot apogeereductionjl), PUBLIC_URL_SLUG,
-# AR_SLACK_CHANNEL (dev C07KQ7BJY5P until trusted, then prod C08B7FKMP16)
+# then fill in: SLACK_TOKEN (bot apogeereductionjl), PUBLIC_URL_SLUG.
+# AR_SLACK_CHANNEL ships as prod C08B7FKMP16 (promoted 2026-09-06); leave it
+# as-is. Demote to dev C07KQ7BJY5P only for testing (see step 7.3).
 ```
 
 The almanac DB identity is NOT in this file: it comes from
@@ -166,9 +167,10 @@ heartbeat:
 airflow dags list                      # expect: apogee_daily, apogee_heartbeat
 airflow dags unpause apogee_heartbeat
 airflow dags unpause apogee_daily
-# supervised first night — posts go to the PROD channel unless
-# AR_SLACK_CHANNEL=C07KQ7BJY5P is set in airflow_env.sh (step 3) or passed
-# as conf. Runs in slurm mode (the default) unless overridden:
+# Routine posts go to the PROD channel (promoted 2026-09-06; airflow_env.sh
+# sets AR_SLACK_CHANNEL=C08B7FKMP16 explicitly). A one-off test run can still
+# be routed to dev with conf, without touching the env file. Runs in slurm
+# mode (the default) unless overridden:
 airflow dags trigger apogee_daily --conf \
   '{"mjd": <recent>, "run_kind": "test", "slack_channel": "C07KQ7BJY5P"}'
 ```
@@ -187,7 +189,9 @@ scrontab -e   # add:
 (or source the token from a chmod-600 file inside a tiny wrapper rather than
 inlining it in scrontab). It alerts on: stale heartbeat (>45 min) and no new
 daily-metrics row in >30 h (the SLA-miss substitute), rate-limited to one
-alert/6 h per condition.
+alert/6 h per condition. It posts to prod `C08B7FKMP16` unless
+`AR_SLACK_ALERT_CHANNEL` says otherwise — this scrontab environment does not
+see airflow_env.sh, so no channel needs to be passed here.
 
 ## 7. Open decisions (**AKS**)
 
@@ -202,9 +206,23 @@ alert/6 h per condition.
    `nice -n 10` on ccalin051 (~1h50m at 8 workers) — the testing mode, or a
    deliberate alternative on the dedicated node. Flip with
    `AR_AIRFLOW_MODE=local` or conf `{"mode": "local"}`.
-3. **Slack channel** — the code default is PROD (`C08B7FKMP16`,
-   ar_main.py's behavior). For the supervised first nights, set
-   `AR_SLACK_CHANNEL=C07KQ7BJY5P` (dev) in airflow_env.sh (step 3);
-   promotion to prod = removing that override once things look right.
+3. **Slack channel** — SETTLED 2026-09-06: promoted to prod. The supervised
+   nights on dev are over, and `airflow_env.sh` (step 3) now sets
+   `AR_SLACK_CHANNEL=C08B7FKMP16` **explicitly**, which is also the code
+   default (`ar_common.py` `SLACK_CHANNEL_PROD`, ar_main.py's behavior).
+   Explicit rather than simply deleting the override, because the
+   deployed channel should be greppable in one place, and because
+   "unset" used to be the state that misrouted the outage alert (below).
+   To demote for testing: swap to `C07KQ7BJY5P` in airflow_env.sh (the
+   commented line is right there), or, better for a one-off, pass conf
+   `{"slack_channel": "C07KQ7BJY5P"}` and leave the deployment alone.
+
+   **Outage alerts are a separate knob.** `airflow-failure-notify.service`
+   and `check_airflow_heartbeat.sh` read `AR_SLACK_ALERT_CHANNEL` and
+   default to prod `C08B7FKMP16`. They used to default to *dev*, so an
+   unset (or dev-demoted) `AR_SLACK_CHANNEL` sent "the APOGEE daily
+   orchestrator is down" to a channel nobody watches. Demoting the DAG's
+   routine posts no longer moves these alerts; set
+   `AR_SLACK_ALERT_CHANNEL` explicitly only to test the alerting path.
 4. **sqlite + LocalExecutor**: fine at this scale (2 DAG runs/day + a
    heartbeat); if concurrency is ever raised, move to postgres.
