@@ -62,7 +62,7 @@ checkpoint_mode=${6:-"commit_exists"}
 run_2d_only=${7:-false}  
 caldir_darks=${8:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 caldir_flats=${9:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
-gain_read_cal_dir=${10:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"}
+gain_read_cal_dir=${10:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"}
 almanac_clobber_mode=${11:-false}
 # Run the arMADGICS stage after the AR reduction. Set via positional arg 12 or the
 # RUN_MADGICS env var (exported at sbatch time); positional arg wins. Default: true (daily).

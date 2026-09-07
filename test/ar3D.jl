@@ -180,3 +180,199 @@ end
     @test iv2[2, 2] == 1 / (2 * readVar + 10.0 / gain)
     @test all(iv2 .> 0) && all(isfinite.(iv2))
 end
+
+@testset "detector calibration guards" begin
+    # Regression test for the defect described in
+    #   .../2026_09_06/lco_gain_investigation/LCO_ERROR_REPORT.md
+    #   .../2026_09_06/lco_gain_recovery/LCO_CALIB_RECOVERY.md
+    # From 2025-06-11 to 2026-09-06 every LCO reduction ran its 2D error model on
+    # byte-identical copies of APO's gain and read-noise maps. The pre-existing
+    # @warn-plus-fallback only fires on a MISSING file, so the placeholder copies
+    # defeated it silently for 15 months. These tests assert that the copied-file
+    # situation now raises.
+
+    writefits(path, dat) = begin
+        f = FITS(path, "w")
+        write(f, dat)
+        close(f)
+    end
+
+    rng = MersenneTwister(4242)
+
+    # ------------------------------------------------------------------
+    # unit-level: the guard itself, on small arrays (fast)
+    # ------------------------------------------------------------------
+    mktempdir() do dir
+        n = 40
+        apo = 1.80 .+ 0.05 .* randn(rng, n, n)
+        writefits(joinpath(dir, "gain_apo_R.fits"), apo)
+
+        # (1) an exact copy must raise, from either telescope's point of view
+        writefits(joinpath(dir, "gain_lco_R.fits"), copy(apo))
+        lcoPath = joinpath(dir, "gain_lco_R.fits")
+        err = try
+            ApogeeReduction.assert_calib_map_telescope_specific(
+                lcoPath, "gain", "lco", "R", copy(apo))
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        # the message must name BOTH files and be actionable
+        @test occursin("gain_lco_R.fits", err.msg)
+        @test occursin("gain_apo_R.fits", err.msg)
+        @test occursin("md5sum", err.msg)
+        # symmetric: loading apo against the lco copy raises too
+        @test_throws ErrorException ApogeeReduction.assert_calib_map_telescope_specific(
+            joinpath(dir, "gain_apo_R.fits"), "gain", "apo", "R", copy(apo))
+
+        # (2) NOT defeatable by perturbing a few pixels. This is the real hazard:
+        #     the deployed pass_clean APO files differ from their pass4 parents by
+        #     as little as ONE pixel out of 4.16e6, so an exact-hash check alone
+        #     would be defeated by any post-copy cleaning pass.
+        nearcopy = copy(apo)
+        nearcopy[1:8] .+= 1.0   # 8/1600 = 0.5% of pixels differ
+        writefits(joinpath(dir, "gain_lco_R.fits"), nearcopy)
+        @test_throws ErrorException ApogeeReduction.assert_calib_map_telescope_specific(
+            lcoPath, "gain", "lco", "R", nearcopy)
+
+        # (3) NaNs in identical positions still count as identical (isequal, not ==)
+        nanapo = copy(apo)
+        nanapo[3, 3] = NaN
+        writefits(joinpath(dir, "gain_apo_R.fits"), nanapo)
+        writefits(joinpath(dir, "gain_lco_R.fits"), copy(nanapo))
+        @test_throws ErrorException ApogeeReduction.assert_calib_map_telescope_specific(
+            lcoPath, "gain", "lco", "R", copy(nanapo))
+
+        # (4) genuinely different maps must pass (LCO really does have a different gain)
+        writefits(joinpath(dir, "gain_apo_R.fits"), apo)
+        lco = 2.70 .+ 0.05 .* randn(rng, n, n)
+        writefits(joinpath(dir, "gain_lco_R.fits"), lco)
+        @test isnothing(ApogeeReduction.assert_calib_map_telescope_specific(
+            lcoPath, "gain", "lco", "R", lco))
+
+        # (5) a different chip's file is not compared against
+        writefits(joinpath(dir, "gain_apo_G.fits"), lco)
+        @test isnothing(ApogeeReduction.assert_calib_map_telescope_specific(
+            lcoPath, "gain", "lco", "R", lco))
+    end
+
+    # ------------------------------------------------------------------
+    # missing-file guard. Until 2026-09-06 this was a @warn plus a flat
+    # stand-in (1.9 e-/DN, 25 DN^2), which is how three cal scripts came to
+    # run on invented detector constants while pointing at dead paths.
+    # ------------------------------------------------------------------
+    mktempdir() do dir
+        caldir = dir * "/"
+        n = 40
+        # (1) directory exists but is empty -> both loaders raise
+        eg = try
+            ApogeeReduction.load_gain_maps(caldir, "lco", "R")
+            nothing
+        catch e
+            e
+        end
+        @test eg isa ErrorException
+        @test occursin("gain_lco_R.fits", eg.msg)      # names the missing file
+        @test occursin("lco", eg.msg)                  # names the telescope
+        @test occursin("--gain_read_cal_dir", eg.msg)  # says what to do
+        @test occursin("does not contain this map", eg.msg)
+        @test !occursin("1.9", eg.msg)                 # no flat stand-in offered
+        er = try
+            ApogeeReduction.load_read_var_maps(caldir, "lco", "R")
+            nothing
+        catch e
+            e
+        end
+        @test er isa ErrorException
+        @test occursin("rdnoise_lco_R.fits", er.msg)
+
+        # (2) directory itself absent -> different, more specific message
+        e2 = try
+            ApogeeReduction.load_gain_maps(joinpath(dir, "nope") * "/", "apo", "R")
+            nothing
+        catch e
+            e
+        end
+        @test e2 isa ErrorException
+        @test occursin("calibration directory itself does not exist", e2.msg)
+
+        # (3) the directory listing is echoed, so a naming/telescope mismatch is
+        #     obvious at a glance rather than needing a second round trip.
+        #     Written at the real map size so that (4) can load it for real.
+        writefits(joinpath(dir, "gain_apo_R.fits"), 1.80 .+ 0.05 .* randn(rng, 2040, 2040))
+        e3 = try
+            ApogeeReduction.load_gain_maps(caldir, "lco", "R")
+            nothing
+        catch e
+            e
+        end
+        @test e3 isa ErrorException
+        @test occursin("gain_apo_R.fits", e3.msg)
+
+        # (4) a missing chip is fatal even when an earlier chip loaded fine --
+        #     the loader must not return a partially-populated dict
+        @test_throws ErrorException ApogeeReduction.load_gain_maps(caldir, "apo", "RG")
+        @test ApogeeReduction.load_gain_maps(caldir, "apo", "R")["R"] isa Matrix{Float64}
+    end
+
+    # ------------------------------------------------------------------
+    # plausibility trip-wire
+    # ------------------------------------------------------------------
+    for med in (1.45, 1.81, 2.56, 2.70)  # real APO and LCO gains
+        @test isnothing(ApogeeReduction.assert_calib_map_plausible(
+            "p", "gain", "lco", "R", med,
+            ApogeeReduction.GAIN_MEDIAN_BOUNDS_E_PER_DN, "e-/DN"))
+    end
+    for med in (1e-3, 0.0, 1e4, NaN)     # units error / reciprocal / corrupt
+        @test_throws ErrorException ApogeeReduction.assert_calib_map_plausible(
+            "p", "gain", "lco", "R", med,
+            ApogeeReduction.GAIN_MEDIAN_BOUNDS_E_PER_DN, "e-/DN")
+    end
+    for med in (2.93, 5.24, 8.01, 11.04) # real APO and LCO read noise, DN
+        @test isnothing(ApogeeReduction.assert_calib_map_plausible(
+            "p", "rdnoise", "lco", "R", med,
+            ApogeeReduction.READ_NOISE_MEDIAN_BOUNDS_DN, "DN"))
+    end
+    for med in (0.01, 1e6, NaN)
+        @test_throws ErrorException ApogeeReduction.assert_calib_map_plausible(
+            "p", "rdnoise", "lco", "R", med,
+            ApogeeReduction.READ_NOISE_MEDIAN_BOUNDS_DN, "DN")
+    end
+
+    # ------------------------------------------------------------------
+    # end-to-end: the guard is actually wired into the load path, at the real
+    # 2040x2040 map size the loaders require. This is the test that would have
+    # caught the 15-month defect.
+    # ------------------------------------------------------------------
+    mktempdir() do dir
+        caldir = dir * "/"  # loaders build paths by string concatenation
+        m = 2040
+        gapo = 1.80 .+ 0.05 .* randn(rng, m, m)
+        rapo = 11.0 .+ 0.4 .* randn(rng, m, m)
+        writefits(joinpath(dir, "gain_apo_R.fits"), gapo)
+        writefits(joinpath(dir, "rdnoise_apo_R.fits"), rapo)
+
+        # the exact 2026-09-06 failure: LCO files are copies of APO's
+        writefits(joinpath(dir, "gain_lco_R.fits"), copy(gapo))
+        writefits(joinpath(dir, "rdnoise_lco_R.fits"), copy(rapo))
+        @test_throws ErrorException ApogeeReduction.load_gain_maps(caldir, "lco", "R")
+        @test_throws ErrorException ApogeeReduction.load_read_var_maps(caldir, "lco", "R")
+
+        # with the real (recovered) LCO values in place, both load cleanly and
+        # carry the LCO numbers, not APO's
+        glco = 2.556 .+ 0.05 .* randn(rng, m, m)
+        rlco = 3.877 .+ 0.3 .* randn(rng, m, m)
+        writefits(joinpath(dir, "gain_lco_R.fits"), glco)
+        writefits(joinpath(dir, "rdnoise_lco_R.fits"), rlco)
+        gd = ApogeeReduction.load_gain_maps(caldir, "lco", "R")
+        rd = ApogeeReduction.load_read_var_maps(caldir, "lco", "R")
+        @test size(gd["R"]) == (2560, 2048)
+        @test gd["R"][5:2044, 5:2044] == glco
+        @test isapprox(median(gd["R"]), 2.556, atol = 0.02)
+        @test isapprox(sqrt(median(rd["R"])), 3.877, atol = 0.05)
+        # APO still loads, and is unchanged by all of this
+        gda = ApogeeReduction.load_gain_maps(caldir, "apo", "R")
+        @test gda["R"][5:2044, 5:2044] == gapo
+    end
+end

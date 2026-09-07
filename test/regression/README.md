@@ -35,7 +35,7 @@ All paths are configurable by env var (see the header of `run_testday.sh`):
 `allobs_57600_61160.h5`), `AR_RAW_CLUSTER` (`cca` → raw `.apz` mirror
 `/mnt/ceph/users/sdssv/raw/APOGEE`, or an explicit base path),
 `AR_CALDIR_DARKS` / `AR_CALDIR_FLATS` (default `2025_07_31/outdir_ref/`),
-`AR_GAIN_READ_CAL_DIR` (default `2025_07_31/pass_clean/`), `AR_WORKERS`
+`AR_GAIN_READ_CAL_DIR` (default `2026_09_06/pass_clean/`), `AR_WORKERS`
 (default 24), `AR_JULIA_VERSION` (default 1.11.0, matching run_all.sh),
 `AR_CHECKPOINT_MODE`, `AR_CHIPS`, `AR_EXP_CLASS_MODEL`. Set
 `AR_TESTDAY_CONFIG=<file>` to source a config file with those assignments.

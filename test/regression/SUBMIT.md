@@ -51,7 +51,7 @@ anything.
   machine was bit-identical for both apo 59429 and apo 58011. Fresh bulk
   goldens from this script supersede `@f76194a`.)
 - Raw `.apz`: cca mirror `/mnt/ceph/users/sdssv/raw/APOGEE` (via `--cluster cca`).
-- Cals: darks/flats `2025_07_31/outdir_ref/`, gain/read `2025_07_31/pass_clean/`.
+- Cals: darks/flats `2025_07_31/outdir_ref/`, gain/read `2026_09_06/pass_clean/`.
 - No exposure-classifier model (decision 2026-08-31: goldens match run_all.sh
   production behavior; the classifier enters later via R1/O5).
 

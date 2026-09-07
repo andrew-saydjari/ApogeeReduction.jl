@@ -40,7 +40,7 @@ runname="dark_cal_${tele}_${mjd_start}_${mjd_end}"
 outdir="outdir/" # launch from working date directory
 almanac_file=${outdir}almanac/${runname}.h5
 runlist=${outdir}almanac/runlist_${runname}.h5
-gain_read_cal_dir="/mnt/ceph/users/asaydjari/working/2025_07_31/pass_clean/"
+gain_read_cal_dir="/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
 
 # nice function to print the elapsed time at each step
 print_elapsed_time() {
