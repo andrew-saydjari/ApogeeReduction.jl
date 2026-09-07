@@ -388,26 +388,77 @@ function assert_calib_map_plausible(path, kind, tele, chip, med, bounds, unit)
     return nothing
 end
 
+"""
+    assert_calib_map_present(path, kind, tele, chip)
+
+Error if a detector calibration map is missing.
+
+This used to be a `@warn` plus a flat stand-in (1.9 e-/DN for gain, 25 DN^2 for read
+variance). That is how `scripts/cal/run_trace_cal.sh`, `scripts/cal/run_dark_cal.sh` and
+`scripts/cal/make_stack_flats.jl` came to run on invented detector constants for both
+telescopes -- they pointed at calibration directories that do not exist on this cluster, and
+nothing louder than a warning said so. Silently substituting a plausible-looking number for a
+measurement produces results that look fine and are wrong; failing does not.
+
+There is deliberately no opt-out. As of this change every caller in the repository resolves to
+a directory containing all twelve maps, so this cannot fire in a supported configuration. If a
+future telescope or era genuinely has to be reduced before its calibration campaign exists, add
+an explicit, recorded flag *at that time* -- do not pre-build the escape hatch, because an
+escape hatch that exists is one that gets used under deadline, which is exactly how this
+happened.
+"""
+function assert_calib_map_present(path, kind, tele, chip)
+    isfile(path) && return nothing
+    dir = dirname(path)
+    context = if !isdir(dir)
+        """
+            The calibration directory itself does not exist:
+                $dir
+            Check the path passed as --gain_read_cal_dir (or gainReadCalDir)."""
+    else
+        present = filter(f -> endswith(f, ".fits"), readdir(dir))
+        listing = isempty(present) ? "        (no .fits files at all)" :
+                  join(("        " * f for f in sort(present)), "\n")
+        """
+            The calibration directory exists but does not contain this map:
+                $dir
+            It does contain:
+        $listing"""
+    end
+    error("""
+          Detector calibration map missing: $(kind) for telescope "$tele", chip $chip.
+
+              expected: $path
+
+          $context
+
+          This is fatal by design. Until 2026-09-06 a missing map was only a warning and the
+          pipeline substituted a flat stand-in value, so entire reduction campaigns ran on
+          invented detector constants without anyone noticing. Every 2D uncertainty, and
+          everything derived from one, is meaningless without the real map.
+
+          What to do: point --gain_read_cal_dir at a directory holding
+          $(kind)_$(tele)_$(chip).fits (and its partners for the other chips and telescope),
+          or measure the missing maps. Do not work around this by copying another telescope's
+          file -- that is separately detected and rejected.
+          """)
+end
+
 function load_gain_maps(gainReadCalDir, tele, chips)
     gainMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
         gainMatPath = gainReadCalDir * "gain_" * tele * "_" * chip * ".fits"
-        if isfile(gainMatPath)
-            f = FITS(gainMatPath)
-            dat = read(f[1])
-            close(f)
-            assert_calib_map_telescope_specific(gainMatPath, "gain", tele, chip, dat)
-            gainMed = nanzeromedian(dat)
-            assert_calib_map_plausible(
-                gainMatPath, "gain", tele, chip, gainMed, GAIN_MEDIAN_BOUNDS_E_PER_DN, "e-/DN")
-            gainView = gainMed .* ones(Float64, 2560, 2048)
-            view(gainView, 5:2044, 5:2044) .= dat
-            gainMatDict[chip] = gainView
-        else
-            #once we have the LCO calibrations, we should make this warning a flag that propagates and a harder error
-            @warn "Gain calibration file not found for chip $chip at $gainMatPath"
-            gainMatDict[chip] = 1.9 * ones(Float64, 2560, 2048) # electrons/DN
-        end
+        assert_calib_map_present(gainMatPath, "gain", tele, chip)
+        f = FITS(gainMatPath)
+        dat = read(f[1])
+        close(f)
+        assert_calib_map_telescope_specific(gainMatPath, "gain", tele, chip, dat)
+        gainMed = nanzeromedian(dat)
+        assert_calib_map_plausible(
+            gainMatPath, "gain", tele, chip, gainMed, GAIN_MEDIAN_BOUNDS_E_PER_DN, "e-/DN")
+        gainView = gainMed .* ones(Float64, 2560, 2048)
+        view(gainView, 5:2044, 5:2044) .= dat
+        gainMatDict[chip] = gainView
     end
     return gainMatDict
 end
@@ -416,27 +467,23 @@ function load_read_var_maps(gainReadCalDir, tele, chips)
     readVarMatDict = Dict{String, Array{Float64, 2}}()
     for chip in string.(collect(chips))
         readVarMatPath = gainReadCalDir * "rdnoise_" * tele * "_" * chip * ".fits"
-        if isfile(readVarMatPath)
-            f = FITS(readVarMatPath)
-            rawdat = read(f[1]) # read noise in DN, before squaring
-            close(f)
-            assert_calib_map_telescope_specific(
-                readVarMatPath, "rdnoise", tele, chip, rawdat)
-            assert_calib_map_plausible(readVarMatPath, "rdnoise", tele, chip,
-                nanzeromedian(rawdat), READ_NOISE_MEDIAN_BOUNDS_DN, "DN")
-            # TODO: Tim and I need to sort out this factor of 2
-            #            dat = (rawdat .^ 2) ./ 2
-            dat = (rawdat .^ 2)
-            refval = nanzeromedian(dat)
-            readVarView = refval .* ones(Float64, 2560, 2048)
-            view(readVarView, 5:2044, 5:2044) .= dat
-            readVarView[isnanorzero.(readVarView)] .= refval
-            readVarView[readVarView .== 1] .= refval
-            readVarMatDict[chip] = readVarView
-        else
-            @warn "Read noise calibration file not found for chip $chip"
-            readVarMatDict[chip] = 25 * ones(Float64, 2560, 2048) # DN/read
-        end
+        assert_calib_map_present(readVarMatPath, "rdnoise", tele, chip)
+        f = FITS(readVarMatPath)
+        rawdat = read(f[1]) # read noise in DN, before squaring
+        close(f)
+        assert_calib_map_telescope_specific(
+            readVarMatPath, "rdnoise", tele, chip, rawdat)
+        assert_calib_map_plausible(readVarMatPath, "rdnoise", tele, chip,
+            nanzeromedian(rawdat), READ_NOISE_MEDIAN_BOUNDS_DN, "DN")
+        # TODO: Tim and I need to sort out this factor of 2
+        #            dat = (rawdat .^ 2) ./ 2
+        dat = (rawdat .^ 2)
+        refval = nanzeromedian(dat)
+        readVarView = refval .* ones(Float64, 2560, 2048)
+        view(readVarView, 5:2044, 5:2044) .= dat
+        readVarView[isnanorzero.(readVarView)] .= refval
+        readVarView[readVarView .== 1] .= refval
+        readVarMatDict[chip] = readVarView
     end
     return readVarMatDict
 end

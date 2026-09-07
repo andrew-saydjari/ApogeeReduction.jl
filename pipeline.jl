@@ -89,7 +89,7 @@ function parse_commandline()
         required = false
         help = "path to the gain and read noise calibration directory"
         arg_type = String
-        default = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2025_06_03/pass_clean/"
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
         "--exp_class_model"
         required = false
         help = "path to the exposure-type classifier artifact (JLD2); empty string skips the post-2D exposure-type check"

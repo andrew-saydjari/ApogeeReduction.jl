@@ -258,6 +258,65 @@ end
     end
 
     # ------------------------------------------------------------------
+    # missing-file guard. Until 2026-09-06 this was a @warn plus a flat
+    # stand-in (1.9 e-/DN, 25 DN^2), which is how three cal scripts came to
+    # run on invented detector constants while pointing at dead paths.
+    # ------------------------------------------------------------------
+    mktempdir() do dir
+        caldir = dir * "/"
+        n = 40
+        # (1) directory exists but is empty -> both loaders raise
+        eg = try
+            ApogeeReduction.load_gain_maps(caldir, "lco", "R")
+            nothing
+        catch e
+            e
+        end
+        @test eg isa ErrorException
+        @test occursin("gain_lco_R.fits", eg.msg)      # names the missing file
+        @test occursin("lco", eg.msg)                  # names the telescope
+        @test occursin("--gain_read_cal_dir", eg.msg)  # says what to do
+        @test occursin("does not contain this map", eg.msg)
+        @test !occursin("1.9", eg.msg)                 # no flat stand-in offered
+        er = try
+            ApogeeReduction.load_read_var_maps(caldir, "lco", "R")
+            nothing
+        catch e
+            e
+        end
+        @test er isa ErrorException
+        @test occursin("rdnoise_lco_R.fits", er.msg)
+
+        # (2) directory itself absent -> different, more specific message
+        e2 = try
+            ApogeeReduction.load_gain_maps(joinpath(dir, "nope") * "/", "apo", "R")
+            nothing
+        catch e
+            e
+        end
+        @test e2 isa ErrorException
+        @test occursin("calibration directory itself does not exist", e2.msg)
+
+        # (3) the directory listing is echoed, so a naming/telescope mismatch is
+        #     obvious at a glance rather than needing a second round trip.
+        #     Written at the real map size so that (4) can load it for real.
+        writefits(joinpath(dir, "gain_apo_R.fits"), 1.80 .+ 0.05 .* randn(rng, 2040, 2040))
+        e3 = try
+            ApogeeReduction.load_gain_maps(caldir, "lco", "R")
+            nothing
+        catch e
+            e
+        end
+        @test e3 isa ErrorException
+        @test occursin("gain_apo_R.fits", e3.msg)
+
+        # (4) a missing chip is fatal even when an earlier chip loaded fine --
+        #     the loader must not return a partially-populated dict
+        @test_throws ErrorException ApogeeReduction.load_gain_maps(caldir, "apo", "RG")
+        @test ApogeeReduction.load_gain_maps(caldir, "apo", "R")["R"] isa Matrix{Float64}
+    end
+
+    # ------------------------------------------------------------------
     # plausibility trip-wire
     # ------------------------------------------------------------------
     for med in (1.45, 1.81, 2.56, 2.70)  # real APO and LCO gains
