@@ -43,6 +43,20 @@
 #       whole question: 260 warnings from one exposure is a data defect,
 #       260 warnings spread over 200 nights is a threshold.
 #
+#   warnings_triage.sh --exposures PATH [PATH...] > warnings_by_exposure.tsv
+#       Emit ONLY a machine-readable TSV resolving warnings to the exposure
+#       level, for joining against per-exposure tables (e.g. the exposure-type
+#       classifier sweep, see classifier_crosscheck.jl):
+#           site <TAB> severity <TAB> tele <TAB> mjd <TAB> exposure <TAB> count
+#       Attribution comes from the product filename in the message
+#       (ar*_<tele>_<mjd>_<exp>_<chip>_<type>.h5) or from an explicit
+#       "<tele> <mjd> exp <n>" phrase.  Records that name no exposure are
+#       emitted with exposure = -1 (e.g. wavecal.jl:1752, whose message
+#       carries neither tele nor mjd); records that name a night but no
+#       exposure get exposure = 0.  Those two sentinels are the honest
+#       answer — do not silently drop them, they are exactly the warnings
+#       that cannot be cross-checked per exposure.
+#
 # Reference TSV columns (tab separated, '#' lines are comments):
 #   site <TAB> count <TAB> verdict <TAB> expect <TAB> note
 # where `verdict` is EXPECTED | ACTIONABLE | UNKNOWN and `expect` is one of
@@ -58,6 +72,7 @@ set -u -o pipefail
 
 emit_baseline=false
 show_units=false
+show_exposures=false
 baseline=""
 paths=()
 
@@ -66,7 +81,8 @@ while [ $# -gt 0 ]; do
         -r|--reference|-b|--baseline) baseline=$2; shift 2 ;;
         --emit-reference|--emit-baseline) emit_baseline=true; shift ;;
         --units)         show_units=true; shift ;;
-        -h|--help)       sed -n '2,50p' "$0"; exit 0 ;;
+        --exposures)     show_exposures=true; shift ;;
+        -h|--help)       sed -n '2,66p' "$0"; exit 0 ;;
         --)              shift; break ;;
         -*)              echo "unknown option: $1" >&2; exit 2 ;;
         *)               paths+=("$1"); shift ;;
@@ -75,7 +91,7 @@ done
 paths+=("$@")
 
 if [ ${#paths[@]} -eq 0 ]; then
-    echo "usage: $(basename "$0") [-r REFERENCE.tsv] [--units] [--emit-reference] PATH [PATH...]" >&2
+    echo "usage: $(basename "$0") [-r REFERENCE.tsv] [--units] [--exposures] [--emit-reference] PATH [PATH...]" >&2
     exit 2
 fi
 
@@ -106,6 +122,102 @@ trap 'rm -rf "$tmp"' EXIT
 for f in "${files[@]}"; do
     tr '\r' '\n' < "$f"
 done | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' > "$tmp/flat.txt"
+
+# ---- per-exposure attribution (machine-readable, for joins) ------------------
+# The inventory above is deliberately per emit SITE.  Cross-checking a warning
+# against a per-exposure signal (the exposure-type classifier, the almanac's
+# flagged_bad) needs finer granularity, and most messages do carry it — in the
+# product filename.  This pass resolves each record as far as the message
+# permits and is explicit about the ones it cannot resolve.
+if $show_exposures; then
+    awk '
+    function clean(s) { sub(/\[K.*$/, "", s); sub(/ *[0-9]+%\|.*$/, "", s); return s }
+    function shorten(site,   mod, path, i, tag) {
+        i = index(site, " "); if (i == 0) return site
+        mod = substr(site, 1, i-1); path = substr(site, i+1)
+        tag = (path ~ /\.julia\/packages\//) ? "[depot] " : ""
+        if (match(path, /\/(src|scripts|test|ext)\//)) path = substr(path, RSTART+1)
+        return mod " " tag path
+    }
+    /┌ (Warning|Error):/ {
+        match($0, /┌ (Warning|Error):/)
+        rec = substr($0, RSTART)
+        sev = (rec ~ /^┌ Error:/) ? "ERROR" : "WARN"
+        sub(/^┌ (Warning|Error): */, "", rec)
+        msg = clean(rec); pending = 1; next
+    }
+    pending && /└ @ / {
+        match($0, /└ @ /); site = substr($0, RSTART+RLENGTH)
+        if (match(site, /^[^ ]+ [^ ]*:[0-9]+/)) site = substr(site, RSTART, RLENGTH)
+        site = shorten(site)
+        delete seen
+        found = 0
+        # (1) product filename: ar<stage>_<tele>_<mjd>_<exp>_<chip>_<type>.h5
+        s = msg
+        while (match(s, /ar[0-9A-Za-z]*_(apo|lco)_[0-9][0-9][0-9][0-9][0-9]_[0-9]+_[RGB]_[a-z]+\.h5/)) {
+            u = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+            n = split(u, p, "_")
+            k = site SUBSEP sev SUBSEP p[2] SUBSEP p[3] SUBSEP (p[4] + 0)
+            if (!(k in seen)) { c[k]++; seen[k] = 1 }
+            found = 1
+        }
+        # (2) explicit "<tele> <mjd> exp <n>" (the exposure-type check warning)
+        if (!found) {
+            s = msg
+            while (match(s, /(apo|lco) [0-9][0-9][0-9][0-9][0-9] exp [0-9]+/)) {
+                u = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+                split(u, p, " ")
+                k = site SUBSEP sev SUBSEP p[1] SUBSEP p[2] SUBSEP (p[4] + 0)
+                if (!(k in seen)) { c[k]++; seen[k] = 1 }
+                found = 1
+            }
+        }
+        # (2b) space-separated "<tele> <mjd> <exp> <chip>" — used by ar1D.jl:818
+        #      ("No fluxing file available for apo 57674 57 R") and ar1D.jl:706
+        #      ("... in ar1Dcal apo 60658 0086 R object").
+        if (!found) {
+            s = msg
+            while (match(s, /(apo|lco) [0-9][0-9][0-9][0-9][0-9] [0-9]+ [RGB]([ .,]|$)/)) {
+                u = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+                split(u, p, " ")
+                k = site SUBSEP sev SUBSEP p[1] SUBSEP p[2] SUBSEP (p[3] + 0)
+                if (!(k in seen)) { c[k]++; seen[k] = 1 }
+                found = 1
+            }
+        }
+        # (3) night only -> exposure 0
+        if (!found) {
+            s = msg
+            while (match(s, /(apo|lco)_[0-9][0-9][0-9][0-9][0-9]/)) {
+                u = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+                split(u, p, "_")
+                k = site SUBSEP sev SUBSEP p[1] SUBSEP p[2] SUBSEP 0
+                if (!(k in seen)) { c[k]++; seen[k] = 1 }
+                found = 1
+            }
+        }
+        if (!found && match(msg, /(tele|for) (apo|lco) (mjd )?[0-9][0-9][0-9][0-9][0-9]/)) {
+            u = substr(msg, RSTART, RLENGTH)
+            sub(/^(tele|for) /, "", u); sub(/mjd /, "", u)
+            split(u, p, " ")
+            c[site SUBSEP sev SUBSEP p[1] SUBSEP p[2] SUBSEP 0]++
+            found = 1
+        }
+        # (4) unattributable -> exposure -1, tele/mjd absent
+        # (quote the -1: bare `SUBSEP -1` is parsed by awk as subtraction)
+        if (!found) c[site SUBSEP sev SUBSEP "-" SUBSEP "-1" SUBSEP "-1"]++
+        pending = 0; next
+    }
+    END {
+        printf "site\tseverity\ttele\tmjd\texposure\tcount\n"
+        for (x in c) {
+            split(x, p, SUBSEP)
+            printf "%s\t%s\t%s\t%s\t%s\t%d\n", p[1], p[2], p[3], p[4], p[5], c[x]
+        }
+    }
+    ' "$tmp/flat.txt" | { read -r hdr; echo "$hdr"; sort -t$'\t' -k1,1 -k3,3 -k4,4n -k5,5n; }
+    exit 0
+fi
 
 # ---- extract records ---------------------------------------------------------
 # A Julia log record is:

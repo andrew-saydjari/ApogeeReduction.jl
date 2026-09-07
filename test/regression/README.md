@@ -94,6 +94,67 @@ reference set are `ACTIONABLE`; the adjudication and its evidence are at
 The triage stage never fails a run — a new emit site is for a human to read,
 not a reason to discard ten hours of reduction.
 
+### Cross-checking warnings against the exposure-type classifier
+
+A warning tells you the pipeline objected. It does not tell you whether the
+pipeline was *right*. The exposure-type classifier is the one other
+per-exposure opinion available, and the goldens/testbed runs deliberately run
+with `AR_EXP_CLASS_MODEL=""` (matching production `run_all.sh`), so its zero
+warning count in a run log is structurally uninformative — it could not have
+fired. That is exactly the kind of zero WARNINGS.md §7 warns against reading as
+health.
+
+Two scripts recover the signal *after* the run, without touching it:
+
+```bash
+# 1. classify every delivered exposure (read-only over <outdir>/apred/)
+julia --project=. test/regression/classify_run.jl \
+    --outdir  <outdir> \
+    --model   <exposure_classifier_rf_v6.jld2> \
+    --output  predictions.tsv \
+    --nworkers 10
+
+# 2. resolve the run's warnings to the exposure level
+test/regression/warnings_triage.sh --exposures <outdir>/logs/ > warnings_by_exposure.tsv
+
+# 3. join them
+julia test/regression/classifier_crosscheck.jl \
+    --predictions predictions.tsv --warnings warnings_by_exposure.tsv \
+    --focus apo:60255:7
+```
+
+`classify_run.jl` calls the same `ApogeeReduction` functions the in-pipeline
+check calls (`exposure_class_features`, `classify_exposure_type`,
+`exposure_check_category`, `exposure_predicted_bad`) and reproduces
+`pipeline.jl`'s `persistence_prior` post-step, so the post-hoc pass and the
+in-pipeline check cannot silently diverge. Running it after the fact is not a
+compromise: it keeps the classifier an *independent* second opinion on the
+warnings rather than a co-author of the same log, and it leaves the run itself
+comparable to previous runs.
+
+Cost, MEASURED on ccalin051 over the 2026_09_03 testbed: ~2 s per exposure per
+core, I/O-bound on three ar2D reads. 17 911 exposures took ~1 h at
+`--nworkers 10`. No Slurm allocation is needed at this scale; `--append`
+resumes a killed sweep.
+
+`classifier_crosscheck.jl` prints a contingency table — CONFIRMED (warning and
+classifier agree), WARN-ONLY (candidate false-positive warning), CLF-ONLY
+(candidate missed detection), quiet — plus the per-emit-site breakdown, the
+`predicted_bad` vs almanac `flagged_bad` divergence, and declared-vs-classified
+type disagreements. It deliberately computes no accuracy or F-score: there is
+no ground truth here, both signals are estimates, and scoring one against the
+other would assume the classifier is right.
+
+Read the quadrants with the classifier's blind spots in mind. It is a random
+forest over 67 whole-chip summary statistics, so it is blind to per-fiber and
+per-chip effects; a warning about one fiber or one chip can be entirely real
+while the exposure classifies fine. WARN-ONLY is a *candidate* false positive,
+never a refutation.
+
+The model artifact is not in this repo (it is ~175 MB). The current one is
+`exposure_classifier_rf_v6.jld2` under the 2026_07_14 scratch dir, with its
+training pipeline and provenance in that directory's `README.md`.
+
 Differences from `scripts/daily/run_all.sh` (deliberate):
 
 - **No almanac invocation.** The bulk `raw/`-layout almanac file
