@@ -1,7 +1,7 @@
 using Pkg;
 Pkg.instantiate();
 using JLD2, ArgParse, DataFrames, HDF5
-using ApogeeReduction: safe_jldsave, read_almanac_exp_df
+using ApogeeReduction: safe_jldsave, read_almanac_exp_df, EXPFLAG_PREDICTED_BAD
 
 ## Parse command line arguments
 function parse_commandline()
@@ -34,7 +34,7 @@ function parse_commandline()
         default = "0"
         "--use_exposure_class"
         required = false
-        help = "drop exposures the exposure-type classifier marked predicted_bad (needs an almanac decorated by scripts/cal/decorate_almanac_exptype.jl; a no-op with a loud note when that group is absent)"
+        help = "drop exposures whose almanac exposure_flags carry bit 2^0 (predicted_bad); needs an almanac decorated by scripts/cal/decorate_almanac_exptype.jl, and is a no-op with a loud note when that group is absent"
         arg_type = Bool
         default = true
     end
@@ -44,23 +44,30 @@ end
 parg = parse_commandline()
 
 """
-Per-(tele, mjd) `predicted_bad` mask written into the almanac by
+Exposure numbers whose `exposure_flags` carry `EXPFLAG_PREDICTED_BAD`, from the
+`exposure_class` group written into the almanac by
 `decorate_almanac_exptype.jl`, aligned to the `exposures` table by exposure
-number. Returns `nothing` when the decoration is absent, which is the state of
-every almanac built before that step joined the DAG — the caller must then keep
-every exposure rather than silently dropping or silently keeping on a guess.
+number.
+
+Returns `nothing` when the decoration is absent, which is the state of every
+almanac built before that step joined the DAG — the caller must then keep every
+exposure rather than silently dropping, or silently keeping on a guess.
+
+Only `EXPFLAG_PREDICTED_BAD` excludes. An exposure with no verdict carries
+`EXPFLAG_NOTRUN` instead — and by the mutual-exclusion invariant never the
+predicted_bad bit — so it is kept: "we did not look" is never grounds for
+exclusion.
 """
 function exposure_class_bad_set(f, tele, mjd)
     haskey(f, "exposure_class") || return nothing
     grp = "exposure_class/$(tele)/$(mjd)"
     haskey(f, grp) || return nothing
     g = f[grp]
-    (haskey(g, "predicted_bad") && haskey(g, "exposure")) || return nothing
-    pb = read(g["predicted_bad"])
+    (haskey(g, "exposure_flags") && haskey(g, "exposure")) || return nothing
+    fl = read(g["exposure_flags"])
     ex = read(g["exposure"])
-    # 1 = judged bad. 0 = judged fine. Anything else (notably -1) = not judged,
-    # and "not judged" is never grounds for exclusion.
-    Set(Int(ex[i]) for i in eachindex(ex) if Int(pb[i]) == 1)
+    Set(Int(ex[i]) for i in eachindex(ex)
+    if (UInt8(fl[i]) & EXPFLAG_PREDICTED_BAD) != 0x00)
 end
 
 mjdexp_list = Int[]
@@ -111,7 +118,7 @@ for tele in tele2do
                 global n_dropped += 1
                 push!(dropped_rows,
                     "  DROPPED $(tele) $(tstmjd) exp $(df.exposure[dfindx]) " *
-                    "($(parg["flat_type"])flat): exposure-type classifier predicted_bad=1")
+                    "($(parg["flat_type"])flat): exposure_flags bit 2^0 (predicted_bad) set")
                 continue
             end
             push!(mjdexp_list, tstmjd_int)

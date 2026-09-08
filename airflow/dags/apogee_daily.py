@@ -263,6 +263,13 @@ def slurm_submit_and_wait(tele, **context):
     # SLACK_CHANNEL flows into the sbatch'd julia layer (ar_main.py parity).
     env = os.environ.copy()
     env["SLACK_CHANNEL"] = p.get("slack_channel") or C.AR_SLACK_CHANNEL
+    # Exposure-type classifier artifact, passed like the other calibration
+    # inputs but by env rather than a 13th positional: run_all.sh's positional
+    # signature is consumed by other callers, and SLACK_CHANNEL already
+    # establishes the env route into the sbatch'd layer. Setting it (even to "")
+    # is what run_all.sh keys on, so production never depends on a default
+    # buried in the Julia arg table.
+    env["AR_EXP_CLASS_MODEL"] = C.EXP_CLASS_MODEL
     print("submitting:", " ".join(cmd))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if res.returncode != 0:

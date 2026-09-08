@@ -77,59 +77,89 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 13    | 8192      | pixel partially saturated |
 | 14    | 16384     | pixel fully saturated |
 
-## Exposure-Level Classifier Fields (1D metadata)
+## Exposure-Level Flags (1D metadata)
 
-The bits above are *per pixel*. Separately, the exposure-type classifier judges
-each exposure as a whole from its 2D images, between the 2D and 1D stages, and
-its verdict is carried into the `metadata` group of the 1D data products
-(`ar1D*`, `ar1Dcal*`, and the reinterpolated `ar1Duni*` / `ar1Dunical*`, which
-inherit it from the first chip's 1D file). A consumer can therefore read a 1D
-file and see whether the frame was judged bad, and why, without re-deriving
-anything from the 2D products or the almanac.
+The bits above are *per pixel*. Separately, each exposure is judged as a whole
+between the 2D and 1D stages, and the verdict is carried into the `metadata`
+group of the 1D data products (`ar1D*`, `ar1Dcal*`, and the reinterpolated
+`ar1Duni*` / `ar1Dunical*`, which inherit it from the first chip's 1D file). A
+consumer can read a 1D file and see whether the frame was judged bad, and why,
+without re-deriving anything from the 2D products or the almanac.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `exp_class_predicted_bad` | Int8 | **Tri-state.** `1` = classifier ran and judged this exposure bad; `0` = classifier ran and judged it fine; `-1` = **UNKNOWN**, no verdict exists |
-| `exp_class_status` | String | Why: `ok`, `lamp_off_candidate`, `mislabel_candidate`, `faint_twilight`, `persistence_prior`, `unknown`, or `notrun` |
-| `exp_class_pred` | String | Predicted content class, e.g. `quartzflat_q1t0u0`, `dark_q0t0u0` |
+| `exposure_flags` | UInt8 | Bitmask; see the bit table and the reading rule below |
+| `exp_class_status` | String | `ok`, `lamp_off_candidate`, `mislabel_candidate`, `faint_twilight`, `persistence_prior`, `unknown`, or `notrun` |
+| `exp_class_pred` | String | Predicted content class, e.g. `quartzflat_q1t0u0` |
 | `exp_class_labeled` | String | The commanded label it was compared against |
 | `exp_class_prob` | Float64 | Max forest probability, `NaN` when there is no verdict |
 
-**`-1` is a real value, not a filler.** The exposure-type check is **on by
-default**: `pipeline.jl --exp_class_model` defaults to the pinned v6 artifact
-`ApogeeReduction.DEFAULT_EXP_CLASS_MODEL`, and both DAGs inherit that. A product
-can still legitimately carry no verdict — the check was deliberately disabled,
-its per-MJD table is missing, it errored on that exposure, or the file predates
-these fields — and in every such case the fields read `predicted_bad = -1`,
-`status = "notrun"`, `pred = "unknown"`, `prob = NaN`. Never treat a missing or
-`-1` value as a clean bill of health; only `== 1` means bad.
+`exposure_flags` bits (shared namespace — do not renumber):
 
-To turn the check off deliberately, pass an empty model path:
-`pipeline.jl --exp_class_model ""`, or `AR_EXP_CLASS_MODEL="" ./run_all.sh ...`.
-Leaving `AR_EXP_CLASS_MODEL` **unset** means on; setting it to the empty string
-means off. A model path that does not exist is a hard error at startup rather
-than a silent skip, so a moved or cleaned-up artifact can never quietly
-downgrade a run to "no classification".
+| Bit | Value | Meaning |
+| --- | ----- | ------- |
+| 0   | 1     | `predicted_bad` — exposure-type classifier verdict |
+| 1   | 2     | `engineering` — configuration's science fibers are an engineering carton |
+| 2   | 4     | `notrun` — **no verdict was formed** for this exposure |
 
-The artifact version is pinned deliberately in `src/exposureClassifier.jl`;
-retraining means editing that constant, not dropping a newer file beside the old
-one. Measured cost of the check on the testbed corpus: **~1.75 s per exposure of
-worker time** (3 chips), of which ~1.34 s is re-reading the `ar2D` images and
-only ~0.3 ms is the forest itself, plus a one-off ~3.6 s model load and ~183 MiB
-resident per worker process — about **0.2%** of the reduction's total CPU.
+### Reading it correctly
 
-This verdict is **advisory**. No exposure is dropped from the reduction because
-of it: engineering and known-bad frames are still reduced. The one place it
-excludes anything is `make_runlist_fiber_flats.jl`, which drops
-`predicted_bad == 1` flats from the trace/fluxing runlists, and logs every
-exclusion. Other per-exposure advisory flags get their own `exp_*` scalars
-rather than bits inside `exp_class_predicted_bad`, so separate producers never
-contend for one integer.
+`exposure_flags == 0` means **judged, and nothing wrong**. "Never judged" is a
+*different value*: bit 2 set. The two are distinguishable from the byte alone —
+that is what bit 2 is for.
 
-The same tri-state lands in the almanac as
-`exposure_class/<tele>/<mjd>/predicted_bad`, written by
-`scripts/cal/decorate_almanac_exptype.jl`, which is what the runlist builder
-reads.
+- `flags == 0` → judged, fine
+- `flags & 4` → no verdict; bit 0 is guaranteed clear (the two are mutually
+  exclusive, and the writer throws rather than emit a byte asserting both)
+- `flags & 1` → judged, and adverse
+
+Read it with `ApogeeReduction.exposure_class_verdict(metadata)`, which returns
+`:bad`, `:fine`, or `:unknown`. For "may I use this for science?", use
+`exposure_ok_for_science(flags)` — note that bit 2 is deliberately **not** a
+no-science bit: an unjudged exposure is not a known-bad one, and silently
+dropping everything we failed to look at would turn a monitoring gap into
+invisible data loss.
+
+An exposure has no verdict when the check was deliberately disabled, its per-MJD
+table is missing, or it errored on that exposure — a crashed check is a failure
+to form an opinion, never an adverse one. `exp_class_status` distinguishes those
+(`"notrun"` vs `"checkfail"`); they share bit 2 because no consumer would act on
+them differently.
+
+**Backward compatibility:** a product written before these fields exist carries
+no `exposure_flags` at all. `exposure_class_verdict` reports that as `:unknown`
+too, so both routes agree. That is a compatibility shim, not the design.
+
+The almanac carries the same byte at
+`exposure_class/<tele>/<mjd>/exposure_flags`, with every row that had no verdict
+set to bit 2.
+
+### It is advisory
+
+No exposure is dropped from the reduction because of these flags: engineering
+and known-bad frames are still reduced. The one place they exclude anything is
+`make_runlist_fiber_flats.jl`, which drops flats with bit 0 set from the
+trace/fluxing runlists and logs every exclusion.
+
+### Configuration
+
+The check runs by default. The classifier artifact is a **calibration input**,
+configured by path exactly like `caldir_darks` / `caldir_flats` /
+`gain_read_cal_dir`: `pipeline.jl --exp_class_model` holds the default and
+`airflow/dags/ar_common.py` (`EXP_CLASS_MODEL`) sets it for production, so
+swapping models is a config change beside the other calibration inputs. The
+version is pinned (v6) — never a glob, never newest-wins.
+
+To disable deliberately: `pipeline.jl --exp_class_model ""`, or
+`AR_EXP_CLASS_MODEL="" ./run_all.sh ...`. Leaving `AR_EXP_CLASS_MODEL` unset
+means on; setting it to the empty string means off. **A model path that does not
+exist is a hard error at startup**, never a silent skip, so a moved or
+cleaned-up artifact cannot quietly downgrade a run to "no classification".
+
+Measured cost: **~1.75 s per exposure of worker time** (3 chips), of which
+~1.34 s is re-reading the `ar2D` images and only ~0.3 ms is the forest itself,
+plus a one-off ~3.6 s model load and ~183 MiB resident per worker process —
+about **0.2%** of the reduction's total CPU.
 
 ## Testing
 

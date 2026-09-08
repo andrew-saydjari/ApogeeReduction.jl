@@ -26,10 +26,10 @@ const EXP_CLASS_CHECK_CACHE = Dict{
 The `exp_class_*` metadata block for one exposure, read from the per-MJD
 exposure-type check table produced between the 2D and 1D stages.
 
-Returns the explicit-unknown block (`predicted_bad = -1`, `status = "notrun"`)
-whenever the classifier did not judge this exposure. The check is off unless
-`--exp_class_model` is set, so unknown is the common case, and it must never be
-confused with a clean bill of health.
+Returns the explicit-unknown block whenever the classifier did not judge this
+exposure: NO `exposure_flags` key, and `status = "notrun"`. The absence of the
+bitmask is what marks it unjudged — a zeroed mask would read as "fine" and must
+never stand in for "we did not look". Read it with `exposure_class_verdict`.
 """
 function exposure_class_metadata_for(outdir, tele, mjd, expnum)
     tbl = get!(EXP_CLASS_CHECK_CACHE, (String(outdir), String(tele), String(mjd))) do

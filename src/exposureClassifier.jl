@@ -30,31 +30,86 @@ const CLASSIFIER_ILLUMINATED = ["arclamp_q0t1u0", "arclamp_q0t0u1",
 const CLASSIFIER_PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat",
     "arclamp"]
 
-# Default exposure-type classifier artifact. The post-2D check runs with this
-# unless it is explicitly disabled (`pipeline.jl --exp_class_model ""`).
-#
-# THE VERSION IS PINNED ON PURPOSE. This must never become "whatever the newest
-# file in that directory is": the class list, the feature layout and the
-# decision thresholds are all properties of one particular trained forest, and a
-# reduction has to be able to say which forest judged it. Retraining means
-# editing this line deliberately, not dropping a new file beside the old one.
-#
-# Location caveat, recorded honestly: this is a dated ANALYSIS directory. That
-# is the same convention the other cal-artifact defaults already follow
-# (caldir_darks, caldir_flats, gain_read_cal_dir in pipeline.jl), but it is not
-# a stable artifact store and it would vanish under a scratch cleanup. The path
-# is defined ONCE, here, precisely so that promoting the artifact to a canonical
-# home is a one-line change and never a hunt through the DAG scripts. pipeline.jl
-# fails fast if it is missing, so a cleanup can never silently downgrade a run to
-# "no classification". See the PR discussion for the proposed canonical home.
-const DEFAULT_EXP_CLASS_MODEL = "/mnt/ceph/users/sdssv/work/asaydjari/2026_07_14/meta/exposure_classifier_rf_v6.jld2"
+# The classifier artifact is a CALIBRATION INPUT, configured by path exactly
+# like caldir_darks / caldir_flats / gain_read_cal_dir: pipeline.jl's arg table
+# holds the default and airflow/dags/ar_common.py sets it for production. There
+# is deliberately no model path constant in src/ — a calibration input does not
+# belong baked into library source.
 
-# Tri-state exposure-class verdict carried into the 1D data products. -1 is a
-# first-class value, not a filler: see the block comment above
-# `exposure_class_unknown_metadata` for why this is not a Bool and not a bitmask.
-const EXP_CLASS_BAD_UNKNOWN = Int8(-1)
-const EXP_CLASS_BAD_FALSE = Int8(0)
-const EXP_CLASS_BAD_TRUE = Int8(1)
+##### Exposure-level flag bitmask #####
+#
+# SHARED SCHEMA. These four definitions are byte-identical to the ones on
+# feature/engineering-carton-flag (PR #397) and must stay that way: two
+# producers write into one `exposure_flags` byte, and a disagreement about the
+# bit numbering would be silent and unrecoverable. On merge, keep one copy.
+#
+# 2^0: predicted_bad — the exposure-type classifier's verdict
+#      (policy: `exposure_predicted_bad`)
+const EXPFLAG_PREDICTED_BAD = 0x01
+# 2^1: engineering exposure — the configuration's science fibers were assigned
+#      an engineering carton, so the frame exists to exercise the hardware, not
+#      to do science (policy: `exposure_is_engineering`, PR #397)
+const EXPFLAG_ENGINEERING = 0x02
+# 2^2: NO VERDICT WAS FORMED for this exposure by the exposure-type classifier
+#      — the check was deliberately disabled, its per-MJD table was missing, or
+#      it threw while evaluating this frame.
+#
+#      This bit is why `exposure_flags == 0` is meaningful: zero means JUDGED
+#      AND FINE, not "we never looked". "Never looked" is 2^2, a different
+#      value, distinguishable from the byte alone.
+#
+#      MUTUALLY EXCLUSIVE with 2^0: if no verdict was formed there is no verdict
+#      to be adverse. `exposure_flag_bits` asserts this; a byte carrying both is
+#      a bug, not a state.
+const EXPFLAG_NOTRUN = 0x04
+# bits that mean "do not do science with this exposure"; prior builds and any
+# other science-sample assembly must exclude these. Reduction must NOT.
+#
+# EXPFLAG_NOTRUN is deliberately NOT included: an unjudged exposure is not a
+# known-bad one, and silently excluding everything we failed to look at would
+# turn a monitoring gap into invisible data loss. A caller that wants "only
+# frames positively cleared" must test the notrun bit itself, explicitly.
+const EXPFLAG_NO_SCIENCE = EXPFLAG_PREDICTED_BAD | EXPFLAG_ENGINEERING
+
+"""
+    exposure_flag_bits(predicted_bad, engineering; notrun = false)
+
+Pack the exposure-level verdicts into the `exposure_flags` bitmask
+(`EXPFLAG_PREDICTED_BAD`, `EXPFLAG_ENGINEERING`, `EXPFLAG_NOTRUN`).
+
+The positional signature is shared with PR #397; `notrun` is a keyword so that
+producers which only know the science verdicts call it unchanged.
+
+Throws if `notrun` and `predicted_bad` are both set: "no verdict was formed" and
+"the verdict was adverse" cannot both be true, and a byte asserting both would
+be silently misread by every consumer downstream.
+"""
+function exposure_flag_bits(predicted_bad::Bool, engineering::Bool; notrun::Bool = false)
+    notrun && predicted_bad &&
+        throw(ArgumentError("exposure_flags: EXPFLAG_NOTRUN and EXPFLAG_PREDICTED_BAD " *
+                            "are mutually exclusive — no verdict cannot also be an adverse verdict"))
+    b = 0x00
+    predicted_bad && (b |= EXPFLAG_PREDICTED_BAD)
+    engineering && (b |= EXPFLAG_ENGINEERING)
+    notrun && (b |= EXPFLAG_NOTRUN)
+    b
+end
+
+"""
+    exposure_ok_for_science(flags)
+
+True when none of the `EXPFLAG_NO_SCIENCE` bits are set. This is the single
+predicate every science-sample assembler (prior builds, catalog construction)
+should use. It is deliberately NOT consulted anywhere in the 2D/1D reduction:
+engineering and predicted-bad exposures are still reduced to 1D.
+
+n.b. this answers "is it flagged?", NOT "was it judged?" — `EXPFLAG_NOTRUN` is
+deliberately not one of these bits, so an unjudged exposure reads as ok here. A
+caller that needs to distinguish "judged fine" from "never judged" must use
+`exposure_class_verdict`.
+"""
+exposure_ok_for_science(flags::Integer) = (UInt8(flags) & EXPFLAG_NO_SCIENCE) == 0x00
+
 # status sentinel meaning "the exposure-type check did not run for this exposure"
 const EXP_CLASS_STATUS_NOTRUN = "notrun"
 # pred/labeled sentinel for the same case (never "", which reads as a real class)
@@ -232,10 +287,9 @@ selection): should this exposure be excluded based on the classifier verdict?
   masked here; missing products already exclude them downstream
 
 This returns a Bool: it answers "did the classifier judge this bad?", and it
-presumes the classifier actually ran. It cannot express "we do not know".
-Consumers that must distinguish "judged good" from "never judged" want the
-tri-state `exposure_class_metadata` / `EXP_CLASS_BAD_*` encoding instead —
-see the note there on why a Bool is the wrong type at the file-metadata layer.
+presumes the classifier actually ran. It cannot express "we do not know" — that
+information lives one level up, in whether an `exposure_flags` field was written
+at all. See `exposure_class_metadata` and `exposure_class_verdict`.
 """
 function exposure_predicted_bad(labeled_class, pred, status)
     if status in ("nofiles", "unclassified", EXP_CLASS_STATUS_NOTRUN, "checkfail")
@@ -251,64 +305,110 @@ end
 
 ##### Exposure-class provenance carried into the 1D data products #####
 #
-# Representation notes (deliberate, please read before extending):
+# REPRESENTATION (deliberate; read before extending).
 #
-# - `exp_class_predicted_bad` is a TRI-STATE Int8, not a Bool and not a bitmask:
-#       1 = the classifier ran and judged this exposure bad
-#       0 = the classifier ran and judged this exposure fine
-#      -1 = UNKNOWN. The classifier never ran (it is off by default), its
-#           artifact was absent, or the check errored on this exposure.
-#   A missing verdict must never read as 0/"fine" to a downstream consumer.
-#   That is the entire reason this is not a Bool.
+# The stored verdict is the shared `exposure_flags` UInt8 bitmask, so that the
+# exposure-type classifier and the engineering-carton check (PR #397) write into
+# one byte with one agreed bit numbering, instead of each owning a private
+# scalar that a consumer would have to know to combine.
 #
-# - It is a scalar owned by ONE producer (the exposure-type classifier), not a
-#   shared bitmask. Other advisory per-exposure flags — e.g. the carton-derived
-#   ENGINEERING bit — get their own namespaced scalar rather than a bit in this
-#   one, so that two producers can never race over the same integer.
+# "No verdict was formed" is a STATE OF THE MASK, not the absence of the field:
+# it is `EXPFLAG_NOTRUN` (2^2). The consequences a reader must internalise:
 #
-# - Field names are prefixed `exp_class_` so the exposure-level namespace stays
-#   visibly separate from the per-pixel bitmasks documented in the README.
+#   exposure_flags == 0            -> JUDGED, and nothing wrong. Not "unknown".
+#   exposure_flags & NOTRUN != 0   -> never judged; bit 2^0 is guaranteed clear
+#   exposure_flags & PREDICTED_BAD -> judged, and adverse
+#
+# so "judged fine" and "never judged" are different VALUES, distinguishable from
+# the byte alone. That is the whole point of spending a bit on it.
+#
+# The companion `exp_class_status` string still carries WHY there is no verdict
+# ("notrun" = disabled or table missing, "checkfail" = the check threw). Those
+# share one bit deliberately: no consumer would act differently on them, the
+# distinction is diagnostic rather than actionable, and bits in a byte shared
+# between two producers are scarce enough not to spend on diagnostics.
+#
+# BACKWARD COMPATIBILITY: a product written before this PR has no
+# `exposure_flags` field at all. `exposure_class_verdict` treats an absent field
+# as unknown too, so both routes converge. That is a compatibility shim, not the
+# design — new writers always emit the field.
+#
+# Field names are prefixed `exp_class_` (except the shared `exposure_flags`
+# itself) so the exposure-level namespace stays visibly separate from the
+# per-pixel bitmasks documented in the README.
 
 """
-    exposure_class_unknown_metadata()
+    exposure_class_unknown_metadata(status = EXP_CLASS_STATUS_NOTRUN)
 
-The `exp_class_*` metadata block for an exposure the classifier never judged.
-Every field is an explicit unknown sentinel: `predicted_bad = -1`,
-`status = "notrun"`, `pred`/`labeled = "unknown"`, `prob = NaN`.
+The metadata block for an exposure the classifier never judged: `exposure_flags`
+carries `EXPFLAG_NOTRUN` (and, by the mutual-exclusion invariant, never
+`EXPFLAG_PREDICTED_BAD`).
 
-This is what a consumer sees when `--exp_class_model` was empty (the default),
-when the per-MJD `exposureTypeCheck_*.h5` is absent, or when reading a 1D file
-written before this field block existed and thus carrying none of it.
+`status` records WHY no verdict exists — "notrun" when the check was disabled or
+its table was missing, "checkfail" when the check threw on this exposure. Both
+set the same bit; only this string tells them apart.
+
+This is what a consumer sees when the check was deliberately disabled
+(`--exp_class_model ""`), when the per-MJD `exposureTypeCheck_*.h5` is absent,
+or when the check errored. A 1D file written before these fields existed carries
+no `exposure_flags` at all, and reads as unknown by the compatibility path in
+`exposure_class_verdict`.
 """
-exposure_class_unknown_metadata() = Dict{String, Any}(
-    "exp_class_predicted_bad" => EXP_CLASS_BAD_UNKNOWN,
-    "exp_class_status" => EXP_CLASS_STATUS_NOTRUN,
+exposure_class_unknown_metadata(status = EXP_CLASS_STATUS_NOTRUN) = Dict{String, Any}(
+    "exposure_flags" => exposure_flag_bits(false, false; notrun = true),
+    "exp_class_status" => String(status),
     "exp_class_pred" => EXP_CLASS_UNKNOWN_STR,
     "exp_class_labeled" => EXP_CLASS_UNKNOWN_STR,
     "exp_class_prob" => NaN)
 
 """
-    exposure_class_metadata(labeled, pred, prob, status)
+    exposure_class_metadata(labeled, pred, prob, status; engineering = false)
 
-Build the `exp_class_*` metadata block for one exposure from a classifier
-verdict. `status` is the category from `exposure_check_category` (plus
-"persistence_prior", which `pipeline.jl` adds, and "checkfail").
+Build the metadata block for one exposure from a classifier verdict, including
+the `exposure_flags` bitmask. `status` is the category from
+`exposure_check_category` (plus "persistence_prior", which `pipeline.jl` adds,
+and "checkfail").
 
-A "checkfail" verdict maps to the UNKNOWN block, not to bad: an exception while
-evaluating the check is a failure to form an opinion, and must not be recorded
-as an adverse opinion about the data.
+A "checkfail" verdict returns the UNKNOWN block — `EXPFLAG_NOTRUN` set, never
+`EXPFLAG_PREDICTED_BAD` — and keeps "checkfail" as its status string. An
+exception while evaluating the check is a failure to form an opinion, and must
+never be recorded as an adverse opinion, nor as a favourable one.
+
+`engineering` is the hand-off point for PR #397's carton-derived bit. This
+producer only knows the classifier's verdict, so it passes `false` by default;
+the engineering check ORs its bit in here rather than writing a competing field.
 """
-function exposure_class_metadata(labeled, pred, prob, status)
+function exposure_class_metadata(labeled, pred, prob, status; engineering::Bool = false)
     (status == "checkfail" || status == EXP_CLASS_STATUS_NOTRUN) &&
-        return exposure_class_unknown_metadata()
-    bad = exposure_predicted_bad(labeled, pred, status) ?
-          EXP_CLASS_BAD_TRUE : EXP_CLASS_BAD_FALSE
+        return exposure_class_unknown_metadata(status)
+    bad = exposure_predicted_bad(labeled, pred, status)
     Dict{String, Any}(
-        "exp_class_predicted_bad" => bad,
+        "exposure_flags" => exposure_flag_bits(bad, engineering),
         "exp_class_status" => String(status),
         "exp_class_pred" => String(pred),
         "exp_class_labeled" => String(labeled),
         "exp_class_prob" => Float64(prob))
+end
+
+"""
+    exposure_class_verdict(md) -> Symbol
+
+Three-way read of an exposure-class metadata block (as returned by
+`exposure_class_metadata`, or read back from a 1D product's `metadata` group):
+
+- `:unknown` — no verdict was formed: `EXPFLAG_NOTRUN` is set, or (compatibility
+  path) the product predates `exposure_flags` and has no such field.
+- `:bad` — a verdict was formed and `EXPFLAG_PREDICTED_BAD` is set.
+- `:fine` — a verdict was formed and that bit is clear.
+
+This is the ONLY correct way to ask "is this exposure fine?" — it is what makes
+the notrun bit and the legacy no-field case give the same answer.
+"""
+function exposure_class_verdict(md::AbstractDict)
+    haskey(md, "exposure_flags") || return :unknown   # pre-PR product
+    f = UInt8(md["exposure_flags"])
+    (f & EXPFLAG_NOTRUN) != 0x00 && return :unknown
+    (f & EXPFLAG_PREDICTED_BAD) != 0x00 ? :bad : :fine
 end
 
 """
@@ -323,13 +423,14 @@ exposure_type_check_path(outdir, tele, mjd) = joinpath(
 """
     read_exposure_type_check(path) -> Dict{Int, Dict{String, Any}}
 
-Read a per-MJD `exposureTypeCheck_*.h5` into expnum => `exp_class_*` metadata
-block. Returns an empty Dict if the file is absent or unreadable, so that every
-caller degrades to the explicit-unknown block rather than failing: this table is
-advisory metadata and must never be able to break a reduction.
+Read a per-MJD `exposureTypeCheck_*.h5` into expnum => metadata block. Returns
+an empty Dict if the file is absent or unreadable, so that every caller degrades
+to the explicit-unknown block rather than failing: this table is advisory
+metadata and must never be able to break a reduction.
 
-Tables written before `predicted_bad` was stored are handled by recomputing it
-from (labeled, pred, flag) with `exposure_predicted_bad`.
+The block is rebuilt from `(labeled, pred, prob, flag)` through
+`exposure_class_metadata`, so a table written by any version of the pipeline
+yields the current encoding and the masking policy lives in exactly one place.
 """
 function read_exposure_type_check(path)
     out = Dict{Int, Dict{String, Any}}()

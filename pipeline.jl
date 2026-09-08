@@ -92,9 +92,9 @@ function parse_commandline()
         default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
         "--exp_class_model"
         required = false
-        help = "exposure-type classifier artifact (JLD2). \"default\" (the default) uses the pinned v6 artifact ApogeeReduction.DEFAULT_EXP_CLASS_MODEL, so the post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). Any other value is used as a path."
+        help = "exposure-type classifier artifact (JLD2). A calibration input, configured by path like --caldir_darks / --gain_read_cal_dir; airflow/dags/ar_common.py sets it for production. The post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). A path that does not exist is a hard error."
         arg_type = String
-        default = "default"
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_07_14/meta/exposure_classifier_rf_v6.jld2"
     end
     return parse_args(s)
 end
@@ -138,17 +138,13 @@ flush(stdout);
     using ParallelDataTransfer, ProgressMeter
     using AstroTime: TAIEpoch, modified_julian, days, value
     using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D,
-                           process_2Dcal, cal2df, get_cal_path, TAIEpoch,
-                           DEFAULT_EXP_CLASS_MODEL
+                           process_2Dcal, cal2df, get_cal_path, TAIEpoch
 end
 
-# Resolve the exposure-type classifier artifact BEFORE parg is shipped to the
-# workers. "default" (the arg-table default) means the pinned v6 artifact; an
-# empty string means the check is deliberately off. Resolving here keeps the
-# pinned path defined in exactly one place, src/exposureClassifier.jl.
-if parg["exp_class_model"] == "default"
-    parg["exp_class_model"] = DEFAULT_EXP_CLASS_MODEL
-end
+# The classifier artifact is a calibration input like the dark/flat/gain
+# directories: a path supplied by the caller, defaulted in the arg table above,
+# and set explicitly by airflow/dags/ar_common.py for production. Version
+# pinning lives in that path (v6), NOT in a glob or a "newest wins" lookup.
 if parg["exp_class_model"] == ""
     println("Exposure-type check: DISABLED by explicit --exp_class_model \"\". " *
             "1D products will record exp_class_status=\"notrun\".")
@@ -276,6 +272,7 @@ if parg["exp_class_model"] != ""
                                classify_exposure_type, exposure_class_label,
                                exposure_check_category, exposure_class_metadata,
                                read_almanac_exp_df,
+                               EXPFLAG_PREDICTED_BAD, EXPFLAG_NOTRUN,
                                CHIP_LIST
         const EXP_CLF = Ref{Any}(nothing)
         function get_exp_clf()
@@ -340,14 +337,17 @@ if parg["exp_class_model"] != ""
             dfc = DataFrame(checks)
             # Resolve the downstream masking policy HERE, once, and store it, so
             # that the 1D products, the almanac decoration and the calibration
-            # runlists all read one number rather than each re-deriving it from
-            # (labeled, pred, flag) and risking three subtly different answers.
-            # Int8[...] on purpose: the Dict is Dict{String,Any}, so an
+            # runlists all read one answer rather than each re-deriving it from
+            # (labeled, pred, flag) and risking three subtly different ones.
+            #
+            # One column: EXPFLAG_NOTRUN inside the mask carries "no verdict",
+            # so a zero byte means judged-and-fine and needs no companion.
+            # UInt8[...] on purpose: the Dict is Dict{String,Any}, so an
             # unannotated comprehension would build a Vector{Any} column and
             # write an untyped HDF5 dataset.
-            dfc.predicted_bad = Int8[exposure_class_metadata(
-                                         r.labeled, r.pred, r.prob, r.flag)["exp_class_predicted_bad"]
-                                     for r in eachrow(dfc)]
+            dfc.exposure_flags = UInt8[exposure_class_metadata(
+                                           r.labeled, r.pred, r.prob, r.flag)["exposure_flags"]
+                                       for r in eachrow(dfc)]
             for sub in groupby(dfc, :mjd)
                 mjd = sub.mjd[1]
                 safe_jldsave(
@@ -358,7 +358,7 @@ if parg["exp_class_model"] != ""
                     expnum = collect(sub.expnum), labeled = String.(sub.labeled),
                     pred = String.(sub.pred), prob = collect(sub.prob),
                     flag = String.(sub.flag),
-                    predicted_bad = collect(sub.predicted_bad))
+                    exposure_flags = collect(sub.exposure_flags))
             end
             # persistence_prior is informational (recorded, not warned)
             warnable = (dfc.flag .!= "ok") .& (dfc.flag .!= "persistence_prior")
@@ -372,10 +372,10 @@ if parg["exp_class_model"] != ""
                 nflag_frac > 0.10 &&
                     @warn "Exposure-type check flagged $(round(100 * nflag_frac, digits = 1))% of exposures (> 10% prior on mislabel rate) — inspect before trusting the flags."
             end
-            npbad = sum(dfc.predicted_bad .== 1)
-            nunk = sum(dfc.predicted_bad .== -1)
+            npbad = sum((dfc.exposure_flags .& EXPFLAG_PREDICTED_BAD) .!= 0x00)
+            nunk = sum((dfc.exposure_flags .& EXPFLAG_NOTRUN) .!= 0x00)
             println("Exposure-type check: $(nrow(dfc)) exposures checked, $nbad flagged, " *
-                    "$npbad predicted_bad, $nunk unknown (check failed)")
+                    "$npbad predicted_bad, $nunk unjudged (check failed)")
             println("Exposure-type check: NOTHING was dropped from the reduction here; " *
                     "the verdict is advisory 1D metadata plus a calibration-runlist input.")
         end

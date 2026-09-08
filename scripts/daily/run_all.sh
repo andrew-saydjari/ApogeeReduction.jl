@@ -68,9 +68,11 @@ almanac_clobber_mode=${11:-false}
 # RUN_MADGICS env var (exported at sbatch time); positional arg wins. Default: true (daily).
 run_madgics=${12:-${RUN_MADGICS:-true}}
 # Exposure-type classifier: ON BY DEFAULT.
-# Leaving AR_EXP_CLASS_MODEL unset passes no flag, so pipeline.jl uses its own
-# pinned v6 default (ApogeeReduction.DEFAULT_EXP_CLASS_MODEL) — the artifact
-# path lives in exactly one place, the Julia source, and is not duplicated here.
+# Leaving AR_EXP_CLASS_MODEL unset passes no flag, so pipeline.jl falls back to
+# the pinned v6 path in its own arg table — the same shape as --caldir_darks and
+# --gain_read_cal_dir. Production sets it explicitly from
+# airflow/dags/ar_common.py (EXP_CLASS_MODEL), so swapping the model is a config
+# change beside the other calibration inputs, not a code change.
 #   unset         -> classifier ON with the pinned v6 artifact
 #   set to ""     -> classifier OFF, deliberately
 #   set to a path -> classifier ON with that artifact

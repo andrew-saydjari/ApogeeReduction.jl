@@ -2,7 +2,8 @@ using Pkg;
 Pkg.instantiate();
 using HDF5, ArgParse, DataFrames, JLD2
 using ApogeeReduction: exposure_class_label, exposure_class_metadata, initalize_git,
-                       EXP_CLASS_BAD_UNKNOWN, EXP_CLASS_UNKNOWN_STR
+                       exposure_class_verdict, EXP_CLASS_UNKNOWN_STR,
+                       EXPFLAG_PREDICTED_BAD, EXPFLAG_NOTRUN
 
 # recompute at runtime: the module-level git consts are frozen at precompile
 # time and can go stale (see comment in src/utils.jl)
@@ -23,15 +24,14 @@ git_branch, git_commit, git_clean = initalize_git(dirname(dirname(@__DIR__)) * "
 ##
 ## Columns per (tele, mjd):
 ##   exposure               exposure number (join key, matches exposures group)
-##   predicted_bad          Int8 TRI-STATE mask for downstream cal/wavecal
-##                          runlists (policy: exposure_class_metadata):
-##                            1 = classifier ran and judged this bad
-##                            0 = classifier ran and judged this fine
-##                           -1 = UNKNOWN, no verdict for this exposure
-##                          -1 is the value for every exposure when the
-##                          classifier was not run (it is off unless pipeline.jl
-##                          gets --exp_class_model). Consumers must treat -1 as
-##                          "do not know", never as "fine": only ==1 excludes.
+##   exposure_flags         UInt8 bitmask, shared with the engineering-carton
+##                          check (PR #397): 2^0 predicted_bad, 2^1 engineering.
+##                          Only bit 2^0 is written here.
+##                          2^2 notrun (no verdict formed). exposure_flags == 0
+##                          therefore means JUDGED AND FINE; "never judged" is
+##                          2^2, a distinct value. 2^0 and 2^2 are mutually
+##                          exclusive. Every row that had no verdict — including
+##                          exposures with no reduced 2D data — gets 2^2.
 ##   exposure_class_pred    predicted content class ("unknown" if no verdict)
 ##   exposure_class_prob    max forest probability (NaN if no verdict)
 ##   exposure_class_status  ok / mislabel_candidate / lamp_off_candidate /
@@ -101,7 +101,7 @@ else
 end
 println("classifier verdicts: ", length(verdict))
 isempty(verdict) &&
-    @warn "no classifier verdicts found — every exposure will be decorated as UNKNOWN (predicted_bad = -1), which is correct but means nothing downstream will be filtered. Was --exp_class_model set on the pipeline.jl call?"
+    @warn "no classifier verdicts found — every exposure will be decorated as UNJUDGED (exposure_flags bit 2^2 notrun), which is correct but means nothing downstream will be filtered. Was --exp_class_model set on the pipeline.jl call?"
 
 nbad = 0
 nunknown = 0
@@ -110,6 +110,7 @@ h5open(parg["almanac_file"], "r+") do f
     rawgrp = haskey(f, "raw") ? "raw" : ""
     haskey(f, "exposure_class") && delete_object(f, "exposure_class")
     g = create_group(f, "exposure_class")
+    attrs(g)["exposure_flags_bits"] = "2^0=predicted_bad,2^1=engineering,2^2=notrun"
     attrs(g)["git_branch"] = git_branch
     attrs(g)["git_commit"] = string(git_commit)
     attrs(g)["git_clean"] = string(git_clean)
@@ -129,28 +130,27 @@ h5open(parg["almanac_file"], "r+") do f
             pred = fill(EXP_CLASS_UNKNOWN_STR, n)
             prob = fill(NaN, n)
             status = fill("unclassified", n)
-            # Tri-state, Int8: -1 = no verdict (classifier never judged this
-            # exposure), 0 = judged fine, 1 = judged bad. An exposure the
-            # classifier never saw MUST NOT decorate as 0 — that reads as a
-            # clean bill of health and is exactly the silent-default failure
-            # this field exists to avoid.
-            bad = fill(EXP_CLASS_BAD_UNKNOWN, n)
+            # Default every row to NOTRUN, not to zero: a row we never formed a
+            # verdict for must not decorate as "judged and fine". Rows with a
+            # verdict overwrite this below.
+            flags = fill(EXPFLAG_NOTRUN, n)
             for i in 1:n
                 v = get(verdict, (tele, parse(Int, mjd), expnum[i]), nothing)
                 isnothing(v) && continue
                 pred[i], prob[i], status[i] = v
                 labeled = exposure_class_label(imtype[i], lq[i], lt[i], lu[i])
-                bad[i] = Int8(exposure_class_metadata(
-                    labeled, pred[i], prob[i], status[i])["exp_class_predicted_bad"])
+                # a checkfail verdict comes back with NOTRUN still set
+                flags[i] = UInt8(exposure_class_metadata(
+                    labeled, pred[i], prob[i], status[i])["exposure_flags"])
             end
             out = create_group(tele_out, mjd)
             out["exposure"] = expnum
-            out["predicted_bad"] = bad
+            out["exposure_flags"] = flags
             out["exposure_class_pred"] = pred
             out["exposure_class_prob"] = prob
             out["exposure_class_status"] = status
-            global nbad += sum(bad .== 1)
-            global nunknown += sum(bad .== -1)
+            global nbad += sum((flags .& EXPFLAG_PREDICTED_BAD) .!= 0x00)
+            global nunknown += sum((flags .& EXPFLAG_NOTRUN) .!= 0x00)
             global ntot += n
         end
     end
