@@ -805,34 +805,44 @@ with DAG(
         t_repo = BashOperator(
             task_id="repo",
             bash_command=(
-                f"cd {C.AR_REPO}\n"
-                "echo '=== Git Status ==='\n"
-                "git status\n"
-                "echo '=== Git Log (last 3 commits) ==='\n"
-                "git log --oneline -3\n"
-                "echo '=== Git Remote Status ==='\n"
-                "git remote -v\n"
                 # DELIBERATE NEW BEHAVIOR (AKS 2026-09-03): actually pull the
-                # production checkout on its branch. ar_main.py's repo task
-                # was status-only (pulling was effectively off).
-                "echo '=== git pull --ff-only ==='\n"
-                "git pull --ff-only\n"
+                # production checkouts. ar_main.py's repo task was status-only.
+                #
+                # AKS 2026-09-08: all three clones now sit on C.PROD_BRANCH,
+                # not main, so merging to main no longer moves production the
+                # next morning. Promotion is the explicit
+                #     git push origin main:<PROD_BRANCH>
+                # done only after validation. Assert the branch before pulling:
+                # a clone on anything else means production was moved by hand,
+                # and pulling would compound it rather than surface it.
+                "prod_pull() {\n"
+                '  dir="$1"; name="$2"\n'
+                '  cd "$dir" || { echo "FATAL: missing clone $dir"; return 1; }\n'
+                f'  want="{C.PROD_BRANCH}"\n'
+                '  have=$(git rev-parse --abbrev-ref HEAD)\n'
+                '  echo "=== $name: $dir (on $have)"\n'
+                '  if [ "$have" != "$want" ]; then\n'
+                '    echo "FATAL: $name clone is on \'$have\', expected production'
+                ' branch \'$want\'."\n'
+                '    echo "Production must not track main. Promote with:'
+                ' git push origin main:$want"\n'
+                '    return 1\n'
+                '  fi\n'
+                '  git log --oneline -3\n'
+                '  git pull --ff-only origin "$want"\n'
+                '  echo "$name now at $(git rev-parse --short HEAD)"\n'
+                "}\n"
+                f"prod_pull {C.AR_REPO} ApogeeReduction || exit 1\n"
                 # arMADGICS clone too (first-night finding 2026-09-04: the
                 # madgics step ran a months-stale arM main that predated the
                 # raw/-layout almanac handling; AR was pulled, arM never was).
-                f"cd {C.AR_MADGICS_DIR}\n"
-                "echo '=== arMADGICS: status + git pull --ff-only ==='\n"
-                "git log --oneline -1\n"
-                "git pull --ff-only\n"
+                f"prod_pull {C.AR_MADGICS_DIR} arMADGICS || exit 1\n"
                 # almanac clone too (AKS 2026-09-04: run from a local clone
                 # like the other pipelines; hash logged at invocation). The
                 # editable install tracks code changes automatically; the
                 # `uv pip install -e` re-sync only matters when almanac's
                 # DEPENDENCIES change, and is a fast no-op otherwise.
-                f"cd {C.ALMANAC_DIR}\n"
-                "echo '=== almanac: status + git pull --ff-only ==='\n"
-                "git log --oneline -1\n"
-                "git pull --ff-only\n"
+                f"prod_pull {C.ALMANAC_DIR} almanac || exit 1\n"
                 f"uv pip install -p {os.path.dirname(C.ALMANAC_BIN)}/python "
                 f"-e {C.ALMANAC_DIR} --quiet 2>&1 | tail -1 || "
                 "echo 'WARNING: almanac env re-sync failed (env unchanged)'\n"),

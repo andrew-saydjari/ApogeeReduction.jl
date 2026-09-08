@@ -93,6 +93,22 @@ ALMANAC_DIR = os.environ.get(
 ALMANAC_BIN = os.environ.get(
     "ALMANAC_BIN", "/mnt/home/sdssv/uv_env/almanac_env/bin/almanac")
 
+# Production deployment branch (AKS 2026-09-08). All three pipeline clones
+# (AR, arMADGICS, almanac) are checked out on this branch, NOT on main.
+#
+# Why: `update.repo` git-pulls each clone every morning, so while the clones
+# tracked main, any merge to main reached production the next morning with no
+# validation step. That is how the 2026-09-08 daily broke — the LCO
+# calibration guard merged to main while GAIN_READ_CAL_DIR still pointed at
+# the directory the guard rejects, and the two arrived in production together.
+#
+# Promotion is now explicit and manual: validate, then fast-forward the branch
+#     git push origin main:airflow-prod
+# and the next `update.repo` picks it up. Nothing else moves production.
+# update.repo asserts each clone is actually on this branch and fails loudly
+# otherwise, so a clone left on main is reported rather than silently pulled.
+PROD_BRANCH = os.environ.get("AR_PROD_BRANCH", "airflow-prod")
+
 CALDIR_DARKS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
 CALDIR_FLATS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
 # 2026-09-06: repointed from 2025_07_31/pass_clean/, whose LCO gain and
