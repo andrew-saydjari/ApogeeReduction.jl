@@ -44,6 +44,16 @@ const EXPFLAG_PREDICTED_BAD = 0x01
 # 2^1: engineering exposure — the configuration's science fibers were assigned
 #      an engineering carton, so the frame exists to exercise the hardware, not
 #      to do science (policy: `exposure_is_engineering`)
+#
+#      This is an EXPOSURE-level summary of a quantity that is fundamentally
+#      per-fiber. It is correct as a per-exposure bit today only because the
+#      purity rule means a flagged configuration is 100% engineering across its
+#      science fibers, so every fiber agrees with the exposure. A per-fiber
+#      notion can be added later WITHOUT a schema change: the bit numbering is
+#      shared, so a future per-fiber `fiber_flags` array simply reuses 2^1 and
+#      the exposure-level bit stays the "all fibers agree" summary. Do not
+#      renumber. `engineering_frac` is written alongside precisely so that the
+#      exposure-level bit is never the only record of the underlying fractions.
 const EXPFLAG_ENGINEERING = 0x02
 # bits that mean "do not do science with this exposure"; prior builds and any
 # other science-sample assembly must exclude these. Reduction must NOT.
@@ -59,44 +69,63 @@ covers `manual_fps_position_stars`, `..._10`, `..._apogee_10`, and
 const ENGINEERING_CARTON_PREFIXES = ["manual_fps_position_stars"]
 
 """
-Minimum fraction of a configuration's *science* fibers that must carry an
-engineering carton before the exposure is flagged engineering. The comparison
-is strict (`frac > ENGINEERING_CARTON_MIN_FRAC`), i.e. a strict majority.
+"Dominated by" is defined as **purity**: ALL of the configuration's *science*
+fibers must carry an engineering carton (`frac >= ENGINEERING_CARTON_PURITY`,
+i.e. exactly 1.0) before the exposure is flagged engineering.
 
-Why a majority and not "any": a stray engineering assignment inside an
-otherwise real science configuration should not condemn ~300 good spectra.
-Why not "all": one un-assigned or serendipitous fiber should not rescue a
-frame that is plainly a positioning test.
+AKS 2026-09-08, after a full-corpus carton census. Purity costs nothing here —
+MEASURED, all four `manual_fps_position_stars*` variants are always 100% of the
+science fibers of every configuration they appear in, and they never appear as a
+minority in someone else's configuration. Purity is what makes that free
+property load-bearing rather than incidental:
 
-Behaviour on mixed configurations (none exist today — every one of the 1023
-configurations in the 57618-61230 corpus with any engineering carton has
-fraction exactly 1.0, MEASURED 2026-09-08): a config that is >50% engineering
-is flagged in full, and a config that is <=50% engineering is not flagged at
-all. Because the flag is per-exposure, either way some fibers are mis-served
-in the mixed case; `engineering_frac` is written alongside the bit so a
-consumer (or a future per-fiber treatment) can apply its own rule.
+- it automatically excludes the 27 other `manual_*` cartons, none of which owns
+  a single 100%-pure configuration (median share 0.4-4.2%);
+- it excludes `manual_mwm_crosscalib_apogee`, which owns exactly one pure
+  configuration but which AKS decided is NOT engineering;
+- a majority rule would additionally pull in configurations where crosscalib and
+  validation_cool run 52-71%, which AKS does not want.
+
+Zero `ops_*` cartons appear on science fibers anywhere in DR21, so the "except
+standards and sky" exemption the ops team suggested is moot.
+
+Behaviour on mixed configurations: a configuration that is *mostly but not
+purely* an engineering carton is NOT flagged, and raises a loud warning (see
+`ENGINEERING_CARTON_WARN_FRAC`). That has never happened in DR21, so if the
+warning ever fires it is a real signal, not noise.
 """
-const ENGINEERING_CARTON_MIN_FRAC = 0.5
+const ENGINEERING_CARTON_PURITY = 1.0
+
+"""
+Fraction above which a non-pure configuration raises a loud warning. A
+configuration whose engineering-carton share is in
+`(ENGINEERING_CARTON_WARN_FRAC, ENGINEERING_CARTON_PURITY)` is NOT flagged
+engineering — it fails the purity rule — but it is close enough to the boundary
+that somebody should look. No configuration in the DR21 corpus lands here.
+"""
+const ENGINEERING_CARTON_WARN_FRAC = 0.5
 
 """
 Fallback for configurations that contain NO `category == "science"` fibers at
 all: evaluate the engineering fraction over every fiber that carries a non-empty
 `firstcarton` instead.
 
-**This is an addition beyond AKS's 2026-09-08 instruction** ("the carton comes
-from the configuration's science fibers"), flagged for his decision. Set it to
-`false` to get exactly the rule as specified.
+**OFF by default**, because AKS's rule is "the configuration's science fibers"
+and the agreed verification target is exactly the 2,448 exposures that rule
+produces. This constant exists to record a MEASURED gap and to make closing it
+a one-line change if AKS wants it.
 
-Why it is here: MEASURED on the 57618-61230 corpus, 5 configurations
-(apo 59558/105, 59558/106, 59560/121, 59560/122, 59561/133 — the earliest FPS
-commissioning nights) carry `manual_fps_position_stars` on 207-254 of their 300
-fibers while having ZERO fibers labelled `category == "science"` (their
-categories are `""`, `bonus`, `open_fiber`, `sky_boss`/`sky_apogee`). Those
-configurations back **35 object exposures** that the science-fibers-only rule
-misses entirely. No configuration in the corpus is affected in the other
-direction: the fallback only ever fires where the primary rule has no data.
+The gap: 5 configurations (apo 59558/105, 59558/106, 59560/121, 59560/122,
+59561/133 — the earliest FPS commissioning nights) carry
+`manual_fps_position_stars` on 207-254 of their 300 fibers while labelling ZERO
+fibers `category == "science"` (their categories are `""`, `bonus`,
+`open_fiber`, `sky_boss`/`sky_apogee`). They back 35 object exposures that the
+science-fibers-only rule cannot see at all. Turning this on adds 2 of those 35
+under the purity rule (cfg 121/122 are 207/207 pure); the other three are
+0.845/0.879 pure over all fibers and would only raise the mostly-not-purely
+warning. The fallback never fires where the primary rule has data.
 """
-const ENGINEERING_FALLBACK_ALL_FIBERS = true
+const ENGINEERING_FALLBACK_ALL_FIBERS = false
 
 """
 Commanded image types the engineering carton check applies to. Calibration
@@ -120,15 +149,16 @@ function is_engineering_carton(carton)
 end
 
 """
-    exposure_is_engineering(cartons; min_frac = ENGINEERING_CARTON_MIN_FRAC, basis)
+    exposure_is_engineering(cartons; purity, warn_frac, basis, label)
 
 Carton check for one exposure. `cartons` is the list of `firstcarton` values of
 the configuration's **science** fibers (`category == "science"`), or of all
-carton-bearing fibers when the config has no science fibers at all (see
-`ENGINEERING_FALLBACK_ALL_FIBERS`); `basis` records which.
+carton-bearing fibers when the config has no science fibers at all and the
+fallback is enabled (see `ENGINEERING_FALLBACK_ALL_FIBERS`); `basis` records
+which.
 
 Returns `(engineering, frac, carton, nsci, basis)`:
-- `engineering::Bool` — `frac > min_frac`
+- `engineering::Bool` — `frac >= purity` (purity rule: ALL science fibers)
 - `frac::Float64` — fraction of the fibers in `cartons` with an engineering
   carton (`NaN` when `cartons` is empty, e.g. plate-era or missing config)
 - `carton::String` — the most common matching carton name ("" if none), kept
@@ -136,11 +166,18 @@ Returns `(engineering, frac, carton, nsci, basis)`:
 - `nsci::Int` — number of fibers the fraction was computed over
 - `basis::String` — `"science"`, `"all_fibers_fallback"`, or `"none"`
 
+Raises a loud `@warn` for a configuration that is MOSTLY but not PURELY an
+engineering carton (`warn_frac < frac < purity`). Such a configuration is NOT
+flagged. No configuration in the DR21 corpus lands there, so the warning firing
+is a real signal. `label` is used only to name the configuration in that
+warning.
+
 An empty `cartons` (plate era, no configuration, unreadable fiber table) is
 never engineering and never errors.
 """
-function exposure_is_engineering(cartons; min_frac = ENGINEERING_CARTON_MIN_FRAC,
-        basis::AbstractString = "science")
+function exposure_is_engineering(cartons; purity = ENGINEERING_CARTON_PURITY,
+        warn_frac = ENGINEERING_CARTON_WARN_FRAC,
+        basis::AbstractString = "science", label::AbstractString = "")
     nsci = length(cartons)
     nsci == 0 &&
         return (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
@@ -158,7 +195,16 @@ function exposure_is_engineering(cartons; min_frac = ENGINEERING_CARTON_MIN_FRAC
         end
         argmax(counts)
     end
-    (engineering = frac > min_frac, frac = frac, carton = carton, nsci = nsci,
+    engineering = frac >= purity
+    if !engineering && frac > warn_frac
+        @warn "Engineering carton check: configuration $(label) is MOSTLY but not " *
+              "PURELY an engineering carton ($(length(matched))/$(nsci) = " *
+              "$(round(frac, digits = 4)) of $(basis) fibers are '$(carton)'). " *
+              "It is NOT flagged engineering (the rule requires purity). This has " *
+              "never happened in the DR21 corpus — treat it as a real signal and " *
+              "decide whether the carton list or the purity rule needs to change."
+    end
+    (engineering = engineering, frac = frac, carton = carton, nsci = nsci,
         basis = String(basis))
 end
 
@@ -226,7 +272,8 @@ function exposure_engineering_from_almanac(f, tele, mjd, config_id, image_type;
     lowercase(strip(String(image_type))) in ENGINEERING_CHECK_IMAGE_TYPES ||
         return (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
     r = almanac_science_cartons(f, tele, mjd, config_id; root = root)
-    exposure_is_engineering(r.cartons; basis = r.basis)
+    exposure_is_engineering(r.cartons; basis = r.basis,
+        label = "$(tele)/$(mjd)/config $(config_id)")
 end
 
 """

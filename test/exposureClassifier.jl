@@ -1,7 +1,8 @@
 using ApogeeReduction: is_engineering_carton, exposure_is_engineering,
                        almanac_science_cartons, exposure_engineering_from_almanac,
                        exposure_flag_bits, exposure_ok_for_science,
-                       ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_MIN_FRAC,
+                       ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
+                       ENGINEERING_CARTON_WARN_FRAC,
                        ENGINEERING_CHECK_IMAGE_TYPES, ENGINEERING_FALLBACK_ALL_FIBERS,
                        EXPFLAG_PREDICTED_BAD, EXPFLAG_ENGINEERING, EXPFLAG_NO_SCIENCE
 using HDF5
@@ -27,7 +28,7 @@ using HDF5
         @test "manual_fps_position_stars" in ENGINEERING_CARTON_PREFIXES
     end
 
-    @testset "majority rule" begin
+    @testset "purity rule" begin
         eng = "manual_fps_position_stars"
         sci = "mwm_snc_100pc"
         # the real-world case: 100% engineering
@@ -42,13 +43,28 @@ using HDF5
         @test !r.engineering
         @test r.frac == 0.0
         @test r.carton == ""
-        # strict majority: 51/100 flags, 50/100 does not
-        @test exposure_is_engineering(vcat(fill(eng, 51), fill(sci, 49))).engineering
+        # PURITY: anything short of 100% is NOT engineering (AKS 2026-09-08).
+        # 299/300 fails; a majority fails; a single stray fiber fails.
+        @test !exposure_is_engineering(vcat(fill(eng, 299), [sci])).engineering
+        @test !exposure_is_engineering(vcat(fill(eng, 51), fill(sci, 49))).engineering
         @test !exposure_is_engineering(vcat(fill(eng, 50), fill(sci, 50))).engineering
-        # a single stray engineering fiber must not condemn a science config
         @test !exposure_is_engineering(vcat([eng], fill(sci, 299))).engineering
-        # threshold constant is the documented one
-        @test ENGINEERING_CARTON_MIN_FRAC == 0.5
+        # this is what keeps the 27 low-share manual_* cartons, and the single
+        # 100%-pure manual_mwm_crosscalib_apogee config, out of the flag
+        @test !exposure_is_engineering(vcat(fill(eng, 71), fill(sci, 29))).engineering
+        # constants are the documented ones
+        @test ENGINEERING_CARTON_PURITY == 1.0
+        @test ENGINEERING_CARTON_WARN_FRAC == 0.5
+        # MOSTLY-but-not-purely must WARN loudly (never seen in DR21, so it is
+        # a real signal if it fires) and must NOT flag
+        @test_logs (:warn, r"MOSTLY but not PURELY") match_mode=:any begin
+            r = exposure_is_engineering(vcat(fill(eng, 90), fill(sci, 10)))
+            @test !r.engineering
+        end
+        # below the warn threshold: no warning, no flag
+        @test_logs min_level=Base.CoreLogging.Warn begin
+            @test !exposure_is_engineering(vcat(fill(eng, 10), fill(sci, 90))).engineering
+        end
         # no science fibers (plate era / no config) -> never engineering, no error
         r = exposure_is_engineering(String[])
         @test !r.engineering
@@ -112,9 +128,10 @@ using HDF5
         # 207-254 of 300 fibers with ZERO category=="science" fibers — their
         # categories are "", bonus, open_fiber, sky_boss. Without the fallback
         # they back 35 unflagged engineering object exposures.
-        # (ENGINEERING_FALLBACK_ALL_FIBERS is an addition beyond AKS's
-        # science-fibers instruction; flip it to false to get the literal rule.)
-        @test ENGINEERING_FALLBACK_ALL_FIBERS
+        # OFF by default: AKS's rule is science fibers, and the agreed target is
+        # exactly the 2,448 exposures that rule produces. Kept as a documented,
+        # one-line-switchable record of the gap.
+        @test !ENGINEERING_FALLBACK_ALL_FIBERS
         mktempdir() do dir
             path = joinpath(dir, "alm2.h5")
             h5open(path, "w") do f
@@ -129,19 +146,22 @@ using HDF5
                 g2["firstcarton"] = vcat(fill("mwm_snc_100pc", 245), fill("", 55))
             end
             h5open(path, "r") do f
-                r = almanac_science_cartons(f, "apo", "59558", 105)
+                # DEFAULT (fallback off): the literal AKS rule — no science
+                # fibers means no cartons to look at, so not engineering
+                @test almanac_science_cartons(f, "apo", "59558", 105).cartons == String[]
+                @test !exposure_engineering_from_almanac(
+                    f, "apo", "59558", 105, "object").engineering
+                # with the fallback ON it sees the config and, being 100% pure
+                # over carton-bearing fibers, flags it
+                r = almanac_science_cartons(f, "apo", "59558", 105;
+                    fallback_all_fibers = true)
                 @test r.basis == "all_fibers_fallback"
                 @test length(r.cartons) == 245   # empty cartons dropped
-                @test exposure_engineering_from_almanac(
-                    f, "apo", "59558", 105, "object").engineering
-                @test exposure_engineering_from_almanac(
-                    f, "apo", "59558", 105, "object").basis == "all_fibers_fallback"
-                @test !exposure_engineering_from_almanac(
-                    f, "apo", "59558", 106, "object").engineering
-                # with the fallback disabled the literal AKS rule applies and
-                # neither is flagged (this is the one-line revert)
-                @test almanac_science_cartons(f, "apo", "59558", 105;
-                    fallback_all_fibers = false).cartons == String[]
+                @test exposure_is_engineering(r.cartons; basis = r.basis).engineering
+                # a real science program of the same shape is never flagged
+                r2 = almanac_science_cartons(f, "apo", "59558", 106;
+                    fallback_all_fibers = true)
+                @test !exposure_is_engineering(r2.cartons; basis = r2.basis).engineering
             end
         end
     end

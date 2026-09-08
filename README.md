@@ -97,22 +97,34 @@ construction) can exclude them. `ApogeeReduction.exposure_ok_for_science(flags)`
 is the single predicate for "safe to do science with", and
 `ApogeeReduction.EXPFLAG_NO_SCIENCE` is the mask it applies.
 
-The engineering bit is a targeting check, not an image check: it is set when a
-strict majority (`ENGINEERING_CARTON_MIN_FRAC`) of the configuration's
-`category == "science"` fibers have a `firstcarton` matching one of
-`ENGINEERING_CARTON_PREFIXES` (currently only `manual_fps_position_stars`, which
-by prefix covers `_10`, `_apogee_10`, and `_lco_apogee_10`). Plate-era
+The engineering bit is a targeting check, not an image check: it is set when
+**all** of the configuration's `category == "science"` fibers have a
+`firstcarton` matching one of `ENGINEERING_CARTON_PREFIXES` (currently only
+`manual_fps_position_stars`, which by prefix covers `_10`, `_apogee_10`, and
+`_lco_apogee_10`). The rule is purity, not majority
+(`ENGINEERING_CARTON_PURITY = 1.0`): every configuration those cartons appear in
+is 100% that carton, and purity is what keeps the other 27 `manual_*` cartons
+out. A configuration that is *mostly but not purely* an engineering carton is
+NOT flagged and raises a loud warning — that has never happened in DR21, so it
+would be a real signal. Plate-era
 exposures have no configuration and no carton, so they are never flagged
 engineering, and calibration frames are never flagged (only `image_type ==
 "object"` is checked — a dark taken while an engineering configuration was
 loaded is still a good dark). Alongside the bit, `engineering_frac`,
 `engineering_carton` and `engineering_basis` record the evidence for the verdict.
 
-A configuration with **no** `category == "science"` fibers falls back to
-evaluating every carton-bearing fiber (`ENGINEERING_FALLBACK_ALL_FIBERS`,
-recorded as `engineering_basis == "all_fibers_fallback"`); five early-FPS
-configurations are engineering by carton but label none of their fibers
-`science`.
+`ENGINEERING_FALLBACK_ALL_FIBERS` (default **off**) would extend the check to
+every carton-bearing fiber for configurations with no `category == "science"`
+fibers at all; five early-FPS configurations are engineering by carton but label
+none of their fibers `science`. It is off because the rule as specified is
+science fibers.
+
+The bit is computed in `pipeline.jl` right after the 2D stage and before the 1D
+stage — the same point as the exposure-type classifier, but ungated by
+`--exp_class_model`, since the check needs only the almanac. It writes
+`apred/<mjd>/exposureEngineering_<tele>_<mjd>.h5`.
+`scripts/cal/decorate_almanac_exptype.jl` computes the same thing for a whole
+almanac after the fact.
 
 
 ## Testing

@@ -3,7 +3,7 @@ Pkg.instantiate();
 using HDF5, ArgParse, DataFrames
 using ApogeeReduction: exposure_class_label, exposure_predicted_bad, initalize_git,
                        exposure_engineering_from_almanac, exposure_flag_bits,
-                       ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_MIN_FRAC,
+                       ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
                        ENGINEERING_CHECK_IMAGE_TYPES, EXPFLAG_PREDICTED_BAD,
                        EXPFLAG_ENGINEERING, ENGINEERING_FALLBACK_ALL_FIBERS
 
@@ -26,9 +26,10 @@ git_branch, git_commit, git_clean = initalize_git(dirname(dirname(@__DIR__)) * "
 ##   exposure_class_status  ok / mislabel_candidate / lamp_off_candidate /
 ##                          persistence_risk / faint_twilight / unknown /
 ##                          rare_label / nofiles / unclassified
-##   engineering            UInt8 0/1 — carton check: the configuration's
+##   engineering            UInt8 0/1 — carton check: ALL of the configuration's
 ##                          science fibers carry an engineering carton
-##                          (ApogeeReduction.ENGINEERING_CARTON_PREFIXES)
+##                          (ApogeeReduction.ENGINEERING_CARTON_PREFIXES; the
+##                          rule is purity, see ENGINEERING_CARTON_PURITY)
 ##   engineering_frac       Float64 fraction of science fibers matching (NaN
 ##                          when there is no configuration: plate era, cals)
 ##   engineering_carton     the matched carton name ("" if none), for audit
@@ -91,7 +92,7 @@ h5open(parg["almanac_file"], "r+") do f
     attrs(g)["results_file"] = abspath(parg["results_file"])
     # engineering-carton policy travels with the file so the bit is self-describing
     attrs(g)["engineering_carton_prefixes"] = join(ENGINEERING_CARTON_PREFIXES, ",")
-    attrs(g)["engineering_carton_min_frac"] = ENGINEERING_CARTON_MIN_FRAC
+    attrs(g)["engineering_carton_purity"] = ENGINEERING_CARTON_PURITY
     attrs(g)["engineering_check_image_types"] = join(ENGINEERING_CHECK_IMAGE_TYPES, ",")
     attrs(g)["engineering_fallback_all_fibers"] = string(ENGINEERING_FALLBACK_ALL_FIBERS)
     attrs(g)["exposure_flags_bits"] = "2^0=predicted_bad,2^1=engineering"
