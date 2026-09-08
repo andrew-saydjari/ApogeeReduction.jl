@@ -476,7 +476,17 @@ for day in "${days[@]}"; do
     elif [ "$n1dcal" -eq 0 ] || [ "$n1duni" -eq 0 ]; then
         verdict="MISSING-1D"
     fi
-    [ "$verdict" = "ok" ] || overall=1
+    # NO-EXPOSURES is a CORRECT outcome, not a failure: a night whose runlist
+    # holds zero exposures (e.g. a cal-only night the filter drops) legitimately
+    # produces no products, and the pipeline exiting gracefully on it is the
+    # behaviour under test. Only genuine shortfalls set the failure flag.
+    # (Testbed job 6999920 completed 288/290 tele-nights ok and still exited 1
+    # on apo 59136 and apo 59423 — 1 and 2 exposures — blocking the arM stage.
+    # Empty nights are certain to recur across the ~3,345 MJDs of the bulk run.)
+    case "$verdict" in
+        ok|NO-EXPOSURES) : ;;
+        *) overall=1 ;;
+    esac
     {
         echo "tele: ${tele}"
         echo "mjd: ${mjd}"
