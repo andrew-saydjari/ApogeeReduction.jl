@@ -68,12 +68,22 @@ almanac_clobber_mode=${11:-false}
 # Run the arMADGICS stage after the AR reduction. Set via positional arg 12 or the
 # RUN_MADGICS env var (exported at sbatch time); positional arg wins. Default: false (bulk).
 run_madgics=${12:-${RUN_MADGICS:-false}}
-# Exposure-type classifier artifact (JLD2). EMPTY BY DEFAULT — this preserves
-# the current bulk behaviour exactly: with it unset, pipeline.jl runs no
-# exposure-type check, the almanac gets no exposure_class group, the flat
-# runlists are unfiltered, and the 1D products record exp_class_status="notrun".
-# Set AR_EXP_CLASS_MODEL to a model path to turn the whole chain on.
-exp_class_model=${AR_EXP_CLASS_MODEL:-""}
+# Exposure-type classifier: ON BY DEFAULT.
+# Leaving AR_EXP_CLASS_MODEL unset passes no flag, so pipeline.jl uses its own
+# pinned v6 default (ApogeeReduction.DEFAULT_EXP_CLASS_MODEL) — the artifact
+# path lives in exactly one place, the Julia source, and is not duplicated here.
+#   unset         -> classifier ON with the pinned v6 artifact
+#   set to ""     -> classifier OFF, deliberately
+#   set to a path -> classifier ON with that artifact
+# n.b. the ${VAR+set} test distinguishes "unset" from "set to empty"; that
+# distinction is the whole mechanism, so do not collapse it to ${VAR:-...}.
+if [ "${AR_EXP_CLASS_MODEL+set}" = "set" ]; then
+    exp_class_opt=(--exp_class_model "$AR_EXP_CLASS_MODEL")
+    if [ -n "$AR_EXP_CLASS_MODEL" ]; then exp_class_on=true; else exp_class_on=false; fi
+else
+    exp_class_opt=()
+    exp_class_on=true
+fi
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -138,7 +148,7 @@ for tele in ${tele_list[@]}
 do
     print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
     ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-    julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode ${exp_class_model:+--exp_class_model "$exp_class_model"}
+    julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode "${exp_class_opt[@]}"
 done
 
 # Exposure-type classifier verdicts -> almanac (POST-2D, PRE-1D).
@@ -148,11 +158,11 @@ done
 # gate reject them after. Advisory only: no exposure is removed from the
 # reduction by this step. Runs once, after the per-telescope loop, because the
 # almanac is shared across telescopes and the decoration rewrites it wholesale.
-if [ -n "$exp_class_model" ]; then
+if $exp_class_on; then
     print_elapsed_time "Decorating almanac with exposure-type classifier verdicts"
     julia +$julia_version --project=$base_dir $base_dir/scripts/cal/decorate_almanac_exptype.jl --almanac_file $almanac_file --apred_dir ${outdir}apred
 else
-    echo "exposure-type classifier: DISABLED (AR_EXP_CLASS_MODEL unset) — almanac not decorated, flat runlists unfiltered, 1D exp_class_status=notrun"
+    echo "exposure-type classifier: DISABLED (AR_EXP_CLASS_MODEL set to empty) — almanac not decorated, flat runlists unfiltered, 1D exp_class_status=notrun"
 fi
 
 # Only continue if run_2d_only is false

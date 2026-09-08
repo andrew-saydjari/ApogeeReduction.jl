@@ -92,9 +92,9 @@ function parse_commandline()
         default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
         "--exp_class_model"
         required = false
-        help = "path to the exposure-type classifier artifact (JLD2); empty string skips the post-2D exposure-type check"
+        help = "exposure-type classifier artifact (JLD2). \"default\" (the default) uses the pinned v6 artifact ApogeeReduction.DEFAULT_EXP_CLASS_MODEL, so the post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). Any other value is used as a path."
         arg_type = String
-        default = ""
+        default = "default"
     end
     return parse_args(s)
 end
@@ -138,8 +138,32 @@ flush(stdout);
     using ParallelDataTransfer, ProgressMeter
     using AstroTime: TAIEpoch, modified_julian, days, value
     using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D,
-                           process_2Dcal, cal2df, get_cal_path, TAIEpoch
+                           process_2Dcal, cal2df, get_cal_path, TAIEpoch,
+                           DEFAULT_EXP_CLASS_MODEL
 end
+
+# Resolve the exposure-type classifier artifact BEFORE parg is shipped to the
+# workers. "default" (the arg-table default) means the pinned v6 artifact; an
+# empty string means the check is deliberately off. Resolving here keeps the
+# pinned path defined in exactly one place, src/exposureClassifier.jl.
+if parg["exp_class_model"] == "default"
+    parg["exp_class_model"] = DEFAULT_EXP_CLASS_MODEL
+end
+if parg["exp_class_model"] == ""
+    println("Exposure-type check: DISABLED by explicit --exp_class_model \"\". " *
+            "1D products will record exp_class_status=\"notrun\".")
+elseif !isfile(parg["exp_class_model"])
+    # Fail fast and loudly. Silently skipping the check would hand a bulk run
+    # thousands of nights of "notrun" metadata that look indistinguishable from
+    # a deliberate opt-out, which is precisely the failure this wiring exists to
+    # remove. If you meant to turn it off, say so with --exp_class_model "".
+    error("--exp_class_model points at a file that does not exist:\n  " *
+          parg["exp_class_model"] *
+          "\nPass --exp_class_model \"\" to run without the exposure-type check.")
+else
+    println("Exposure-type check: ENABLED, model = ", parg["exp_class_model"])
+end
+
 @passobj 1 workers() parg
 @passobj 1 workers() proj_path
 println(BLAS.get_config());

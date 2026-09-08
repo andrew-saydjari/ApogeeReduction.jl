@@ -30,6 +30,25 @@ const CLASSIFIER_ILLUMINATED = ["arclamp_q0t1u0", "arclamp_q0t0u1",
 const CLASSIFIER_PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat",
     "arclamp"]
 
+# Default exposure-type classifier artifact. The post-2D check runs with this
+# unless it is explicitly disabled (`pipeline.jl --exp_class_model ""`).
+#
+# THE VERSION IS PINNED ON PURPOSE. This must never become "whatever the newest
+# file in that directory is": the class list, the feature layout and the
+# decision thresholds are all properties of one particular trained forest, and a
+# reduction has to be able to say which forest judged it. Retraining means
+# editing this line deliberately, not dropping a new file beside the old one.
+#
+# Location caveat, recorded honestly: this is a dated ANALYSIS directory. That
+# is the same convention the other cal-artifact defaults already follow
+# (caldir_darks, caldir_flats, gain_read_cal_dir in pipeline.jl), but it is not
+# a stable artifact store and it would vanish under a scratch cleanup. The path
+# is defined ONCE, here, precisely so that promoting the artifact to a canonical
+# home is a one-line change and never a hunt through the DAG scripts. pipeline.jl
+# fails fast if it is missing, so a cleanup can never silently downgrade a run to
+# "no classification". See the PR discussion for the proposed canonical home.
+const DEFAULT_EXP_CLASS_MODEL = "/mnt/ceph/users/sdssv/work/asaydjari/2026_07_14/meta/exposure_classifier_rf_v6.jld2"
+
 # Tri-state exposure-class verdict carried into the 1D data products. -1 is a
 # first-class value, not a filler: see the block comment above
 # `exposure_class_unknown_metadata` for why this is not a Bool and not a bitmask.
@@ -192,7 +211,15 @@ end
 Masking policy for downstream consumers (cal runlists, wavecal arc/FPI
 selection): should this exposure be excluded based on the classifier verdict?
 
-- object_q0t0u0: never masked (science frames are handled downstream)
+- object_q0t0u0: never masked (science frames are handled downstream).
+  n.b. this exemption is keyed on the EXACT label string, not on
+  `image_type == "object"`. An object frame with anomalous lamp flags is
+  labeled e.g. "object_q0t0u1" and does NOT take this branch, so it can come
+  back masked (4 such frames exist in DR21, all on lco 57802). That is
+  harmless today because the only consumer of the mask is the fiber-flat
+  runlist builder, which selects on `image_type == "<flat_type>flat"` first and
+  so can never see an object frame. If a future consumer masks science
+  exposures with this, revisit the exemption before doing so.
 - dark_q0t0u0: masked when the content prediction is anything but a clean
   dark (dark_persist, illuminated content) or the prediction is unknown.
   Sequence-only persistence risks whose image still classifies as a clean

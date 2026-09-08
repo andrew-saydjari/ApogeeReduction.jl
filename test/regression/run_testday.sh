@@ -32,13 +32,14 @@
 #   AR_CALDIR_DARKS       dark cal dir  [2025_07_31/outdir_ref/]
 #   AR_CALDIR_FLATS       flat cal dir  [2025_07_31/outdir_ref/]
 #   AR_GAIN_READ_CAL_DIR  gain/readnoise cal dir [2026_09_06/pass_clean/]
+#   AR_EXP_CLASS_MODEL    exposure-type classifier artifact; unset = pinned v6
+#                         default (check ON), "" = check OFF
 #   AR_WORKERS            Distributed workers for pipeline.jl / pipeline_2d_1d
 #                         in local mode [24 — headroom on 32-core ccalin051]
 #   AR_SLURM              auto | true | false — see mode block below [auto]
 #   AR_JULIA_VERSION      juliaup channel [1.11.0, matching run_all.sh]
 #   AR_CHECKPOINT_MODE    clobber | commit_exists | commit_same [commit_exists]
 #   AR_CHIPS              chips to reduce [RGB]
-#   AR_EXP_CLASS_MODEL    exposure-classifier artifact; empty = skip check []
 #
 # Exit code: 0 on success; the step that failed is the last "--------- x ---------"
 # banner in the log (${outdir}logs/run_testday_<tele>_<mjd>.log).
@@ -67,7 +68,15 @@ AR_WORKERS=${AR_WORKERS:-24}
 AR_JULIA_VERSION=${AR_JULIA_VERSION:-"1.11.0"}
 AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE:-"commit_exists"}
 AR_CHIPS=${AR_CHIPS:-"RGB"}
-AR_EXP_CLASS_MODEL=${AR_EXP_CLASS_MODEL:-""}
+# Exposure-type classifier: ON BY DEFAULT, matching the production DAGs.
+# Unset -> pass no flag -> pipeline.jl uses its pinned v6 default.
+# Set to "" -> pass --exp_class_model "" -> check off, deliberately.
+# ${VAR+set} distinguishes unset from set-to-empty; that is the mechanism.
+if [ "${AR_EXP_CLASS_MODEL+set}" = "set" ]; then
+    exp_class_opt=(--exp_class_model "$AR_EXP_CLASS_MODEL")
+else
+    exp_class_opt=()
+fi
 
 base_dir="$(cd "$1" && pwd)"
 tele=$2
@@ -117,7 +126,7 @@ echo "  tele=$tele mjd=$mjd outdir=$outdir"
 echo "  almanac_src=$AR_ALMANAC_SRC"
 echo "  raw cluster=$AR_RAW_CLUSTER darks=$AR_CALDIR_DARKS flats=$AR_CALDIR_FLATS"
 echo "  gain/read=$AR_GAIN_READ_CAL_DIR workers=$AR_WORKERS julia=$AR_JULIA_VERSION"
-echo "  checkpoint_mode=$AR_CHECKPOINT_MODE chips=$AR_CHIPS exp_class_model='${AR_EXP_CLASS_MODEL}'"
+echo "  checkpoint_mode=$AR_CHECKPOINT_MODE chips=$AR_CHIPS exp_class_model='${AR_EXP_CLASS_MODEL-(pinned v6 default)}'"
 if [ "$AR_SLURM" = "true" ]; then
     echo "  mode=slurm SLURM_NTASKS=$SLURM_NTASKS nodes=${SLURM_NNODES:-?} nodelist=${SLURM_JOB_NODELIST:-?}"
 else
@@ -174,7 +183,7 @@ julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/pipeline.jl" \
     --chips "$AR_CHIPS" --caldir_darks "$AR_CALDIR_DARKS" --caldir_flats "$AR_CALDIR_FLATS" \
     --cluster "$AR_RAW_CLUSTER" --gain_read_cal_dir "$AR_GAIN_READ_CAL_DIR" \
     --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}" \
-    ${AR_EXP_CLASS_MODEL:+--exp_class_model "$AR_EXP_CLASS_MODEL"}
+    "${exp_class_opt[@]}"
 
 # ---- traces + relFluxing per flat type -------------------------------------
 for flat_type in "${flat_types[@]}"; do

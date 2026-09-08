@@ -3,9 +3,20 @@ using ApogeeReduction: exposure_class_metadata, exposure_class_unknown_metadata,
                        exposure_type_check_path, read_exposure_type_check,
                        exposure_class_metadata_for, safe_jldsave,
                        EXP_CLASS_BAD_UNKNOWN, EXP_CLASS_BAD_FALSE, EXP_CLASS_BAD_TRUE,
-                       EXP_CLASS_STATUS_NOTRUN, EXP_CLASS_UNKNOWN_STR
+                       EXP_CLASS_STATUS_NOTRUN, EXP_CLASS_UNKNOWN_STR,
+                       DEFAULT_EXP_CLASS_MODEL
 
 @testset "exposureClassifier" begin
+    @testset "default model artifact is pinned" begin
+        # The default must name one specific trained forest. "Whatever the
+        # newest file in that directory is" would leave a reduction unable to
+        # say which model judged it.
+        @test occursin("_v6.jld2", DEFAULT_EXP_CLASS_MODEL)
+        @test isabspath(DEFAULT_EXP_CLASS_MODEL)
+        # deliberately NOT asserted to exist: the test suite must pass on a
+        # machine without the 175 MB artifact
+    end
+
     @testset "exposure_class_label" begin
         @test exposure_class_label("arclamp", false, true, false) == "arclamp_q0t1u0"
         @test exposure_class_label("quartzflat", 1, 0, 0) == "quartzflat_q1t0u0"
@@ -38,10 +49,20 @@ using ApogeeReduction: exposure_class_metadata, exposure_class_unknown_metadata,
         @test b["exp_class_predicted_bad"] == EXP_CLASS_BAD_TRUE
         @test b["exp_class_pred"] == "dark_q0t0u0"
 
-        # object frames are never masked, whatever the classifier thinks
+        # standard science frames are never masked, whatever the forest thinks
         o = exposure_class_metadata(
             "object_q0t0u0", "dark_q0t0u0", 1.0, "mislabel_candidate")
         @test o["exp_class_predicted_bad"] == EXP_CLASS_BAD_FALSE
+
+        # ...but the exemption is on the EXACT label, not image_type == object.
+        # An object frame with an anomalous lamp flag (lco 57802 209-212 in
+        # DR21) is labeled object_q0t0u1 and DOES come back masked. Harmless
+        # while the only consumer is the fiber-flat runlist builder, which
+        # never sees an object frame; asserted here so the nuance is recorded
+        # rather than rediscovered.
+        o2 = exposure_class_metadata(
+            "object_q0t0u1", "object_q0t0u0", 1.0, "mislabel_candidate")
+        @test o2["exp_class_predicted_bad"] == EXP_CLASS_BAD_TRUE
 
         # a dark following a bright exposure is informational, not bad
         p = exposure_class_metadata(

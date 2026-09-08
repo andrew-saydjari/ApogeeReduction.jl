@@ -95,14 +95,28 @@ anything from the 2D products or the almanac.
 | `exp_class_labeled` | String | The commanded label it was compared against |
 | `exp_class_prob` | Float64 | Max forest probability, `NaN` when there is no verdict |
 
-**`-1` is a real value, not a filler.** The exposure-type check only runs when
-`pipeline.jl` is given `--exp_class_model` (set `AR_EXP_CLASS_MODEL` for the
-`run_all.sh` / `run_bulk.sh` DAGs), and it is **off by default**. When it did
-not run, is missing its per-MJD table, or errored on an exposure, the fields
-read `predicted_bad = -1`, `status = "notrun"`, `pred = "unknown"`,
-`prob = NaN`. A 1D file written before these fields existed carries none of
-them, which reads the same way. Never treat a missing or `-1` value as a clean
-bill of health — only `== 1` means bad.
+**`-1` is a real value, not a filler.** The exposure-type check is **on by
+default**: `pipeline.jl --exp_class_model` defaults to the pinned v6 artifact
+`ApogeeReduction.DEFAULT_EXP_CLASS_MODEL`, and both DAGs inherit that. A product
+can still legitimately carry no verdict — the check was deliberately disabled,
+its per-MJD table is missing, it errored on that exposure, or the file predates
+these fields — and in every such case the fields read `predicted_bad = -1`,
+`status = "notrun"`, `pred = "unknown"`, `prob = NaN`. Never treat a missing or
+`-1` value as a clean bill of health; only `== 1` means bad.
+
+To turn the check off deliberately, pass an empty model path:
+`pipeline.jl --exp_class_model ""`, or `AR_EXP_CLASS_MODEL="" ./run_all.sh ...`.
+Leaving `AR_EXP_CLASS_MODEL` **unset** means on; setting it to the empty string
+means off. A model path that does not exist is a hard error at startup rather
+than a silent skip, so a moved or cleaned-up artifact can never quietly
+downgrade a run to "no classification".
+
+The artifact version is pinned deliberately in `src/exposureClassifier.jl`;
+retraining means editing that constant, not dropping a newer file beside the old
+one. Measured cost of the check on the testbed corpus: **~1.75 s per exposure of
+worker time** (3 chips), of which ~1.34 s is re-reading the `ar2D` images and
+only ~0.3 ms is the forest itself, plus a one-off ~3.6 s model load and ~183 MiB
+resident per worker process — about **0.2%** of the reduction's total CPU.
 
 This verdict is **advisory**. No exposure is dropped from the reduction because
 of it: engineering and known-bad frames are still reduced. The one place it
