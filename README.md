@@ -77,6 +77,43 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 13    | 8192      | pixel partially saturated |
 | 14    | 16384     | pixel fully saturated |
 
+## Exposure-Level Flag Bits
+
+Separately from the per-pixel bits above, whole *exposures* can be flagged.
+These bits are written by `scripts/cal/decorate_almanac_exptype.jl` into the
+almanac's `exposure_class/<tele>/<mjd>/exposure_flags` dataset (`UInt8`, aligned
+row-for-row with `raw/<tele>/<mjd>/exposures`).
+
+| Bit   | Value     | Meaning     |
+| ----- | --------- | ----------- |
+| -     | 0         | No problems |
+| 0     | 1         | `predicted_bad` — the image-content classifier says this exposure should not be used (policy: `exposure_predicted_bad`) |
+| 1     | 2         | `engineering` — the configuration's science fibers carry an engineering carton, so the exposure exists to exercise the hardware, not to do science (policy: `exposure_is_engineering`) |
+
+**These bits are advisory metadata, not a reduction filter.** Every exposure,
+engineering ones included, is still reduced all the way to 1D; the bits exist so
+that consumers who assemble *science* samples (prior builds, catalog
+construction) can exclude them. `ApogeeReduction.exposure_ok_for_science(flags)`
+is the single predicate for "safe to do science with", and
+`ApogeeReduction.EXPFLAG_NO_SCIENCE` is the mask it applies.
+
+The engineering bit is a targeting check, not an image check: it is set when a
+strict majority (`ENGINEERING_CARTON_MIN_FRAC`) of the configuration's
+`category == "science"` fibers have a `firstcarton` matching one of
+`ENGINEERING_CARTON_PREFIXES` (currently only `manual_fps_position_stars`, which
+by prefix covers `_10`, `_apogee_10`, and `_lco_apogee_10`). Plate-era
+exposures have no configuration and no carton, so they are never flagged
+engineering, and calibration frames are never flagged (only `image_type ==
+"object"` is checked — a dark taken while an engineering configuration was
+loaded is still a good dark). Alongside the bit, `engineering_frac`,
+`engineering_carton` and `engineering_basis` record the evidence for the verdict.
+
+A configuration with **no** `category == "science"` fibers falls back to
+evaluating every carton-bearing fiber (`ENGINEERING_FALLBACK_ALL_FIBERS`,
+recorded as `engineering_basis == "all_fibers_fallback"`); five early-FPS
+configurations are engineering by carton but label none of their fibers
+`science`.
+
 
 ## Testing
 
