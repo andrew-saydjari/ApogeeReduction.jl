@@ -302,8 +302,9 @@ Winsorise `Z` and subtract its own `hp × hp` local mean.
 Both detectors carry genuine coherent structure on scales of hundreds of pixels —
 illumination roll-off near the array edges, broad dark-current gradients.  It is real,
 but it is not a *defect region*, and left in place it dominates the ranking: without
-this step the largest "regions" found are 220-column-wide strips running the full
-height of the array at x < 250 and x > 1800, on every chip of both telescopes.
+this step the twelve largest regions across the six telescope-chips are all
+array-spanning strips of 40000-150000 px, ten of them the roll-off in the first or last
+~250 columns.
 
 `hp` must be comfortably larger than the largest matched-filter scale (65 here), so a
 defect the filter bank can actually resolve loses only a few percent of its amplitude:
