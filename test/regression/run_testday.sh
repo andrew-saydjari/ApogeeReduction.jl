@@ -188,7 +188,8 @@ for flat_type in "${flat_types[@]}"; do
     mkdir -p "${outdir}${flat_type}_flats"
     julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_traces_from_flats.jl" \
         --tele "$tele" --trace_dir "$outdir" --runlist "$flatrunlist" --flat_type "$flat_type" \
-        --slack_quiet true --checkpoint_mode "$AR_CHECKPOINT_MODE"
+        --slack_quiet true --checkpoint_mode "$AR_CHECKPOINT_MODE" \
+        --almanac_file "$almanac_file"
 
     print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
     mkdir -p "${outdir}apredrelflux"

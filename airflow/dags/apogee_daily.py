@@ -552,6 +552,10 @@ def build_observatory_group(tele: str) -> TaskGroup:
                                 f"--trace_dir {C.xn('outdir', tele)} "
                                 f"--runlist {flatrunlist} "
                                 f"--flat_type {flat_type} --slack_quiet true "
+                                # FPI guide fibers for the dome-flat trace plots
+                                # are read from the night's configurations here,
+                                # not from a hardcoded per-telescope pair.
+                                f"--almanac_file {C.xn('almanac_file', tele)} "
                                 "--checkpoint_mode "
                                 "{{ params.checkpoint_mode }}")
                             + "'",

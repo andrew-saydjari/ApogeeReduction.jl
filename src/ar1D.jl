@@ -303,6 +303,58 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 end
 
 """
+Return the FPI guide fiber IDs for one night, derived from the configurations
+themselves rather than from a hardcoded constant.
+
+The FPI feed has no positioner and therefore no FIBERMAP row in the
+confSummary; almanac synthesizes a stub with `category == "bonus"` for every
+APOGEE fiber_id in 1:300 that a configuration does not account for. Those stubs
+carry no fiber_type, so they must be read before any `fiber_type == "APOGEE"`
+filter.
+
+The FPI feed does not move within a night, so the first object configuration
+that identifies it is used. Returns an empty vector when the night has no such
+configuration (a calibration-only night, the plate era, or a read failure) --
+callers should then decline to label anything rather than guess, because a
+stale constant silently overriding real fiber assignments is the failure mode
+this replaces.
+"""
+function get_fpi_fiberIDs_from_almanac(almanac_file, tele, mjd)
+    fiberIDs = Int[]
+    isfile(almanac_file) || return fiberIDs
+    try
+        f = h5open(almanac_file, "r")
+        try
+            df_exp = read_almanac_exp_df(f, tele, mjd)
+            if "config_id" in names(df_exp)
+                for row in eachrow(df_exp)
+                    (row.image_type == "object") || continue
+                    config_id = row.config_id
+                    (config_id > 0) || continue
+                    fibers_path = "raw/$(tele)/$(mjd)/fibers/$(config_id)"
+                    haskey(f, fibers_path) || continue
+                    df_fib = DataFrame(read(f[fibers_path]))
+                    rename!(df_fib, lowercase.(names(df_fib)))
+                    ("category" in names(df_fib)) || continue
+                    ids = df_fib[df_fib[!, "category"].=="bonus", "fiber_id"]
+                    if !isempty(ids)
+                        fiberIDs = sort(unique(Int.(ids)))
+                        break
+                    end
+                end
+            end
+        finally
+            close(f)
+        end
+    catch e
+        @warn "Could not derive FPI guide fibers from $(almanac_file) for $(tele)/$(mjd); " *
+              "they will not be annotated."
+        show(e)
+    end
+    return fiberIDs
+end
+
+"""
 Given an open HDF.file, `f`, and the telescope, mjd, and expnum, return a dictionary
 mapping fiber index (1:300 laid out on the chip) to fiber type.
 """

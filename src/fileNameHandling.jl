@@ -74,6 +74,20 @@ function adjFiberIndx2FiberIndx(adjfibindx)
     return mod1(adjfibindx, 300)
 end
 
+"""
+DEPRECATED -- do not use for identifying the FPI guide fibers.
+
+This hardcoded pair is wrong wherever the FPI feed does not sit where the
+constant says: on the LCO FPS commissioning nights MJD 59820/59826/59827 the
+FPI is on fiber_id 142/153, not 82/213, and the two fibers named here carry
+category "science" there. Relying on it silently relabelled and discarded real
+science fibers.
+
+Use `get_fpi_fiberIDs_from_almanac(almanac_file, tele, mjd)`, which reads the
+FPI fibers out of the night's own configurations. It has no callers left; it is
+retained only so that any out-of-tree user gets this warning rather than a
+silent wrong answer.
+"""
 function get_fpi_guide_fiberID(tele)
     if (tele == "apo")
         return 75, 225
