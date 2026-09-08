@@ -77,6 +77,45 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 13    | 8192      | pixel partially saturated |
 | 14    | 16384     | pixel fully saturated |
 
+## Exposure-Level Classifier Fields (1D metadata)
+
+The bits above are *per pixel*. Separately, the exposure-type classifier judges
+each exposure as a whole from its 2D images, between the 2D and 1D stages, and
+its verdict is carried into the `metadata` group of the 1D data products
+(`ar1D*`, `ar1Dcal*`, and the reinterpolated `ar1Duni*` / `ar1Dunical*`, which
+inherit it from the first chip's 1D file). A consumer can therefore read a 1D
+file and see whether the frame was judged bad, and why, without re-deriving
+anything from the 2D products or the almanac.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `exp_class_predicted_bad` | Int8 | **Tri-state.** `1` = classifier ran and judged this exposure bad; `0` = classifier ran and judged it fine; `-1` = **UNKNOWN**, no verdict exists |
+| `exp_class_status` | String | Why: `ok`, `lamp_off_candidate`, `mislabel_candidate`, `faint_twilight`, `persistence_prior`, `unknown`, or `notrun` |
+| `exp_class_pred` | String | Predicted content class, e.g. `quartzflat_q1t0u0`, `dark_q0t0u0` |
+| `exp_class_labeled` | String | The commanded label it was compared against |
+| `exp_class_prob` | Float64 | Max forest probability, `NaN` when there is no verdict |
+
+**`-1` is a real value, not a filler.** The exposure-type check only runs when
+`pipeline.jl` is given `--exp_class_model` (set `AR_EXP_CLASS_MODEL` for the
+`run_all.sh` / `run_bulk.sh` DAGs), and it is **off by default**. When it did
+not run, is missing its per-MJD table, or errored on an exposure, the fields
+read `predicted_bad = -1`, `status = "notrun"`, `pred = "unknown"`,
+`prob = NaN`. A 1D file written before these fields existed carries none of
+them, which reads the same way. Never treat a missing or `-1` value as a clean
+bill of health — only `== 1` means bad.
+
+This verdict is **advisory**. No exposure is dropped from the reduction because
+of it: engineering and known-bad frames are still reduced. The one place it
+excludes anything is `make_runlist_fiber_flats.jl`, which drops
+`predicted_bad == 1` flats from the trace/fluxing runlists, and logs every
+exclusion. Other per-exposure advisory flags get their own `exp_*` scalars
+rather than bits inside `exp_class_predicted_bad`, so separate producers never
+contend for one integer.
+
+The same tri-state lands in the almanac as
+`exposure_class/<tele>/<mjd>/predicted_bad`, written by
+`scripts/cal/decorate_almanac_exptype.jl`, which is what the runlist builder
+reads.
 
 ## Testing
 

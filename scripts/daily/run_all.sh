@@ -67,6 +67,12 @@ almanac_clobber_mode=${11:-false}
 # Run the arMADGICS stage after the AR reduction. Set via positional arg 12 or the
 # RUN_MADGICS env var (exported at sbatch time); positional arg wins. Default: true (daily).
 run_madgics=${12:-${RUN_MADGICS:-true}}
+# Exposure-type classifier artifact (JLD2). EMPTY BY DEFAULT — this preserves
+# the current production behaviour exactly: with it unset, pipeline.jl runs no
+# exposure-type check, the almanac gets no exposure_class group, the flat
+# runlists are unfiltered, and the 1D products record exp_class_status="notrun".
+# Set AR_EXP_CLASS_MODEL to a model path to turn the whole chain on.
+exp_class_model=${AR_EXP_CLASS_MODEL:-""}
 
 runname="allobs_${tele}_${mjd}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -130,7 +136,19 @@ fi
 
 print_elapsed_time "Running 3D->2D/2Dcal Pipeline for $tele"
 ## sometimes have to adjust workers_per_node based on nreads, could programmatically set based on the average or max read number in the exposures for that night
-julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode
+julia +$julia_version --project=$base_dir $base_dir/pipeline.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --chips "RGB" --caldir_darks $caldir_darks --caldir_flats $caldir_flats --cluster cca --gain_read_cal_dir $gain_read_cal_dir --checkpoint_mode $checkpoint_mode ${exp_class_model:+--exp_class_model "$exp_class_model"}
+
+# Exposure-type classifier verdicts -> almanac (POST-2D, PRE-1D).
+# pipeline.jl has just written apred/<mjd>/exposureTypeCheck_*.h5; fold those
+# into the almanac so make_runlist_fiber_flats.jl below can drop known-bad flats
+# BEFORE trace fitting rather than having the trace gate reject them after.
+# Advisory only: no exposure is removed from the reduction by this step.
+if [ -n "$exp_class_model" ]; then
+    print_elapsed_time "Decorating almanac with exposure-type classifier verdicts"
+    julia +$julia_version --project=$base_dir $base_dir/scripts/cal/decorate_almanac_exptype.jl --almanac_file $almanac_file --apred_dir ${outdir}apred
+else
+    echo "exposure-type classifier: DISABLED (AR_EXP_CLASS_MODEL unset) — almanac not decorated, flat runlists unfiltered, 1D exp_class_status=notrun"
+fi
 
 # Only continue if run_2d_only is false
 if [ "$run_2d_only" != "true" ]; then

@@ -30,6 +30,17 @@ const CLASSIFIER_ILLUMINATED = ["arclamp_q0t1u0", "arclamp_q0t0u1",
 const CLASSIFIER_PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat",
     "arclamp"]
 
+# Tri-state exposure-class verdict carried into the 1D data products. -1 is a
+# first-class value, not a filler: see the block comment above
+# `exposure_class_unknown_metadata` for why this is not a Bool and not a bitmask.
+const EXP_CLASS_BAD_UNKNOWN = Int8(-1)
+const EXP_CLASS_BAD_FALSE = Int8(0)
+const EXP_CLASS_BAD_TRUE = Int8(1)
+# status sentinel meaning "the exposure-type check did not run for this exposure"
+const EXP_CLASS_STATUS_NOTRUN = "notrun"
+# pred/labeled sentinel for the same case (never "", which reads as a real class)
+const EXP_CLASS_UNKNOWN_STR = "unknown"
+
 """
 Count strict local maxima of profile `p` above `thresh`.
 """
@@ -192,9 +203,15 @@ selection): should this exposure be excluded based on the classifier verdict?
   (mislabel / lamp-off / faint-twilight / unknown / rare label)
 - exposures without reduced 2D data ("nofiles"/"unclassified") are not
   masked here; missing products already exclude them downstream
+
+This returns a Bool: it answers "did the classifier judge this bad?", and it
+presumes the classifier actually ran. It cannot express "we do not know".
+Consumers that must distinguish "judged good" from "never judged" want the
+tri-state `exposure_class_metadata` / `EXP_CLASS_BAD_*` encoding instead —
+see the note there on why a Bool is the wrong type at the file-metadata layer.
 """
 function exposure_predicted_bad(labeled_class, pred, status)
-    if status in ("nofiles", "unclassified")
+    if status in ("nofiles", "unclassified", EXP_CLASS_STATUS_NOTRUN, "checkfail")
         false
     elseif labeled_class == "object_q0t0u0"
         false
@@ -203,6 +220,107 @@ function exposure_predicted_bad(labeled_class, pred, status)
     else
         status != "ok"
     end
+end
+
+##### Exposure-class provenance carried into the 1D data products #####
+#
+# Representation notes (deliberate, please read before extending):
+#
+# - `exp_class_predicted_bad` is a TRI-STATE Int8, not a Bool and not a bitmask:
+#       1 = the classifier ran and judged this exposure bad
+#       0 = the classifier ran and judged this exposure fine
+#      -1 = UNKNOWN. The classifier never ran (it is off by default), its
+#           artifact was absent, or the check errored on this exposure.
+#   A missing verdict must never read as 0/"fine" to a downstream consumer.
+#   That is the entire reason this is not a Bool.
+#
+# - It is a scalar owned by ONE producer (the exposure-type classifier), not a
+#   shared bitmask. Other advisory per-exposure flags — e.g. the carton-derived
+#   ENGINEERING bit — get their own namespaced scalar rather than a bit in this
+#   one, so that two producers can never race over the same integer.
+#
+# - Field names are prefixed `exp_class_` so the exposure-level namespace stays
+#   visibly separate from the per-pixel bitmasks documented in the README.
+
+"""
+    exposure_class_unknown_metadata()
+
+The `exp_class_*` metadata block for an exposure the classifier never judged.
+Every field is an explicit unknown sentinel: `predicted_bad = -1`,
+`status = "notrun"`, `pred`/`labeled = "unknown"`, `prob = NaN`.
+
+This is what a consumer sees when `--exp_class_model` was empty (the default),
+when the per-MJD `exposureTypeCheck_*.h5` is absent, or when reading a 1D file
+written before this field block existed and thus carrying none of it.
+"""
+exposure_class_unknown_metadata() = Dict{String, Any}(
+    "exp_class_predicted_bad" => EXP_CLASS_BAD_UNKNOWN,
+    "exp_class_status" => EXP_CLASS_STATUS_NOTRUN,
+    "exp_class_pred" => EXP_CLASS_UNKNOWN_STR,
+    "exp_class_labeled" => EXP_CLASS_UNKNOWN_STR,
+    "exp_class_prob" => NaN)
+
+"""
+    exposure_class_metadata(labeled, pred, prob, status)
+
+Build the `exp_class_*` metadata block for one exposure from a classifier
+verdict. `status` is the category from `exposure_check_category` (plus
+"persistence_prior", which `pipeline.jl` adds, and "checkfail").
+
+A "checkfail" verdict maps to the UNKNOWN block, not to bad: an exception while
+evaluating the check is a failure to form an opinion, and must not be recorded
+as an adverse opinion about the data.
+"""
+function exposure_class_metadata(labeled, pred, prob, status)
+    (status == "checkfail" || status == EXP_CLASS_STATUS_NOTRUN) &&
+        return exposure_class_unknown_metadata()
+    bad = exposure_predicted_bad(labeled, pred, status) ?
+          EXP_CLASS_BAD_TRUE : EXP_CLASS_BAD_FALSE
+    Dict{String, Any}(
+        "exp_class_predicted_bad" => bad,
+        "exp_class_status" => String(status),
+        "exp_class_pred" => String(pred),
+        "exp_class_labeled" => String(labeled),
+        "exp_class_prob" => Float64(prob))
+end
+
+"""
+    exposure_type_check_path(outdir, tele, mjd)
+
+Path of the per-MJD exposure-type check table written by `pipeline.jl` between
+the 2D and 1D stages.
+"""
+exposure_type_check_path(outdir, tele, mjd) = joinpath(
+    outdir, "apred", string(mjd), "exposureTypeCheck_$(tele)_$(mjd).h5")
+
+"""
+    read_exposure_type_check(path) -> Dict{Int, Dict{String, Any}}
+
+Read a per-MJD `exposureTypeCheck_*.h5` into expnum => `exp_class_*` metadata
+block. Returns an empty Dict if the file is absent or unreadable, so that every
+caller degrades to the explicit-unknown block rather than failing: this table is
+advisory metadata and must never be able to break a reduction.
+
+Tables written before `predicted_bad` was stored are handled by recomputing it
+from (labeled, pred, flag) with `exposure_predicted_bad`.
+"""
+function read_exposure_type_check(path)
+    out = Dict{Int, Dict{String, Any}}()
+    isfile(path) || return out
+    try
+        d = load(path)
+        expnum = d["expnum"]
+        labeled, pred = d["labeled"], d["pred"]
+        prob, flag = d["prob"], d["flag"]
+        for i in eachindex(expnum)
+            out[Int(expnum[i])] = exposure_class_metadata(
+                labeled[i], pred[i], prob[i], flag[i])
+        end
+    catch e
+        @warn "Could not read exposure-type check table $path; treating as unknown" exception=e
+        return Dict{Int, Dict{String, Any}}()
+    end
+    out
 end
 
 """

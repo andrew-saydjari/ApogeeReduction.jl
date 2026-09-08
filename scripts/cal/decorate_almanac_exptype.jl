@@ -1,7 +1,8 @@
 using Pkg;
 Pkg.instantiate();
-using HDF5, ArgParse, DataFrames
-using ApogeeReduction: exposure_class_label, exposure_predicted_bad, initalize_git
+using HDF5, ArgParse, DataFrames, JLD2
+using ApogeeReduction: exposure_class_label, exposure_class_metadata, initalize_git,
+                       EXP_CLASS_BAD_UNKNOWN, EXP_CLASS_UNKNOWN_STR
 
 # recompute at runtime: the module-level git consts are frozen at precompile
 # time and can go stale (see comment in src/utils.jl)
@@ -13,17 +14,31 @@ git_branch, git_commit, git_clean = initalize_git(dirname(dirname(@__DIR__)) * "
 ## with one dataset per column, aligned row-for-row with
 ## `raw/<tele>/<mjd>/exposures`. Nothing under `raw/` is ever touched.
 ##
+## Two input modes:
+##   --apred_dir <outdir>/apred   in-pipeline: gathers the per-MJD
+##                                exposureTypeCheck_*.h5 tables pipeline.jl
+##                                writes between the 2D and 1D stages. This is
+##                                the mode the DAGs use.
+##   --results_file <sweep.h5>    offline: a classifier sweep audit table.
+##
 ## Columns per (tele, mjd):
 ##   exposure               exposure number (join key, matches exposures group)
-##   predicted_bad          UInt8 0/1 mask for downstream cal/wavecal runlists
-##                          (policy: ApogeeReduction.exposure_predicted_bad)
-##   exposure_class_pred    predicted content class ("" if unclassified)
-##   exposure_class_prob    max forest probability (NaN if unclassified)
+##   predicted_bad          Int8 TRI-STATE mask for downstream cal/wavecal
+##                          runlists (policy: exposure_class_metadata):
+##                            1 = classifier ran and judged this bad
+##                            0 = classifier ran and judged this fine
+##                           -1 = UNKNOWN, no verdict for this exposure
+##                          -1 is the value for every exposure when the
+##                          classifier was not run (it is off unless pipeline.jl
+##                          gets --exp_class_model). Consumers must treat -1 as
+##                          "do not know", never as "fine": only ==1 excludes.
+##   exposure_class_pred    predicted content class ("unknown" if no verdict)
+##   exposure_class_prob    max forest probability (NaN if no verdict)
 ##   exposure_class_status  ok / mislabel_candidate / lamp_off_candidate /
 ##                          persistence_risk / faint_twilight / unknown /
 ##                          rare_label / nofiles / unclassified
-## The `exposure_class` group carries git branch/commit/clean and the results
-## file path as attributes, so the model + policy version is pinned to the
+## The `exposure_class` group carries git branch/commit/clean and the source
+## path as attributes, so the model + policy version is pinned to the
 ## pipeline git hash.
 
 function parse_commandline()
@@ -34,25 +49,62 @@ function parse_commandline()
         help = "path to the almanac file to decorate (modified in place)"
         arg_type = String
         "--results_file"
-        required = true
-        help = "classifier results table (sweep audit or merged exposureTypeCheck): obs/mjd/expnum/pred/maxp/status"
+        required = false
+        help = "offline classifier results table (sweep audit): obs/mjd/expnum/pred/maxp/status"
         arg_type = String
+        default = ""
+        "--apred_dir"
+        required = false
+        help = "in-pipeline mode: reduction apred/ directory; gathers every apred/<mjd>/exposureTypeCheck_*.h5 written by pipeline.jl between the 2D and 1D stages"
+        arg_type = String
+        default = ""
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
 
-# classifier verdicts keyed by (obs, mjd, expnum)
-res = h5open(parg["results_file"], "r") do f
-    DataFrame(obs = read(f["obs"]), mjd = read(f["mjd"]), expnum = read(f["expnum"]),
-        pred = read(f["pred"]), maxp = read(f["maxp"]), status = read(f["status"]))
+if (parg["results_file"] == "") == (parg["apred_dir"] == "")
+    error("give exactly one of --results_file (offline sweep) or --apred_dir (in-pipeline exposureTypeCheck tables)")
 end
-verdict = Dict(zip(zip(res.obs, res.mjd, res.expnum),
-    zip(res.pred, res.maxp, res.status)))
+
+# classifier verdicts keyed by (obs, mjd, expnum) => (pred, maxp, status)
+verdict = if parg["results_file"] != ""
+    res = h5open(parg["results_file"], "r") do f
+        DataFrame(obs = read(f["obs"]), mjd = read(f["mjd"]), expnum = read(f["expnum"]),
+            pred = read(f["pred"]), maxp = read(f["maxp"]), status = read(f["status"]))
+    end
+    println("source: offline results file ", parg["results_file"])
+    Dict(zip(zip(res.obs, res.mjd, res.expnum),
+        zip(res.pred, res.maxp, res.status)))
+else
+    # In-pipeline mode: the per-MJD tables pipeline.jl writes after the 2D stage.
+    # Column names differ from the offline sweep (tele/flag vs obs/status).
+    d = Dict{Tuple{String, Int, Int}, Tuple{String, Float64, String}}()
+    files = String[]
+    for mjddir in readdir(parg["apred_dir"]; join = true)
+        isdir(mjddir) || continue
+        append!(files, filter(p -> occursin("exposureTypeCheck_", basename(p)) &&
+                                  endswith(p, ".h5"),
+            readdir(mjddir; join = true)))
+    end
+    println("source: $(length(files)) in-pipeline exposureTypeCheck table(s) under ",
+        parg["apred_dir"])
+    for p in files
+        t = load(p)
+        for i in eachindex(t["expnum"])
+            d[(String(t["tele"][i]), Int(t["mjd"][i]), Int(t["expnum"][i]))] = (
+                String(t["pred"][i]), Float64(t["prob"][i]), String(t["flag"][i]))
+        end
+    end
+    d
+end
 println("classifier verdicts: ", length(verdict))
+isempty(verdict) &&
+    @warn "no classifier verdicts found — every exposure will be decorated as UNKNOWN (predicted_bad = -1), which is correct but means nothing downstream will be filtered. Was --exp_class_model set on the pipeline.jl call?"
 
 nbad = 0
+nunknown = 0
 ntot = 0
 h5open(parg["almanac_file"], "r+") do f
     rawgrp = haskey(f, "raw") ? "raw" : ""
@@ -61,7 +113,8 @@ h5open(parg["almanac_file"], "r+") do f
     attrs(g)["git_branch"] = git_branch
     attrs(g)["git_commit"] = string(git_commit)
     attrs(g)["git_clean"] = string(git_clean)
-    attrs(g)["results_file"] = abspath(parg["results_file"])
+    attrs(g)["results_file"] = parg["results_file"] == "" ? "" : abspath(parg["results_file"])
+    attrs(g)["apred_dir"] = parg["apred_dir"] == "" ? "" : abspath(parg["apred_dir"])
     for tele in keys(f[rawgrp == "" ? "/" : rawgrp])
         tele in ("exposure_class", "meta") && continue
         tele_out = create_group(g, tele)
@@ -73,26 +126,34 @@ h5open(parg["almanac_file"], "r+") do f
             lq, lt, lu = read(exp_grp["lamp_quartz"]), read(exp_grp["lamp_thar"]),
             read(exp_grp["lamp_une"])
             n = length(expnum)
-            pred = fill("", n)
+            pred = fill(EXP_CLASS_UNKNOWN_STR, n)
             prob = fill(NaN, n)
             status = fill("unclassified", n)
-            bad = falses(n)
+            # Tri-state, Int8: -1 = no verdict (classifier never judged this
+            # exposure), 0 = judged fine, 1 = judged bad. An exposure the
+            # classifier never saw MUST NOT decorate as 0 — that reads as a
+            # clean bill of health and is exactly the silent-default failure
+            # this field exists to avoid.
+            bad = fill(EXP_CLASS_BAD_UNKNOWN, n)
             for i in 1:n
                 v = get(verdict, (tele, parse(Int, mjd), expnum[i]), nothing)
                 isnothing(v) && continue
                 pred[i], prob[i], status[i] = v
                 labeled = exposure_class_label(imtype[i], lq[i], lt[i], lu[i])
-                bad[i] = exposure_predicted_bad(labeled, pred[i], status[i])
+                bad[i] = Int8(exposure_class_metadata(
+                    labeled, pred[i], prob[i], status[i])["exp_class_predicted_bad"])
             end
             out = create_group(tele_out, mjd)
             out["exposure"] = expnum
-            out["predicted_bad"] = UInt8.(bad)
+            out["predicted_bad"] = bad
             out["exposure_class_pred"] = pred
             out["exposure_class_prob"] = prob
             out["exposure_class_status"] = status
-            global nbad += sum(bad)
+            global nbad += sum(bad .== 1)
+            global nunknown += sum(bad .== -1)
             global ntot += n
         end
     end
 end
-println("decorated $(parg["almanac_file"]): $ntot exposures, $nbad predicted_bad")
+println("decorated $(parg["almanac_file"]): $ntot exposures, $nbad predicted_bad, " *
+        "$nunknown unknown (no classifier verdict)")

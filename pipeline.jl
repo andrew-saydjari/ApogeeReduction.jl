@@ -230,17 +230,28 @@ if parg["doCal2d"]
     @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
 end
 
-##### Exposure-type check (post-2D)
+##### Exposure-type check (POST-2D, PRE-1D) #####
 # Classify each exposure from its ar2D images alone and compare to the
 # commanded image_type + lamp flags. Mislabeled cals (ThAr/UNe swaps, FPI vs
 # arclamp, lamp-on "darks") poison downstream calibrations; this writes a
 # per-mjd audit table and warns on confident disagreements. Warning-only:
-# labels are never changed automatically.
+# labels are never changed automatically and NO exposure is dropped from the
+# reduction here — engineering and known-bad frames are still reduced. The
+# verdict is advisory metadata (carried into the 1D products, see
+# `process_1D`) plus an input to the calibration runlists (see
+# `make_runlist_fiber_flats.jl`), never a reduction filter.
+#
+# Placement matters: this block is the last thing pipeline.jl does, and
+# pipeline.jl is the 3D->2D stage, so the verdict is written before any caller
+# runs pipeline_2d_1d.jl. Every DAG path (bulk, daily, cal, regression) invokes
+# pipeline.jl strictly before pipeline_2d_1d.jl, so "after 2D, before 1D" holds
+# by construction rather than by convention.
 if parg["exp_class_model"] != ""
     @everywhere begin
         using ApogeeReduction: exposure_class_features, load_exposure_classifier,
                                classify_exposure_type, exposure_class_label,
-                               exposure_check_category, read_almanac_exp_df,
+                               exposure_check_category, exposure_class_metadata,
+                               read_almanac_exp_df,
                                CHIP_LIST
         const EXP_CLF = Ref{Any}(nothing)
         function get_exp_clf()
@@ -303,6 +314,16 @@ if parg["exp_class_model"] != ""
 
         if !isempty(checks)
             dfc = DataFrame(checks)
+            # Resolve the downstream masking policy HERE, once, and store it, so
+            # that the 1D products, the almanac decoration and the calibration
+            # runlists all read one number rather than each re-deriving it from
+            # (labeled, pred, flag) and risking three subtly different answers.
+            # Int8[...] on purpose: the Dict is Dict{String,Any}, so an
+            # unannotated comprehension would build a Vector{Any} column and
+            # write an untyped HDF5 dataset.
+            dfc.predicted_bad = Int8[exposure_class_metadata(
+                                         r.labeled, r.pred, r.prob, r.flag)["exp_class_predicted_bad"]
+                                     for r in eachrow(dfc)]
             for sub in groupby(dfc, :mjd)
                 mjd = sub.mjd[1]
                 safe_jldsave(
@@ -312,7 +333,8 @@ if parg["exp_class_model"] != ""
                     tele = String.(sub.tele), mjd = collect(sub.mjd),
                     expnum = collect(sub.expnum), labeled = String.(sub.labeled),
                     pred = String.(sub.pred), prob = collect(sub.prob),
-                    flag = String.(sub.flag))
+                    flag = String.(sub.flag),
+                    predicted_bad = collect(sub.predicted_bad))
             end
             # persistence_prior is informational (recorded, not warned)
             warnable = (dfc.flag .!= "ok") .& (dfc.flag .!= "persistence_prior")
@@ -326,7 +348,12 @@ if parg["exp_class_model"] != ""
                 nflag_frac > 0.10 &&
                     @warn "Exposure-type check flagged $(round(100 * nflag_frac, digits = 1))% of exposures (> 10% prior on mislabel rate) — inspect before trusting the flags."
             end
-            println("Exposure-type check: $(nrow(dfc)) exposures checked, $nbad flagged")
+            npbad = sum(dfc.predicted_bad .== 1)
+            nunk = sum(dfc.predicted_bad .== -1)
+            println("Exposure-type check: $(nrow(dfc)) exposures checked, $nbad flagged, " *
+                    "$npbad predicted_bad, $nunk unknown (check failed)")
+            println("Exposure-type check: NOTHING was dropped from the reduction here; " *
+                    "the verdict is advisory 1D metadata plus a calibration-runlist input.")
         end
     end
 end

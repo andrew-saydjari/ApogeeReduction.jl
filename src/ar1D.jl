@@ -7,6 +7,37 @@ using DataFrames
 # trace_params is of size (n_x_pix, n_fibers, 3)
 # the elements correspodn to flux, y-pixel, and gaussian witdth (sigma)
 
+# Per-(tele, mjd) cache of the exposure-type check table written between the 2D
+# and 1D stages, so the 1D pass reads each night's table once per worker process
+# rather than once per exposure per chip. A night with no table caches the empty
+# Dict, so we do not stat a missing file repeatedly.
+#
+# n.b. this is a per-PROCESS cache filled under pmap (Distributed), NOT a
+# per-thread buffer indexed by threadid(). Do not "optimize" it into one.
+# Keyed on outdir too, not just (tele, mjd): a single process can legitimately
+# be pointed at two reduction directories, and (tele, mjd) alone would silently
+# serve one run's verdicts for the other's exposures.
+const EXP_CLASS_CHECK_CACHE = Dict{
+    Tuple{String, String, String}, Dict{Int, Dict{String, Any}}}()
+
+"""
+    exposure_class_metadata_for(outdir, tele, mjd, expnum)
+
+The `exp_class_*` metadata block for one exposure, read from the per-MJD
+exposure-type check table produced between the 2D and 1D stages.
+
+Returns the explicit-unknown block (`predicted_bad = -1`, `status = "notrun"`)
+whenever the classifier did not judge this exposure. The check is off unless
+`--exp_class_model` is set, so unknown is the common case, and it must never be
+confused with a clean bill of health.
+"""
+function exposure_class_metadata_for(outdir, tele, mjd, expnum)
+    tbl = get!(EXP_CLASS_CHECK_CACHE, (String(outdir), String(tele), String(mjd))) do
+        read_exposure_type_check(exposure_type_check_path(outdir, tele, mjd))
+    end
+    get(tbl, Int(expnum), exposure_class_unknown_metadata())
+end
+
 # hold off on prop ivar through until we switch to sutr_wood, also could implement a chi2 cut here
 # add a condition that we should drop any x pixel where a bad bit in any of the pixels being summed is bad
 
@@ -884,6 +915,14 @@ function process_1D(fname;
     end
     trace_metadata = read_metadata(traceFname)
     metadata = merge(metadata, trace_metadata)
+
+    # Carry the exposure-type classifier's verdict into the 1D products, so a
+    # downstream consumer reading a 1D file can see WHETHER the frame was judged
+    # bad and WHY without re-deriving anything from the 2D products or the
+    # almanac. Written into `metadata`, so it also propagates to the
+    # wavelength-reinterpolated ar1Duni*/ar1Dunical* files, which inherit their
+    # metadata from the first chip's ar1D* file (see `reinterp_spectra`).
+    metadata = merge(metadata, exposure_class_metadata_for(outdir, tele, mjd, dfindx))
 
     flux_1d, ivar_1d,
     mask_1d,
