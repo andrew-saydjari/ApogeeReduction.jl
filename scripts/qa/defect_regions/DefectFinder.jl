@@ -307,8 +307,8 @@ height of the array at x < 250 and x > 1800, on every chip of both telescopes.
 
 `hp` must be comfortably larger than the largest matched-filter scale (65 here), so a
 defect the filter bank can actually resolve loses only a few percent of its amplitude:
-the 52 × 24 block on APO chip G occupies 7.5 % of a 129 × 129 window, so its matched
-filter output drops by 7.5 %.  Structure much broader than `hp` is removed by
+the 460-pixel block recovered on APO chip G occupies 2.8 % of a 129 × 129 window, so
+its matched-filter output drops by 2.8 %.  Structure much broader than `hp` is removed by
 construction — that is the point, and it is the reason the scale ladder stops at 65.
 """
 function highpass(Z::Matrix{Float64}; zclip::Float64 = 4.0, hp::Int = 129)
