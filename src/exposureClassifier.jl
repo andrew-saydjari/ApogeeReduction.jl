@@ -14,6 +14,10 @@
 #   "unknown" (image doesn't resemble any trained class).
 # - The model artifact (random forest) is trained offline; see
 #   scripts under the 2026_07_14 scratch dir (train_classifier.jl et al.).
+#   n.b. those offline scripts still write/read the model's ORIGINAL path;
+#   the artifact the pipeline loads was moved to cal_ref/ on 2026-09-08.
+#   They are analysis tooling, not pipeline code -- retraining means
+#   producing an artifact and pointing the config at it.
 
 using JLD2, Statistics, StatsBase
 using LinearAlgebra: dot

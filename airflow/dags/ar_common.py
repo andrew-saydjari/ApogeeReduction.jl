@@ -132,11 +132,14 @@ GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/
 # Set to "" to disable the post-2D exposure-type check. A path that does not
 # exist is a hard error at pipeline.jl startup, never a silent skip.
 #
-# n.b. this is a dated analysis directory, as the three paths above also are.
-# Where large calibration artifacts should live permanently is an open question
-# AKS wants to settle separately; nothing here presumes an answer.
-EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/2026_07_14/meta/"
-                   "exposure_classifier_rf_v6.jld2")
+# 2026-09-08: MOVED here from 2026_07_14/meta/, a dated analysis directory that
+# was a natural scratch-cleanup target. The move was verified byte-identical
+# (md5 d669241f030817ab4e68bfd32b117c0d, 175,330,224 bytes) and the OLD PATH NO
+# LONGER EXISTS, so any caller still pointing at it fails loudly at startup
+# rather than silently skipping the check. See mved.txt in the old directory.
+# Only the v6 artifact moved; v1-v5 and the sweep outputs stay behind.
+EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
+                   "exposure_classifier/exposure_classifier_rf_v6.jld2")
 
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {

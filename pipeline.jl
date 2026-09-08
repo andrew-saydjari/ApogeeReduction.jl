@@ -94,7 +94,7 @@ function parse_commandline()
         required = false
         help = "exposure-type classifier artifact (JLD2). A calibration input, configured by path like --caldir_darks / --gain_read_cal_dir; airflow/dags/ar_common.py sets it for production. The post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). A path that does not exist is a hard error."
         arg_type = String
-        default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_07_14/meta/exposure_classifier_rf_v6.jld2"
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_rf_v6.jld2"
     end
     return parse_args(s)
 end
@@ -219,6 +219,14 @@ end
 
 # probably need to capture that calFlag somehow, write a meta cal file?
 all2D = vcat(ap2dnamelist...)
+
+# ar2D chip-file path => exposure-type classifier feature vector, handed forward
+# from the 2D calibration pass so the exposure-type check does not re-read the
+# same images. Empty when the check is disabled, when doCal2d is false, or for
+# any chip the checkpoint let the 2D pass skip; every one of those cases falls
+# back to reading the file, so a miss costs time, never correctness.
+exp_class_featcache = Dict{String, Vector{Float64}}()
+
 if parg["doCal2d"]
     darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
     df_dark = cal2df(darkFlist)
@@ -244,10 +252,20 @@ if parg["doCal2d"]
         end
     end
 
-    # process the 2D calibration for all exposures
+    # process the 2D calibration for all exposures.
+    # When the exposure-type check is enabled, this pass ALSO returns each
+    # chip's classifier features, computed from the ar2D array it already holds
+    # in memory. The check below then needs no second read of the same files.
     @everywhere process_2Dcal_partial(fname) = process_2Dcal(
-        fname, checkpoint_mode = parg["checkpoint_mode"])
-    @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
+        fname, checkpoint_mode = parg["checkpoint_mode"],
+        exp_class_features = (parg["exp_class_model"] != ""))
+    cal2d_feats = @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
+    # chip-file path => feature vector, for the chips this pass actually
+    # recomputed. Entries are absent for chips the checkpoint skipped, and the
+    # exposure-type check reads those from disk instead.
+    for (fname, f) in zip(all2D, cal2d_feats)
+        isnothing(f) || (exp_class_featcache[fname] = f)
+    end
 end
 
 ##### Exposure-type check (POST-2D, PRE-1D) #####
@@ -281,7 +299,12 @@ if parg["exp_class_model"] != ""
             end
             EXP_CLF[]
         end
-        function exp_type_check_one(fnames_by_chip)
+        # `work` is (chip => ar2D path, chip => precomputed features). Features
+        # present for a chip are used as-is; absent ones are read from the file,
+        # so a checkpointed rerun that skipped the 2D pass still gets a verdict
+        # rather than "notrun".
+        function exp_type_check_one(work)
+            fnames_by_chip, feats_by_chip = work
             # any chip filename parses to (tele, mjd, expnum, imtype)
             sname = split(split(basename(first(values(fnames_by_chip))), ".h5")[1], "_")
             _, tele, mjdstr, expnumstr, _, _ = sname[(end - 5):end]
@@ -295,8 +318,14 @@ if parg["exp_class_model"] != ""
                     get(erow, :lamp_quartz, "?"), get(erow, :lamp_thar, "?"),
                     get(erow, :lamp_une, "?"))
                 clf = get_exp_clf()
-                chip_features = Dict(chip => exposure_class_features(
-                                         load(fnames_by_chip[chip], "dimage"))
+                # All three chips are required: the design row concatenates
+                # R, G and B and the colour features are inter-chip ratios, so
+                # a per-chip partial verdict would be meaningless. The grouping
+                # below only submits exposures with a complete chip set.
+                chip_features = Dict(
+                    chip => get(feats_by_chip, chip, nothing) !== nothing ?
+                            feats_by_chip[chip] :
+                            exposure_class_features(load(fnames_by_chip[chip], "dimage"))
                 for chip in keys(fnames_by_chip))
                 res = classify_exposure_type(clf, chip_features, tele)
                 flag = exposure_check_category(labeled, res, clf.flag_tau)
@@ -331,7 +360,22 @@ if parg["exp_class_model"] != ""
             get!(groups, key, Dict{String, String}())[chip] = fname
         end
         complete = [g for g in values(groups) if length(g) == length(CHIP_LIST)]
-        checks = @showprogress desc="Exposure-type check" pmap(exp_type_check_one, complete)
+        # Pair each exposure's chip files with whatever the 2D pass already
+        # computed. Feature vectors are 21 Float64s, so shipping them to the
+        # workers is free next to re-reading a 32 MB image.
+        work = map(complete) do g
+            fx = Dict{String, Vector{Float64}}()
+            for (chip, path) in g
+                f = get(exp_class_featcache, path, nothing)
+                isnothing(f) || (fx[chip] = f)
+            end
+            (g, fx)
+        end
+        n_chip_cached = sum(length(w[2]) for w in work; init = 0)
+        n_chip_total = sum(length(w[1]) for w in work; init = 0)
+        println("Exposure-type check: $(n_chip_cached)/$(n_chip_total) chip images reused " *
+                "from the 2D stage; $(n_chip_total - n_chip_cached) re-read from disk")
+        checks = @showprogress desc="Exposure-type check" pmap(exp_type_check_one, work)
 
         if !isempty(checks)
             dfc = DataFrame(checks)

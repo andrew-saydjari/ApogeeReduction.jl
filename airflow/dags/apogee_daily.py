@@ -524,13 +524,28 @@ def build_observatory_group(tele: str) -> TaskGroup:
                             f"--caldir_flats {C.CALDIR_FLATS} "
                             f"--cluster cca "
                             f"--gain_read_cal_dir {C.GAIN_READ_CAL_DIR} "
+                            f"--exp_class_model {C.EXP_CLASS_MODEL} "
                             "--checkpoint_mode {{ params.checkpoint_mode }} "
                             "--workers_per_node {{ params.workers }}"),
                     tele,
                 ),
             )
 
-            prev = t_p3d2d
+            # Fold the post-2D classifier verdicts into the almanac before the
+            # flat runlists are built, mirroring scripts/daily/run_all.sh on the
+            # SLURM chain. Without it this chain would classify but never filter.
+            t_decorate = BashOperator(
+                task_id="decorate_exptype",
+                bash_command=C.step_cmd(
+                    "decorate_exptype",
+                    C.julia("scripts/cal/decorate_almanac_exptype.jl",
+                            f"--almanac_file {C.xn('almanac_file', tele)} "
+                            f"--apred_dir {C.xn('outdir', tele)}apred"),
+                    tele,
+                ),
+            )
+            t_p3d2d >> t_decorate
+            prev = t_decorate
             for flat_type in ("quartz", "dome"):
                 with TaskGroup(group_id=f"{flat_type}_flats") as fg:
                     flatrunlist = (f"{C.xn('outdir', tele)}almanac/runlist_"
