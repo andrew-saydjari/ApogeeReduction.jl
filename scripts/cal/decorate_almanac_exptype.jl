@@ -5,7 +5,8 @@ using ApogeeReduction: exposure_class_label, exposure_predicted_bad, initalize_g
                        exposure_engineering_from_almanac, exposure_flag_bits,
                        ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
                        ENGINEERING_CHECK_IMAGE_TYPES, EXPFLAG_PREDICTED_BAD,
-                       EXPFLAG_ENGINEERING, ENGINEERING_FALLBACK_ALL_FIBERS
+                       EXPFLAG_ENGINEERING,
+                       ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS
 
 # recompute at runtime: the module-level git consts are frozen at precompile
 # time and can go stale (see comment in src/utils.jl)
@@ -26,17 +27,19 @@ git_branch, git_commit, git_clean = initalize_git(dirname(dirname(@__DIR__)) * "
 ##   exposure_class_status  ok / mislabel_candidate / lamp_off_candidate /
 ##                          persistence_risk / faint_twilight / unknown /
 ##                          rare_label / nofiles / unclassified
-##   engineering            UInt8 0/1 — carton check: ALL of the configuration's
-##                          science fibers carry an engineering carton
-##                          (ApogeeReduction.ENGINEERING_CARTON_PREFIXES; the
-##                          rule is purity, see ENGINEERING_CARTON_PURITY)
+##   engineering            UInt8 0/1 — carton check. Clause 1: ALL of the
+##                          configuration's science fibers carry an engineering
+##                          carton (ENGINEERING_CARTON_PREFIXES, purity rule, see
+##                          ENGINEERING_CARTON_PURITY). Clause 2: the config has
+##                          ZERO science fibers and ANY fiber carries one (see
+##                          ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS)
 ##   engineering_frac       Float64 fraction of science fibers matching (NaN
 ##                          when there is no configuration: plate era, cals)
 ##   engineering_carton     the matched carton name ("" if none), for audit
 ##   engineering_basis      which fibers the fraction was computed over:
-##                          "science" (normal), "all_fibers_fallback" (config has
-##                          no science-category fibers; see
-##                          ENGINEERING_FALLBACK_ALL_FIBERS), or "none"
+##                          "science" (clause 1: purity over the science fibers),
+##                          "scienceless_position_stars" (clause 2: zero science
+##                          fibers and any fiber carries the carton), or "none"
 ##   exposure_flags         UInt8 bitmask: 2^0 predicted_bad, 2^1 engineering
 ##                          (see README "Exposure-Level Flag Bits")
 ## The `exposure_class` group carries git branch/commit/clean and the results
@@ -94,7 +97,8 @@ h5open(parg["almanac_file"], "r+") do f
     attrs(g)["engineering_carton_prefixes"] = join(ENGINEERING_CARTON_PREFIXES, ",")
     attrs(g)["engineering_carton_purity"] = ENGINEERING_CARTON_PURITY
     attrs(g)["engineering_check_image_types"] = join(ENGINEERING_CHECK_IMAGE_TYPES, ",")
-    attrs(g)["engineering_fallback_all_fibers"] = string(ENGINEERING_FALLBACK_ALL_FIBERS)
+    attrs(g)["engineering_flag_scienceless_position_stars"] =
+        string(ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS)
     attrs(g)["exposure_flags_bits"] = "2^0=predicted_bad,2^1=engineering"
     for tele in keys(f[rawgrp == "" ? "/" : rawgrp])
         tele in ("exposure_class", "meta") && continue

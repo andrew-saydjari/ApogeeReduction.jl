@@ -97,27 +97,36 @@ construction) can exclude them. `ApogeeReduction.exposure_ok_for_science(flags)`
 is the single predicate for "safe to do science with", and
 `ApogeeReduction.EXPFLAG_NO_SCIENCE` is the mask it applies.
 
-The engineering bit is a targeting check, not an image check: it is set when
-**all** of the configuration's `category == "science"` fibers have a
-`firstcarton` matching one of `ENGINEERING_CARTON_PREFIXES` (currently only
+The engineering bit is a targeting check, not an image check. It is set when
+either clause holds, against `ENGINEERING_CARTON_PREFIXES` (currently only
 `manual_fps_position_stars`, which by prefix covers `_10`, `_apogee_10`, and
-`_lco_apogee_10`). The rule is purity, not majority
-(`ENGINEERING_CARTON_PURITY = 1.0`): every configuration those cartons appear in
-is 100% that carton, and purity is what keeps the other 27 `manual_*` cartons
-out. A configuration that is *mostly but not purely* an engineering carton is
-NOT flagged and raises a loud warning — that has never happened in DR21, so it
-would be a real signal. Plate-era
+`_lco_apogee_10`):
+
+1. the configuration HAS `category == "science"` fibers and **all** of them
+   carry an engineering carton — purity, not majority
+   (`ENGINEERING_CARTON_PURITY = 1.0`). Every configuration those cartons appear
+   in is 100% that carton, and purity is what keeps the other 27 `manual_*`
+   cartons out. A configuration that is *mostly but not purely* an engineering
+   carton is NOT flagged and raises a loud warning — that has never happened in
+   DR21, so it would be a real signal.
+2. the configuration has **zero** science fibers and **any** fiber carries an
+   engineering carton (`ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS`). This
+   catches the earliest APO FPS positioning configurations, which predate the
+   science-category convention. It is keyed on the engineering carton itself,
+   not a general "fall back to all fibers", so a science-less configuration
+   carrying some other carton is untouched.
+
+The two clauses are mutually exclusive by construction (one requires science
+fibers, the other requires none), so clause 2 cannot perturb clause 1.
+Plate-era
 exposures have no configuration and no carton, so they are never flagged
 engineering, and calibration frames are never flagged (only `image_type ==
 "object"` is checked — a dark taken while an engineering configuration was
 loaded is still a good dark). Alongside the bit, `engineering_frac`,
 `engineering_carton` and `engineering_basis` record the evidence for the verdict.
 
-`ENGINEERING_FALLBACK_ALL_FIBERS` (default **off**) would extend the check to
-every carton-bearing fiber for configurations with no `category == "science"`
-fibers at all; five early-FPS configurations are engineering by carton but label
-none of their fibers `science`. It is off because the rule as specified is
-science fibers.
+`engineering_basis` records which clause fired: `"science"`,
+`"scienceless_position_stars"`, or `"none"`.
 
 The bit is computed in `pipeline.jl` right after the 2D stage and before the 1D
 stage — the same point as the exposure-type classifier, but ungated by

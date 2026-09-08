@@ -1,9 +1,11 @@
 using ApogeeReduction: is_engineering_carton, exposure_is_engineering,
-                       almanac_science_cartons, exposure_engineering_from_almanac,
+                       almanac_config_cartons, engineering_verdict,
+                       exposure_engineering_from_almanac,
                        exposure_flag_bits, exposure_ok_for_science,
                        ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
                        ENGINEERING_CARTON_WARN_FRAC,
-                       ENGINEERING_CHECK_IMAGE_TYPES, ENGINEERING_FALLBACK_ALL_FIBERS,
+                       ENGINEERING_CHECK_IMAGE_TYPES,
+                       ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS,
                        EXPFLAG_PREDICTED_BAD, EXPFLAG_ENGINEERING, EXPFLAG_NO_SCIENCE
 using HDF5
 
@@ -95,22 +97,24 @@ using HDF5
                 g3["fiber_id"] = collect(1:200)
             end
             h5open(path, "r") do f
-                @test length(almanac_science_cartons(f, "apo", "59625", 3472).cartons) == 250
-                @test almanac_science_cartons(f, "apo", "59625", 3472).basis == "science"
+                @test length(almanac_config_cartons(f, "apo", "59625", 3472).science) == 250
+                @test exposure_engineering_from_almanac(
+                    f, "apo", "59625", 3472, "object").basis == "science"
                 @test exposure_engineering_from_almanac(
                     f, "apo", "59625", 3472, "object").engineering
                 @test !exposure_engineering_from_almanac(
                     f, "apo", "59625", 3500, "object").engineering
                 # plate era: no firstcarton column -> empty, not an error
-                @test almanac_science_cartons(f, "apo", "57674", 8662).cartons == String[]
+                @test almanac_config_cartons(f, "apo", "57674", 8662).science == String[]
+                @test almanac_config_cartons(f, "apo", "57674", 8662).all == String[]
                 @test !exposure_engineering_from_almanac(
                     f, "apo", "57674", 8662, "object").engineering
                 # plate-era config_id sentinel
-                @test almanac_science_cartons(f, "apo", "57674", -1).cartons == String[]
+                @test almanac_config_cartons(f, "apo", "57674", -1).science == String[]
                 @test !exposure_engineering_from_almanac(
                     f, "apo", "57674", -1, "object").engineering
                 # missing configuration group
-                @test almanac_science_cartons(f, "apo", "59625", 999999).cartons == String[]
+                @test almanac_config_cartons(f, "apo", "59625", 999999).science == String[]
                 # calibration exposures riding an engineering config are NOT
                 # engineering: a dark taken under config 3472 is still a dark
                 for it in ("dark", "quartzflat", "domeflat", "arclamp", "internalflat")
@@ -122,46 +126,73 @@ using HDF5
         end
     end
 
-    @testset "no-science-fiber fallback" begin
-        # MEASURED: 5 early-FPS configurations (apo 59558/105, 59558/106,
-        # 59560/121, 59560/122, 59561/133) carry manual_fps_position_stars on
-        # 207-254 of 300 fibers with ZERO category=="science" fibers — their
-        # categories are "", bonus, open_fiber, sky_boss. Without the fallback
-        # they back 35 unflagged engineering object exposures.
-        # OFF by default: AKS's rule is science fibers, and the agreed target is
-        # exactly the 2,448 exposures that rule produces. Kept as a documented,
-        # one-line-switchable record of the gap.
-        @test !ENGINEERING_FALLBACK_ALL_FIBERS
+    @testset "clause 2: science-less position-stars configs" begin
+        # AKS 2026-09-08: "if any fibers are manual_fps_position_stars* and no
+        # science fibers, then reject."
+        #
+        # MEASURED over the full DR21 almanac: exactly 5 configurations
+        # (apo 59558/105, 59558/106, 59560/121, 59560/122, 59561/133) carry
+        # manual_fps_position_stars on 207-254 of 300 fibers with ZERO
+        # category=="science" fibers — categories are "", bonus, open_fiber,
+        # sky_boss. They back 35 object exposures, with ZERO overlap with
+        # clause 1, so enabling this cannot perturb the 2,448.
+        @test ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS
+
+        eng = "manual_fps_position_stars"
+        sci = "mwm_snc_100pc"
+
+        # The rule is "ANY position-stars fiber", not purity: a single one is
+        # enough when there are no science fibers.
+        r = engineering_verdict(String[], vcat([eng], fill(sci, 299)))
+        @test r.engineering
+        @test r.basis == "scienceless_position_stars"
+        @test r.nsci == 0            # zero science fibers is what triggered it
+        # ...but the SAME fiber content WITH science fibers goes to clause 1 and
+        # is rejected by purity. This is the pair that pins the two clauses apart.
+        @test !engineering_verdict(vcat([eng], fill(sci, 299)),
+            vcat([eng], fill(sci, 299))).engineering
+
+        # Not a general all-fibers fallback: a science-less config carrying some
+        # OTHER carton must NOT be flagged, however uniform it is.
+        r2 = engineering_verdict(String[], fill(sci, 300))
+        @test !r2.engineering
+        @test r2.basis == "none"
+        # ...and no mostly-but-not-purely warning is raised on the clause-2 path
+        @test_logs min_level=Base.CoreLogging.Warn begin
+            @test !engineering_verdict(String[],
+                vcat(fill(sci, 200), fill("mwm_bin_rv", 100))).engineering
+        end
+
+        # nothing at all -> not engineering, no error
+        @test !engineering_verdict(String[], String[]).engineering
+        @test engineering_verdict(String[], String[]).basis == "none"
+
         mktempdir() do dir
             path = joinpath(dir, "alm2.h5")
             h5open(path, "w") do f
+                # the real apo 59558/105 shape: 245/300 position-stars, 0 science
                 g = create_group(f, "raw/apo/59558/fibers/105")
                 g["category"] = vcat(fill("", 245), fill("sky_boss", 40),
                     fill("bonus", 15))
-                g["firstcarton"] = vcat(fill("manual_fps_position_stars", 245),
-                    fill("", 55))
-                # same shape but a real science program: must NOT be flagged
+                g["firstcarton"] = vcat(fill(eng, 245), fill("", 55))
+                # same shape, real science program: must NOT be flagged
                 g2 = create_group(f, "raw/apo/59558/fibers/106")
                 g2["category"] = vcat(fill("", 245), fill("sky_boss", 55))
-                g2["firstcarton"] = vcat(fill("mwm_snc_100pc", 245), fill("", 55))
+                g2["firstcarton"] = vcat(fill(sci, 245), fill("", 55))
             end
             h5open(path, "r") do f
-                # DEFAULT (fallback off): the literal AKS rule — no science
-                # fibers means no cartons to look at, so not engineering
-                @test almanac_science_cartons(f, "apo", "59558", 105).cartons == String[]
+                c = almanac_config_cartons(f, "apo", "59558", 105)
+                @test c.science == String[]        # zero science fibers
+                @test length(c.all) == 245         # blank cartons dropped
+                v = exposure_engineering_from_almanac(f, "apo", "59558", 105, "object")
+                @test v.engineering
+                @test v.basis == "scienceless_position_stars"
+                @test v.frac == 1.0                # 245/245 carton-bearing fibers
                 @test !exposure_engineering_from_almanac(
-                    f, "apo", "59558", 105, "object").engineering
-                # with the fallback ON it sees the config and, being 100% pure
-                # over carton-bearing fibers, flags it
-                r = almanac_science_cartons(f, "apo", "59558", 105;
-                    fallback_all_fibers = true)
-                @test r.basis == "all_fibers_fallback"
-                @test length(r.cartons) == 245   # empty cartons dropped
-                @test exposure_is_engineering(r.cartons; basis = r.basis).engineering
-                # a real science program of the same shape is never flagged
-                r2 = almanac_science_cartons(f, "apo", "59558", 106;
-                    fallback_all_fibers = true)
-                @test !exposure_is_engineering(r2.cartons; basis = r2.basis).engineering
+                    f, "apo", "59558", 106, "object").engineering
+                # clause 2 still respects the image-type restriction
+                @test !exposure_engineering_from_almanac(
+                    f, "apo", "59558", 105, "dark").engineering
             end
         end
     end
@@ -171,6 +202,10 @@ using HDF5
         @test exposure_flag_bits(true, false) == EXPFLAG_PREDICTED_BAD
         @test exposure_flag_bits(false, true) == EXPFLAG_ENGINEERING
         @test exposure_flag_bits(true, true) == (EXPFLAG_PREDICTED_BAD | EXPFLAG_ENGINEERING)
+        # `extra` lets the concurrent classifier-propagation work OR in a bit
+        # (e.g. NOT-RUN) without either side renumbering bits 0 and 1
+        @test exposure_flag_bits(false, false; extra = 0x04) == 0x04
+        @test exposure_flag_bits(true, true; extra = 0x04) == 0x07
         @test EXPFLAG_PREDICTED_BAD == 0x01
         @test EXPFLAG_ENGINEERING == 0x02
         # the guard predicate downstream science-sample assembly relies on.

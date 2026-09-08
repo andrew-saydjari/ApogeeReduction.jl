@@ -41,20 +41,25 @@ const CLASSIFIER_PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat",
 # 2^0: the image-content classifier says this exposure should not be used
 #      (policy: `exposure_predicted_bad`)
 const EXPFLAG_PREDICTED_BAD = 0x01
-# 2^1: engineering exposure — the configuration's science fibers were assigned
-#      an engineering carton, so the frame exists to exercise the hardware, not
-#      to do science (policy: `exposure_is_engineering`)
+# 2^1: engineering exposure — the configuration was assigned an engineering
+#      carton, so the frame exists to exercise the hardware, not to do science
+#      (policy: `engineering_verdict`, two clauses)
 #
 #      This is an EXPOSURE-level summary of a quantity that is fundamentally
-#      per-fiber. It is correct as a per-exposure bit today only because the
-#      purity rule means a flagged configuration is 100% engineering across its
-#      science fibers, so every fiber agrees with the exposure. A per-fiber
-#      notion can be added later WITHOUT a schema change: the bit numbering is
-#      shared, so a future per-fiber `fiber_flags` array simply reuses 2^1 and
-#      the exposure-level bit stays the "all fibers agree" summary. Do not
-#      renumber. `engineering_frac` is written alongside precisely so that the
-#      exposure-level bit is never the only record of the underlying fractions.
+#      per-fiber. Under clause 1 (purity) every science fiber agrees with the
+#      exposure, so the summary is exact. Under clause 2 (science-less
+#      positioning configurations) it is a deliberate whole-exposure call on a
+#      configuration with NO science fibers to serve — 46-93 fibers per such
+#      config are neither position-stars nor science and remain UNKNOWN.
+#      A per-fiber notion can be added later WITHOUT a schema change: the bit
+#      numbering is shared, so a future per-fiber `fiber_flags` array simply
+#      reuses 2^1 and the exposure-level bit stays the summary. Do not renumber.
+#      `engineering_frac` and `engineering_basis` are written alongside precisely
+#      so the bit is never the only record of how the verdict was reached.
 const EXPFLAG_ENGINEERING = 0x02
+# 2^2 onward: UNASSIGNED here, reserved for the concurrent classifier-propagation
+#      work (a NOT-RUN state as a bit rather than by field absence). Pass such a
+#      bit through `exposure_flag_bits(...; extra = bit)` rather than renumbering.
 # bits that mean "do not do science with this exposure"; prior builds and any
 # other science-sample assembly must exclude these. Reduction must NOT.
 const EXPFLAG_NO_SCIENCE = EXPFLAG_PREDICTED_BAD | EXPFLAG_ENGINEERING
@@ -106,26 +111,49 @@ that somebody should look. No configuration in the DR21 corpus lands here.
 const ENGINEERING_CARTON_WARN_FRAC = 0.5
 
 """
-Fallback for configurations that contain NO `category == "science"` fibers at
-all: evaluate the engineering fraction over every fiber that carries a non-empty
-`firstcarton` instead.
+Second clause of the engineering rule, AKS 2026-09-08:
 
-**OFF by default**, because AKS's rule is "the configuration's science fibers"
-and the agreed verification target is exactly the 2,448 exposures that rule
-produces. This constant exists to record a MEASURED gap and to make closing it
-a one-line change if AKS wants it.
+> "if any fibers are `manual_fps_position_stars*` and no science fibers, then
+> reject."
 
-The gap: 5 configurations (apo 59558/105, 59558/106, 59560/121, 59560/122,
-59561/133 — the earliest FPS commissioning nights) carry
-`manual_fps_position_stars` on 207-254 of their 300 fibers while labelling ZERO
-fibers `category == "science"` (their categories are `""`, `bonus`,
-`open_fiber`, `sky_boss`/`sky_apogee`). They back 35 object exposures that the
-science-fibers-only rule cannot see at all. Turning this on adds 2 of those 35
-under the purity rule (cfg 121/122 are 207/207 pure); the other three are
-0.845/0.879 pure over all fibers and would only raise the mostly-not-purely
-warning. The fallback never fires where the primary rule has data.
+i.e. `engineering := CLAUSE 1 OR CLAUSE 2` where
+
+- **clause 1** — the configuration HAS science fibers and *all* of them carry an
+  engineering carton (`ENGINEERING_CARTON_PURITY`);
+- **clause 2** — the configuration has ZERO `category == "science"` fibers AND
+  *any* fiber, of any category, carries an engineering carton.
+
+This is deliberately NOT a general "when science is empty, fall back to all
+fibers" rule. The distinction matters: a general fallback would evaluate purity
+over whatever cartons a science-less configuration happened to carry and could
+flag one that has nothing to do with positioning. Clause 2 is keyed on the
+engineering carton itself, so a science-less configuration with different
+cartons is untouched.
+
+MEASURED over the full DR21 almanac before this was enabled: clause 2 matches
+exactly 5 configurations / 35 object exposures, with ZERO overlap with clause 1,
+so it cannot perturb the 2,448 that clause 1 produces (new total 2,483):
+
+| config | position-stars fibers | object exposures |
+| --- | --- | --- |
+| apo 59558 cfg 105 | 245/300 | 5 |
+| apo 59558 cfg 106 | 245/300 | 3 |
+| apo 59560 cfg 121 | 207/300 | 1 |
+| apo 59560 cfg 122 | 207/300 | 1 |
+| apo 59561 cfg 133 | 254/300 | 25 |
+
+All APO, MJD 59558-59561 — a three-night window at the very start of APO FPS
+operations (the APO FPS divide is MJD 59423), three nights before
+`manual_fps_position_stars` proper begins at 59564. Consistent with the earliest
+positioning configurations predating the science-category convention.
+
+Stated plainly rather than papered over: 46-93 fibers per configuration are
+neither position-stars nor science, and what they are is UNKNOWN. The rule
+deliberately does not care — "any position-stars fiber, no science fibers" — and
+that indifference is exactly what makes it safe to apply without understanding
+the rest of the configuration.
 """
-const ENGINEERING_FALLBACK_ALL_FIBERS = false
+const ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS = true
 
 """
 Commanded image types the engineering carton check applies to. Calibration
@@ -154,8 +182,7 @@ end
 Carton check for one exposure. `cartons` is the list of `firstcarton` values of
 the configuration's **science** fibers (`category == "science"`), or of all
 carton-bearing fibers when the config has no science fibers at all and the
-fallback is enabled (see `ENGINEERING_FALLBACK_ALL_FIBERS`); `basis` records
-which.
+configuration has none (clause 2); `basis` records which.
 
 Returns `(engineering, frac, carton, nsci, basis)`:
 - `engineering::Bool` — `frac >= purity` (purity rule: ALL science fibers)
@@ -164,7 +191,7 @@ Returns `(engineering, frac, carton, nsci, basis)`:
 - `carton::String` — the most common matching carton name ("" if none), kept
   for provenance so the reason for the bit is auditable
 - `nsci::Int` — number of fibers the fraction was computed over
-- `basis::String` — `"science"`, `"all_fibers_fallback"`, or `"none"`
+- `basis::String` — `"science"`, `"scienceless_position_stars"`, or `"none"`
 
 Raises a loud `@warn` for a configuration that is MOSTLY but not PURELY an
 engineering carton (`warn_frac < frac < purity`). Such a configuration is NOT
@@ -209,17 +236,64 @@ function exposure_is_engineering(cartons; purity = ENGINEERING_CARTON_PURITY,
 end
 
 """
-    almanac_science_cartons(f, tele, mjd, config_id; root = "raw")
+    engineering_verdict(sci_cartons, all_cartons; label, flag_scienceless)
 
-Read the `firstcarton` values of the science fibers of one configuration from an
-open almanac HDF5 file `f` (group `<root>/<tele>/<mjd>/fibers/<config_id>`;
-pass `root = ""` for the rootless layout some older almanac files use).
+Apply BOTH clauses of the engineering rule to one configuration and return the
+verdict NamedTuple `(engineering, frac, carton, nsci, basis)`.
 
-Returns `(cartons, basis)` where `basis` is `"science"` (the normal case),
-`"all_fibers_fallback"` (no science-category fibers; see
-`ENGINEERING_FALLBACK_ALL_FIBERS`), or `"none"`.
+- `sci_cartons` — `firstcarton` of the `category == "science"` fibers
+- `all_cartons` — `firstcarton` of EVERY fiber in the configuration
 
-Returns empty cartons — never throws — when any of the following holds, which is
+Clause 1 (science fibers exist): purity over `sci_cartons`, `basis = "science"`.
+Clause 2 (`isempty(sci_cartons)` and any fiber carries an engineering carton):
+flagged, `basis = "scienceless_position_stars"`. Clause 2 is keyed on the
+engineering carton itself — a science-less configuration whose fibers carry some
+OTHER carton is not flagged. See `ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS`.
+
+The two clauses are mutually exclusive by construction (one requires science
+fibers, the other requires none), so enabling clause 2 cannot perturb clause 1's
+verdicts.
+
+For clause 2, `nsci == 0` (that is what triggered it) and `frac` is the share of
+the configuration's CARTON-BEARING fibers that carry an engineering carton
+(blank cartons are dropped upstream) — informational only, since the rule there
+is "any", not a threshold, and no warning is raised on this path.
+"""
+function engineering_verdict(sci_cartons, all_cartons; label::AbstractString = "",
+        flag_scienceless::Bool = ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS,
+        purity = ENGINEERING_CARTON_PURITY,
+        warn_frac = ENGINEERING_CARTON_WARN_FRAC)
+    none = (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
+    # CLAUSE 1: the configuration has science fibers -> purity over those
+    if !isempty(sci_cartons)
+        return exposure_is_engineering(sci_cartons; purity = purity,
+            warn_frac = warn_frac, basis = "science", label = label)
+    end
+    # CLAUSE 2: zero science fibers AND any fiber carries an engineering carton
+    flag_scienceless || return none
+    isempty(all_cartons) && return none
+    matched = String[strip(String(c)) for c in all_cartons if is_engineering_carton(c)]
+    isempty(matched) && return none
+    counts = Dict{String, Int}()
+    for m in matched
+        counts[m] = get(counts, m, 0) + 1
+    end
+    (engineering = true, frac = length(matched) / length(all_cartons),
+        carton = argmax(counts), nsci = 0, basis = "scienceless_position_stars")
+end
+
+"""
+    almanac_config_cartons(f, tele, mjd, config_id; root = "raw")
+
+Read one configuration's `firstcarton` column from an open almanac HDF5 file `f`
+(group `<root>/<tele>/<mjd>/fibers/<config_id>`; pass `root = ""` for the
+rootless layout some older almanac files use).
+
+Returns `(science, all)`: the cartons of the `category == "science"` fibers, and
+the cartons of every fiber (empty carton strings dropped from `all`, since a
+blank carton carries no information for either clause).
+
+Returns both empty — never throws — when any of the following holds, which is
 the correct "not engineering" answer rather than an error:
 - `config_id <= 0` (plate-era rows carry `config_id == -1`)
 - the `fibers/<config_id>` group is absent
@@ -227,9 +301,8 @@ the correct "not engineering" answer rather than an error:
   they predate cartons entirely)
 - the table cannot be read
 """
-function almanac_science_cartons(f, tele, mjd, config_id; root::AbstractString = "raw",
-        fallback_all_fibers::Bool = ENGINEERING_FALLBACK_ALL_FIBERS)
-    empty_result = (cartons = String[], basis = "none")
+function almanac_config_cartons(f, tele, mjd, config_id; root::AbstractString = "raw")
+    empty_result = (science = String[], all = String[])
     (config_id isa Integer) || return empty_result
     config_id > 0 || return empty_result
     path = isempty(root) ? "$(tele)/$(mjd)/fibers/$(config_id)" :
@@ -239,20 +312,11 @@ function almanac_science_cartons(f, tele, mjd, config_id; root::AbstractString =
         df = DataFrame(read(f[path]))
         rename!(df, lowercase.(names(df)))
         ("category" in names(df) && "firstcarton" in names(df)) || return empty_result
+        cart = String[strip(String(c)) for c in df.firstcarton]
         sci = strip.(String.(df.category)) .== "science"
-        if any(sci)
-            return (cartons = String[strip(String(c)) for c in df.firstcarton[sci]],
-                basis = "science")
-        end
-        fallback_all_fibers || return empty_result
-        # no science-category fibers at all: fall back to every fiber that has a
-        # carton (see ENGINEERING_FALLBACK_ALL_FIBERS for why, and how to disable)
-        allc = String[strip(String(c)) for c in df.firstcarton]
-        filter!(!isempty, allc)
-        isempty(allc) && return empty_result
-        return (cartons = allc, basis = "all_fibers_fallback")
+        return (science = cart[sci], all = filter(!isempty, cart))
     catch e
-        @warn "almanac_science_cartons: could not read $(path); treating as non-engineering" exception = e
+        @warn "almanac_config_cartons: could not read $(path); treating as non-engineering" exception = e
         return empty_result
     end
 end
@@ -262,28 +326,35 @@ end
 
 Full engineering carton check for one almanac exposure row. Applies the check
 only to `ENGINEERING_CHECK_IMAGE_TYPES` (see that constant for why), and reads
-the science-fiber cartons from the almanac's own fiber table — no confSummary
-dependency, since the almanac is already a pipeline input.
+the cartons from the almanac's own fiber table — no confSummary dependency,
+since the almanac is already a pipeline input.
 
-Returns the same NamedTuple as `exposure_is_engineering`.
+Returns the `engineering_verdict` NamedTuple.
 """
 function exposure_engineering_from_almanac(f, tele, mjd, config_id, image_type;
         root::AbstractString = "raw")
     lowercase(strip(String(image_type))) in ENGINEERING_CHECK_IMAGE_TYPES ||
         return (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
-    r = almanac_science_cartons(f, tele, mjd, config_id; root = root)
-    exposure_is_engineering(r.cartons; basis = r.basis,
-        label = "$(tele)/$(mjd)/config $(config_id)")
+    r = almanac_config_cartons(f, tele, mjd, config_id; root = root)
+    engineering_verdict(r.science, r.all; label = "$(tele)/$(mjd)/config $(config_id)")
 end
 
 """
-    exposure_flag_bits(predicted_bad, engineering)
+    exposure_flag_bits(predicted_bad, engineering; extra = 0x00)
 
 Pack the exposure-level verdicts into the `exposure_flags` bitmask
 (`EXPFLAG_PREDICTED_BAD`, `EXPFLAG_ENGINEERING`).
+
+This is the SHARED packer: every producer of `exposure_flags` should go through
+it so the bit numbering has exactly one definition. Bit 2 onward are unassigned
+here and reserved for the concurrent classifier-propagation work (which adds a
+NOT-RUN state as a bit rather than by field absence); `extra` lets a caller OR in
+such a bit without this function needing to know about it, and without either
+side renumbering. Bits 0 and 1 are fixed — do not renumber them.
 """
-function exposure_flag_bits(predicted_bad::Bool, engineering::Bool)
-    b = 0x00
+function exposure_flag_bits(predicted_bad::Bool, engineering::Bool;
+        extra::Integer = 0x00)
+    b = UInt8(extra)
     predicted_bad && (b |= EXPFLAG_PREDICTED_BAD)
     engineering && (b |= EXPFLAG_ENGINEERING)
     b
