@@ -469,7 +469,7 @@ function get_fibTargDict(f, tele, mjd, dfindx)
 
     # FPS era only: label the FPI guide fibers from the configuration itself.
     #
-    # This used to call get_fpi_guide_fiberID(tele), a hardcoded pair, and
+    # This used to call a hardcoded per-telescope fiber pair (removed) and
     # overwrite those two fibers unconditionally. That is wrong whenever the FPI
     # feed does not sit where the constant says. Measured on the LCO FPS
     # commissioning nights MJD 59820/59826/59827 (16 configurations): the FPI is
