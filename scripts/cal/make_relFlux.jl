@@ -130,7 +130,7 @@ if length(all1Da) > 0
     valid_flats4fluxing_fname = joinpath(parg["trace_dir"], "almanac/valid_$(cal_type)flats4fluxing_$(parg["runname"]).h5")
     # "cw" + per-tele group replacement (not "w", which truncates the whole file):
     # separate per-telescope invocations sharing a runname must not clobber each
-    # other's groups (e.g. run_trace_cal.sh runs per --tele with a tele-less
+    # other's groups (e.g. the DAGs run per --tele with a tele-less
     # runname). Only the telescope groups present in THIS call's runlist are
     # replaced; output is identical to "w" for combined-runlist callers.
     h5open(valid_flats4fluxing_fname, "cw") do f

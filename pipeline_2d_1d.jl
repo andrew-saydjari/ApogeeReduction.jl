@@ -259,7 +259,7 @@ end
 
 # we should do somthing smart to assemble the traces from a night into a single file
 # that gives us the trace of a fiber as a funciton of time or something
-# for now, for each MJD, take the first one (or do that in run_trace_cal.sh)
+# for now, for each MJD, take the first one (or do that in the trace cal step)
 # I think dome flats needs to swtich to dome_flats/mjd/
 @time "Finding traceMain files" begin
     # Create all (mjd, chip) combinations for parallel processing

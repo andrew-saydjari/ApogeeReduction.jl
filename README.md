@@ -43,11 +43,11 @@ Nightly Runs:
     ├── almanac: queries database containing targeting information and data transfer status
     ├── make_runlist_all.sh: convert almanac output into a runlist interpreted by the pipeline
     ├── pipeline.sh: reduces data from raw type (3D compressed) to 2D calibrated data
-    ├── run_trace_cal.sh: extracts the traces from domeflats to define 1D extraction profiles
-    │   ├── almanac
-    │   ├── make_runlist_dome_flats.sh: scrape almanac outputs for dome flats
-    │   ├── pipeline.sh
-    │   └── make_traces_domeflats.jl: extracts/saves traces from dome flats via gaussian fits to the "y" direction
+    ├── per flat type (quartz, dome):
+    │   ├── make_runlist_fiber_flats.jl: scrape almanac outputs for flats of that type
+    │   ├── make_traces_from_flats.jl: extracts/saves traces via gaussian fits to the "y" direction
+    │   ├── pipeline_2d_1d.sh (--relFlux false)
+    │   └── make_relFlux.jl: relative fluxing from the extracted flats
     ├── pipeline_2d_1d.sh: extracts and calibrates 1D spectra from 2D calibrated data
     └── plot_all.sh: makes end of night plots for validation/QA and posts them to Slack
 ```
