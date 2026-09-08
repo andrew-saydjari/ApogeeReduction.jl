@@ -68,15 +68,32 @@ set -o pipefail
 
 # mirror run_bulk.sh: locate the script (sbatch copies it into spool, so use
 # scontrol under Slurm), then the repo root two levels up from test/regression/
-if [ -n "${SLURM_JOB_ID:-}" ]; then
-    script_path=$(scontrol show job "$SLURM_JOB_ID" | awk -F= '/Command=/{print $2}')
-    hostname
-    echo "$SLURM_JOB_NODELIST"
+#
+# AR_BASE_DIR skips the derivation entirely. The scontrol branch assumes THIS
+# script is the one sbatch was handed — true when it is submitted directly,
+# false when a wrapper (submit_testbed.sh) or an external orchestrator is the
+# job's Command and this script runs as a child, in which case Command= points
+# somewhere else and base_dir would come out wrong. Such a caller sets
+# AR_BASE_DIR to the repo root. Unset (direct submission) is byte-identical to
+# the previous behaviour.
+if [ -n "${AR_BASE_DIR:-}" ]; then
+    base_dir="$(cd "$AR_BASE_DIR" && pwd)"
+    harness_dir="$base_dir/test/regression"
+    if [ -n "${SLURM_JOB_ID:-}" ]; then
+        hostname
+        echo "$SLURM_JOB_NODELIST"
+    fi
 else
-    script_path=$(realpath "$0")
+    if [ -n "${SLURM_JOB_ID:-}" ]; then
+        script_path=$(scontrol show job "$SLURM_JOB_ID" | awk -F= '/Command=/{print $2}')
+        hostname
+        echo "$SLURM_JOB_NODELIST"
+    else
+        script_path=$(realpath "$0")
+    fi
+    harness_dir="$(cd "$(dirname "$script_path")" && pwd)"
+    base_dir="$(dirname "$(dirname "$harness_dir")")"
 fi
-harness_dir="$(cd "$(dirname "$script_path")" && pwd)"
-base_dir="$(dirname "$(dirname "$harness_dir")")"
 echo "base_dir: $base_dir"
 
 # ---- config (env-overridable) ----------------------------------------------
@@ -90,6 +107,12 @@ AR_CALDIR_FLATS=${AR_CALDIR_FLATS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07
 AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"}
 AR_WORKERS=${AR_WORKERS:-24}    # local (AR_SLURM=false) mode only
 AR_EXP_CLASS_MODEL=""           # decision: goldens without the classifier
+# First line of MANIFEST.md. This body drives more than the golden baselines
+# (submit_testbed.sh runs the same chain over the DR21 200-MJD set), and a
+# manifest that calls a testbed "Golden baselines" mislabels the record — the
+# 2026_09_03 testbed's manifest opens with exactly that wrong header. The
+# default keeps the goldens path unchanged.
+AR_RUN_LABEL=${AR_RUN_LABEL:-"# Golden baselines MANIFEST"}
 
 # The test days (REFACTOR_PLAN v1 §4.2): 6 (tele, mjd) pairs covering the 5
 # fixed test days + both telescopes at 60000. The A3 gapped-almanac day joins
@@ -404,7 +427,7 @@ if [ -f "$manifest" ]; then
     { echo; echo "---"; echo; } >> "$manifest"
     echo "# Redo/partial run ($(date -Is))" >> "$manifest"
 else
-    echo "# Golden baselines MANIFEST" >> "$manifest"
+    echo "$AR_RUN_LABEL" >> "$manifest"
 fi
 {
     echo
@@ -453,7 +476,17 @@ for day in "${days[@]}"; do
     elif [ "$n1dcal" -eq 0 ] || [ "$n1duni" -eq 0 ]; then
         verdict="MISSING-1D"
     fi
-    [ "$verdict" = "ok" ] || overall=1
+    # NO-EXPOSURES is a CORRECT outcome, not a failure: a night whose runlist
+    # holds zero exposures (e.g. a cal-only night the filter drops) legitimately
+    # produces no products, and the pipeline exiting gracefully on it is the
+    # behaviour under test. Only genuine shortfalls set the failure flag.
+    # (Testbed job 6999920 completed 288/290 tele-nights ok and still exited 1
+    # on apo 59136 and apo 59423 — 1 and 2 exposures — blocking the arM stage.
+    # Empty nights are certain to recur across the ~3,345 MJDs of the bulk run.)
+    case "$verdict" in
+        ok|NO-EXPOSURES) : ;;
+        *) overall=1 ;;
+    esac
     {
         echo "tele: ${tele}"
         echo "mjd: ${mjd}"
