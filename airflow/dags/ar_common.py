@@ -95,7 +95,14 @@ ALMANAC_BIN = os.environ.get(
 
 CALDIR_DARKS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
 CALDIR_FLATS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
-GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"
+# 2026-09-06: repointed from 2025_07_31/pass_clean/, whose LCO gain and
+# read-noise maps were byte-identical copies of APO's (Utah notebook cell 29
+# read `outlst_apo` while writing the `lco` files). Every LCO reduction from
+# 2025-06-11 to 2026-09-06 ran its 2D error model on APO detector constants.
+# This directory carries APO's maps unchanged (all six bit-identical to the
+# old set) plus LCO's real recovered maps; provenance in its MANIFEST.md.
+# ar3D.assert_calib_map_telescope_specific hard-fails on the old directory.
+GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
 
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
