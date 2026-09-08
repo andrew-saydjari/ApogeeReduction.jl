@@ -93,9 +93,32 @@ ALMANAC_DIR = os.environ.get(
 ALMANAC_BIN = os.environ.get(
     "ALMANAC_BIN", "/mnt/home/sdssv/uv_env/almanac_env/bin/almanac")
 
+# Production deployment branch (AKS 2026-09-08). All three pipeline clones
+# (AR, arMADGICS, almanac) are checked out on this branch, NOT on main.
+#
+# Why: `update.repo` git-pulls each clone every morning, so while the clones
+# tracked main, any merge to main reached production the next morning with no
+# validation step. That is how the 2026-09-08 daily broke — the LCO
+# calibration guard merged to main while GAIN_READ_CAL_DIR still pointed at
+# the directory the guard rejects, and the two arrived in production together.
+#
+# Promotion is now explicit and manual: validate, then fast-forward the branch
+#     git push origin main:airflow-prod
+# and the next `update.repo` picks it up. Nothing else moves production.
+# update.repo asserts each clone is actually on this branch and fails loudly
+# otherwise, so a clone left on main is reported rather than silently pulled.
+PROD_BRANCH = os.environ.get("AR_PROD_BRANCH", "airflow-prod")
+
 CALDIR_DARKS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
 CALDIR_FLATS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
-GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/pass_clean/"
+# 2026-09-06: repointed from 2025_07_31/pass_clean/, whose LCO gain and
+# read-noise maps were byte-identical copies of APO's (Utah notebook cell 29
+# read `outlst_apo` while writing the `lco` files). Every LCO reduction from
+# 2025-06-11 to 2026-09-06 ran its 2D error model on APO detector constants.
+# This directory carries APO's maps unchanged (all six bit-identical to the
+# old set) plus LCO's real recovered maps; provenance in its MANIFEST.md.
+# ar3D.assert_calib_map_telescope_specific hard-fails on the old directory.
+GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
 
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
