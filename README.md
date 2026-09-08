@@ -77,6 +77,63 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 13    | 8192      | pixel partially saturated |
 | 14    | 16384     | pixel fully saturated |
 
+### Per-fiber relative-throughput bits (`bitmsk_relthrpt`)
+
+A **different axis** from the per-pixel mask above and from the exposure-level
+`exp_class_*` metadata: this one is per FIBER and per EXPOSURE. It is produced by
+`get_relFlux` (`src/ar1D.jl`) from a dome flat, stored in the `relFlux_*` cal
+products, copied into each chip's `ar1D*` product by `process_1D`, and stacked
+into the resampled `ar1Duni*` products as an `(N_CHIPS, N_FIBERS)` array by
+`reinterp_spectra`, alongside the `relthrpt` values themselves.
+
+| Bit | Value | Constant | Meaning |
+| --- | --- | --- | --- |
+| -   | 0   | | Fiber throughput is normal |
+| 0   | 1   | `RELTHRPT_WARN_BIT` | `relthrpt < 1 - sig_cut * IQR`: low, but still usable and still flux-scaled |
+| 1   | 2   | `RELTHRPT_BROKEN_BIT` | `relthrpt < rel_val_cut` (0.07): fiber is dead/near-dead |
+| 2   | 4   | `RELTHRPT_NOFILE_BIT` | No fluxing file was available; `relthrpt` forced to exactly 1 |
+| 3   | 8   | `RELTHRPT_NOTFINITE_BIT` | `relthrpt` is NaN/Inf (fiber all-NaN or all-zero in the flat). Always accompanied by bit 1 |
+
+`RELTHRPT_UNUSABLE_BITS = 2 | 8`. **A fiber carrying either of those bits is
+deliberately NOT flux-scaled by `process_1D`.** Nothing is dropped from the
+reduction: the spectrum is written normally, but its flux is left on an arbitrary
+scale, so any chi2 computed against it downstream is meaningless. Consumers
+should mask on `relthrpt_fiber_unusable(bitmsk_relthrpt)`;
+`relthrpt_fiber_fluxable` gives the exact set of fibers that were scaled.
+
+Bit 2 is deliberately excluded from `RELTHRPT_UNUSABLE_BITS`: in that case
+`relthrpt` is forced to exactly 1, so the spectrum is simply unfluxed but
+unscaled, a known and benign state rather than a broken fiber.
+
+Fiber quality is per fiber-EPOCH, not per fiber: fibers break and fibers get
+repaired. A static per-fiber blacklist is the wrong tool; use this per-exposure
+flag.
+
+**Known limitation.** Only the last chip's (`B`) throughput solution is computed
+and it is applied to R, G and B alike, even though `make_relFlux.jl` writes a
+per-chip solution and the per-chip symlink is named as though it were the chip's
+own. Chromatic throughput differences are therefore unmodelled by construction,
+and a fiber dead on one chip only is not flagged unless it is also dead on B. The
+chip actually used is now recorded in the product metadata as `relflux_chip`;
+`process_1D(...; per_chip_relflux = true)` switches to genuine per-chip fluxing.
+That is a survey-wide science change (it moves the flux scale of every R and G
+spectrum) and is off by default.
+
+### Per-fiber ingest bits (`bitmsk_ingest`, in `ar1Duni*`)
+
+A second, independent per-fiber flag, computed by `reinterp_spectra` and — until
+now — discarded at the end of the function instead of being written out.
+
+| Bit | Value | Meaning |
+| --- | --- | --- |
+| 1   | 2   | Every pixel of the fiber's 1D flux is NaN or zero |
+| 2   | 4   | Every pixel of the fiber is bad by `bad_pix_bits` or missing-chip |
+| 3   | 8   | Every pixel of the fiber's ivar is NaN or zero |
+
+Different axis from `bitmsk_relthrpt`: that one says the fiber's dome-flat
+throughput is dead, this one says the extracted data itself is unusable. Read
+both. Named `bitmsk_ingest`, not `ingestBit`, because arMADGICS has its own
+per-spectrum `ingestBit` column with an entirely different bit table.
 
 ## Testing
 

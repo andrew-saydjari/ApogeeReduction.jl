@@ -10,7 +10,81 @@ using DataFrames
 # hold off on prop ivar through until we switch to sutr_wood, also could implement a chi2 cut here
 # add a condition that we should drop any x pixel where a bad bit in any of the pixels being summed is bad
 
-function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
+# ---------------------------------------------------------------------------
+# Per-FIBER relative-throughput bitmask (`bitmsk_relthrpt`)
+#
+# This is the authoritative, per fiber-EPOCH statement of "is this fiber
+# delivering light on this exposure?". It is produced by `get_relFlux` from a
+# dome flat, stored in the `relFlux_*` cal products, copied into the per-chip
+# `ar1D*` products by `process_1D`, and stacked into the resampled
+# `ar1Duni*` products by `reinterp_spectra`. Downstream consumers (arMADGICS
+# and the QA/census scripts) are expected to read it and mask on
+# `RELTHRPT_UNUSABLE_BITS`.
+#
+# n.b. this axis is FIBER-level and per exposure. It is deliberately separate
+# from the EXPOSURE-level `exp_class_*` / engineering-carton flags that live in
+# the 1D product metadata: a fiber can be dead on an otherwise perfect
+# exposure, and an exposure can be junk with every fiber healthy.
+# ---------------------------------------------------------------------------
+
+"Fiber throughput is low relative to the exposure median, but still usable."
+const RELTHRPT_WARN_BIT = 2^0
+"Fiber throughput is below `rel_val_cut`: the fiber is dead/near-dead."
+const RELTHRPT_BROKEN_BIT = 2^1
+"No fluxing (dome flat) file was available; `relthrpt` was forced to 1."
+const RELTHRPT_NOFILE_BIT = 2^2
+"""
+`relthrpt` is not finite (NaN/Inf), i.e. the fiber was all-NaN or all-zero in
+the flat, or the exposure-level normalization was itself degenerate.
+Always accompanied by `RELTHRPT_BROKEN_BIT`, so bit-1 consumers are correct
+without changes.
+"""
+const RELTHRPT_NOTFINITE_BIT = 2^3
+
+"""
+Bits which mean "do not trust this fiber's flux calibration at all".
+
+This is the aggressive mask downstream analysis should use: a fiber carrying
+any of these bits is NOT flux-scaled by `process_1D`, so its flux is on an
+arbitrary scale and any chi2 computed against it is meaningless.
+
+`RELTHRPT_NOFILE_BIT` is deliberately NOT in this set: in that case `relthrpt`
+is forced to exactly 1 and the spectrum is simply unfluxed-but-unscaled, which
+is a known and benign state, not a broken fiber.
+"""
+const RELTHRPT_UNUSABLE_BITS = RELTHRPT_BROKEN_BIT | RELTHRPT_NOTFINITE_BIT
+
+"""
+    relthrpt_fiber_unusable(bitmsk_relthrpt)
+
+`true` wherever the per-fiber relative-throughput bitmask says the fiber's flux
+calibration is unusable (dead fiber or non-finite throughput). Broadcasts over
+any shape, so it works on the `(300,)` per-chip vectors in `ar1D*` and on the
+`(N_CHIPS, 300)` stacks in `ar1Duni*`.
+"""
+relthrpt_fiber_unusable(bitmsk_relthrpt) = (bitmsk_relthrpt .& RELTHRPT_UNUSABLE_BITS) .!= 0
+
+"""
+    relthrpt_fiber_fluxable(bitmsk_relthrpt)
+
+`true` wherever `process_1D` will actually divide the fiber by `relthrpt`.
+The single source of truth for which fibers get flux-scaled: `process_1D` uses
+it, and downstream code can use it to reason about what was done.
+"""
+function relthrpt_fiber_fluxable(bitmsk_relthrpt)
+    (bitmsk_relthrpt .& (RELTHRPT_UNUSABLE_BITS | RELTHRPT_NOFILE_BIT)) .== 0
+end
+
+"""
+    get_relFlux(fname; sig_cut, rel_val_cut, use_pix_mask)
+
+Per-fiber relative throughput and its quality bitmask, from a flat exposure.
+
+`use_pix_mask` gates whether the per-fiber throughput median is taken only over
+pixels that carry no `bad_pix_bits`. It defaults to `false`, which reproduces
+the historical numbers exactly; see the comment at the call site below.
+"""
+function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07, use_pix_mask::Bool = false)
     f = jldopen(fname)
     flux_1d = f["flux_1d"]
     mask_1d = f["mask_1d"]
@@ -18,14 +92,54 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07)
     close(f)
     metadata = read_metadata(fname)
 
-    absthrpt = dropdims(nanzeromedian(flux_1d, 1), dims = 1)
+    # `mask_1d_good` was computed and then never used here for a long time, so the
+    # throughput median ran over every pixel including ones the 2D stage had already
+    # called bad. Honouring the mask is the defensible thing to do, but it moves
+    # `relthrpt` for every fiber on every flat, and therefore moves the flux scale of
+    # every reduced spectrum. That is a science change with a whole-survey blast
+    # radius, so it is gated OFF by default and must be turned on deliberately,
+    # together with a re-reduction and a before/after comparison. It is no longer
+    # dead code either way.
+    flux_for_thrpt = if use_pix_mask
+        masked = copy(flux_1d)
+        masked[.!mask_1d_good] .= NaN
+        masked
+    else
+        flux_1d
+    end
+
+    # `absthrpt` is the un-normalized per-fiber median. No pipeline stage consumes it;
+    # it is read only by make_relFlux.jl's QA plots. Kept deliberately: it costs one
+    # `dropdims` (it is the value `relthrpt` is derived from anyway) and it is the only
+    # record of ABSOLUTE throughput, which is what you need to tell "this fiber died"
+    # from "the whole exposure was faint". Documented here so it is not mistaken for
+    # dead code again.
+    absthrpt = dropdims(nanzeromedian(flux_for_thrpt, 1), dims = 1)
     bitmsk_relthrpt = zeros(Int, length(absthrpt))
     relthrpt = copy(absthrpt)
     relthrpt ./= nanzeromedian(relthrpt)
 
-    thresh = (1 .- sig_cut * nanzeroiqr(relthrpt))
-    bitmsk_relthrpt[relthrpt .< thresh] .|= 2^0
-    bitmsk_relthrpt[relthrpt .< rel_val_cut] .|= 2^1
+    # `nanzeromedian` returns NaN for a fiber that is entirely NaN-or-zero, and
+    # `NaN < x` is `false` in Julia, so BOTH threshold tests below silently pass a
+    # NaN fiber as good. `process_1D` would then divide flux and multiply ivar by
+    # NaN and poison the fiber all the way downstream with nothing flagged. Catch
+    # non-finite throughput explicitly and FIRST. Same for a degenerate
+    # exposure-level normalization, which makes every fiber's relthrpt non-finite
+    # and must flag the whole exposure's fibers rather than none of them.
+    notfinite = .!isfinite.(relthrpt)
+    bitmsk_relthrpt[notfinite] .|= (RELTHRPT_NOTFINITE_BIT | RELTHRPT_BROKEN_BIT |
+                                    RELTHRPT_WARN_BIT)
+
+    # `nanzeroiqr` is itself NaN when the whole exposure is NaN-or-zero, which would
+    # make `thresh` NaN and flag nothing. In that case every fiber is already caught
+    # by the non-finite test above, but guard the comparison anyway so the warn bit
+    # is never decided by a NaN threshold.
+    iqr_relthrpt = nanzeroiqr(relthrpt)
+    thresh = isfinite(iqr_relthrpt) ? (1 - sig_cut * iqr_relthrpt) : NaN
+    if isfinite(thresh)
+        bitmsk_relthrpt[isfinite.(relthrpt) .& (relthrpt .< thresh)] .|= RELTHRPT_WARN_BIT
+    end
+    bitmsk_relthrpt[isfinite.(relthrpt) .& (relthrpt .< rel_val_cut)] .|= RELTHRPT_BROKEN_BIT
     return absthrpt, relthrpt, bitmsk_relthrpt, metadata
 end
 
@@ -821,11 +935,23 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
 
     outivar, outmsk = normalize_reinterp_spectra!(outflux, outvar, cntvec)
 
-    # Write reinterpolated data
+    # Write reinterpolated data.
+    #
+    # `ingestBit` is a SECOND per-fiber quality flag (bit 1: flux all NaN/zero; bit 2:
+    # every pixel bad by bitmask; bit 3: ivars all NaN/zero) that this loop computes and
+    # that, until now, was thrown away at the end of the function -- exactly the same
+    # class of defect as the throughput flag never reaching a consumer. It is now
+    # written out, as `bitmsk_ingest`. It is a DIFFERENT axis from `bitmsk_relthrpt`:
+    # that one says the fiber's dome-flat throughput is dead, this one says the
+    # extracted data itself is unusable. A consumer should read both.
+    #
+    # n.b. named `bitmsk_ingest`, NOT `ingestBit`: arMADGICS has its own per-spectrum
+    # `ingestBit` column with an entirely different bit table, and two flags with one
+    # name in adjacent products is a trap.
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
         extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack,
-        bitmsk_relthrpt = bitmsk_thrpt_stack)
+        bitmsk_relthrpt = bitmsk_thrpt_stack, bitmsk_ingest = ingestBit)
     return
 end
 
@@ -840,7 +966,8 @@ function process_1D(fname;
         chip_list::Vector{String} = CHIP_LIST,
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/",
-        checkpoint_mode = "commit_same")
+        checkpoint_mode = "commit_same",
+        per_chip_relflux::Bool = false)
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     dfindx = parse(Int, expnum)
@@ -904,11 +1031,31 @@ function process_1D(fname;
     resid_outfname = replace(fname, "ar2D" => "ar2Dresiduals")
     safe_jldsave(resid_outfname, metadata; resid_flux, resid_ivar, trace_used_param_fname = traceFname)
     if relFlux
-        # relative fluxing (using B (last chip) only for now)
+        # ###################################################################
+        # WARNING -- KNOWN LIMITATION, PLEASE READ BEFORE TRUSTING `relthrpt`
+        #
+        # `make_relFlux.jl` computes and stores a SEPARATE `relthrpt` for every
+        # chip, but this call hard-selects ONE chip (`chip_list[end]`, i.e. B)
+        # and the resulting throughput is applied to R, G and B alike, a few
+        # lines below. The per-chip `relFlux_*_<chip>.h5` symlink created below
+        # is NAMED as though it were the chip's own fluxing solution; it is not.
+        # Chromatic (per-chip) throughput differences are therefore unmodelled
+        # BY CONSTRUCTION, and a fiber that is dead on one chip only will not be
+        # flagged unless it is also dead on B.
+        #
+        # Changing this is a survey-wide science change (it moves the flux scale
+        # of every R and G spectrum ever reduced), so it is left as-is and made
+        # explicit rather than silently "fixed": the chip actually used is now
+        # recorded in the product metadata as `relflux_chip`, and
+        # `per_chip_relflux` below flips the behaviour for anyone who wants to
+        # measure the difference. Do not flip it in production without a
+        # before/after comparison.
+        # ###################################################################
+        fluxing_chip = per_chip_relflux ? chip : chip_list[end]
         # this is the path to the underlying fluxing file.
         # it is symlinked below to an exposure-specific file (linkPath).
         relflux_bit,calPath = get_fluxing_file(
-            dfalmanac, outdir, tele, mjd, dfindx, runname, fluxing_chip = chip_list[end])
+            dfalmanac, outdir, tele, mjd, dfindx, runname, fluxing_chip = fluxing_chip)
         fibtargDict, fiber_sdss_id_Dict = get_fibTargDict(falm, tele, mjd, dfindx)
         fiberTypeList = map(x -> fibtargDict[x], 1:300)
 
@@ -918,7 +1065,11 @@ function process_1D(fname;
                 @warn "No fluxing file available for $(tele) $(mjd) $(dfindx) $(chip)"
             end
             relthrpt = ones(size(flux_1d, 2))
-            bitmsk_relthrpt = 2^2 * ones(Int, size(flux_1d, 2))
+            # `relthrptr` must exist on every branch: it used to be defined only in
+            # the `else` below and this branch survived purely because no bit-2 fiber
+            # is ever fluxable. That is an accident, not a design.
+            relthrptr = reshape(relthrpt, (1, length(relthrpt)))
+            bitmsk_relthrpt = RELTHRPT_NOFILE_BIT * ones(Int, size(flux_1d, 2))
         elseif !isfile(calPath)
             error("Fluxing file $(calPath) for $(tele) $(mjd) $(dfindx) $(chip) does not exist")
         else
@@ -936,14 +1087,24 @@ function process_1D(fname;
         # broken fibers (bit 1, relthrpt < rel_val_cut) always also have the low-throughput
         # warn bit 0 set, so the mask must exclude on bit 1 explicitly: their relthrpt is a
         # noise-level (possibly negative) domeflat measurement and dividing by it produces
-        # arbitrarily inflated flux. Bit 2 (no fluxing file) is excluded as before.
-        msk_goodwarn = (bitmsk_relthrpt .& (2^1 | 2^2)) .== 0
+        # arbitrarily inflated flux. Bit 2 (no fluxing file) is excluded as before, and
+        # bit 3 (non-finite relthrpt) would divide by NaN.
+        #
+        # A fiber excluded HERE is left on an arbitrary flux scale -- it is not zeroed,
+        # not NaN'd and not masked, by design, so nothing is dropped from the reduction.
+        # That is exactly why `bitmsk_relthrpt` has to travel with the data: it is the
+        # only record that this fiber's flux is uncalibrated, and any downstream chi2
+        # computed against it is meaningless.
+        msk_goodwarn = relthrpt_fiber_fluxable(bitmsk_relthrpt)
         if any(msk_goodwarn)
             flux_1d[:, msk_goodwarn] ./= relthrptr[:, msk_goodwarn]
             ivar_1d[:, msk_goodwarn] .*= relthrptr[:, msk_goodwarn] .^ 2
         end
 
 	metadata["bitmsk_relFluxFile"] = relflux_bit
+        # Which chip's throughput solution was actually applied to this chip's data.
+        # Equal to `chip` only when `per_chip_relflux` is on; see the WARNING above.
+        metadata["relflux_chip"] = fluxing_chip
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
