@@ -331,7 +331,8 @@ for flat_type in "${flat_types[@]}"; do
         mkdir -p "${outroot}${flat_type}_flats"
         julia +"$AR_JULIA_VERSION" --project="$base_dir" "$base_dir/scripts/cal/make_traces_from_flats.jl" \
             --tele "$tele" --trace_dir "$outroot" --runlist "$flatrunlist" \
-            --flat_type "$flat_type" --slack_quiet true --checkpoint_mode "$AR_CHECKPOINT_MODE"
+            --flat_type "$flat_type" --slack_quiet true --checkpoint_mode "$AR_CHECKPOINT_MODE" \
+            --almanac_file "$almanac_file"
         stage_end
 
         stage_begin "2D->1D (no relFlux) ${flat_type} flats ${tele}"

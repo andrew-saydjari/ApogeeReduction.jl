@@ -37,6 +37,11 @@ function parse_commandline()
         help = "checkpoint mode (clobber, commit_exists, commit_same)"
         arg_type = String
         default = "commit_same"
+        "--almanac_file"
+        required = false
+        help = "almanac hdf5 file; used to identify the FPI guide fibers from the night's configurations for the dome-flat trace plots. If empty, FPI fibers are not annotated."
+        arg_type = String
+        default = ""
     end
     return parse_args(s)
 end
@@ -58,7 +63,7 @@ end
 @everywhere begin
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction
-    using ApogeeReduction: get_cal_file, get_fpi_guide_fiberID, get_fps_plate_divide, trace_extract,
+    using ApogeeReduction: get_cal_file, get_fpi_fiberIDs_from_almanac, get_fps_plate_divide, trace_extract,
                            safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace
 end
 
@@ -99,8 +104,20 @@ end
     end
     flist = vcat(cal_flist...)
 
-    # this is currently forcing only a single telescope at a time
-    fpifib1, fpifib2 = get_fpi_guide_fiberID(parg["tele"])
+    # FPI guide fibers are derived per night from the configurations in the
+    # almanac ("bonus" stubs), not from a hardcoded per-telescope pair: the
+    # constant is wrong on the LCO FPS commissioning nights (MJD 59820/59826/
+    # 59827, where the FPI is on fiber_id 142/153, not 82/213). Flats carry no
+    # configuration of their own, so the night's object configurations are used;
+    # the FPI feed does not move within a night. Cached per MJD -- one small
+    # HDF5 read per night rather than per file.
+    _fpi_cache = Dict{String, Vector{Int}}()
+    function fpi_fiberIDs_for(teleloc, mjdloc)
+        parg["almanac_file"] == "" && return Int[]
+        get!(_fpi_cache, "$(teleloc)_$(mjdloc)") do
+            get_fpi_fiberIDs_from_almanac(parg["almanac_file"], teleloc, mjdloc)
+        end
+    end
 
     function make_traces(fname, flat_type; checkpoint_mode = "commit_same")
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
@@ -117,7 +134,7 @@ end
         
         savename = joinpath(parg["trace_dir"], "$(flat_type)_flats", "$(mjdloc)", "$(flat_type)Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5")
         if check_file(savename, mode = checkpoint_mode)
-            return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = checkpoint_mode)
+            return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
         end
         
         f = jldopen(fname)
@@ -171,7 +188,7 @@ end
         mkpath(dirname(savename))
         safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
     
-        return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = checkpoint_mode)
+        return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
     end
 end
 

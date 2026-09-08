@@ -74,14 +74,6 @@ function adjFiberIndx2FiberIndx(adjfibindx)
     return mod1(adjfibindx, 300)
 end
 
-function get_fpi_guide_fiberID(tele)
-    if (tele == "apo")
-        return 75, 225
-    elseif (tele == "lco")
-        return 82, 213
-    end
-end
-
 function get_fps_plate_divide(tele)
     if (tele == "apo")
         return 59423

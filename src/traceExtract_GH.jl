@@ -1110,7 +1110,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 end
 
 function trace_plots(dirNamePlots,
-        cal_type, fname, teleloc, mjdloc, expidloc, chiploc, mjdfps2plate, fpifib1, fpifib2; checkpoint_mode = "commit_same")
+        cal_type, fname, teleloc, mjdloc, expidloc, chiploc, mjdfps2plate, fpi_fiberIDs; checkpoint_mode = "commit_same")
     tracePlot_heights_widths_Path = dirNamePlots * "$(mjdloc)/$(cal_type)Trace_med_heights_widths_$(teleloc)_$(mjdloc)_$(expidloc)_$(chiploc).png"
     if check_file(tracePlot_heights_widths_Path, mode = checkpoint_mode)
         return tracePlot_heights_widths_Path
@@ -1134,8 +1134,12 @@ function trace_plots(dirNamePlots,
     scatter!(ax, 301 .- (1:300), y)
 
     if (cal_type == "dome") && (parse(Int, mjdloc) > mjdfps2plate)
-        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
-        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
+        # Annotate only fibers the configuration actually identifies as the
+        # FPI feed. An empty list means the night gave no such configuration,
+        # in which case nothing is marked rather than marking a guess.
+        for fpifib in fpi_fiberIDs
+            scatter!(ax, [fpifib], [y[301 - fpifib]], color = :red)
+        end
     end
 
     hlines!(ax, cut, linestyle = :dash)
@@ -1149,8 +1153,12 @@ function trace_plots(dirNamePlots,
     scatter!(ax, 301 .- (1:300), y)
 
     if (cal_type == "dome") && (parse(Int, mjdloc) > mjdfps2plate)
-        scatter!(ax, [fpifib1], [y[301 - fpifib1]], color = :red)
-        scatter!(ax, [fpifib2], [y[301 - fpifib2]], color = :red)
+        # Annotate only fibers the configuration actually identifies as the
+        # FPI feed. An empty list means the night gave no such configuration,
+        # in which case nothing is marked rather than marking a guess.
+        for fpifib in fpi_fiberIDs
+            scatter!(ax, [fpifib], [y[301 - fpifib]], color = :red)
+        end
     end
 
     med_val = nanzeromedian(y)

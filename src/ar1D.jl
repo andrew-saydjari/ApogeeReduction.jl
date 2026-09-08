@@ -303,6 +303,58 @@ function extract_optimal_iter(dimage, ivarimage, pix_bitmask, trace_params,
 end
 
 """
+Return the FPI guide fiber IDs for one night, derived from the configurations
+themselves rather than from a hardcoded constant.
+
+The FPI feed has no positioner and therefore no FIBERMAP row in the
+confSummary; almanac synthesizes a stub with `category == "bonus"` for every
+APOGEE fiber_id in 1:300 that a configuration does not account for. Those stubs
+carry no fiber_type, so they must be read before any `fiber_type == "APOGEE"`
+filter.
+
+The FPI feed does not move within a night, so the first object configuration
+that identifies it is used. Returns an empty vector when the night has no such
+configuration (a calibration-only night, the plate era, or a read failure) --
+callers should then decline to label anything rather than guess, because a
+stale constant silently overriding real fiber assignments is the failure mode
+this replaces.
+"""
+function get_fpi_fiberIDs_from_almanac(almanac_file, tele, mjd)
+    fiberIDs = Int[]
+    isfile(almanac_file) || return fiberIDs
+    try
+        f = h5open(almanac_file, "r")
+        try
+            df_exp = read_almanac_exp_df(f, tele, mjd)
+            if "config_id" in names(df_exp)
+                for row in eachrow(df_exp)
+                    (row.image_type == "object") || continue
+                    config_id = row.config_id
+                    (config_id > 0) || continue
+                    fibers_path = "raw/$(tele)/$(mjd)/fibers/$(config_id)"
+                    haskey(f, fibers_path) || continue
+                    df_fib = DataFrame(read(f[fibers_path]))
+                    rename!(df_fib, lowercase.(names(df_fib)))
+                    ("category" in names(df_fib)) || continue
+                    ids = df_fib[df_fib[!, "category"].=="bonus", "fiber_id"]
+                    if !isempty(ids)
+                        fiberIDs = sort(unique(Int.(ids)))
+                        break
+                    end
+                end
+            end
+        finally
+            close(f)
+        end
+    catch e
+        @warn "Could not derive FPI guide fibers from $(almanac_file) for $(tele)/$(mjd); " *
+              "they will not be annotated."
+        show(e)
+    end
+    return fiberIDs
+end
+
+"""
 Given an open HDF.file, `f`, and the telescope, mjd, and expnum, return a dictionary
 mapping fiber index (1:300 laid out on the chip) to fiber type.
 """
@@ -342,6 +394,13 @@ function get_fibTargDict(f, tele, mjd, dfindx)
     exposure_info = df_exp[dfindx, :]
     config_id = exposure_info[configIdCol]
 
+    # FPI guide fibers, derived from the configuration below. Empty means either
+    # that no configuration was read (calibration exposure, config_id == -1, or
+    # a read failure) or that the configuration accounted for all 300 APOGEE
+    # fibers, leaving no "bonus" stub for the FPI feed.
+    fpi_fiberIndxs = Int[]
+    read_config = false
+
     fibtargDict, fiber_sdss_id_Dict = if exposure_info.image_type != "object"
         (Dict(1:300 .=> "cal"), Dict(1:300 .=> -2))
     else
@@ -354,6 +413,20 @@ function get_fibTargDict(f, tele, mjd, dfindx)
                 df_fib = DataFrame(read(f["raw/$(tele)/$(mjd)/fibers/$(config_id)"]))
                 # normalizes all column names to lowercase
                 rename!(df_fib, lowercase.(names(df_fib)))
+
+                # The FPI feed is a fixed illumination source: it has no
+                # positioner and therefore no FIBERMAP row in the confSummary.
+                # almanac notices the gap and synthesizes a stub row with
+                # category "bonus" for every APOGEE fiber_id in 1:300 that the
+                # configuration does not account for. Those stubs carry no
+                # fiber_type, so they must be read BEFORE the "APOGEE" filter
+                # below or they are silently discarded.
+                read_config = true
+                fpi_fiberIndxs = if configIdCol == "config_id"
+                    fiberID2fiberIndx.(df_fib[df_fib[!, "category"].=="bonus", "fiber_id"])
+                else
+                    Int[]
+                end
 
                 # limit to only the APOGEE fiber/hole information
                 df_fib = if configIdCol == "config_id"
@@ -394,10 +467,37 @@ function get_fibTargDict(f, tele, mjd, dfindx)
         end
     end
 
+    # FPS era only: label the FPI guide fibers from the configuration itself.
+    #
+    # This used to call a hardcoded per-telescope fiber pair (removed) and
+    # overwrite those two fibers unconditionally. That is wrong whenever the FPI
+    # feed does not sit where the constant says. Measured on the LCO FPS
+    # commissioning nights MJD 59820/59826/59827 (16 configurations): the FPI is
+    # on fiber_id 142/153, while the hardcoded 82/213 carry category "science" —
+    # so 133 object exposures had two real science fibers relabelled "fpiguide"
+    # and discarded, and the true FPI fibers were never labelled at all.
+    # Confirmed in the extracted spectra: counting narrow emission peaks per
+    # fiber, 142/153 rank 1-2 at ~485 peaks against a per-fiber median of 60-100,
+    # while 82/213 sit mid-pack; on later LCO nights the ranking flips to 82/213,
+    # matching "bonus" on those configurations.
+    #
+    # There is deliberately NO fallback to the hardcoded pair: a wrong constant
+    # silently destroying science fibers is worse than no FPI label. If an FPS
+    # configuration yields no "bonus" stub, warn loudly and label nothing. The
+    # plate era has no configurations and no FPI, so it is silent by design.
     if parse(Int, mjd) > mjdfps2plate
-        fpifib1, fpifib2 = fiberID2fiberIndx.(get_fpi_guide_fiberID(tele))
-        fibtargDict[fpifib1] = "fpiguide"
-        fibtargDict[fpifib2] = "fpiguide"
+        if isempty(fpi_fiberIndxs)
+            if read_config
+                @warn "No FPI guide fibers found for $(tele)/$(mjd)/fibers/$(config_id) " *
+                      "(exposure $(dfindx)): the configuration accounts for all 300 APOGEE " *
+                      "fibers, so almanac synthesized no \"bonus\" row. No fiber will be " *
+                      "labelled fpiguide for this exposure."
+            end
+        else
+            for fibindx in fpi_fiberIndxs
+                fibtargDict[fibindx] = "fpiguide"
+            end
+        end
     end
     return (fibtargDict, fiber_sdss_id_Dict)
 end
