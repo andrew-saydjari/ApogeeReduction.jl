@@ -437,9 +437,14 @@ if parg["relFlux"]
         sendto(workers(), mjd_list_fpi = mjd_list_fpi)
         sendto(workers(), all1DfpiPeaks_a = all1DfpiPeaks_a)
         sendto(workers(), all1DObjectSkyPeaks = all1DObjectSkyPeaks)
+        # the almanac is needed by the FPI wavecal gate to derive the night's FPI
+        # guide fibers (they are not a constant: LCO MJD 59810-59850 used 142/153)
+        almanac_file = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
+        sendto(workers(), almanac_file = almanac_file)
         @everywhere fpi_medwavecal_skyline_dither_partial(mjd_ind) = fpi_medwavecal_skyline_dither(
             unique_mjds[mjd_ind], mjd_list_fpi, mjd_list_wavecal, all1DfpiPeaks_a, all1DObjectSkyPeaks,
-            wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"])
+            wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"],
+            almanac_file = almanac_file)
         @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
     end
 

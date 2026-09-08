@@ -1740,17 +1740,91 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
     end    
 end
 
-function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal, 
+"""
+    fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
+        all1DfpiPeaks_a, all1DObjectSkyPeaks, wavecalNightAve_fname;
+        verbose = true, checkpoint_mode = "commit_same", almanac_file = "")
+
+Promote the night's wavelength solution from the sky-line solution to the
+FPI solution -- but only if the FPI solution passes the acceptance gate in
+`fpi_gate.jl`. See that file for the two guards, the thresholds and the corpus
+they were measured against.
+
+This promotion used to be unconditional and silent, which is how five LCO
+nights with a dark FPI were delivered with a wavelength solution wrong by
+~1.2 px RMS. When either guard fails the night is NOT failed: the sky solution
+already written by `skyline_medwavecal_skyline_dither` is kept, no
+`waveCalNightfpiDither` files are written for the night's object exposures (so
+`reinterp_spectra` uses the sky solution), a warning naming the night, the
+guard and its value is emitted, and the verdict is recorded under `fpi_qa/` in
+the night's `wavecalNightAve` file.
+
+`almanac_file` is needed to derive the night's FPI guide fibers. When it is
+empty the primary guard falls back to the all-fiber statistic and says so.
+"""
+function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
 					     all1DfpiPeaks_a, all1DObjectSkyPeaks,
-					     wavecalNightAve_fname; 
+					     wavecalNightAve_fname;
                          verbose = true,
-					     checkpoint_mode = "commit_same")
+					     checkpoint_mode = "commit_same",
+					     almanac_file = "")
     mskMJD_fpi = (mjd_list_fpi .== mjd)
     mskMJD_obj = (mjd_list_wavecal .== mjd)
-    
+
     if isnothing(wavecalNightAve_fname)
         @warn "Could not find nightly average wave soln at $(wavecalNightAve_fname)"
     elseif (size(all1DfpiPeaks_a[mskMJD_fpi], 1) > 0)
+        fpi_fnames = all1DfpiPeaks_a[mskMJD_fpi]
+        tele = split(basename(fpi_fnames[1]), "_")[2]
+
+        # ---- Guard 1 (primary): is there FPI light in the FPI fibers?
+        # Runs on the fpiPeaks products, before any of the wavecal work, so a
+        # dark FPI costs nothing and cannot reach the promotion below.
+        fpi_fiberIDs = if isempty(almanac_file)
+            Int[]
+        else
+            get_fpi_fiberIDs_from_almanac(almanac_file, tele, mjd)
+        end
+        fpi_fiberIndxs = try
+            filter(i -> 1 <= i <= N_FIBERS, fiberID2fiberIndx.(fpi_fiberIDs))
+        catch
+            Int[]
+        end
+        light = fpi_light_check(fpi_fnames; fpi_fiberIndxs = fpi_fiberIndxs)
+
+        qa = Dict{String, Any}(
+            "tele" => String(tele),
+            "mjd" => mjd,
+            "n_fpi_exposures" => length(fpi_fnames),
+            "n_fpiPeaks_files_read" => light.n_files,
+            "fpi_fiberIDs" => collect(Int, fpi_fiberIDs),
+            "fpi_fiberIDs_from_almanac" => !isempty(fpi_fiberIDs),
+            "lit_fraction" => light.lit,
+            "lit_fraction_all_fibers" => light.lit_all,
+            "lit_fraction_fpi_fibers" => light.lit_fpifib,
+            "lit_fraction_threshold" => FPI_LIT_FRACTION_MIN,
+            "resid_rms_threshold" => FPI_RESID_RMS_MAX,
+            "resid_rms" => NaN,
+            "resid_mad" => NaN,
+            "n_peaks_used" => -1,
+            "frac_peaks_used" => NaN,
+            "gate_pass" => false,
+            "failed_guard" => "none",
+            "best_wave_type" => "sky")
+
+        if !light.pass
+            @warn "FPI WAVECAL GATE FAILED for $(tele) MJD $(mjd): guard fpi_light. " *
+                  "Lit fraction of fitted FPI peaks = $(round(light.lit, sigdigits = 3)) " *
+                  "(all fibers $(round(light.lit_all, sigdigits = 3)), " *
+                  "FPI guide fibers $(round(light.lit_fpifib, sigdigits = 3)), " *
+                  "IDs $(isempty(fpi_fiberIDs) ? "unknown - almanac named none" : join(fpi_fiberIDs, "/"))), " *
+                  "threshold $(FPI_LIT_FRACTION_MIN). The FPI produced no usable light; " *
+                  "FALLING BACK to the nightly sky-line wavelength solution for this night. " *
+                  "The night is NOT rejected."
+            qa["failed_guard"] = "fpi_light"
+            save_fpi_qa!(wavecalNightAve_fname, qa)
+            return
+        end
 
         f = h5open(wavecalNightAve_fname, "r")
         curr_best_wave_type = read(f["best_wave_type"])
@@ -1759,8 +1833,47 @@ function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
 	close(f)
 
         # using FPI exposures to measure high-precision nightly wavelength solution
-        outfname, night_linParams, night_nlParams, night_wave_soln = comb_exp_get_and_save_fpi_wavecal(
-            all1DfpiPeaks_a[mskMJD_fpi], curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, verbose = verbose, checkpoint_mode = checkpoint_mode)
+        fpi_out = comb_exp_get_and_save_fpi_wavecal(
+            fpi_fnames, curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, verbose = verbose, checkpoint_mode = checkpoint_mode)
+
+        if isnothing(fpi_out)
+            @warn "FPI WAVECAL GATE FAILED for $(tele) MJD $(mjd): guard fpi_solution. " *
+                  "comb_exp_get_and_save_fpi_wavecal returned nothing. " *
+                  "FALLING BACK to the nightly sky-line wavelength solution. The night is NOT rejected."
+            qa["failed_guard"] = "fpi_solution"
+            save_fpi_qa!(wavecalNightAve_fname, qa)
+            return
+        end
+        outfname, night_linParams, night_nlParams, night_wave_soln = fpi_out
+
+        # ---- Guard 2 (secondary): FPI fit residual RMS.
+        resid = fpi_resid_stats(outfname)
+        qa["resid_rms"] = resid.rms
+        qa["resid_mad"] = resid.mad
+        qa["n_peaks_used"] = resid.n_used
+        qa["frac_peaks_used"] = resid.frac_used
+        if resid.n_used == 0
+            @warn "FPI WAVECAL GATE FAILED for $(tele) MJD $(mjd): guard fpi_no_peaks_used. " *
+                  "The FPI wavelength fit used ZERO peaks, so $(basename(outfname)) holds " *
+                  "the seed solution rather than a fit. " *
+                  "FALLING BACK to the nightly sky-line wavelength solution for this night. " *
+                  "The night is NOT rejected."
+            qa["failed_guard"] = "fpi_no_peaks_used"
+            save_fpi_qa!(wavecalNightAve_fname, qa)
+            return
+        elseif !resid.pass
+            @warn "FPI WAVECAL GATE FAILED for $(tele) MJD $(mjd): guard fpi_resid_rms. " *
+                  "FPI fit residual RMS = $(round(resid.rms, sigdigits = 3)) Angstroms " *
+                  "(threshold $(FPI_RESID_RMS_MAX); $(round(100 * resid.frac_used, sigdigits = 3))% of peaks used). " *
+                  "FALLING BACK to the nightly sky-line wavelength solution for this night. " *
+                  "The night is NOT rejected."
+            qa["failed_guard"] = "fpi_resid_rms"
+            save_fpi_qa!(wavecalNightAve_fname, qa)
+            return
+        end
+
+        qa["gate_pass"] = true
+        qa["best_wave_type"] = "fpi"
 
         f = h5open(wavecalNightAve_fname, "r+")
 	if haskey(f, "best_wave_type")
@@ -1769,11 +1882,13 @@ function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
 
 	curr_best_wave_type = "fpi"
 	f["best_wave_type"] = curr_best_wave_type
-	f["$(curr_best_wave_type)/used_fnames"] = all1DfpiPeaks_a[mskMJD_fpi]
+	f["$(curr_best_wave_type)/used_fnames"] = fpi_fnames
 	f["$(curr_best_wave_type)/nightAve_wave_soln"] = night_wave_soln
 	f["$(curr_best_wave_type)/nightAve_nlParams"] = night_nlParams
 	f["$(curr_best_wave_type)/nightAve_linParams"] = night_linParams
 	close(f)
+
+        save_fpi_qa!(wavecalNightAve_fname, qa)
 
         # using skylines to measure dither offsets from FPI-defined wavelength solution
         get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
