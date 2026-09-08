@@ -11,6 +11,8 @@ lco    60044    44820002-44820024    spQF        "sparsePak quartz flat"
 lco    60755    51930001-51930005    sat         "saturation internal flats, 170 reads"
 apo    60823    52610012-52610015    sat         "saturation internal flats, 450 reads"
 
+apo    57952    23900001-23900009    rdL         "read-count ladder, internal flats at 58/60/3/6/12/24/48 reads with darks at 60 and 3 interleaved; calibration-only night"
+
 apo    57126    15640002-15640021    uD          "ultra dark, 100 reads"
 apo    57581    20190002-20190030    uD          "ultra dark, 100 reads"
 apo    57949    23870002-23870031    uD          "ultra dark, 100 reads"
