@@ -353,7 +353,8 @@ end
     using ApogeeReduction: exposure_engineering_from_almanac, exposure_flag_bits,
                            read_almanac_exp_df, safe_jldsave, EXPFLAG_ENGINEERING,
                            ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
-                           ENGINEERING_CHECK_IMAGE_TYPES
+                           ENGINEERING_CHECK_IMAGE_TYPES, apply_designless_clause,
+                           ENGINEERING_DESIGNLESS_DESIGN_ID
     almfile = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
     if !isfile(almfile)
         @warn "Engineering-carton check SKIPPED: no almanac at $almfile"
@@ -365,6 +366,12 @@ end
                 df = read_almanac_exp_df(almfile, parg["tele"], mjd)
                 cfgid = "config_id" in names(df) ? df.config_id : fill(-1, nrow(df))
                 n = nrow(df)
+                # design_id is per EXPOSURE, so it is applied outside the
+                # per-config cache below. An almanac without the column leaves
+                # `nothing`, which is_designless_design reads as "unknown", not
+                # as "designless" — clause 3 then simply never fires.
+                designid = "design_id" in names(df) ? df.design_id :
+                           fill(nothing, nrow(df))
                 eng = falses(n)
                 engfrac = fill(NaN, n)
                 engcarton = fill("", n)
@@ -378,6 +385,7 @@ end
                             exposure_engineering_from_almanac(fh, parg["tele"],
                                 string(mjd), cfgid[i], df.image_type[i])
                         end
+                        e = apply_designless_clause(e, designid[i])
                         eng[i] = e.engineering
                         engfrac[i] = e.frac
                         engcarton[i] = e.carton

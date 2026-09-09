@@ -165,6 +165,123 @@ about the science content of the frame.
 const ENGINEERING_CHECK_IMAGE_TYPES = ["object"]
 
 """
+The `design_id` an FPS configuration carries when it was built by jaeger WITHOUT
+a robostrategy design. This is the SDSS-V convention, not an almanac sentinel —
+established 2026-09-09 and worth restating, because the two are easy to confuse
+and the conclusion flips depending on which it is:
+
+- almanac's own missing-value sentinel for `design_id` is `-1`, set at
+  `almanac/src/almanac/data_models/exposure.py:46`
+  (`Field(default=-1, alias="designid")`) and coerced through
+  `empty_string_to_int(v, -1)`. A whole-package grep for the literal `999` in
+  `almanac/src` returns exactly one hit, unrelated (a `plate = -999` fallback in
+  the bad-exposure CSV loader).
+- `-999` is present in the RAW FITS HEADERS and in the confSummary files:
+  `apo/59765/apR-a-42030010.apz` carries `DESIGNID = -999`, `FIELDID = '-999'`,
+  `CONFIGID = 6106`, `OBSCMNT = 'FPI test'`, and `confSummary-6106.par` has
+  `design_id -999`, `field_id -999`, `robostrategy_run NA`, `raCen/decCen -999.0`.
+
+So there is no parser bug to fix here: `-999` is genuine observatory output
+meaning "no design was ever generated for this configuration".
+
+`design_id == -999` and `field_id == -999` co-occur perfectly over the DR21
+corpus (17,311 rows each), so this is one signal, not two, and `design_id == 0`
+never occurs.
+"""
+const ENGINEERING_DESIGNLESS_DESIGN_ID = -999
+
+"""
+Third clause of the engineering rule, AKS 2026-09-09 ("implement the -999
+clause"), after a full-corpus census:
+
+> **clause 3** — an `object` exposure whose configuration was built without a
+> robostrategy design (`design_id == ENGINEERING_DESIGNLESS_DESIGN_ID`).
+
+It closes a real hole rather than duplicating clauses 1 and 2: those catch
+engineering configurations built *from a position-stars design*, and miss
+configurations built from *no design at all*.
+
+MEASURED over the full DR21 almanac (`allobs_57618_61230.h5`, 2026-09-09):
+
+- 17,311 rows carry `design_id == -999`, but **17,296 of them (99.91%) are
+  CALIBRATION frames** — 7,932 arclamp, 3,540 dark, 3,082 domeflat, 1,767
+  quartzflat, 956 internalflat, 19 twilightflat — spread over 1,323 nights,
+  continuous from MJD 59637 to 61227.
+- exactly **15 are `object`**: apo 59697 (2), apo 59765 (11), apo 60212 (2).
+
+The `ENGINEERING_CHECK_IMAGE_TYPES` restriction is therefore NOT cosmetic and
+NOT optional. Implementing this clause anywhere that does not inherit that gate
+— a standalone almanac-row filter, say — would destroy 17,296 perfectly good
+calibration frames, including most FPS-era APO arclamps and darks. Keep the
+clause inside `exposure_engineering_from_almanac`, which gates on image type at
+its first line.
+
+All 15 have a POSITIVE `config_id` (5055, 6106, 10680) and identical fiber
+tables: 300 fibers, 0 science, 0 sky, 0 standard, 0 non-empty cartons, 298
+blank category + 2 `bonus`, `assigned = 0`, `on_target = 0`. A control
+configuration on the same night (10681) has 175 science / 91 sky_apogee / 15
+standard_apogee, so the emptiness is real and not an ingest failure.
+
+NET NEW: none of the 15 is reachable by clause 1 (needs science fibers) or
+clause 2 (needs a `manual_fps_position_stars*` fiber), and they have neither.
+The engineering total therefore goes 2,483 -> 2,498 with no reclassification of
+anything already flagged.
+
+Why it matters despite being 0.015% of 100,007 FPS-era object exposures: these
+are the ONLY `-999` exposures that reach arMADGICS. arM ingests on
+`image_type == "object"` (`arMADGICS.jl/src/ingest.jl`), so the 17,296
+calibration frames are already invisible to it, while these 15 would be solved
+as science against a fiber table with no targets. apo 60212 exp 12/13 are the
+clearest case: they sit inside a six-rung twilight ladder (nread 15, 15, **20**,
+**25**, 30, 40) whose other four rungs are correctly typed `twilightflat` with
+the comment "twilight flats", while these two carry `IMAGETYP = object` and a
+blank comment. Without this clause, arM would fit twilight sky continuum with
+stellar and sky models. The other 13 announce themselves in
+`observer_comment`: 'FPI test', 'test', 'testok', and
+'test w/ BOSS FF lamps on for 30s during exp'.
+
+See `metadata/special_cal_obs.txt` for the twilight sequence itself, which is
+recorded there as a calibration observation independent of this flag.
+"""
+const ENGINEERING_FLAG_DESIGNLESS = true
+
+"""
+    is_designless_design(design_id)
+
+True when `design_id` marks a configuration built without a robostrategy design
+(`ENGINEERING_DESIGNLESS_DESIGN_ID`), and clause 3 is enabled.
+
+Deliberately total: a `nothing`, a missing column, or a non-integer gives
+`false` — "we do not know the design" is not the same claim as "there was no
+design", and only the latter is evidence of an engineering frame.
+"""
+function is_designless_design(design_id)
+    ENGINEERING_FLAG_DESIGNLESS || return false
+    (design_id isa Integer) || return false
+    Int(design_id) == ENGINEERING_DESIGNLESS_DESIGN_ID
+end
+
+"""
+    apply_designless_clause(verdict, design_id)
+
+OR clause 3 into an `engineering_verdict` NamedTuple.
+
+Separate from `engineering_verdict` on purpose. The carton clauses need the
+configuration's fiber table, which callers cache per `config_id`; `design_id`
+lives on the EXPOSURE row. Folding clause 3 into the cached call would let one
+exposure's design leak onto every other exposure sharing its configuration.
+Applying it here, per row, after the cache lookup, makes that impossible.
+
+A verdict already flagged by clause 1 or 2 keeps its more specific `basis`; only
+an unflagged verdict can become `basis = "designless"`.
+"""
+function apply_designless_clause(verdict, design_id)
+    (verdict.engineering || !is_designless_design(design_id)) && return verdict
+    (engineering = true, frac = verdict.frac, carton = verdict.carton,
+        nsci = verdict.nsci, basis = "designless")
+end
+
+"""
     is_engineering_carton(carton)
 
 True when the carton name matches any prefix in `ENGINEERING_CARTON_PREFIXES`
@@ -324,19 +441,29 @@ end
 """
     exposure_engineering_from_almanac(f, tele, mjd, config_id, image_type; root = "raw")
 
-Full engineering carton check for one almanac exposure row. Applies the check
-only to `ENGINEERING_CHECK_IMAGE_TYPES` (see that constant for why), and reads
-the cartons from the almanac's own fiber table — no confSummary dependency,
-since the almanac is already a pipeline input.
+Full engineering check for one almanac exposure row. Applies the check only to
+`ENGINEERING_CHECK_IMAGE_TYPES` (see that constant for why), and reads the
+cartons from the almanac's own fiber table — no confSummary dependency, since
+the almanac is already a pipeline input.
+
+Pass `design_id` to include clause 3 (`ENGINEERING_FLAG_DESIGNLESS`). Omitting it
+evaluates the carton clauses alone, which is the correct behaviour for a caller
+that has no design column rather than a silent "not engineering".
+
+Callers that CACHE this result per `config_id` must leave `design_id` unset here
+and apply `apply_designless_clause` per exposure row afterwards — `design_id`
+lives on the exposure, not the configuration, so caching it would leak one
+exposure's design onto its config-mates.
 
 Returns the `engineering_verdict` NamedTuple.
 """
 function exposure_engineering_from_almanac(f, tele, mjd, config_id, image_type;
-        root::AbstractString = "raw")
+        design_id = nothing, root::AbstractString = "raw")
     lowercase(strip(String(image_type))) in ENGINEERING_CHECK_IMAGE_TYPES ||
         return (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
     r = almanac_config_cartons(f, tele, mjd, config_id; root = root)
-    engineering_verdict(r.science, r.all; label = "$(tele)/$(mjd)/config $(config_id)")
+    v = engineering_verdict(r.science, r.all; label = "$(tele)/$(mjd)/config $(config_id)")
+    apply_designless_clause(v, design_id)
 end
 
 """

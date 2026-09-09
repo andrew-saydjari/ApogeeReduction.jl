@@ -6,6 +6,9 @@ using ApogeeReduction: is_engineering_carton, exposure_is_engineering,
                        ENGINEERING_CARTON_WARN_FRAC,
                        ENGINEERING_CHECK_IMAGE_TYPES,
                        ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS,
+                       ENGINEERING_FLAG_DESIGNLESS,
+                       ENGINEERING_DESIGNLESS_DESIGN_ID,
+                       is_designless_design, apply_designless_clause,
                        EXPFLAG_PREDICTED_BAD, EXPFLAG_ENGINEERING, EXPFLAG_NO_SCIENCE
 using HDF5
 
@@ -193,6 +196,95 @@ using HDF5
                 # clause 2 still respects the image-type restriction
                 @test !exposure_engineering_from_almanac(
                     f, "apo", "59558", 105, "dark").engineering
+            end
+        end
+    end
+
+    @testset "clause 3: designless configurations (design_id == -999)" begin
+        # AKS 2026-09-09: "implement the -999 clause".
+        #
+        # MEASURED over the full DR21 almanac: 17,311 rows carry design_id ==
+        # -999, but 17,296 (99.91%) are CALIBRATION frames. Exactly 15 are
+        # `object`: apo 59697 (2), 59765 (11), 60212 (2). The image-type
+        # restriction is therefore load-bearing, not cosmetic — the tests below
+        # assert it directly.
+        @test ENGINEERING_FLAG_DESIGNLESS
+        @test ENGINEERING_DESIGNLESS_DESIGN_ID == -999
+
+        # -- the predicate is deliberately total --
+        @test is_designless_design(-999)
+        @test !is_designless_design(-1)         # almanac's OWN missing sentinel
+        @test !is_designless_design(0)          # never occurs in the corpus
+        @test !is_designless_design(388590)     # a real design
+        @test !is_designless_design(nothing)    # column absent: unknown != absent
+        @test !is_designless_design("-999")     # not an Integer
+        @test !is_designless_design(missing)
+
+        none = (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
+        # -- clause 3 flags an otherwise-clean verdict --
+        v = apply_designless_clause(none, -999)
+        @test v.engineering
+        @test v.basis == "designless"
+        @test v.nsci == 0
+        # -- and leaves everything else untouched --
+        @test !apply_designless_clause(none, -1).engineering
+        @test !apply_designless_clause(none, 388590).engineering
+        @test !apply_designless_clause(none, nothing).engineering
+        # -- a verdict already flagged keeps its MORE SPECIFIC basis --
+        c1 = (engineering = true, frac = 1.0, carton = "manual_fps_position_stars",
+            nsci = 250, basis = "science")
+        @test apply_designless_clause(c1, -999).basis == "science"
+        c2 = (engineering = true, frac = 1.0, carton = "manual_fps_position_stars",
+            nsci = 0, basis = "scienceless_position_stars")
+        @test apply_designless_clause(c2, -999).basis == "scienceless_position_stars"
+        # -- idempotent: applying twice cannot change the answer (both call
+        #    sites apply it after a cache lookup, so this must hold) --
+        @test apply_designless_clause(apply_designless_clause(none, -999), -999).basis ==
+              "designless"
+
+        # -- end to end against a fixture shaped like the real thing --
+        mktempdir() do dir
+            path = joinpath(dir, "alm_designless.h5")
+            h5open(path, "w") do f
+                # apo 60212 config 10680: the twilight-ladder configuration.
+                # 300 fibers, 0 science, 0 sky, 0 cartons, 298 blank + 2 bonus,
+                # assigned = 0 — exactly as measured.
+                g = create_group(f, "raw/apo/60212/fibers/10680")
+                g["category"] = vcat(fill("", 298), fill("bonus", 2))
+                g["firstcarton"] = fill("", 300)
+                # config 10681 on the same night IS science: the control that
+                # proves the emptiness above is real and not an ingest failure
+                g2 = create_group(f, "raw/apo/60212/fibers/10681")
+                g2["category"] = vcat(fill("science", 175), fill("sky_apogee", 91),
+                    fill("standard_apogee", 15), fill("", 19))
+                g2["firstcarton"] = vcat(fill("mwm_snc_100pc", 175), fill("", 125))
+            end
+            h5open(path, "r") do f
+                # the carton clauses alone say nothing: no science, no cartons
+                @test !exposure_engineering_from_almanac(
+                    f, "apo", "60212", 10680, "object").engineering
+                # clause 3 catches it
+                v = exposure_engineering_from_almanac(
+                    f, "apo", "60212", 10680, "object"; design_id = -999)
+                @test v.engineering
+                @test v.basis == "designless"
+
+                # THE LOAD-BEARING ASSERTION: 17,296 calibration frames carry
+                # design_id == -999 and must survive untouched. If this ever
+                # fails, most FPS-era APO arclamps and darks are being thrown
+                # away.
+                for it in ("dark", "quartzflat", "domeflat", "arclamp",
+                    "internalflat", "twilightflat")
+                    @test !exposure_engineering_from_almanac(
+                        f, "apo", "60212", 10680, it; design_id = -999).engineering
+                end
+
+                # a real design on the same night is untouched
+                @test !exposure_engineering_from_almanac(
+                    f, "apo", "60212", 10681, "object"; design_id = 382526).engineering
+                # omitting design_id evaluates the carton clauses alone
+                @test !exposure_engineering_from_almanac(
+                    f, "apo", "60212", 10680, "object").engineering
             end
         end
     end

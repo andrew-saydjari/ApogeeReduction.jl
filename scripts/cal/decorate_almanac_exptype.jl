@@ -6,7 +6,9 @@ using ApogeeReduction: exposure_class_label, exposure_predicted_bad, initalize_g
                        ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
                        ENGINEERING_CHECK_IMAGE_TYPES, EXPFLAG_PREDICTED_BAD,
                        EXPFLAG_ENGINEERING,
-                       ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS
+                       ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS,
+                       apply_designless_clause, ENGINEERING_FLAG_DESIGNLESS,
+                       ENGINEERING_DESIGNLESS_DESIGN_ID
 
 # recompute at runtime: the module-level git consts are frozen at precompile
 # time and can go stale (see comment in src/utils.jl)
@@ -113,6 +115,10 @@ h5open(parg["almanac_file"], "r+") do f
             # plate-era files may not carry config_id at all; -1 == no configuration
             cfgid = haskey(exp_grp, "config_id") ? read(exp_grp["config_id"]) :
                     fill(-1, length(expnum))
+            # plate-era files carry no design_id; `nothing` reads as "unknown",
+            # which is_designless_design deliberately does NOT treat as -999
+            designid = haskey(exp_grp, "design_id") ? read(exp_grp["design_id"]) :
+                       fill(nothing, length(expnum))
             n = length(expnum)
             pred = fill("", n)
             prob = fill(NaN, n)
@@ -141,10 +147,14 @@ h5open(parg["almanac_file"], "r+") do f
                     (engineering = false, frac = NaN, carton = "", nsci = 0,
                         basis = "none")
                 else
-                    get!(engcache, Int(cfgid[i])) do
-                        exposure_engineering_from_almanac(f, tele, mjd, cfgid[i],
-                            imtype[i]; root = rawgrp)
-                    end
+                    # design_id is per EXPOSURE; clause 3 is applied outside the
+                    # per-config cache so one exposure's design cannot leak onto
+                    # its config-mates
+                    apply_designless_clause(
+                        get!(engcache, Int(cfgid[i])) do
+                            exposure_engineering_from_almanac(f, tele, mjd, cfgid[i],
+                                imtype[i]; root = rawgrp)
+                        end, designid[i])
                 end
                 engbasis[i] = e.basis
                 eng[i] = e.engineering
