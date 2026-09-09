@@ -14,8 +14,12 @@
 #   "unknown" (image doesn't resemble any trained class).
 # - The model artifact (random forest) is trained offline; see
 #   scripts under the 2026_07_14 scratch dir (train_classifier.jl et al.).
+#   n.b. those offline scripts still write/read the model's ORIGINAL path;
+#   the artifact the pipeline loads was moved to cal_ref/ on 2026-09-08.
+#   They are analysis tooling, not pipeline code -- retraining means
+#   producing an artifact and pointing the config at it.
 
-using JLD2, Statistics, StatsBase
+using JLD2, Statistics, StatsBase, HDF5, DataFrames
 using LinearAlgebra: dot
 using DecisionTree: apply_forest_proba
 
@@ -29,6 +33,524 @@ const CLASSIFIER_ILLUMINATED = ["arclamp_q0t1u0", "arclamp_q0t0u1",
 # exposure types bright enough to leave persistence in the following dark
 const CLASSIFIER_PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat",
     "arclamp"]
+
+# The classifier artifact is a CALIBRATION INPUT, configured by path exactly
+# like caldir_darks / caldir_flats / gain_read_cal_dir: pipeline.jl's arg table
+# holds the default and airflow/dags/ar_common.py sets it for production. There
+# is deliberately no model path constant in src/ — a calibration input does not
+# belong baked into library source.
+
+## ---------------------------------------------------------------------------
+## Exposure-level flag bits (`exposure_class/<tele>/<mjd>/exposure_flags`)
+##
+## These are EXPOSURE-level advisory bits, distinct from the per-pixel flag bits
+## documented in the README's "Current Flag Bits" table. They are metadata for
+## downstream consumers (prior builds, cal runlists, catalog construction); the
+## reduction to 1D never consults them, so every exposure is still reduced.
+##
+## SHARED SCHEMA (PR #397 + PR #398). Two producers write into this one byte, so
+## the bit numbering has exactly one definition and `exposure_flag_bits` is the
+## only packer. Bits 2^0 and 2^1 are fixed; 2^2 is EXPFLAG_NOTRUN. Do not
+## renumber any of them — a disagreement here would be silent and unrecoverable.
+## A new producer ORs its bit in through `exposure_flag_bits(...; extra = bit)`.
+## ---------------------------------------------------------------------------
+# 2^0: the image-content classifier says this exposure should not be used
+#      (policy: `exposure_predicted_bad`, PR #398)
+const EXPFLAG_PREDICTED_BAD = 0x01
+# 2^1: engineering exposure — the configuration was assigned an engineering
+#      carton, so the frame exists to exercise the hardware, not to do science
+#      (policy: `engineering_verdict`, three clauses, PR #397)
+#
+#      This is an EXPOSURE-level summary of a quantity that is fundamentally
+#      per-fiber. Under clause 1 (purity) every science fiber agrees with the
+#      exposure, so the summary is exact. Under clause 2 (science-less
+#      positioning configurations) it is a deliberate whole-exposure call on a
+#      configuration with NO science fibers to serve — 46-93 fibers per such
+#      config are neither position-stars nor science and remain UNKNOWN.
+#      A per-fiber notion can be added later WITHOUT a schema change: the bit
+#      numbering is shared, so a future per-fiber `fiber_flags` array simply
+#      reuses 2^1 and the exposure-level bit stays the summary. Do not renumber.
+#      `engineering_frac` and `engineering_basis` are written alongside precisely
+#      so the bit is never the only record of how the verdict was reached.
+const EXPFLAG_ENGINEERING = 0x02
+# 2^2: NO VERDICT WAS FORMED for this exposure by the exposure-type classifier
+#      — the check was deliberately disabled, its per-MJD table was missing, or
+#      it threw while evaluating this frame (PR #398).
+#
+#      This bit is why `exposure_flags == 0` is meaningful: zero means JUDGED
+#      AND FINE, not "we never looked". "Never looked" is 2^2, a different
+#      value, distinguishable from the byte alone.
+#
+#      MUTUALLY EXCLUSIVE with 2^0: if no verdict was formed there is no verdict
+#      to be adverse. `exposure_flag_bits` asserts this; a byte carrying both is
+#      a bug, not a state.
+const EXPFLAG_NOTRUN = 0x04
+# 2^3 onward: UNASSIGNED. Claim one by adding a const here and ORing it in via
+#      `exposure_flag_bits(...; extra = bit)` rather than renumbering.
+# bits that mean "do not do science with this exposure"; prior builds and any
+# other science-sample assembly must exclude these. Reduction must NOT.
+#
+# EXPFLAG_NOTRUN is deliberately NOT included: an unjudged exposure is not a
+# known-bad one, and silently excluding everything we failed to look at would
+# turn a monitoring gap into invisible data loss. A caller that wants "only
+# frames positively cleared" must test the notrun bit itself, explicitly.
+const EXPFLAG_NO_SCIENCE = EXPFLAG_PREDICTED_BAD | EXPFLAG_ENGINEERING
+
+"""
+Carton-name prefixes that mark a configuration as ENGINEERING rather than
+survey science. Extend this list as more engineering cartons are identified;
+matching is a case-insensitive `startswith`, so `"manual_fps_position_stars"`
+covers `manual_fps_position_stars`, `..._10`, `..._apogee_10`, and
+`..._lco_apogee_10` (all four exist in the 57618-61230 corpus).
+"""
+const ENGINEERING_CARTON_PREFIXES = ["manual_fps_position_stars"]
+
+"""
+"Dominated by" is defined as **purity**: ALL of the configuration's *science*
+fibers must carry an engineering carton (`frac >= ENGINEERING_CARTON_PURITY`,
+i.e. exactly 1.0) before the exposure is flagged engineering.
+
+AKS 2026-09-08, after a full-corpus carton census. Purity costs nothing here —
+MEASURED, all four `manual_fps_position_stars*` variants are always 100% of the
+science fibers of every configuration they appear in, and they never appear as a
+minority in someone else's configuration. Purity is what makes that free
+property load-bearing rather than incidental:
+
+- it automatically excludes the 27 other `manual_*` cartons, none of which owns
+  a single 100%-pure configuration (median share 0.4-4.2%);
+- it excludes `manual_mwm_crosscalib_apogee`, which owns exactly one pure
+  configuration but which AKS decided is NOT engineering;
+- a majority rule would additionally pull in configurations where crosscalib and
+  validation_cool run 52-71%, which AKS does not want.
+
+Zero `ops_*` cartons appear on science fibers anywhere in DR21, so the "except
+standards and sky" exemption the ops team suggested is moot.
+
+Behaviour on mixed configurations: a configuration that is *mostly but not
+purely* an engineering carton is NOT flagged, and raises a loud warning (see
+`ENGINEERING_CARTON_WARN_FRAC`). That has never happened in DR21, so if the
+warning ever fires it is a real signal, not noise.
+"""
+const ENGINEERING_CARTON_PURITY = 1.0
+
+"""
+Fraction above which a non-pure configuration raises a loud warning. A
+configuration whose engineering-carton share is in
+`(ENGINEERING_CARTON_WARN_FRAC, ENGINEERING_CARTON_PURITY)` is NOT flagged
+engineering — it fails the purity rule — but it is close enough to the boundary
+that somebody should look. No configuration in the DR21 corpus lands here.
+"""
+const ENGINEERING_CARTON_WARN_FRAC = 0.5
+
+"""
+Second clause of the engineering rule, AKS 2026-09-08:
+
+> "if any fibers are `manual_fps_position_stars*` and no science fibers, then
+> reject."
+
+i.e. `engineering := CLAUSE 1 OR CLAUSE 2` where
+
+- **clause 1** — the configuration HAS science fibers and *all* of them carry an
+  engineering carton (`ENGINEERING_CARTON_PURITY`);
+- **clause 2** — the configuration has ZERO `category == "science"` fibers AND
+  *any* fiber, of any category, carries an engineering carton.
+
+This is deliberately NOT a general "when science is empty, fall back to all
+fibers" rule. The distinction matters: a general fallback would evaluate purity
+over whatever cartons a science-less configuration happened to carry and could
+flag one that has nothing to do with positioning. Clause 2 is keyed on the
+engineering carton itself, so a science-less configuration with different
+cartons is untouched.
+
+MEASURED over the full DR21 almanac before this was enabled: clause 2 matches
+exactly 5 configurations / 35 object exposures, with ZERO overlap with clause 1,
+so it cannot perturb the 2,448 that clause 1 produces (new total 2,483):
+
+| config | position-stars fibers | object exposures |
+| --- | --- | --- |
+| apo 59558 cfg 105 | 245/300 | 5 |
+| apo 59558 cfg 106 | 245/300 | 3 |
+| apo 59560 cfg 121 | 207/300 | 1 |
+| apo 59560 cfg 122 | 207/300 | 1 |
+| apo 59561 cfg 133 | 254/300 | 25 |
+
+All APO, MJD 59558-59561 — a three-night window at the very start of APO FPS
+operations (the APO FPS divide is MJD 59423), three nights before
+`manual_fps_position_stars` proper begins at 59564. Consistent with the earliest
+positioning configurations predating the science-category convention.
+
+Stated plainly rather than papered over: 46-93 fibers per configuration are
+neither position-stars nor science, and what they are is UNKNOWN. The rule
+deliberately does not care — "any position-stars fiber, no science fibers" — and
+that indifference is exactly what makes it safe to apply without understanding
+the rest of the configuration.
+"""
+const ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS = true
+
+"""
+Commanded image types the engineering carton check applies to. Calibration
+frames (darks, flats, arcs) taken while an engineering configuration happened
+to be loaded are still perfectly good calibrations, and the FPS era carries a
+`config_id` on those rows too — so restricting to `object` keeps the flag
+about the science content of the frame.
+"""
+const ENGINEERING_CHECK_IMAGE_TYPES = ["object"]
+
+"""
+The `design_id` an FPS configuration carries when it was built by jaeger WITHOUT
+a robostrategy design. This is the SDSS-V convention, not an almanac sentinel —
+established 2026-09-09 and worth restating, because the two are easy to confuse
+and the conclusion flips depending on which it is:
+
+- almanac's own missing-value sentinel for `design_id` is `-1`, set at
+  `almanac/src/almanac/data_models/exposure.py:46`
+  (`Field(default=-1, alias="designid")`) and coerced through
+  `empty_string_to_int(v, -1)`. A whole-package grep for the literal `999` in
+  `almanac/src` returns exactly one hit, unrelated (a `plate = -999` fallback in
+  the bad-exposure CSV loader).
+- `-999` is present in the RAW FITS HEADERS and in the confSummary files:
+  `apo/59765/apR-a-42030010.apz` carries `DESIGNID = -999`, `FIELDID = '-999'`,
+  `CONFIGID = 6106`, `OBSCMNT = 'FPI test'`, and `confSummary-6106.par` has
+  `design_id -999`, `field_id -999`, `robostrategy_run NA`, `raCen/decCen -999.0`.
+
+So there is no parser bug to fix here: `-999` is genuine observatory output
+meaning "no design was ever generated for this configuration".
+
+`design_id == -999` and `field_id == -999` co-occur perfectly over the DR21
+corpus (17,311 rows each), so this is one signal, not two, and `design_id == 0`
+never occurs.
+"""
+const ENGINEERING_DESIGNLESS_DESIGN_ID = -999
+
+"""
+Third clause of the engineering rule, AKS 2026-09-09 ("implement the -999
+clause"), after a full-corpus census:
+
+> **clause 3** — an `object` exposure whose configuration was built without a
+> robostrategy design (`design_id == ENGINEERING_DESIGNLESS_DESIGN_ID`).
+
+It closes a real hole rather than duplicating clauses 1 and 2: those catch
+engineering configurations built *from a position-stars design*, and miss
+configurations built from *no design at all*.
+
+MEASURED over the full DR21 almanac (`allobs_57618_61230.h5`, 2026-09-09):
+
+- 17,311 rows carry `design_id == -999`, but **17,296 of them (99.91%) are
+  CALIBRATION frames** — 7,932 arclamp, 3,540 dark, 3,082 domeflat, 1,767
+  quartzflat, 956 internalflat, 19 twilightflat — spread over 1,323 nights,
+  continuous from MJD 59637 to 61227.
+- exactly **15 are `object`**: apo 59697 (2), apo 59765 (11), apo 60212 (2).
+
+The `ENGINEERING_CHECK_IMAGE_TYPES` restriction is therefore NOT cosmetic and
+NOT optional. Implementing this clause anywhere that does not inherit that gate
+— a standalone almanac-row filter, say — would destroy 17,296 perfectly good
+calibration frames, including most FPS-era APO arclamps and darks. Keep the
+clause inside `exposure_engineering_from_almanac`, which gates on image type at
+its first line.
+
+All 15 have a POSITIVE `config_id` (5055, 6106, 10680) and identical fiber
+tables: 300 fibers, 0 science, 0 sky, 0 standard, 0 non-empty cartons, 298
+blank category + 2 `bonus`, `assigned = 0`, `on_target = 0`. A control
+configuration on the same night (10681) has 175 science / 91 sky_apogee / 15
+standard_apogee, so the emptiness is real and not an ingest failure.
+
+NET NEW: none of the 15 is reachable by clause 1 (needs science fibers) or
+clause 2 (needs a `manual_fps_position_stars*` fiber), and they have neither.
+The engineering total therefore goes 2,483 -> 2,498 with no reclassification of
+anything already flagged.
+
+Why it matters despite being 0.015% of 100,007 FPS-era object exposures: these
+are the ONLY `-999` exposures that reach arMADGICS. arM ingests on
+`image_type == "object"` (`arMADGICS.jl/src/ingest.jl`), so the 17,296
+calibration frames are already invisible to it, while these 15 would be solved
+as science against a fiber table with no targets. apo 60212 exp 12/13 are the
+clearest case: they sit inside a six-rung twilight ladder (nread 15, 15, **20**,
+**25**, 30, 40) whose other four rungs are correctly typed `twilightflat` with
+the comment "twilight flats", while these two carry `IMAGETYP = object` and a
+blank comment. Without this clause, arM would fit twilight sky continuum with
+stellar and sky models. The other 13 announce themselves in
+`observer_comment`: 'FPI test', 'test', 'testok', and
+'test w/ BOSS FF lamps on for 30s during exp'.
+
+See `metadata/special_cal_obs.txt` for the twilight sequence itself, which is
+recorded there as a calibration observation independent of this flag.
+"""
+const ENGINEERING_FLAG_DESIGNLESS = true
+
+"""
+    is_designless_design(design_id)
+
+True when `design_id` marks a configuration built without a robostrategy design
+(`ENGINEERING_DESIGNLESS_DESIGN_ID`), and clause 3 is enabled.
+
+Deliberately total: a `nothing`, a missing column, or a non-integer gives
+`false` — "we do not know the design" is not the same claim as "there was no
+design", and only the latter is evidence of an engineering frame.
+"""
+function is_designless_design(design_id)
+    ENGINEERING_FLAG_DESIGNLESS || return false
+    (design_id isa Integer) || return false
+    Int(design_id) == ENGINEERING_DESIGNLESS_DESIGN_ID
+end
+
+"""
+    apply_designless_clause(verdict, design_id)
+
+OR clause 3 into an `engineering_verdict` NamedTuple.
+
+Separate from `engineering_verdict` on purpose. The carton clauses need the
+configuration's fiber table, which callers cache per `config_id`; `design_id`
+lives on the EXPOSURE row. Folding clause 3 into the cached call would let one
+exposure's design leak onto every other exposure sharing its configuration.
+Applying it here, per row, after the cache lookup, makes that impossible.
+
+A verdict already flagged by clause 1 or 2 keeps its more specific `basis`; only
+an unflagged verdict can become `basis = "designless"`.
+"""
+function apply_designless_clause(verdict, design_id)
+    (verdict.engineering || !is_designless_design(design_id)) && return verdict
+    (engineering = true, frac = verdict.frac, carton = verdict.carton,
+        nsci = verdict.nsci, basis = "designless")
+end
+
+"""
+    is_engineering_carton(carton)
+
+True when the carton name matches any prefix in `ENGINEERING_CARTON_PREFIXES`
+(case-insensitive, surrounding whitespace stripped).
+"""
+function is_engineering_carton(carton)
+    c = lowercase(strip(String(carton)))
+    isempty(c) && return false
+    any(p -> startswith(c, lowercase(p)), ENGINEERING_CARTON_PREFIXES)
+end
+
+"""
+    exposure_is_engineering(cartons; purity, warn_frac, basis, label)
+
+Carton check for one exposure. `cartons` is the list of `firstcarton` values of
+the configuration's **science** fibers (`category == "science"`), or of all
+carton-bearing fibers when the config has no science fibers at all and the
+configuration has none (clause 2); `basis` records which.
+
+Returns `(engineering, frac, carton, nsci, basis)`:
+- `engineering::Bool` — `frac >= purity` (purity rule: ALL science fibers)
+- `frac::Float64` — fraction of the fibers in `cartons` with an engineering
+  carton (`NaN` when `cartons` is empty, e.g. plate-era or missing config)
+- `carton::String` — the most common matching carton name ("" if none), kept
+  for provenance so the reason for the bit is auditable
+- `nsci::Int` — number of fibers the fraction was computed over
+- `basis::String` — `"science"`, `"scienceless_position_stars"`, or `"none"`
+
+Raises a loud `@warn` for a configuration that is MOSTLY but not PURELY an
+engineering carton (`warn_frac < frac < purity`). Such a configuration is NOT
+flagged. No configuration in the DR21 corpus lands there, so the warning firing
+is a real signal. `label` is used only to name the configuration in that
+warning.
+
+An empty `cartons` (plate era, no configuration, unreadable fiber table) is
+never engineering and never errors.
+"""
+function exposure_is_engineering(cartons; purity = ENGINEERING_CARTON_PURITY,
+        warn_frac = ENGINEERING_CARTON_WARN_FRAC,
+        basis::AbstractString = "science", label::AbstractString = "")
+    nsci = length(cartons)
+    nsci == 0 &&
+        return (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
+    matched = String[]
+    for c in cartons
+        is_engineering_carton(c) && push!(matched, strip(String(c)))
+    end
+    frac = length(matched) / nsci
+    carton = if isempty(matched)
+        ""
+    else
+        counts = Dict{String, Int}()
+        for m in matched
+            counts[m] = get(counts, m, 0) + 1
+        end
+        argmax(counts)
+    end
+    engineering = frac >= purity
+    if !engineering && frac > warn_frac
+        @warn "Engineering carton check: configuration $(label) is MOSTLY but not " *
+              "PURELY an engineering carton ($(length(matched))/$(nsci) = " *
+              "$(round(frac, digits = 4)) of $(basis) fibers are '$(carton)'). " *
+              "It is NOT flagged engineering (the rule requires purity). This has " *
+              "never happened in the DR21 corpus — treat it as a real signal and " *
+              "decide whether the carton list or the purity rule needs to change."
+    end
+    (engineering = engineering, frac = frac, carton = carton, nsci = nsci,
+        basis = String(basis))
+end
+
+"""
+    engineering_verdict(sci_cartons, all_cartons; label, flag_scienceless)
+
+Apply BOTH clauses of the engineering rule to one configuration and return the
+verdict NamedTuple `(engineering, frac, carton, nsci, basis)`.
+
+- `sci_cartons` — `firstcarton` of the `category == "science"` fibers
+- `all_cartons` — `firstcarton` of EVERY fiber in the configuration
+
+Clause 1 (science fibers exist): purity over `sci_cartons`, `basis = "science"`.
+Clause 2 (`isempty(sci_cartons)` and any fiber carries an engineering carton):
+flagged, `basis = "scienceless_position_stars"`. Clause 2 is keyed on the
+engineering carton itself — a science-less configuration whose fibers carry some
+OTHER carton is not flagged. See `ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS`.
+
+The two clauses are mutually exclusive by construction (one requires science
+fibers, the other requires none), so enabling clause 2 cannot perturb clause 1's
+verdicts.
+
+For clause 2, `nsci == 0` (that is what triggered it) and `frac` is the share of
+the configuration's CARTON-BEARING fibers that carry an engineering carton
+(blank cartons are dropped upstream) — informational only, since the rule there
+is "any", not a threshold, and no warning is raised on this path.
+"""
+function engineering_verdict(sci_cartons, all_cartons; label::AbstractString = "",
+        flag_scienceless::Bool = ENGINEERING_FLAG_SCIENCELESS_POSITION_STARS,
+        purity = ENGINEERING_CARTON_PURITY,
+        warn_frac = ENGINEERING_CARTON_WARN_FRAC)
+    none = (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
+    # CLAUSE 1: the configuration has science fibers -> purity over those
+    if !isempty(sci_cartons)
+        return exposure_is_engineering(sci_cartons; purity = purity,
+            warn_frac = warn_frac, basis = "science", label = label)
+    end
+    # CLAUSE 2: zero science fibers AND any fiber carries an engineering carton
+    flag_scienceless || return none
+    isempty(all_cartons) && return none
+    matched = String[strip(String(c)) for c in all_cartons if is_engineering_carton(c)]
+    isempty(matched) && return none
+    counts = Dict{String, Int}()
+    for m in matched
+        counts[m] = get(counts, m, 0) + 1
+    end
+    (engineering = true, frac = length(matched) / length(all_cartons),
+        carton = argmax(counts), nsci = 0, basis = "scienceless_position_stars")
+end
+
+"""
+    almanac_config_cartons(f, tele, mjd, config_id; root = "raw")
+
+Read one configuration's `firstcarton` column from an open almanac HDF5 file `f`
+(group `<root>/<tele>/<mjd>/fibers/<config_id>`; pass `root = ""` for the
+rootless layout some older almanac files use).
+
+Returns `(science, all)`: the cartons of the `category == "science"` fibers, and
+the cartons of every fiber (empty carton strings dropped from `all`, since a
+blank carton carries no information for either clause).
+
+Returns both empty — never throws — when any of the following holds, which is
+the correct "not engineering" answer rather than an error:
+- `config_id <= 0` (plate-era rows carry `config_id == -1`)
+- the `fibers/<config_id>` group is absent
+- the fiber table has no `firstcarton` column (plate-era fiber tables do not:
+  they predate cartons entirely)
+- the table cannot be read
+"""
+function almanac_config_cartons(f, tele, mjd, config_id; root::AbstractString = "raw")
+    empty_result = (science = String[], all = String[])
+    (config_id isa Integer) || return empty_result
+    config_id > 0 || return empty_result
+    path = isempty(root) ? "$(tele)/$(mjd)/fibers/$(config_id)" :
+           "$(root)/$(tele)/$(mjd)/fibers/$(config_id)"
+    haskey(f, path) || return empty_result
+    try
+        df = DataFrame(read(f[path]))
+        rename!(df, lowercase.(names(df)))
+        ("category" in names(df) && "firstcarton" in names(df)) || return empty_result
+        cart = String[strip(String(c)) for c in df.firstcarton]
+        sci = strip.(String.(df.category)) .== "science"
+        return (science = cart[sci], all = filter(!isempty, cart))
+    catch e
+        @warn "almanac_config_cartons: could not read $(path); treating as non-engineering" exception = e
+        return empty_result
+    end
+end
+
+"""
+    exposure_engineering_from_almanac(f, tele, mjd, config_id, image_type; root = "raw")
+
+Full engineering check for one almanac exposure row. Applies the check only to
+`ENGINEERING_CHECK_IMAGE_TYPES` (see that constant for why), and reads the
+cartons from the almanac's own fiber table — no confSummary dependency, since
+the almanac is already a pipeline input.
+
+Pass `design_id` to include clause 3 (`ENGINEERING_FLAG_DESIGNLESS`). Omitting it
+evaluates the carton clauses alone, which is the correct behaviour for a caller
+that has no design column rather than a silent "not engineering".
+
+Callers that CACHE this result per `config_id` must leave `design_id` unset here
+and apply `apply_designless_clause` per exposure row afterwards — `design_id`
+lives on the exposure, not the configuration, so caching it would leak one
+exposure's design onto its config-mates.
+
+Returns the `engineering_verdict` NamedTuple.
+"""
+function exposure_engineering_from_almanac(f, tele, mjd, config_id, image_type;
+        design_id = nothing, root::AbstractString = "raw")
+    lowercase(strip(String(image_type))) in ENGINEERING_CHECK_IMAGE_TYPES ||
+        return (engineering = false, frac = NaN, carton = "", nsci = 0, basis = "none")
+    r = almanac_config_cartons(f, tele, mjd, config_id; root = root)
+    v = engineering_verdict(r.science, r.all; label = "$(tele)/$(mjd)/config $(config_id)")
+    apply_designless_clause(v, design_id)
+end
+
+"""
+    exposure_flag_bits(predicted_bad, engineering; notrun = false, extra = 0x00)
+
+Pack the exposure-level verdicts into the `exposure_flags` bitmask
+(`EXPFLAG_PREDICTED_BAD`, `EXPFLAG_ENGINEERING`, `EXPFLAG_NOTRUN`).
+
+This is the SHARED packer: every producer of `exposure_flags` should go through
+it so the bit numbering has exactly one definition. Bits 0 and 1 are fixed and
+bit 2 is `EXPFLAG_NOTRUN` — do not renumber any of them.
+
+The positional signature is shared by PR #397 and PR #398; both extra states are
+keywords, so a producer that only knows the science verdicts calls it unchanged.
+`extra` remains the escape hatch for a FUTURE producer to OR in a bit (2^3
+onward) without this function needing to know about it, and without any side
+renumbering.
+
+Throws if the composed byte would carry both `EXPFLAG_NOTRUN` and
+`EXPFLAG_PREDICTED_BAD`: "no verdict was formed" and "the verdict was adverse"
+cannot both be true, and a byte asserting both would be silently misread by
+every consumer downstream. The check is on the COMPOSED BYTE, not just on the
+`notrun` keyword, so routing the bit in through `extra` cannot evade it.
+"""
+function exposure_flag_bits(predicted_bad::Bool, engineering::Bool;
+        notrun::Bool = false, extra::Integer = 0x00)
+    b = UInt8(extra)
+    predicted_bad && (b |= EXPFLAG_PREDICTED_BAD)
+    engineering && (b |= EXPFLAG_ENGINEERING)
+    notrun && (b |= EXPFLAG_NOTRUN)
+    (b & EXPFLAG_NOTRUN) != 0x00 && (b & EXPFLAG_PREDICTED_BAD) != 0x00 &&
+        throw(ArgumentError("exposure_flags: EXPFLAG_NOTRUN and EXPFLAG_PREDICTED_BAD " *
+                            "are mutually exclusive — no verdict cannot also be an adverse verdict"))
+    b
+end
+
+"""
+    exposure_ok_for_science(flags)
+
+True when none of the `EXPFLAG_NO_SCIENCE` bits are set. This is the single
+predicate every science-sample assembler (prior builds, catalog construction)
+should use. It is deliberately NOT consulted anywhere in the 2D/1D reduction:
+engineering and predicted-bad exposures are still reduced to 1D.
+
+n.b. this answers "is it flagged?", NOT "was it judged?" — `EXPFLAG_NOTRUN` is
+deliberately not one of these bits, so an unjudged exposure reads as ok here. A
+caller that needs to distinguish "judged fine" from "never judged" must use
+`exposure_class_verdict`.
+"""
+exposure_ok_for_science(flags::Integer) = (UInt8(flags) & EXPFLAG_NO_SCIENCE) == 0x00
+
+# status sentinel meaning "the exposure-type check did not run for this exposure"
+const EXP_CLASS_STATUS_NOTRUN = "notrun"
+# pred/labeled sentinel for the same case (never "", which reads as a real class)
+const EXP_CLASS_UNKNOWN_STR = "unknown"
 
 """
 Count strict local maxima of profile `p` above `thresh`.
@@ -181,7 +703,15 @@ end
 Masking policy for downstream consumers (cal runlists, wavecal arc/FPI
 selection): should this exposure be excluded based on the classifier verdict?
 
-- object_q0t0u0: never masked (science frames are handled downstream)
+- object_q0t0u0: never masked (science frames are handled downstream).
+  n.b. this exemption is keyed on the EXACT label string, not on
+  `image_type == "object"`. An object frame with anomalous lamp flags is
+  labeled e.g. "object_q0t0u1" and does NOT take this branch, so it can come
+  back masked (4 such frames exist in DR21, all on lco 57802). That is
+  harmless today because the only consumer of the mask is the fiber-flat
+  runlist builder, which selects on `image_type == "<flat_type>flat"` first and
+  so can never see an object frame. If a future consumer masks science
+  exposures with this, revisit the exemption before doing so.
 - dark_q0t0u0: masked when the content prediction is anything but a clean
   dark (dark_persist, illuminated content) or the prediction is unknown.
   Sequence-only persistence risks whose image still classifies as a clean
@@ -192,9 +722,14 @@ selection): should this exposure be excluded based on the classifier verdict?
   (mislabel / lamp-off / faint-twilight / unknown / rare label)
 - exposures without reduced 2D data ("nofiles"/"unclassified") are not
   masked here; missing products already exclude them downstream
+
+This returns a Bool: it answers "did the classifier judge this bad?", and it
+presumes the classifier actually ran. It cannot express "we do not know" — that
+information lives one level up, in whether an `exposure_flags` field was written
+at all. See `exposure_class_metadata` and `exposure_class_verdict`.
 """
 function exposure_predicted_bad(labeled_class, pred, status)
-    if status in ("nofiles", "unclassified")
+    if status in ("nofiles", "unclassified", EXP_CLASS_STATUS_NOTRUN, "checkfail")
         false
     elseif labeled_class == "object_q0t0u0"
         false
@@ -203,6 +738,154 @@ function exposure_predicted_bad(labeled_class, pred, status)
     else
         status != "ok"
     end
+end
+
+##### Exposure-class provenance carried into the 1D data products #####
+#
+# REPRESENTATION (deliberate; read before extending).
+#
+# The stored verdict is the shared `exposure_flags` UInt8 bitmask, so that the
+# exposure-type classifier and the engineering-carton check (PR #397) write into
+# one byte with one agreed bit numbering, instead of each owning a private
+# scalar that a consumer would have to know to combine.
+#
+# "No verdict was formed" is a STATE OF THE MASK, not the absence of the field:
+# it is `EXPFLAG_NOTRUN` (2^2). The consequences a reader must internalise:
+#
+#   exposure_flags == 0            -> JUDGED, and nothing wrong. Not "unknown".
+#   exposure_flags & NOTRUN != 0   -> never judged; bit 2^0 is guaranteed clear
+#   exposure_flags & PREDICTED_BAD -> judged, and adverse
+#
+# so "judged fine" and "never judged" are different VALUES, distinguishable from
+# the byte alone. That is the whole point of spending a bit on it.
+#
+# The companion `exp_class_status` string still carries WHY there is no verdict
+# ("notrun" = disabled or table missing, "checkfail" = the check threw). Those
+# share one bit deliberately: no consumer would act differently on them, the
+# distinction is diagnostic rather than actionable, and bits in a byte shared
+# between two producers are scarce enough not to spend on diagnostics.
+#
+# BACKWARD COMPATIBILITY: a product written before this PR has no
+# `exposure_flags` field at all. `exposure_class_verdict` treats an absent field
+# as unknown too, so both routes converge. That is a compatibility shim, not the
+# design — new writers always emit the field.
+#
+# Field names are prefixed `exp_class_` (except the shared `exposure_flags`
+# itself) so the exposure-level namespace stays visibly separate from the
+# per-pixel bitmasks documented in the README.
+
+"""
+    exposure_class_unknown_metadata(status = EXP_CLASS_STATUS_NOTRUN)
+
+The metadata block for an exposure the classifier never judged: `exposure_flags`
+carries `EXPFLAG_NOTRUN` (and, by the mutual-exclusion invariant, never
+`EXPFLAG_PREDICTED_BAD`).
+
+`status` records WHY no verdict exists — "notrun" when the check was disabled or
+its table was missing, "checkfail" when the check threw on this exposure. Both
+set the same bit; only this string tells them apart.
+
+This is what a consumer sees when the check was deliberately disabled
+(`--exp_class_model ""`), when the per-MJD `exposureTypeCheck_*.h5` is absent,
+or when the check errored. A 1D file written before these fields existed carries
+no `exposure_flags` at all, and reads as unknown by the compatibility path in
+`exposure_class_verdict`.
+"""
+exposure_class_unknown_metadata(status = EXP_CLASS_STATUS_NOTRUN) = Dict{String, Any}(
+    "exposure_flags" => exposure_flag_bits(false, false; notrun = true),
+    "exp_class_status" => String(status),
+    "exp_class_pred" => EXP_CLASS_UNKNOWN_STR,
+    "exp_class_labeled" => EXP_CLASS_UNKNOWN_STR,
+    "exp_class_prob" => NaN)
+
+"""
+    exposure_class_metadata(labeled, pred, prob, status; engineering = false)
+
+Build the metadata block for one exposure from a classifier verdict, including
+the `exposure_flags` bitmask. `status` is the category from
+`exposure_check_category` (plus "persistence_prior", which `pipeline.jl` adds,
+and "checkfail").
+
+A "checkfail" verdict returns the UNKNOWN block — `EXPFLAG_NOTRUN` set, never
+`EXPFLAG_PREDICTED_BAD` — and keeps "checkfail" as its status string. An
+exception while evaluating the check is a failure to form an opinion, and must
+never be recorded as an adverse opinion, nor as a favourable one.
+
+`engineering` is the hand-off point for PR #397's carton-derived bit. This
+producer only knows the classifier's verdict, so it passes `false` by default;
+the engineering check ORs its bit in here rather than writing a competing field.
+"""
+function exposure_class_metadata(labeled, pred, prob, status; engineering::Bool = false)
+    (status == "checkfail" || status == EXP_CLASS_STATUS_NOTRUN) &&
+        return exposure_class_unknown_metadata(status)
+    bad = exposure_predicted_bad(labeled, pred, status)
+    Dict{String, Any}(
+        "exposure_flags" => exposure_flag_bits(bad, engineering),
+        "exp_class_status" => String(status),
+        "exp_class_pred" => String(pred),
+        "exp_class_labeled" => String(labeled),
+        "exp_class_prob" => Float64(prob))
+end
+
+"""
+    exposure_class_verdict(md) -> Symbol
+
+Three-way read of an exposure-class metadata block (as returned by
+`exposure_class_metadata`, or read back from a 1D product's `metadata` group):
+
+- `:unknown` — no verdict was formed: `EXPFLAG_NOTRUN` is set, or (compatibility
+  path) the product predates `exposure_flags` and has no such field.
+- `:bad` — a verdict was formed and `EXPFLAG_PREDICTED_BAD` is set.
+- `:fine` — a verdict was formed and that bit is clear.
+
+This is the ONLY correct way to ask "is this exposure fine?" — it is what makes
+the notrun bit and the legacy no-field case give the same answer.
+"""
+function exposure_class_verdict(md::AbstractDict)
+    haskey(md, "exposure_flags") || return :unknown   # pre-PR product
+    f = UInt8(md["exposure_flags"])
+    (f & EXPFLAG_NOTRUN) != 0x00 && return :unknown
+    (f & EXPFLAG_PREDICTED_BAD) != 0x00 ? :bad : :fine
+end
+
+"""
+    exposure_type_check_path(outdir, tele, mjd)
+
+Path of the per-MJD exposure-type check table written by `pipeline.jl` between
+the 2D and 1D stages.
+"""
+exposure_type_check_path(outdir, tele, mjd) = joinpath(
+    outdir, "apred", string(mjd), "exposureTypeCheck_$(tele)_$(mjd).h5")
+
+"""
+    read_exposure_type_check(path) -> Dict{Int, Dict{String, Any}}
+
+Read a per-MJD `exposureTypeCheck_*.h5` into expnum => metadata block. Returns
+an empty Dict if the file is absent or unreadable, so that every caller degrades
+to the explicit-unknown block rather than failing: this table is advisory
+metadata and must never be able to break a reduction.
+
+The block is rebuilt from `(labeled, pred, prob, flag)` through
+`exposure_class_metadata`, so a table written by any version of the pipeline
+yields the current encoding and the masking policy lives in exactly one place.
+"""
+function read_exposure_type_check(path)
+    out = Dict{Int, Dict{String, Any}}()
+    isfile(path) || return out
+    try
+        d = load(path)
+        expnum = d["expnum"]
+        labeled, pred = d["labeled"], d["pred"]
+        prob, flag = d["prob"], d["flag"]
+        for i in eachindex(expnum)
+            out[Int(expnum[i])] = exposure_class_metadata(
+                labeled[i], pred[i], prob[i], flag[i])
+        end
+    catch e
+        @warn "Could not read exposure-type check table $path; treating as unknown" exception=e
+        return Dict{Int, Dict{String, Any}}()
+    end
+    out
 end
 
 """
