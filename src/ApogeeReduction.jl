@@ -22,6 +22,9 @@ include("ar1D.jl")
 include("fileNameHandling.jl")
 include("utils.jl")
 
+# acceptance gate for the FPI nightly wavelength solution
+# (uses nanmedian from utils.jl and fiberID2fiberIndx from fileNameHandling.jl)
+include("fpi_gate.jl")
 include("wavecal.jl")
 include("skyline_peaks.jl")
 include("arclamp_peaks.jl")

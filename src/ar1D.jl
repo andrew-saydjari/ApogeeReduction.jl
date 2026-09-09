@@ -863,7 +863,26 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # outdir = "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2024_12_05/outdir/"
     # fname = outdir * "apred/$(mjd)/" * get_1d_name(parse(Int, last(expid,4)), df) * ".h5"
 
-    wavetype_order = ["fpi", "sky"]
+    # The night's wavelength solution is chosen by preference order, but the FPI
+    # solution is only a candidate if the night's FPI acceptance gate passed (see
+    # src/fpi_gate.jl). `wavecalNightAve` records that decision in
+    # `best_wave_type`. Consulting it matters because this loop keys on FILE
+    # PRESENCE alone: a `waveCalNightfpiDither` left behind by an earlier run (or
+    # by a checkpointed resume) would otherwise silently win over the sky
+    # solution the gate chose.
+    wavetype_order = if isfile(backupWave_fname)
+        night_wave_type = try
+            h5open(backupWave_fname, "r") do f
+                haskey(f, "best_wave_type") ? read(f["best_wave_type"]) : "fpi"
+            end
+        catch
+            "fpi"
+        end
+        # only ever *narrows* the order, and only on an explicit "sky" verdict
+        night_wave_type == "sky" ? ["sky"] : ["fpi", "sky"]
+    else
+        ["fpi", "sky"]
+    end
     found_soln = false
     wavecal_type = ""
     for wavetype in wavetype_order
