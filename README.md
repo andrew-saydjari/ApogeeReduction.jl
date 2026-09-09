@@ -77,9 +77,105 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 13    | 8192      | pixel partially saturated |
 | 14    | 16384     | pixel fully saturated |
 
+### Per-fiber relative-throughput bits (`bitmsk_relthrpt`)
+
+A **different axis** from the per-pixel mask above and from the exposure-level
+`exp_class_*` metadata: this one is per FIBER and per EXPOSURE. It is produced by
+`get_relFlux` (`src/ar1D.jl`) from a dome flat, stored in the `relFlux_*` cal
+products, copied into each chip's `ar1D*` product by `process_1D`, and stacked
+into the resampled `ar1Duni*` products as an `(N_CHIPS, N_FIBERS)` array by
+`reinterp_spectra`, alongside the `relthrpt` values themselves.
+
+| Bit | Value | Constant | Meaning |
+| --- | --- | --- | --- |
+| -   | 0   | | Fiber throughput is normal |
+| 0   | 1   | `RELTHRPT_WARN_BIT` | `relthrpt < 1 - sig_cut * IQR`: low, but still usable and still flux-scaled |
+| 1   | 2   | `RELTHRPT_BROKEN_BIT` | `relthrpt < rel_val_cut` (0.07): fiber is dead/near-dead |
+| 2   | 4   | `RELTHRPT_NOFILE_BIT` | No fluxing file was available; `relthrpt` forced to exactly 1 |
+| 3   | 8   | `RELTHRPT_NOTFINITE_BIT` | `relthrpt` is NaN/Inf (fiber all-NaN or all-zero in the flat). Always accompanied by bit 1 |
+| 4   | 16  | `RELTHRPT_LOWGOODPIX_BIT` | Fewer than `RELTHRPT_MIN_GOODPIX` pixels survived masking, so the median is noise, not throughput. Sets bits 3, 1 and 0 too |
+
+`RELTHRPT_UNUSABLE_BITS = 2 | 8 | 16`. **A fiber carrying either of those bits is
+deliberately NOT flux-scaled by `process_1D`.** Nothing is dropped from the
+reduction: the spectrum is written normally, but its flux is left on an arbitrary
+scale, so any chi2 computed against it downstream is meaningless. Consumers
+should mask on `relthrpt_fiber_unusable(bitmsk_relthrpt)`;
+`relthrpt_fiber_fluxable` gives the exact set of fibers that were scaled.
+
+Bit 2 is deliberately excluded from `RELTHRPT_UNUSABLE_BITS`: in that case
+`relthrpt` is forced to exactly 1, so the spectrum is simply unfluxed but
+unscaled, a known and benign state rather than a broken fiber.
+
+Fiber quality is per fiber-EPOCH, not per fiber: fibers break and fibers get
+repaired. A static per-fiber blacklist is the wrong tool; use this per-exposure
+flag.
+
+### The throughput median honours the pixel mask
+
+`get_relFlux` takes each fiber's median over pixels carrying no `bad_pix_bits`
+(`use_pix_mask`, default **on**). Previously `mask_1d_good` was computed and then
+ignored, so a bad-yet-finite-nonzero pixel — a cosmic ray, a saturated pixel —
+contributed to the number the entire flux scale is built on. `nanzeromedian` only
+ever dropped NaN and exact zeros.
+
+MEASURED blast radius of turning it on, over 2,976 testbed domeflat products
+(892,800 fiber measurements, all chips):
+
+| | APO | LCO |
+|---|---:|---:|
+| median fractional change in `relthrpt` | 5.5e-4 | 1.0e-4 |
+| p95 / p99 | 1.3e-2 / 5.7e-2 | 5.8e-4 / 1.9e-3 |
+| fibers changing by >1% | 6.2% | 0.28% |
+| fiber measurements changing FLAG state | 148 (2.4e-4) | 13 (4.5e-5) |
+| fibers newly flagged broken | 12 | 2 |
+| worst single flat | 20 fibers change flag, 4 newly broken | 1 / 1 |
+
+So: typically sub-0.1%, with a small tail; the flag state essentially never moves.
+
+`RELTHRPT_MIN_GOODPIX = 256` is the floor below which a fiber is flagged rather
+than assigned a meaningless median. It is derived from the data, not picked
+round: sub-sampling real domeflat fibers, 256 is the smallest `n` whose
+95th-percentile median error (0.064) falls below `rel_val_cut` (0.07), the
+sharpest cut this function makes. It cannot fire on healthy data — the minimum
+observed good-pixel count across the testbed is 1805 of 2048, seven times the
+floor, and zero fibers fell below it.
+
+> **Interaction on the record.** `bad_pix_bits` (24566) does NOT include
+> `pix_not_dark_corr_bits` (2^3 = 8), which is what the coherent APO chip-G
+> defect block (columns ~512–531, rows ~1362–1377) reads. **Those pixels still
+> contribute to throughput after this change.** That is expected: the
+> defect-region bit is a separate change and lands outside `bad_pix_bits` first.
+
+**Known limitation.** Only the last chip's (`B`) throughput solution is computed
+and it is applied to R, G and B alike, even though `make_relFlux.jl` writes a
+per-chip solution and the per-chip symlink is named as though it were the chip's
+own. Chromatic throughput differences are therefore unmodelled by construction,
+and a fiber dead on one chip only is not flagged unless it is also dead on B. The
+chip actually used is now recorded in the product metadata as `relflux_chip`;
+`process_1D(...; per_chip_relflux = true)` switches to genuine per-chip fluxing.
+That is a survey-wide science change (it moves the flux scale of every R and G
+spectrum) and is off by default.
+
+### Per-fiber ingest bits (`bitmsk_ingest`, in `ar1Duni*`)
+
+A second, independent per-fiber flag, computed by `reinterp_spectra` and — until
+now — discarded at the end of the function instead of being written out.
+
+| Bit | Value | Meaning |
+| --- | --- | --- |
+| 1   | 2   | Every pixel of the fiber's 1D flux is NaN or zero |
+| 2   | 4   | Every pixel of the fiber is bad by `bad_pix_bits` or missing-chip |
+| 3   | 8   | Every pixel of the fiber's ivar is NaN or zero |
+
+Different axis from `bitmsk_relthrpt`: that one says the fiber's dome-flat
+throughput is dead, this one says the extracted data itself is unusable. Read
+both. Named `bitmsk_ingest`, not `ingestBit`, because arMADGICS has its own
+per-spectrum `ingestBit` column with an entirely different bit table.
+
 ## Exposure-Level Flags (1D metadata)
 
-The bits above are *per pixel*. Separately, each exposure is judged as a whole
+The bit tables above are *per pixel* and *per fiber*. Separately, each exposure
+is judged as a whole
 between the 2D and 1D stages, and the verdict is carried into the `metadata`
 group of the 1D data products (`ar1D*`, `ar1Dcal*`, and the reinterpolated
 `ar1Duni*` / `ar1Dunical*`, which inherit it from the first chip's 1D file). A
