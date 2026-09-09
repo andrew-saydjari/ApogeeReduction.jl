@@ -394,7 +394,7 @@ end
 Error if a detector calibration map is missing.
 
 This used to be a `@warn` plus a flat stand-in (1.9 e-/DN for gain, 25 DN^2 for read
-variance). That is how `scripts/cal/run_trace_cal.sh`, `scripts/cal/run_dark_cal.sh` and
+variance). That is how `scripts/cal/run_dark_cal.sh` and
 `scripts/cal/make_stack_flats.jl` came to run on invented detector constants for both
 telescopes -- they pointed at calibration directories that do not exist on this cluster, and
 nothing louder than a warning said so. Silently substituting a plausible-looking number for a
