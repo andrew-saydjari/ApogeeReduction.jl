@@ -40,6 +40,37 @@ Always accompanied by `RELTHRPT_BROKEN_BIT`, so bit-1 consumers are correct
 without changes.
 """
 const RELTHRPT_NOTFINITE_BIT = 2^3
+"""
+Too few pixels survived `bad_pix_bits` masking for the throughput median to be a
+measurement rather than noise (fewer than `RELTHRPT_MIN_GOODPIX`). `relthrpt` is
+forced to NaN, so this always also sets `RELTHRPT_NOTFINITE_BIT`,
+`RELTHRPT_BROKEN_BIT` and `RELTHRPT_WARN_BIT`. Bit 3 is the SYMPTOM (the value is
+not finite); this bit is the CAUSE.
+"""
+const RELTHRPT_LOWGOODPIX_BIT = 2^4
+
+"""
+Minimum number of pixels that must contribute to a fiber's throughput median.
+
+DERIVED FROM THE DATA, not picked round. Sub-sampling the good pixels of real
+domeflat fibers (2026_09_08 `floor_study.jl`, 42 flats spanning MJD 57652-61190,
+both telescopes) gives the 95th-percentile fractional error of a median over `n`
+pixels:
+
+    n      16     32     64     96    128    192    256    512   1024
+    err  0.223  0.167  0.123  0.106  0.089  0.075  0.064  0.044  0.025
+
+256 is the smallest `n` at which that error (0.064) falls below `rel_val_cut`
+(0.07), the sharpest cut this function makes -- i.e. the point below which
+sampling noise alone could push a healthy fiber across the "broken" threshold.
+
+It cannot fire on healthy data: over 892,800 fiber measurements on the DR21
+200-MJD testbed the MINIMUM good-pixel count was 1805 of 2048 (APO) and 1903
+(LCO), 7x above this floor, and zero fibers fell below it. This is insurance,
+not a filter. It is also above the proportional analogue of arMADGICS'
+`INGEST_MIN_GOODPIX` (500 of 8700 -> 118 of 2048).
+"""
+const RELTHRPT_MIN_GOODPIX = 256
 
 """
 Bits which mean "do not trust this fiber's flux calibration at all".
@@ -52,7 +83,8 @@ arbitrary scale and any chi2 computed against it is meaningless.
 is forced to exactly 1 and the spectrum is simply unfluxed-but-unscaled, which
 is a known and benign state, not a broken fiber.
 """
-const RELTHRPT_UNUSABLE_BITS = RELTHRPT_BROKEN_BIT | RELTHRPT_NOTFINITE_BIT
+const RELTHRPT_UNUSABLE_BITS = RELTHRPT_BROKEN_BIT | RELTHRPT_NOTFINITE_BIT |
+                               RELTHRPT_LOWGOODPIX_BIT
 
 """
     relthrpt_fiber_unusable(bitmsk_relthrpt)
@@ -76,15 +108,17 @@ function relthrpt_fiber_fluxable(bitmsk_relthrpt)
 end
 
 """
-    get_relFlux(fname; sig_cut, rel_val_cut, use_pix_mask)
+    get_relFlux(fname; sig_cut, rel_val_cut, use_pix_mask, min_goodpix)
 
 Per-fiber relative throughput and its quality bitmask, from a flat exposure.
 
-`use_pix_mask` gates whether the per-fiber throughput median is taken only over
-pixels that carry no `bad_pix_bits`. It defaults to `false`, which reproduces
-the historical numbers exactly; see the comment at the call site below.
+`use_pix_mask` (default `true`) takes the per-fiber throughput median over
+pixels carrying no `bad_pix_bits` only. `min_goodpix` is the floor below which a
+fiber is flagged rather than assigned a meaningless median; see
+`RELTHRPT_MIN_GOODPIX`.
 """
-function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07, use_pix_mask::Bool = false)
+function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07,
+        use_pix_mask::Bool = true, min_goodpix::Int = RELTHRPT_MIN_GOODPIX)
     f = jldopen(fname)
     flux_1d = f["flux_1d"]
     mask_1d = f["mask_1d"]
@@ -92,14 +126,17 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07, use_pix_mask::Boo
     close(f)
     metadata = read_metadata(fname)
 
-    # `mask_1d_good` was computed and then never used here for a long time, so the
-    # throughput median ran over every pixel including ones the 2D stage had already
-    # called bad. Honouring the mask is the defensible thing to do, but it moves
-    # `relthrpt` for every fiber on every flat, and therefore moves the flux scale of
-    # every reduced spectrum. That is a science change with a whole-survey blast
-    # radius, so it is gated OFF by default and must be turned on deliberately,
-    # together with a re-reduction and a before/after comparison. It is no longer
-    # dead code either way.
+    # `mask_1d_good` was computed here and then never used, so the throughput median
+    # ran over every pixel in the fiber. `nanzeromedian` drops NaN and exact zeros,
+    # but a bad-yet-finite-nonzero pixel -- cosmic ray, saturation -- still
+    # contributed to the number the whole flux scale is built on. It is now honoured.
+    #
+    # CAVEAT, ON THE RECORD: `bad_pix_bits` (24566) does NOT include
+    # `pix_not_dark_corr_bits` (2^3 = 8), which is what the coherent APO chip-G
+    # defect block at columns ~512-531, rows ~1362-1377 reads. Those pixels STILL
+    # contribute to throughput after this change. That is expected: landing a
+    # defect-region bit is a separate approved change, and it deliberately lands
+    # OUTSIDE `bad_pix_bits` first. Revisit this line when it moves inside.
     flux_for_thrpt = if use_pix_mask
         masked = copy(flux_1d)
         masked[.!mask_1d_good] .= NaN
@@ -107,6 +144,14 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07, use_pix_mask::Boo
     else
         flux_1d
     end
+
+    # How many pixels actually enter each fiber's median. Masking can starve a fiber,
+    # and the median of a handful of pixels is noise, not throughput -- worse, the
+    # median of an EMPTY set is NaN, and `NaN < thresh` is false, so without the
+    # non-finite guard below such a fiber would be judged GOOD and then NaN-poison
+    # flux and ivar downstream. Turning the mask on without that guard would be
+    # actively worse than leaving it off.
+    n_contrib = dropdims(sum(.!isnanorzero.(flux_for_thrpt), dims = 1), dims = 1)
 
     # `absthrpt` is the un-normalized per-fiber median. No pipeline stage consumes it;
     # it is read only by make_relFlux.jl's QA plots. Kept deliberately: it costs one
@@ -116,6 +161,15 @@ function get_relFlux(fname; sig_cut = 4.5, rel_val_cut = 0.07, use_pix_mask::Boo
     # dead code again.
     absthrpt = dropdims(nanzeromedian(flux_for_thrpt, 1), dims = 1)
     bitmsk_relthrpt = zeros(Int, length(absthrpt))
+
+    # Starved fibers are NaN'd BEFORE the exposure-level normalization below, so a
+    # meaningless few-pixel median cannot contaminate the median-of-fibers that every
+    # other fiber is divided by.
+    starved = n_contrib .< min_goodpix
+    absthrpt[starved] .= NaN
+    bitmsk_relthrpt[starved] .|= (RELTHRPT_LOWGOODPIX_BIT | RELTHRPT_NOTFINITE_BIT |
+                                  RELTHRPT_BROKEN_BIT | RELTHRPT_WARN_BIT)
+
     relthrpt = copy(absthrpt)
     relthrpt ./= nanzeromedian(relthrpt)
 
