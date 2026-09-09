@@ -404,10 +404,31 @@ for pat in \
     "Exposure-type check" \
     "Error reported by Slack API" \
     ; do
-    n=$(grep -c "$pat" "$logfile" || true)
+    # Exclude this census's own output lines: they are appended to $logfile,
+    # so on a resumed run every pattern would match its previous "census:" line
+    # (measured in job 7001233: eleven categories with a true count of 0 read as
+    # 1x, and arclamp read 263x against a true 260).
+    n=$(grep -v '^census: ' "$logfile" | grep -c "$pat" || true)
     echo "census: ${n}x \"$pat\""
 done
 stage_end
+
+# ---- arM diagnostics are NOT censused here ----------------------------------
+# arM reports per-spectrum problems with bare `println`, not `@warn`, so neither
+# the census above nor the triage below sees any of it (1,708 dropped spectra
+# went uncounted in job 7001233). It cannot be censused from this script either:
+# this stage runs at the end of the REDUCTION, before arM has run, so it could
+# only ever report zero.
+#
+# Run test/regression/arm_census.sh AFTER the arM stage. It reads `ingestBit` and
+# `skyBit` out of the arM batch PRODUCTS, not out of the log -- arMADGICS no
+# longer prints the sky-guard verdict at all, and the log never showed the
+# informational ingestBit values in the first place. Pass arM's output directory;
+# the log argument is optional and only feeds the few diagnostics that still have
+# no product column (currently the prior-support guard):
+#     test/regression/arm_census.sh "$ARM_OUTDIR/raw" "$SLURM_SUBMIT_LOG"
+# Measured: 16,523 batch products / 1,622,474 spectra in ~3m15s with 8 workers.
+
 
 # ---- stage: warnings triage (full inventory + diff vs adjudicated baseline) --
 stage_begin "warnings triage"
