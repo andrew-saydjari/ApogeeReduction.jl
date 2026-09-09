@@ -12,6 +12,7 @@
 #SBATCH --partition=cca
 #SBATCH --nodes=8
 #SBATCH --constraint="[genoa|icelake|rome]"
+#SBATCH --mem=900G
 
 #SBATCH --time=4-00:00
 #SBATCH --job-name=ar_bulk
