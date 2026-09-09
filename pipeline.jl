@@ -425,3 +425,96 @@ if parg["exp_class_model"] != ""
         end
     end
 end
+
+##### Engineering-carton check (post-2D, pre-1D)
+# AKS 2026-09-08: the FPS-era "object" exposures that classified as darks were
+# FPS fibre-positioning frames, not survey science. They must still be reduced
+# to 1D, but nobody should do science on them. This flags them from TARGETING,
+# not from pixels: the configuration's science fibers carry an engineering
+# carton (ApogeeReduction.ENGINEERING_CARTON_PREFIXES).
+#
+# Runs at the same point in the pipeline as the exposure-type classifier, so the
+# verdict is available before the 1D stage — but is DELIBERATELY NOT gated on
+# `exp_class_model`: it needs no trained model, only the almanac, so it runs on
+# every night whether or not the classifier is configured.
+#
+# THIS IS NOT A REDUCTION FILTER. Nothing below skips or alters any exposure.
+# The output is a per-mjd sidecar table, `exposureEngineering_<tele>_<mjd>.h5`,
+# whose `exposure_flags` column carries EXPFLAG_ENGINEERING (2^1) for the
+# consumers that assemble science samples (arMADGICS prior builds). The
+# classifier's own predicted_bad bit (2^0) rides the same bit numbering, so the
+# two can be OR-ed into one mask wherever both are propagated.
+@time "Engineering-carton check" begin
+    using ApogeeReduction: exposure_engineering_from_almanac, exposure_flag_bits,
+                           read_almanac_exp_df, safe_jldsave, EXPFLAG_ENGINEERING,
+                           ENGINEERING_CARTON_PREFIXES, ENGINEERING_CARTON_PURITY,
+                           ENGINEERING_CHECK_IMAGE_TYPES, apply_designless_clause,
+                           ENGINEERING_DESIGNLESS_DESIGN_ID
+    almfile = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
+    if !isfile(almfile)
+        @warn "Engineering-carton check SKIPPED: no almanac at $almfile"
+    else
+        neng_total = 0
+        for mjd in unique_mjds
+            # the check must never break a reduction run
+            try
+                df = read_almanac_exp_df(almfile, parg["tele"], mjd)
+                cfgid = "config_id" in names(df) ? df.config_id : fill(-1, nrow(df))
+                n = nrow(df)
+                # design_id is per EXPOSURE, so it is applied outside the
+                # per-config cache below. An almanac without the column leaves
+                # `nothing`, which is_designless_design reads as "unknown", not
+                # as "designless" — clause 3 then simply never fires.
+                designid = "design_id" in names(df) ? df.design_id :
+                           fill(nothing, nrow(df))
+                eng = falses(n)
+                engfrac = fill(NaN, n)
+                engcarton = fill("", n)
+                engbasis = fill("none", n)
+                cache = Dict{Int, NamedTuple}()   # one fiber-table read per config
+                h5open(almfile, "r") do fh
+                    for i in 1:n
+                        lowercase(strip(String(df.image_type[i]))) in
+                        ENGINEERING_CHECK_IMAGE_TYPES || continue
+                        e = get!(cache, Int(cfgid[i])) do
+                            exposure_engineering_from_almanac(fh, parg["tele"],
+                                string(mjd), cfgid[i], df.image_type[i])
+                        end
+                        e = apply_designless_clause(e, designid[i])
+                        eng[i] = e.engineering
+                        engfrac[i] = e.frac
+                        engcarton[i] = e.carton
+                        engbasis[i] = e.basis
+                    end
+                end
+                neng = sum(eng)
+                neng_total += neng
+                safe_jldsave(
+                    joinpath(parg["outdir"],
+                        "apred/$(mjd)/exposureEngineering_$(parg["tele"])_$(mjd).h5"),
+                    Dict{String, Any}();
+                    tele = fill(String(parg["tele"]), n), mjd = fill(mjd, n),
+                    exposure = collect(df.exposure), engineering = UInt8.(eng),
+                    engineering_frac = engfrac, engineering_carton = engcarton,
+                    engineering_basis = engbasis,
+                    exposure_flags = exposure_flag_bits.(falses(n), eng))
+                if neng > 0
+                    for i in findall(eng)
+                        @warn "Engineering exposure: $(parg["tele"]) $mjd exp $(df.exposure[i]) " *
+                              "config $(cfgid[i]) carton '$(engcarton[i])' " *
+                              "(purity $(round(engfrac[i], digits = 4)) of $(engbasis[i]) fibers). " *
+                              "Still reduced to 1D; excluded from science samples."
+                    end
+                end
+                println("Engineering-carton check: $(parg["tele"]) $mjd — $n exposures, " *
+                        "$neng flagged engineering (prefixes: " *
+                        "$(join(ENGINEERING_CARTON_PREFIXES, ",")), purity " *
+                        "$(ENGINEERING_CARTON_PURITY))")
+            catch e
+                @warn "Engineering-carton check failed for $(parg["tele"]) $mjd" exception=e
+            end
+        end
+        println("Engineering-carton check: $neng_total exposure(s) flagged engineering " *
+                "across $(length(unique_mjds)) mjd(s). These are STILL REDUCED to 1D.")
+    end
+end
