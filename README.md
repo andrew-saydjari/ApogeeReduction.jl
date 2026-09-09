@@ -77,30 +77,102 @@ Certain pixels are entirely masked or have data of questionable quality. This pi
 | 13    | 8192      | pixel partially saturated |
 | 14    | 16384     | pixel fully saturated |
 
-## Exposure-Level Flag Bits
+## Exposure-Level Flags (1D metadata)
 
-Separately from the per-pixel bits above, whole *exposures* can be flagged.
-These bits are written by `scripts/cal/decorate_almanac_exptype.jl` into the
-almanac's `exposure_class/<tele>/<mjd>/exposure_flags` dataset (`UInt8`, aligned
-row-for-row with `raw/<tele>/<mjd>/exposures`).
+The bits above are *per pixel*. Separately, each exposure is judged as a whole
+between the 2D and 1D stages, and the verdict is carried into the `metadata`
+group of the 1D data products (`ar1D*`, `ar1Dcal*`, and the reinterpolated
+`ar1Duni*` / `ar1Dunical*`, which inherit it from the first chip's 1D file). A
+consumer can read a 1D file and see whether the frame was judged bad, and why,
+without re-deriving anything from the 2D products or the almanac.
 
-| Bit   | Value     | Meaning     |
-| ----- | --------- | ----------- |
-| -     | 0         | No problems |
-| 0     | 1         | `predicted_bad` — the image-content classifier says this exposure should not be used (policy: `exposure_predicted_bad`) |
-| 1     | 2         | `engineering` — the configuration's science fibers carry an engineering carton, so the exposure exists to exercise the hardware, not to do science (policy: `exposure_is_engineering`) |
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `exposure_flags` | UInt8 | Bitmask; see the bit table and the reading rule below |
+| `exp_class_status` | String | `ok`, `lamp_off_candidate`, `mislabel_candidate`, `faint_twilight`, `persistence_prior`, `unknown`, or `notrun` |
+| `exp_class_pred` | String | Predicted content class, e.g. `quartzflat_q1t0u0` |
+| `exp_class_labeled` | String | The commanded label it was compared against |
+| `exp_class_prob` | Float64 | Max forest probability, `NaN` when there is no verdict |
 
-**These bits are advisory metadata, not a reduction filter.** Every exposure,
-engineering ones included, is still reduced all the way to 1D; the bits exist so
-that consumers who assemble *science* samples (prior builds, catalog
-construction) can exclude them. `ApogeeReduction.exposure_ok_for_science(flags)`
-is the single predicate for "safe to do science with", and
-`ApogeeReduction.EXPFLAG_NO_SCIENCE` is the mask it applies.
+`exposure_flags` bits (shared namespace — do not renumber):
 
-The engineering bit is a targeting check, not an image check. It is set when
-either clause holds, against `ENGINEERING_CARTON_PREFIXES` (currently only
-`manual_fps_position_stars`, which by prefix covers `_10`, `_apogee_10`, and
-`_lco_apogee_10`):
+| Bit | Value | Meaning |
+| --- | ----- | ------- |
+| 0   | 1     | `predicted_bad` — exposure-type classifier verdict |
+| 1   | 2     | `engineering` — configuration's science fibers are an engineering carton |
+| 2   | 4     | `notrun` — **no verdict was formed** for this exposure |
+
+### Reading it correctly
+
+`exposure_flags == 0` means **judged, and nothing wrong**. "Never judged" is a
+*different value*: bit 2 set. The two are distinguishable from the byte alone —
+that is what bit 2 is for.
+
+- `flags == 0` → judged, fine
+- `flags & 4` → no verdict; bit 0 is guaranteed clear (the two are mutually
+  exclusive, and the writer throws rather than emit a byte asserting both)
+- `flags & 1` → judged, and adverse
+
+Read it with `ApogeeReduction.exposure_class_verdict(metadata)`, which returns
+`:bad`, `:fine`, or `:unknown`. For "may I use this for science?", use
+`exposure_ok_for_science(flags)` — note that bit 2 is deliberately **not** a
+no-science bit: an unjudged exposure is not a known-bad one, and silently
+dropping everything we failed to look at would turn a monitoring gap into
+invisible data loss.
+
+An exposure has no verdict when the check was deliberately disabled, its per-MJD
+table is missing, or it errored on that exposure — a crashed check is a failure
+to form an opinion, never an adverse one. `exp_class_status` distinguishes those
+(`"notrun"` vs `"checkfail"`); they share bit 2 because no consumer would act on
+them differently.
+
+**Backward compatibility:** a product written before these fields exist carries
+no `exposure_flags` at all. `exposure_class_verdict` reports that as `:unknown`
+too, so both routes agree. That is a compatibility shim, not the design.
+
+The almanac carries the same byte at
+`exposure_class/<tele>/<mjd>/exposure_flags`, with every row that had no verdict
+set to bit 2.
+
+### It is advisory
+
+No exposure is dropped from the reduction because of these flags: engineering
+and known-bad frames are still reduced. The one place they exclude anything is
+`make_runlist_fiber_flats.jl`, which drops flats with bit 0 set from the
+trace/fluxing runlists and logs every exclusion.
+
+### Configuration
+
+The check runs by default. The classifier artifact is a **calibration input**,
+configured by path exactly like `caldir_darks` / `caldir_flats` /
+`gain_read_cal_dir`: `pipeline.jl --exp_class_model` holds the default and
+`airflow/dags/ar_common.py` (`EXP_CLASS_MODEL`) sets it for production, so
+swapping models is a config change beside the other calibration inputs. The
+version is pinned (v6) — never a glob, never newest-wins.
+
+To disable deliberately: `pipeline.jl --exp_class_model ""`, or
+`AR_EXP_CLASS_MODEL="" ./run_all.sh ...`. Leaving `AR_EXP_CLASS_MODEL` unset
+means on; setting it to the empty string means off. **A model path that does not
+exist is a hard error at startup**, never a silent skip, so a moved or
+cleaned-up artifact cannot quietly downgrade a run to "no classification".
+
+Measured cost: **~1.75 s per exposure of worker time** (3 chips), of which
+~1.34 s is re-reading the `ar2D` images and only ~0.3 ms is the forest itself,
+plus a one-off ~3.6 s model load and ~183 MiB resident per worker process —
+about **0.2%** of the reduction's total CPU.
+
+### The engineering bit (a targeting check, not an image check)
+
+Bit 1 is set by `exposure_engineering_from_almanac`, which reads the almanac's
+own fiber table — no confSummary dependency. It is **ungated by
+`--exp_class_model`**: the check needs only the almanac, so it runs even when the
+image classifier is disabled. That independence is why bit 1 can co-occur with
+bit 2 (`notrun`): an exposure the classifier never judged can still be known to
+be an engineering frame.
+
+It is set when any clause holds, against `ENGINEERING_CARTON_PREFIXES`
+(currently only `manual_fps_position_stars`, which by prefix covers `_10`,
+`_apogee_10`, and `_lco_apogee_10`):
 
 1. the configuration HAS `category == "science"` fibers and **all** of them
    carry an engineering carton — purity, not majority
@@ -115,26 +187,37 @@ either clause holds, against `ENGINEERING_CARTON_PREFIXES` (currently only
    science-category convention. It is keyed on the engineering carton itself,
    not a general "fall back to all fibers", so a science-less configuration
    carrying some other carton is untouched.
+3. the configuration was built **without a robostrategy design**
+   (`design_id == -999`, `ENGINEERING_FLAG_DESIGNLESS`). `-999` is genuine
+   observatory output meaning "no design was generated", not an almanac
+   sentinel (almanac's own missing value is `-1`). 17,311 rows carry it but
+   17,296 are calibration frames, so this clause is applied **only** to
+   `image_type == "object"` — see below.
 
-The two clauses are mutually exclusive by construction (one requires science
-fibers, the other requires none), so clause 2 cannot perturb clause 1.
-Plate-era
-exposures have no configuration and no carton, so they are never flagged
-engineering, and calibration frames are never flagged (only `image_type ==
-"object"` is checked — a dark taken while an engineering configuration was
-loaded is still a good dark). Alongside the bit, `engineering_frac`,
-`engineering_carton` and `engineering_basis` record the evidence for the verdict.
+Clauses 1 and 2 are mutually exclusive by construction (one requires science
+fibers, the other requires none), so clause 2 cannot perturb clause 1. Clause 3
+is applied per exposure row, outside the per-configuration cache, because
+`design_id` lives on the exposure rather than the configuration.
 
-`engineering_basis` records which clause fired: `"science"`,
-`"scienceless_position_stars"`, or `"none"`.
+Plate-era exposures have no configuration and no carton, so they are never
+flagged engineering, and calibration frames are never flagged (only
+`image_type == "object"` is checked — a dark taken while an engineering
+configuration was loaded is still a good dark). That image-type restriction is
+load-bearing rather than cosmetic: without it, clause 3 alone would discard
+17,296 good FPS-era calibration frames.
+
+Alongside the bit, `engineering_frac`, `engineering_carton` and
+`engineering_basis` record the evidence for the verdict. `engineering_basis`
+records which clause fired: `"science"` (clause 1),
+`"scienceless_position_stars"` (clause 2), `"designless"` (clause 3), or
+`"none"`.
 
 The bit is computed in `pipeline.jl` right after the 2D stage and before the 1D
-stage — the same point as the exposure-type classifier, but ungated by
-`--exp_class_model`, since the check needs only the almanac. It writes
+stage — the same point as the exposure-type classifier. It writes
 `apred/<mjd>/exposureEngineering_<tele>_<mjd>.h5`.
 `scripts/cal/decorate_almanac_exptype.jl` computes the same thing for a whole
-almanac after the fact.
-
+almanac after the fact, writing `engineering`, `engineering_frac`,
+`engineering_carton` and `engineering_basis` alongside `exposure_flags`.
 
 ## Testing
 

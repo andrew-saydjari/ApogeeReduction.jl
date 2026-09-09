@@ -675,12 +675,32 @@ function process_3D(outdir, runname, tel, mjd, expid, chip,
 end
 
 # come back to tuning the chi2perdofcut once more rigorously establish noise model
-function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_same")
+"""
+    process_2Dcal(fname; ..., exp_class_features = false)
+
+Dark-subtract and flat-field one chip's `ar2D` image into `ar2Dcal`.
+
+With `exp_class_features = true`, additionally returns the exposure-type
+classifier's per-chip feature vector, computed from the `ar2D` array this
+function already holds in memory. That is purely an I/O saving: the classifier's
+own pass used to re-open and re-read the same file, measured at 1.344 s of its
+1.751 s per exposure.
+
+Returns `nothing` when features were not requested, and also when the checkpoint
+short-circuit fires — in that case no `dimage` was ever loaded, so there is
+nothing to featurise and the caller must fall back to reading the file.
+"""
+function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_same",
+        exp_class_features::Bool = false)
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     outfname = replace(fname, "ar2D" => "ar2Dcal")
     if check_file(outfname, mode = checkpoint_mode)
-        return
+        # Resumed run: the 2D cal is already done, `dimage` is never loaded, and
+        # so no features can be produced here. Returning `nothing` is what lets
+        # the caller fall back to the file-reading path instead of silently
+        # recording "notrun" for an exposure it could still have judged.
+        return nothing
     end
 
     dimage = load(fname, "dimage")
@@ -688,6 +708,17 @@ function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_sam
     CRimage = load(fname, "CRimage")
     chisqimage = load(fname, "chisqimage")
     last_unsaturated = load(fname, "last_unsaturated")
+
+    # Classifier features from the ar2D image, computed HERE because this is the
+    # last point at which the untouched ar2D array exists in memory: the dark
+    # subtraction below mutates `dimage` in place, and everything after it is
+    # ar2Dcal content. The model was trained on ar2D, so featurising the
+    # post-dark, post-flat array would silently change every prediction while
+    # still appearing to work.
+    #
+    # n.b. `exposure_class_features` copies before it zeroes NaNs, so this does
+    # not perturb the array the calibration below depends on.
+    feats = exp_class_features ? exposure_class_features(dimage) : nothing
 
     metadata = read_metadata(fname)
     # n.b. every pixel does't use this many diffs. Some are truncated due to saturation
@@ -724,5 +755,5 @@ function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_sam
     pix_bitmask .|= (last_unsaturated .<= 0) * bad_fully_saturated
 
     safe_jldsave(outfname, metadata; dimage, ivarimage, pix_bitmask)
-    return
+    return feats
 end

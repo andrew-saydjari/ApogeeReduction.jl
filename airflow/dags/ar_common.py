@@ -120,6 +120,27 @@ CALDIR_FLATS = "/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"
 # ar3D.assert_calib_map_telescope_specific hard-fails on the old directory.
 GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
 
+# Exposure-type classifier artifact. A calibration input like the three paths
+# above, and configured in the same place for the same reason: swapping the
+# model is a config change here, not a code change in ApogeeReduction.
+#
+# THE VERSION IS PINNED (v6). Never a glob and never "newest wins": the class
+# list, feature layout and decision thresholds all belong to one trained forest,
+# and a reduction has to be able to say which forest judged it. Retraining means
+# editing this line deliberately.
+#
+# Set to "" to disable the post-2D exposure-type check. A path that does not
+# exist is a hard error at pipeline.jl startup, never a silent skip.
+#
+# 2026-09-08: MOVED here from 2026_07_14/meta/, a dated analysis directory that
+# was a natural scratch-cleanup target. The move was verified byte-identical
+# (md5 d669241f030817ab4e68bfd32b117c0d, 175,330,224 bytes) and the OLD PATH NO
+# LONGER EXISTS, so any caller still pointing at it fails loudly at startup
+# rather than silently skipping the check. See mved.txt in the old directory.
+# Only the v6 artifact moved; v1-v5 and the sweep outputs stay behind.
+EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
+                   "exposure_classifier/exposure_classifier_rf_v6.jld2")
+
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
     "tunnel_check": ("The Utah ControlMaster (ssh alias `mwm`) is down. Only "

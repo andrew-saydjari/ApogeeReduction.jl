@@ -92,9 +92,9 @@ function parse_commandline()
         default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
         "--exp_class_model"
         required = false
-        help = "path to the exposure-type classifier artifact (JLD2); empty string skips the post-2D exposure-type check"
+        help = "exposure-type classifier artifact (JLD2). A calibration input, configured by path like --caldir_darks / --gain_read_cal_dir; airflow/dags/ar_common.py sets it for production. The post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). A path that does not exist is a hard error."
         arg_type = String
-        default = ""
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_rf_v6.jld2"
     end
     return parse_args(s)
 end
@@ -140,6 +140,26 @@ flush(stdout);
     using ApogeeReduction: load_read_var_maps, load_gain_maps, load_saturation_maps, process_3D,
                            process_2Dcal, cal2df, get_cal_path, TAIEpoch
 end
+
+# The classifier artifact is a calibration input like the dark/flat/gain
+# directories: a path supplied by the caller, defaulted in the arg table above,
+# and set explicitly by airflow/dags/ar_common.py for production. Version
+# pinning lives in that path (v6), NOT in a glob or a "newest wins" lookup.
+if parg["exp_class_model"] == ""
+    println("Exposure-type check: DISABLED by explicit --exp_class_model \"\". " *
+            "1D products will record exp_class_status=\"notrun\".")
+elseif !isfile(parg["exp_class_model"])
+    # Fail fast and loudly. Silently skipping the check would hand a bulk run
+    # thousands of nights of "notrun" metadata that look indistinguishable from
+    # a deliberate opt-out, which is precisely the failure this wiring exists to
+    # remove. If you meant to turn it off, say so with --exp_class_model "".
+    error("--exp_class_model points at a file that does not exist:\n  " *
+          parg["exp_class_model"] *
+          "\nPass --exp_class_model \"\" to run without the exposure-type check.")
+else
+    println("Exposure-type check: ENABLED, model = ", parg["exp_class_model"])
+end
+
 @passobj 1 workers() parg
 @passobj 1 workers() proj_path
 println(BLAS.get_config());
@@ -199,6 +219,14 @@ end
 
 # probably need to capture that calFlag somehow, write a meta cal file?
 all2D = vcat(ap2dnamelist...)
+
+# ar2D chip-file path => exposure-type classifier feature vector, handed forward
+# from the 2D calibration pass so the exposure-type check does not re-read the
+# same images. Empty when the check is disabled, when doCal2d is false, or for
+# any chip the checkpoint let the 2D pass skip; every one of those cases falls
+# back to reading the file, so a miss costs time, never correctness.
+exp_class_featcache = Dict{String, Vector{Float64}}()
+
 if parg["doCal2d"]
     darkFlist = sort(glob("darkRate*.h5", parg["caldir_darks"] * "darks/"))
     df_dark = cal2df(darkFlist)
@@ -224,23 +252,45 @@ if parg["doCal2d"]
         end
     end
 
-    # process the 2D calibration for all exposures
+    # process the 2D calibration for all exposures.
+    # When the exposure-type check is enabled, this pass ALSO returns each
+    # chip's classifier features, computed from the ar2D array it already holds
+    # in memory. The check below then needs no second read of the same files.
     @everywhere process_2Dcal_partial(fname) = process_2Dcal(
-        fname, checkpoint_mode = parg["checkpoint_mode"])
-    @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
+        fname, checkpoint_mode = parg["checkpoint_mode"],
+        exp_class_features = (parg["exp_class_model"] != ""))
+    cal2d_feats = @showprogress desc="2D Calibration" pmap(process_2Dcal_partial, all2D)
+    # chip-file path => feature vector, for the chips this pass actually
+    # recomputed. Entries are absent for chips the checkpoint skipped, and the
+    # exposure-type check reads those from disk instead.
+    for (fname, f) in zip(all2D, cal2d_feats)
+        isnothing(f) || (exp_class_featcache[fname] = f)
+    end
 end
 
-##### Exposure-type check (post-2D)
+##### Exposure-type check (POST-2D, PRE-1D) #####
 # Classify each exposure from its ar2D images alone and compare to the
 # commanded image_type + lamp flags. Mislabeled cals (ThAr/UNe swaps, FPI vs
 # arclamp, lamp-on "darks") poison downstream calibrations; this writes a
 # per-mjd audit table and warns on confident disagreements. Warning-only:
-# labels are never changed automatically.
+# labels are never changed automatically and NO exposure is dropped from the
+# reduction here — engineering and known-bad frames are still reduced. The
+# verdict is advisory metadata (carried into the 1D products, see
+# `process_1D`) plus an input to the calibration runlists (see
+# `make_runlist_fiber_flats.jl`), never a reduction filter.
+#
+# Placement matters: this block is the last thing pipeline.jl does, and
+# pipeline.jl is the 3D->2D stage, so the verdict is written before any caller
+# runs pipeline_2d_1d.jl. Every DAG path (bulk, daily, cal, regression) invokes
+# pipeline.jl strictly before pipeline_2d_1d.jl, so "after 2D, before 1D" holds
+# by construction rather than by convention.
 if parg["exp_class_model"] != ""
     @everywhere begin
         using ApogeeReduction: exposure_class_features, load_exposure_classifier,
                                classify_exposure_type, exposure_class_label,
-                               exposure_check_category, read_almanac_exp_df,
+                               exposure_check_category, exposure_class_metadata,
+                               read_almanac_exp_df,
+                               EXPFLAG_PREDICTED_BAD, EXPFLAG_NOTRUN,
                                CHIP_LIST
         const EXP_CLF = Ref{Any}(nothing)
         function get_exp_clf()
@@ -249,7 +299,12 @@ if parg["exp_class_model"] != ""
             end
             EXP_CLF[]
         end
-        function exp_type_check_one(fnames_by_chip)
+        # `work` is (chip => ar2D path, chip => precomputed features). Features
+        # present for a chip are used as-is; absent ones are read from the file,
+        # so a checkpointed rerun that skipped the 2D pass still gets a verdict
+        # rather than "notrun".
+        function exp_type_check_one(work)
+            fnames_by_chip, feats_by_chip = work
             # any chip filename parses to (tele, mjd, expnum, imtype)
             sname = split(split(basename(first(values(fnames_by_chip))), ".h5")[1], "_")
             _, tele, mjdstr, expnumstr, _, _ = sname[(end - 5):end]
@@ -263,8 +318,14 @@ if parg["exp_class_model"] != ""
                     get(erow, :lamp_quartz, "?"), get(erow, :lamp_thar, "?"),
                     get(erow, :lamp_une, "?"))
                 clf = get_exp_clf()
-                chip_features = Dict(chip => exposure_class_features(
-                                         load(fnames_by_chip[chip], "dimage"))
+                # All three chips are required: the design row concatenates
+                # R, G and B and the colour features are inter-chip ratios, so
+                # a per-chip partial verdict would be meaningless. The grouping
+                # below only submits exposures with a complete chip set.
+                chip_features = Dict(
+                    chip => get(feats_by_chip, chip, nothing) !== nothing ?
+                            feats_by_chip[chip] :
+                            exposure_class_features(load(fnames_by_chip[chip], "dimage"))
                 for chip in keys(fnames_by_chip))
                 res = classify_exposure_type(clf, chip_features, tele)
                 flag = exposure_check_category(labeled, res, clf.flag_tau)
@@ -299,10 +360,38 @@ if parg["exp_class_model"] != ""
             get!(groups, key, Dict{String, String}())[chip] = fname
         end
         complete = [g for g in values(groups) if length(g) == length(CHIP_LIST)]
-        checks = @showprogress desc="Exposure-type check" pmap(exp_type_check_one, complete)
+        # Pair each exposure's chip files with whatever the 2D pass already
+        # computed. Feature vectors are 21 Float64s, so shipping them to the
+        # workers is free next to re-reading a 32 MB image.
+        work = map(complete) do g
+            fx = Dict{String, Vector{Float64}}()
+            for (chip, path) in g
+                f = get(exp_class_featcache, path, nothing)
+                isnothing(f) || (fx[chip] = f)
+            end
+            (g, fx)
+        end
+        n_chip_cached = sum(length(w[2]) for w in work; init = 0)
+        n_chip_total = sum(length(w[1]) for w in work; init = 0)
+        println("Exposure-type check: $(n_chip_cached)/$(n_chip_total) chip images reused " *
+                "from the 2D stage; $(n_chip_total - n_chip_cached) re-read from disk")
+        checks = @showprogress desc="Exposure-type check" pmap(exp_type_check_one, work)
 
         if !isempty(checks)
             dfc = DataFrame(checks)
+            # Resolve the downstream masking policy HERE, once, and store it, so
+            # that the 1D products, the almanac decoration and the calibration
+            # runlists all read one answer rather than each re-deriving it from
+            # (labeled, pred, flag) and risking three subtly different ones.
+            #
+            # One column: EXPFLAG_NOTRUN inside the mask carries "no verdict",
+            # so a zero byte means judged-and-fine and needs no companion.
+            # UInt8[...] on purpose: the Dict is Dict{String,Any}, so an
+            # unannotated comprehension would build a Vector{Any} column and
+            # write an untyped HDF5 dataset.
+            dfc.exposure_flags = UInt8[exposure_class_metadata(
+                                           r.labeled, r.pred, r.prob, r.flag)["exposure_flags"]
+                                       for r in eachrow(dfc)]
             for sub in groupby(dfc, :mjd)
                 mjd = sub.mjd[1]
                 safe_jldsave(
@@ -312,7 +401,8 @@ if parg["exp_class_model"] != ""
                     tele = String.(sub.tele), mjd = collect(sub.mjd),
                     expnum = collect(sub.expnum), labeled = String.(sub.labeled),
                     pred = String.(sub.pred), prob = collect(sub.prob),
-                    flag = String.(sub.flag))
+                    flag = String.(sub.flag),
+                    exposure_flags = collect(sub.exposure_flags))
             end
             # persistence_prior is informational (recorded, not warned)
             warnable = (dfc.flag .!= "ok") .& (dfc.flag .!= "persistence_prior")
@@ -326,7 +416,12 @@ if parg["exp_class_model"] != ""
                 nflag_frac > 0.10 &&
                     @warn "Exposure-type check flagged $(round(100 * nflag_frac, digits = 1))% of exposures (> 10% prior on mislabel rate) — inspect before trusting the flags."
             end
-            println("Exposure-type check: $(nrow(dfc)) exposures checked, $nbad flagged")
+            npbad = sum((dfc.exposure_flags .& EXPFLAG_PREDICTED_BAD) .!= 0x00)
+            nunk = sum((dfc.exposure_flags .& EXPFLAG_NOTRUN) .!= 0x00)
+            println("Exposure-type check: $(nrow(dfc)) exposures checked, $nbad flagged, " *
+                    "$npbad predicted_bad, $nunk unjudged (check failed)")
+            println("Exposure-type check: NOTHING was dropped from the reduction here; " *
+                    "the verdict is advisory 1D metadata plus a calibration-runlist input.")
         end
     end
 end

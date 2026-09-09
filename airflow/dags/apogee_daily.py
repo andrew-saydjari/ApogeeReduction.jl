@@ -263,6 +263,13 @@ def slurm_submit_and_wait(tele, **context):
     # SLACK_CHANNEL flows into the sbatch'd julia layer (ar_main.py parity).
     env = os.environ.copy()
     env["SLACK_CHANNEL"] = p.get("slack_channel") or C.AR_SLACK_CHANNEL
+    # Exposure-type classifier artifact, passed like the other calibration
+    # inputs but by env rather than a 13th positional: run_all.sh's positional
+    # signature is consumed by other callers, and SLACK_CHANNEL already
+    # establishes the env route into the sbatch'd layer. Setting it (even to "")
+    # is what run_all.sh keys on, so production never depends on a default
+    # buried in the Julia arg table.
+    env["AR_EXP_CLASS_MODEL"] = C.EXP_CLASS_MODEL
     print("submitting:", " ".join(cmd))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if res.returncode != 0:
@@ -517,13 +524,28 @@ def build_observatory_group(tele: str) -> TaskGroup:
                             f"--caldir_flats {C.CALDIR_FLATS} "
                             f"--cluster cca "
                             f"--gain_read_cal_dir {C.GAIN_READ_CAL_DIR} "
+                            f"--exp_class_model {C.EXP_CLASS_MODEL} "
                             "--checkpoint_mode {{ params.checkpoint_mode }} "
                             "--workers_per_node {{ params.workers }}"),
                     tele,
                 ),
             )
 
-            prev = t_p3d2d
+            # Fold the post-2D classifier verdicts into the almanac before the
+            # flat runlists are built, mirroring scripts/daily/run_all.sh on the
+            # SLURM chain. Without it this chain would classify but never filter.
+            t_decorate = BashOperator(
+                task_id="decorate_exptype",
+                bash_command=C.step_cmd(
+                    "decorate_exptype",
+                    C.julia("scripts/cal/decorate_almanac_exptype.jl",
+                            f"--almanac_file {C.xn('almanac_file', tele)} "
+                            f"--apred_dir {C.xn('outdir', tele)}apred"),
+                    tele,
+                ),
+            )
+            t_p3d2d >> t_decorate
+            prev = t_decorate
             for flat_type in ("quartz", "dome"):
                 with TaskGroup(group_id=f"{flat_type}_flats") as fg:
                     flatrunlist = (f"{C.xn('outdir', tele)}almanac/runlist_"
