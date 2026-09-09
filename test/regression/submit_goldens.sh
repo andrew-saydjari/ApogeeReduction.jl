@@ -409,8 +409,14 @@ stage_end
 # this stage runs at the end of the REDUCTION, before arM has run, so it could
 # only ever report zero.
 #
-# Run test/regression/arm_census.sh AFTER the arM stage, on the log arM wrote to:
-#     test/regression/arm_census.sh "$SLURM_SUBMIT_LOG"
+# Run test/regression/arm_census.sh AFTER the arM stage. It reads `ingestBit` and
+# `skyBit` out of the arM batch PRODUCTS, not out of the log -- arMADGICS no
+# longer prints the sky-guard verdict at all, and the log never showed the
+# informational ingestBit values in the first place. Pass arM's output directory;
+# the log argument is optional and only feeds the few diagnostics that still have
+# no product column (currently the prior-support guard):
+#     test/regression/arm_census.sh "$ARM_OUTDIR/raw" "$SLURM_SUBMIT_LOG"
+# Measured: 16,523 batch products / 1,622,474 spectra in ~3m15s with 8 workers.
 
 
 # ---- stage: warnings triage (full inventory + diff vs adjudicated baseline) --
