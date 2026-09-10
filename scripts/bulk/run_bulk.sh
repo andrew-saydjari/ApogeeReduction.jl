@@ -10,11 +10,11 @@
 
 # ------------------------------------------------------------------------------
 #SBATCH --partition=cca
-#SBATCH --nodes=8
-#SBATCH --constraint="[genoa|icelake|rome]"
+#SBATCH --nodes=12
+#SBATCH --constraint="genoa"
 #SBATCH --mem=900G
 
-#SBATCH --time=4-00:00
+#SBATCH --time=7-00:00
 #SBATCH --job-name=ar_bulk
 #SBATCH --output=slurm_logs/%x_%j.out
 # ------------------------------------------------------------------------------
