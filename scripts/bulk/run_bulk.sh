@@ -12,7 +12,7 @@
 #SBATCH --partition=cca
 #SBATCH --nodes=12
 #SBATCH --constraint="genoa"
-#SBATCH --mem=900G
+#SBATCH --mem=0
 
 #SBATCH --time=7-00:00
 #SBATCH --job-name=ar_bulk
