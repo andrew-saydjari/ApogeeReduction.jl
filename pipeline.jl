@@ -494,7 +494,7 @@ end
                     end
                 end
                 neng = sum(eng)
-                neng_total += neng
+                global neng_total += neng
                 safe_jldsave(
                     joinpath(parg["outdir"],
                         "apred/$(mjd)/exposureEngineering_$(parg["tele"])_$(mjd).h5"),
