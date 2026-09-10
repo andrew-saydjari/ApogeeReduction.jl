@@ -286,10 +286,16 @@ end
 # by construction rather than by convention.
 if parg["exp_class_model"] != ""
     @everywhere begin
+        # `import ApogeeReduction` brings the MODULE NAME into scope so qualified
+        # references (ApogeeReduction.CLASSIFIER_PERSIST_SOURCES, line ~338) resolve;
+        # `using X: names` alone does NOT — that omission failed every exposure of
+        # job 7014926 as `checkfail` and then killed the run at safe_jldsave (:397),
+        # which was likewise missing from this block's selective import list.
+        import ApogeeReduction
         using ApogeeReduction: exposure_class_features, load_exposure_classifier,
                                classify_exposure_type, exposure_class_label,
                                exposure_check_category, exposure_class_metadata,
-                               read_almanac_exp_df,
+                               read_almanac_exp_df, safe_jldsave,
                                EXPFLAG_PREDICTED_BAD, EXPFLAG_NOTRUN,
                                CHIP_LIST
         const EXP_CLF = Ref{Any}(nothing)
