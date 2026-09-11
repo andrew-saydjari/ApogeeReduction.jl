@@ -1,0 +1,8 @@
+# Known/accepted FPI fiber-index deviation epochs, consumed by
+# scripts/verify/check_fpi_homogeneity.jl (task #54).
+# Format: tele mjd_lo mjd_hi optional free-text label
+#
+# Nights listed here still appear in the FLAG section of the homogeneity
+# report, but annotated [KNOWN] instead of [NEW]: they were reviewed by a
+# human and accepted. Only [NEW] deviations require review.
+lco 59810 59850 re-fibering epoch, FPI on 142/153; ruled trustworthy by AKS + ops, kept in DR21
