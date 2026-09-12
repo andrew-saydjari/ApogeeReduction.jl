@@ -16,6 +16,7 @@
 # Idempotent: entries that already carry 9 elements have elements 5-9 replaced.
 
 using CSV, DataFrames, JLD2, Printf
+using ApogeeReduction: safe_jldsave
 
 const REPO = dirname(dirname(@__DIR__))
 const DICTFILE = joinpath(REPO, "data", "roughwave_dict.jld2")
@@ -44,5 +45,10 @@ for r in eachrow(coeffs)
         r.tele, r.chip, quart(1024), old[1], r.c1 / 2048, old[2])
 end
 
-jldsave(DICTFILE; roughwave_dict = roughwave_dict)
+safe_jldsave(DICTFILE,
+    Dict{String, Any}(
+        "source" => "scripts/cal/make_roughwave_dict.jl",
+        "coeffs_file" => "data/rough_poly_coeffs.csv",
+        "quartic_reference_nights" => "apo 60105, lco 60105 (pass-1 DR21 adopted FPI nightAve)");
+    roughwave_dict = roughwave_dict)
 println("wrote $(DICTFILE)")
