@@ -1,7 +1,49 @@
 import FastRunningMedian: running_median
 using Optim, HDF5
 
-function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines; 
+# wavecal_class codes stored in the skyLinePeaks product (numeric for portability):
+# B = associate + fit + use in the wavelength solution;
+# A = associate + fit only (association guard; NaN-masked at ingest, see
+#     ingest_skyLines_file); X / unclassed rows are never selected.
+const WAVECAL_CLASS_CODES = Dict("X" => 0, "A" => 1, "B" => 2)
+
+"""
+    rough_wave(pix, rw)
+
+Rough wavelength (vacuum A) at pixel `pix` from a roughwave_dict entry `rw`.
+Entries carrying the quartic model (9 elements; see
+scripts/cal/make_roughwave_dict.jl) use it -- max error < 0.004 A vs the adopted
+solutions, where the old linear model erred by 5-17 A with chip-dependent
+curvature (the root cause of sky-line association thefts). 4-element (legacy)
+entries fall back to the linear model.
+"""
+function rough_wave(pix, rw)
+    if length(rw) >= 9
+        x = (pix - (N_XPIX ÷ 2)) / N_XPIX
+        return rw[5] + rw[6] * x + rw[7] * x^2 + rw[8] * x^3 + rw[9] * x^4
+    else
+        return rough_linear_wave(pix; a = rw[1], b = rw[2])
+    end
+end
+
+"""
+    rough_dispersion(pix, rw)
+
+Local dispersion d(lambda)/d(pix) (A per pixel, negative) of the rough wavelength
+model at pixel `pix` -- the quartic's analytic derivative, or the global linear
+slope for legacy 4-element entries. Used to convert catalog doublet separations
+to pixels at the line's own location (the global slope is up to ~5% off locally).
+"""
+function rough_dispersion(pix, rw)
+    if length(rw) >= 9
+        x = (pix - (N_XPIX ÷ 2)) / N_XPIX
+        return (rw[6] + 2 * rw[7] * x + 3 * rw[8] * x^2 + 4 * rw[9] * x^3) / N_XPIX
+    else
+        return rw[2]
+    end
+end
+
+function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
 				 med_flux_window = 31, flux_thresh = 97,
 				 max_pix_sep = 5, n_pad = 5, min_seg_length = 2)
 
@@ -56,30 +98,25 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
         segment_fluxes[i] = sum(flux_range)
     end
 
-    seg_rough_wavs = map(
-        x -> rough_linear_wave(
-            mean(x); a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2]),
-        segments)
+    rw = roughwave_dict[tele][chip]
+    seg_rough_wavs = map(x -> rough_wave(mean(x), rw), segments)
 
     ######
 
-    wav_range = (roughwave_dict[tele][chip][4], roughwave_dict[tele][chip][3])
-    # Filter lines within wavelength range and sort by emission strength
-    bright_lines0 = sort(
+    wav_range = (rw[4], rw[3])
+    # Select the association set: classed rows of data/APOGEE_sky_linelist.csv
+    # (B = fit + use in solution, A = association guard, fit only) inside this
+    # chip's wavelength range. The strength/cleanliness cuts are frozen in the
+    # generated file (see scripts/cal/make_sky_linelist.jl), not applied here.
+    bright_lines = sort(
         filter(
-            row -> (wav_range[1] <= row.wav * 10 <= wav_range[2]) .& (row.number_of_lines .== 2),
+            row -> (wav_range[1] <= row.wave_cen_ang <= wav_range[2]) &&
+                   (coalesce(row.wavecal_class, "") in ("A", "B")),
             df_sky_lines),
-        :intensity,
-        rev = true
+        :wave_cen_ang
     )
-    bright_lines0 = bright_lines0[findall((bright_lines0.clean .== true) .& (bright_lines0.number_of_lines .> 1))[1:8], :]
-    rescale_int = maximum(bright_lines0.intensity)
-    bright_lines0.norm_intensity .= (bright_lines0.intensity ./ rescale_int)
-    bright_lines0.norm_sigma_intensity .= (bright_lines0.sigma_intensity ./ rescale_int)
-    bright_lines = bright_lines0[bright_lines0.norm_intensity .> 0.12, :] #prev 12
 
-    # Convert bright_lines wavelengths to Angstroms and get as vector
-    bright_wavs = bright_lines.wav .* 10
+    bright_wavs = collect(bright_lines.wave_cen_ang)
 
     # Find optimal offset by trying different values
     function calc_total_diff(offset)
@@ -143,7 +180,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
     for (i, w) in enumerate(adjusted_wavs)
         nearest_idx[i] = argmin(abs.(w .- bright_wavs))
         d2th_wavs[i] = abs(w - bright_wavs[nearest_idx[i]])
-        th_norm_flux[i] = bright_lines.intensity[nearest_idx[i]]
+        th_norm_flux[i] = bright_lines.model_rel_int[nearest_idx[i]]
     end
 
     is_closest = zeros(Bool, length(d2th_wavs))
@@ -167,36 +204,45 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
     #     end
     # end
 
-    # msk2use .&= (bright_lines.clean[nearest_idx] .== true) .& (abs.(obs_norm_flux .- th_norm_flux) .<= 0.3)
-    msk2use .&= (bright_lines.clean[nearest_idx] .== true)
+    # every selected (class A/B) row is a clean fit-eligible Lambda-doublet by
+    # construction of the generated list, so no per-row cleanliness mask is needed
+    # msk2use .&= (abs.(obs_norm_flux .- th_norm_flux) .<= 0.3)
     cen_pixs = mean.(segments[msk2use])
 
     ######
 
+    # Fixed-splitting, fixed-ratio Lambda-doublet fit ("V1"): the component
+    # separation is a spectroscopic constant known to ~0.01 A (Brooke et al. 2016)
+    # -- far better than any per-fiber fit -- and the e/f component ratio is
+    # 1.000 +/- 0.002 and temperature-independent. Freeing the separation railed
+    # at its bound in 50-91% of unresolved-line fits and carried a degeneracy
+    # jump mode of 150-235 mA under LSF-width mismatch; fixing both leaves a
+    # 5-parameter fit (amplitude, centroid, width, background slope + offset).
     function get_subline_params(lindx)
         cpix = cen_pixs[lindx]
         ref_indx = nearest_idx[msk2use][lindx]
 
-        subLine_weight = parse.(Float64,
-            split(replace(bright_lines[ref_indx, :subline_I][2:(end - 1)], " " => ","), ","))
-	subline_wavs = parse.(Float64,
-            filter(!isempty,split(
-                replace(replace(bright_lines[ref_indx, :subline_wav][2:(end - 1)], "  " => ","),
-                    " " => ","),
-                ",")))
-	sort_inds = sortperm(subLine_weight,rev=true)[1:2]
-	subLine_weight = subLine_weight[sort_inds] ./ sum(subLine_weight[sort_inds])
-	subline_wavs = subline_wavs[sort_inds]
-	sort_inds = sortperm(subline_wavs)
-	subLine_weight = subLine_weight[sort_inds]
-	subline_wavs = subline_wavs[sort_inds]
+        # sublines are ascending in wavelength in the generated list
+        subline_wavs = [bright_lines.subwave_1_ang[ref_indx],
+            bright_lines.subwave_2_ang[ref_indx]]
+        subLine_weight = [bright_lines.weight_1[ref_indx],
+            bright_lines.weight_2[ref_indx]]
+        subLine_weight = subLine_weight ./ sum(subLine_weight)
 
-#        outwave = bright_lines[ref_indx, :wav] * 10
-	outwave = (subline_wavs' * subLine_weight) * 10
+        outwave = subline_wavs' * subLine_weight
 
-        subline_wav_diffs = (subline_wavs .* 10 .- outwave)
-        subline_wav_pix_diffs = subline_wav_diffs ./ (roughwave_dict[tele][chip][2])
-        subLine_ratio = subLine_weight[2] / subLine_weight[1]
+        # fixed splitting in pixels, converted with the LOCAL dispersion of the
+        # rough model at this peak (the global linear slope is up to ~5% off
+        # locally, which matters for the resolved doublets)
+        sepd = (subline_wavs[2] - subline_wavs[1]) / abs(rough_dispersion(cpix, rw))
+
+        # dispersion is NEGATIVE (wavelength falls with pixel), so the BLUE
+        # component (subline_wavs[1]) sits at the HIGHER pixel: pair the weights
+        # accordingly. (The previous free-separation fit paired weight 1 with the
+        # lower pixel, leaving outpix and outwave mutually inconsistent by
+        # (w1 - w2) * sep -- harmless at 1:1 weights, first-order otherwise.)
+        w_lo_pix = subLine_weight[2]   # red component -> lower pixel
+        w_hi_pix = subLine_weight[1]   # blue component -> higher pixel
 
         peak_range = collect(Int(floor(cpix - 10)):Int(floor(cpix + 10)))
         x = peak_range
@@ -204,13 +250,14 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
         y = flux_vec[peak_range]
         yamp = max(abs(maximum(y)) / sqrt(2 * pi),0.001)
 
+        # p = [amplitude, centroid pix, width pix, bkg slope, bkg offset]
         function gfit(p; exclude_idx = nothing)
-            lam1 = p[2] - p[4] / 2
-            lam2 = p[2] + p[4] / 2
+            lam1 = p[2] - sepd / 2
+            lam2 = p[2] + sepd / 2
 
-            model = p[1] * subLine_weight[1] * diff(normal_cdf.(x_edges .- lam1, p[3])) .+
-                    p[1] * subLine_weight[2] * diff(normal_cdf.(x_edges .- lam2, p[3])) .+
-                    p[5] .* (x .- cpix) .+ p[6]
+            model = p[1] * w_lo_pix * diff(normal_cdf.(x_edges .- lam1, p[3])) .+
+                    p[1] * w_hi_pix * diff(normal_cdf.(x_edges .- lam2, p[3])) .+
+                    p[4] .* (x .- cpix) .+ p[5]
             residuals = (y .- model) .^ 2
             if !isnothing(exclude_idx)
                 return sum(residuals[1:(exclude_idx - 1)]) + sum(residuals[(exclude_idx + 1):end])
@@ -220,19 +267,18 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
         end
 
         function gfit2(p)
-            lam1 = p[2] - p[4] / 2
-            lam2 = p[2] + p[4] / 2
-            model = p[1] * subLine_weight[1] * diff(normal_cdf.(x_edges .- lam1, p[3])) .+
-                    p[1] * subLine_weight[2] * diff(normal_cdf.(x_edges .- lam2, p[3])) .+
-                    p[5] .* (x .- cpix) .+ p[6]
+            lam1 = p[2] - sepd / 2
+            lam2 = p[2] + sepd / 2
+            model = p[1] * w_lo_pix * diff(normal_cdf.(x_edges .- lam1, p[3])) .+
+                    p[1] * w_hi_pix * diff(normal_cdf.(x_edges .- lam2, p[3])) .+
+                    p[4] .* (x .- cpix) .+ p[5]
             return model
         end
 
-        sepd = abs(subline_wav_pix_diffs[2] - subline_wav_pix_diffs[1])
         yoffset = abs(nanzeromedian(y))
-        p0 = [yamp, cpix, 1, sepd, 0.0, yoffset]
-        lb = [0.0, cpix - 10, 0.3, 0.8 * sepd, -5, 0]
-        ub = [20 * yamp, cpix + 10, 3.0, 1.5 * sepd, 5, 2 * yoffset]
+        p0 = [yamp, cpix, 1, 0.0, yoffset]
+        lb = [0.0, cpix - 10, 0.3, -5, 0]
+        ub = [20 * yamp, cpix + 10, 3.0, 5, 2 * yoffset]
 
         opt_prob = Optim.optimize(gfit, lb, ub, p0, Fminbox(NelderMead()))
         fitparams = Optim.minimizer(opt_prob)
@@ -245,9 +291,13 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
         opt_prob = Optim.optimize(gfit_excl, lb, ub, p0, Fminbox(NelderMead()))
         fitparams = Optim.minimizer(opt_prob)
 
-        outpix = [fitparams[2] - fitparams[4] / 2, fitparams[2] + fitparams[4] / 2]' *
-                 subLine_weight
-        return [outpix, outwave, fitparams..., bright_lines.linindx[ref_indx]]
+        # weight-averaged component position with the corrected pairing
+        # (equals fitparams[2] for 1:1 weights)
+        outpix = fitparams[2] + (w_hi_pix - w_lo_pix) * sepd / 2
+        # keep the saved 9-row layout: the (now fixed) separation is written into
+        # the old free-separation slot so downstream consumers are untouched
+        return [outpix, outwave, fitparams[1], fitparams[2], fitparams[3], sepd,
+            fitparams[4], fitparams[5], bright_lines.linindx[ref_indx]]
     end
 
     # make sure to save the pamt and the tparams (BOTH!)
@@ -279,6 +329,12 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     boff = map(x -> replace_data_1(x[2]), pout)
 
     unique_skyline_inds = sort(unique(vcat(map(x -> get_last_ind(x[1]), pout)...)))
+    # wavecal class per line (aligned with the sky_line_mat rows), recorded in the
+    # product so wavelength-solution ingest can mask class-A guards (code 1)
+    # without re-reading the line list
+    line_class = Int[get(WAVECAL_CLASS_CODES,
+                         String(coalesce(df_sky_lines.wavecal_class[i], "")), 0)
+                     for i in unique_skyline_inds]
     # println("$(tele) $(chip): $(length(unique_skyline_inds)) unique sky lines")
     # println(unique_skyline_inds)
     first_valid_idx = findfirst(x -> !isnothing(x[1]), pout)
@@ -336,7 +392,7 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     # attrs(f["boff"])["axis_1"] = "fibers"
     # close(f)
 
-    safe_jldsave(outname, sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, no_metadata = true)
+    safe_jldsave(outname, sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, line_class = line_class, no_metadata = true)
 
     return
 end

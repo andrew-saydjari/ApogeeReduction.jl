@@ -1595,9 +1595,23 @@ function ingest_skyLines_file(fileName)
         println(fileName)
         read(f["sky_line_mat_clean"])
     end
+    # wavecal class per line (see WAVECAL_CLASS_CODES): only class B (code 2)
+    # enters the wavelength solution; class-A guards are fit for association
+    # protection and QA but NaN-masked here, which removes them from every
+    # downstream fit (per-exposure, nightAve, dither) via the existing NaN
+    # handling. Files written before the class column existed carry no
+    # line_class dataset and are ingested unmasked (all lines were class B).
+    line_class = if haskey(f, "line_class")
+        read(f["line_class"])
+    else
+        fill(2, size(sky_line_mat_clean, 1))
+    end
     close(f)
     sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
+    not_for_solution = line_class .!= 2
+    sky_line_xlst[not_for_solution, :] .= NaN
+    sky_line_wlst[not_for_solution, :] .= NaN
     return sky_line_xlst, sky_line_wlst
 end
 

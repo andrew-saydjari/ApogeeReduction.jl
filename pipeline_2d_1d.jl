@@ -360,10 +360,12 @@ if parg["relFlux"]
     all1DArclamp = vcat(all1DArclampperchip...)
     all1DFPI = vcat(all1DFPIperchip...)
 
-    ## load rough wave dict and sky lines list
+    ## load rough wave dict and sky lines list (generated file; see
+    ## scripts/cal/make_sky_linelist.jl for provenance and the class scheme)
     @everywhere begin
         roughwave_dict = load(joinpath(proj_path, "data", "roughwave_dict.jld2"), "roughwave_dict")
-        df_sky_lines = CSV.read(joinpath(proj_path, "data", "APOGEE_lines.csv"), DataFrame)
+        df_sky_lines = CSV.read(
+            joinpath(proj_path, "data", "APOGEE_sky_linelist.csv"), DataFrame, comment = "#")
         df_sky_lines.linindx = 1:size(df_sky_lines, 1)
     end
 
