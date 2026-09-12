@@ -433,12 +433,309 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
     return outname
 end
 
-#read in a list of fnames, then take the 
+#############################################################################
+# Deterministic night-frame convention ("Method A'")
+#
+# `get_ave_night_wave_soln` historically snapped the night reference frame to
+# the single exposure nearest the per-coefficient median solution (the argmin
+# below, kept as an initializer). On dither-alternating nights (ABBA) with an
+# even split, that median sits at the midpoint of two dither groups ~0.5 px
+# apart and every exposure is (to within measurement noise) equidistant from
+# it, so ~0.001 px run-to-run noise in the per-exposure sky solutions decides
+# the argmin and the whole night frame moves by +-~0.5 px between runs.
+# Per-exposure composed solutions (night frame + refit ditherParams) are
+# invariant; only the internal frame convention was nondeterministic.
+#
+# Method A' (applied after the dither refinement rounds):
+#   1. GROUP on MEASURED offsets, never on labels: cluster the per-exposure
+#      fitted dither offsets (1-D single-link, gap threshold
+#      NIGHT_FRAME_CLUSTER_GAP_PIX). Commanded-vs-measured differences and
+#      header label faults cannot corrupt the grouping.
+#   2. SELECT the canonical cluster with the almanac DITHPIX
+#      (`dithered_pixels`) values used as LABELS ONLY (an ordering, never a
+#      shift): canonical = cluster with the smallest median valid DITHPIX.
+#      When the labels cannot discriminate (tied / frozen / missing), fall
+#      back to MEASURED-POSITION ORDERING: canonical = the cluster at the
+#      extreme measured position that corresponds to the smallest DITHPIX
+#      under the telescope's verified DITHPIX-axis direction
+#      (NIGHT_FRAME_DITHPIX_DIRECTION: lowest position at LCO, highest at
+#      APO). Cluster ORDERING by position is frame-shift invariant: a
+#      convention flip shifts every exposure's offset by the same amount, so
+#      the differences between cluster medians (~0.5 px separation vs
+#      ~0.001 px cross-run noise) survive -- only ABSOLUTE offsets are
+#      circular, not their ordering. DITHPIX is the commanded position along
+#      the same physical axis, so with the direction folded in,
+#      the measured ordering coincides with smallest-DITHPIX whenever the
+#      labels are honest (verified corpus-wide against saved products: APO
+#      direction -1 on 133/133 label-discriminating nights 57643-61227, LCO
+#      +1 on 113/113 nights 57851-61230, era-stable, no exceptions) -- the
+#      two rules select the SAME cluster by construction and the label rule
+#      is a redundant cross-check rather than a different rule. Every
+#      cluster is an equally correct frame; the ordering is a
+#      run-independent sorting convention, not a correctness judgment.
+#   3. APPLY one global scalar shift to the night frame (polynomial
+#      composition, `pin_night_frame!`) so it coincides with the canonical
+#      cluster. The subsequent per-exposure dither refits against the pinned
+#      frame absorb the shift exactly, so per-exposure composed solutions are
+#      unchanged (up to float roundoff).
+#
+# Three QA conditions are flagged (warning + metadata in the night wavecal
+# product, `sky/frame_anchor/`):
+#   - "DITHPIX frozen but dither motion detected": labels identical across
+#     exposures while the measured offsets form separated clusters
+#     (57800-family ICS/header fault).
+#   - "DITHPIX changed but no dither motion detected": labels form >= 2
+#     groups while the measured offsets form one cluster (stuck dither
+#     mechanism -- ops-relevant).
+#   - "DITHPIX ordering inconsistent with measured dither direction": the
+#     labels discriminate but rank the clusters opposite to their measured
+#     positions. Measurement beats label: the measured ordering is used and
+#     the inconsistency is flagged.
+#############################################################################
+
+"""
+Gap (pixels) above which two sorted per-exposure dither offsets belong to
+different clusters. Dither groups are ~0.5 px apart with ~0.02 px
+within-group scatter, so 0.15 px is comfortably between the two scales.
+"""
+const NIGHT_FRAME_CLUSTER_GAP_PIX = 0.15
+
+"""Two DITHPIX labels within this (pixels) count as the same commanded position."""
+const NIGHT_FRAME_DITHPIX_TOL = 0.1
+
+"""
+DITHPIX at or below this is treated as a header sentinel (0.0 observed on
+apo 58819/59300/59310 and lco 59166), not a real commanded position.
+"""
+const NIGHT_FRAME_DITHPIX_MIN_VALID = 1.0
+
+"""
+Direction of the DITHPIX label axis relative to the measured dither/pixel
+axis, per telescope: +1 where DITHPIX increases with measured pixel position,
+-1 where it decreases. MEASURED corpus-wide from saved products
+(sign_convention_check.jl, PR #406): every label-discriminating APO night
+sampled across MJD 57643-61227 (133 nights) has the larger DITHPIX on the
+SMALLER measured position (direction -1); every LCO night sampled across
+57851-61230 (113 nights) has it on the larger position (direction +1). Both
+are era-stable with zero exceptions. This makes the measured-position
+tie-break coincide with the smallest-DITHPIX label rule by construction at
+both telescopes. An unknown telescope defaults to +1.
+"""
+const NIGHT_FRAME_DITHPIX_DIRECTION = Dict("apo" => -1, "lco" => 1)
+
+"""
+    cluster_offsets_1d(offsets_pix; gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX)
+
+Single-link 1-D clustering of per-exposure dither offsets (pixels): sort and
+split at gaps larger than `gap_pix`. Returns a vector of clusters, each a
+vector of indices into `offsets_pix`, ordered by increasing offset.
+Non-finite offsets (failed dither fits) are excluded from every cluster.
+"""
+function cluster_offsets_1d(offsets_pix; gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX)
+    good = findall(isfinite, view(offsets_pix, :))
+    isempty(good) && return Vector{Int}[]
+    perm = sort(good, by = i -> offsets_pix[i])
+    clusters = [[perm[1]]]
+    for i in perm[2:end]
+        if offsets_pix[i] - offsets_pix[clusters[end][end]] > gap_pix
+            push!(clusters, Int[])
+        end
+        push!(clusters[end], i)
+    end
+    return clusters
+end
+
+"""
+    count_dithpix_groups(labels; tol = NIGHT_FRAME_DITHPIX_TOL)
+
+Number of distinct commanded dither positions among the valid DITHPIX labels
+(finite and > NIGHT_FRAME_DITHPIX_MIN_VALID). Returns 0 when no valid labels
+exist.
+"""
+function count_dithpix_groups(labels; tol = NIGHT_FRAME_DITHPIX_TOL)
+    v = sort(filter(l -> isfinite(l) && l > NIGHT_FRAME_DITHPIX_MIN_VALID,
+        collect(Float64, labels)))
+    isempty(v) && return 0
+    return 1 + count(>(tol), diff(v))
+end
+
+"""
+    night_frame_anchor(exp_offset_pix, exp_dithpix;
+        gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX, label_tol = NIGHT_FRAME_DITHPIX_TOL,
+        dithpix_direction = 1)
+
+Method A' canonical-frame selection (see the block comment above).
+
+Inputs (aligned vectors, one entry per exposure):
+- `exp_offset_pix`: fitted global dither offset of each exposure relative to
+  the current night frame, in pixels (NaN where the dither fit failed).
+- `exp_dithpix`: almanac `dithered_pixels` label per exposure (NaN where
+  missing). Used for ORDERING only, never as a shift.
+- `dithpix_direction`: the telescope's verified DITHPIX-axis direction
+  (`NIGHT_FRAME_DITHPIX_DIRECTION`); +1 means DITHPIX increases with measured
+  pixel position (LCO), -1 means it decreases (APO).
+
+Returns a NamedTuple with the shift to fold into the night frame
+(`shift_pix`, NaN when no exposure has a finite offset), the selection `mode`
+("dithpix_group", "measured_position", "measured_position_override",
+"single_cluster", "single_valid_cluster" or "none"), the per-exposure cluster
+assignment (`exp_cluster`, 0 = unclustered), per-cluster summaries, and the
+three QA flags.
+
+Selection details: clusters with >= 2 members are preferred as canonical
+candidates (guards against a stray single-exposure cluster from one bad fit);
+when only singleton clusters exist they all remain candidates. The DITHPIX
+rule picks the candidate whose median valid label is the unique minimum (by
+more than `label_tol`); a tie, frozen or missing label situation falls back
+to measured-position ordering over the tied candidates (the extreme median
+position that maps to smallest DITHPIX under `dithpix_direction` —
+frame-shift-invariant, and coincident with the label rule whenever labels
+are honest). When the label rule and the measured ordering disagree, the
+measurement wins ("measured_position_override") and
+`qa_dithpix_order_inconsistent` is raised.
+"""
+function night_frame_anchor(exp_offset_pix, exp_dithpix;
+        gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX, label_tol = NIGHT_FRAME_DITHPIX_TOL,
+        dithpix_direction = 1)
+    n_exp = length(exp_offset_pix)
+    clusters = cluster_offsets_1d(exp_offset_pix; gap_pix = gap_pix)
+
+    exp_cluster = zeros(Int, n_exp)
+    for (c, members) in enumerate(clusters), i in members
+        exp_cluster[i] = c
+    end
+
+    n_label_groups = count_dithpix_groups(exp_dithpix; tol = label_tol)
+    qa_frozen = (length(clusters) >= 2) && (n_label_groups == 1)
+    qa_stuck = (length(clusters) == 1) && (n_label_groups >= 2)
+
+    cluster_n = length.(clusters)
+    cluster_offset_pix = [median(filter(isfinite, exp_offset_pix[m])) for m in clusters]
+    valid_label(l) = isfinite(l) && l > NIGHT_FRAME_DITHPIX_MIN_VALID
+    cluster_dithpix = map(clusters) do m
+        v = filter(valid_label, collect(Float64, exp_dithpix[m]))
+        isempty(v) ? NaN : median(v)
+    end
+
+    if isempty(clusters)
+        return (shift_pix = NaN, mode = "none", canonical_cluster = 0,
+            canonical_dithpix = NaN, exp_cluster = exp_cluster,
+            cluster_n = cluster_n, cluster_offset_pix = cluster_offset_pix,
+            cluster_dithpix = cluster_dithpix,
+            dithpix_direction = Int(dithpix_direction),
+            qa_dithpix_frozen_but_motion = false,
+            qa_dithpix_changed_but_no_motion = false,
+            qa_dithpix_order_inconsistent = false)
+    end
+
+    # canonical candidates: prefer clusters with >= 2 exposures
+    cand = findall(cluster_n .>= 2)
+    isempty(cand) && (cand = collect(eachindex(clusters)))
+
+    # clusters are sorted by increasing median offset (cluster_offsets_1d).
+    # The measured-position pick within a candidate pool is the extreme that
+    # maps to the smallest DITHPIX under the telescope's verified axis
+    # direction: the first (lowest position) for direction +1 (LCO), the
+    # last (highest position) for direction -1 (APO).
+    measured_pick(pool) = dithpix_direction >= 0 ? pool[1] : pool[end]
+    qa_order = false
+    canonical, mode = if length(cand) == 1
+        cand[1], (length(clusters) == 1 ? "single_cluster" : "single_valid_cluster")
+    else
+        labs = cluster_dithpix[cand]
+        finite_labs = filter(isfinite, labs)
+        min_lab = isempty(finite_labs) ? NaN : minimum(finite_labs)
+        at_min = [c for (c, l) in zip(cand, labs) if isfinite(l) && l <= min_lab + label_tol]
+        if length(at_min) == 1
+            # labels discriminate: smallest-DITHPIX cluster. By the verified
+            # sign convention this coincides with the measured-position pick;
+            # if it does not, the measurement beats the label.
+            if at_min[1] == measured_pick(cand)
+                at_min[1], "dithpix_group"
+            else
+                qa_order = true
+                measured_pick(cand), "measured_position_override"
+            end
+        else
+            # labels tied/frozen/missing: measured-position ordering over the
+            # tied candidate pool (all candidates when no labels are valid)
+            pool = isempty(at_min) ? cand : at_min
+            measured_pick(pool), "measured_position"
+        end
+    end
+
+    return (shift_pix = cluster_offset_pix[canonical], mode = mode,
+        canonical_cluster = canonical,
+        canonical_dithpix = cluster_dithpix[canonical], exp_cluster = exp_cluster,
+        cluster_n = cluster_n, cluster_offset_pix = cluster_offset_pix,
+        cluster_dithpix = cluster_dithpix,
+        dithpix_direction = Int(dithpix_direction),
+        qa_dithpix_frozen_but_motion = qa_frozen,
+        qa_dithpix_changed_but_no_motion = qa_stuck,
+        qa_dithpix_order_inconsistent = qa_order)
+end
+
+"""
+    pin_night_frame!(med_linParams, shift_pix)
+
+Fold one global scalar shift into the night-average solution by substituting
+`xt -> xt + shift_pix / N_XPIX` in every fiber's wavelength polynomial
+(exactly the composition machinery used by the dither refinement rounds).
+After pinning, exposures of the canonical cluster refit to dither offsets
+~ 0. The per-exposure dither transforms are refit downstream against the
+pinned frame (`get_and_save_sky_dither_per_fiber`), and a refit dither offset
+shifts by exactly `-shift`, so per-exposure composed wavelength solutions are
+unchanged up to float roundoff.
+"""
+function pin_night_frame!(med_linParams, shift_pix)
+    isfinite(shift_pix) || return med_linParams
+    n_lin_coeffs = size(med_linParams, 2)
+    shift_poly = Polynomial([shift_pix / N_XPIX, 1.0])
+    for fibIndx in 1:size(med_linParams, 1)
+        curr_coeffs = Polynomial(med_linParams[fibIndx, :])(shift_poly).coeffs
+        n_curr_use_coeffs = min(size(curr_coeffs, 1), n_lin_coeffs)
+        med_linParams[fibIndx, :] .= 0
+        med_linParams[fibIndx, 1:n_curr_use_coeffs] .= curr_coeffs[1:n_curr_use_coeffs]
+    end
+    return med_linParams
+end
+
+"""
+    get_exp_dithpix_dict(almanac_file, tele, mjd)
+
+Commanded dither positions for the night: a Dict mapping the almanac
+`exposure` number to its `dithered_pixels` value (the DITHPIX header label).
+Returns `nothing` when the almanac (or the column) is unavailable, in which
+case the night-frame anchor falls back to measured-position ordering.
+Never throws: label plumbing must not be able to fail a night.
+"""
+function get_exp_dithpix_dict(almanac_file, tele, mjd)
+    (almanac_file == "" || !isfile(almanac_file)) && return nothing
+    try
+        df = read_almanac_exp_df(almanac_file, tele, mjd)
+        if !("dithered_pixels" in names(df)) || !("exposure" in names(df))
+            return nothing
+        end
+        to_f(x) = x isa AbstractString ? something(tryparse(Float64, x), NaN) : Float64(x)
+        to_i(x) = x isa AbstractString ? parse(Int, x) : Int(x)
+        return Dict(to_i(e) => to_f(d) for (e, d) in zip(df.exposure, df.dithered_pixels))
+    catch e
+        @warn "Night-frame anchor: could not read DITHPIX labels from $(almanac_file) for $(tele) $(mjd); falling back to measured-position ordering." exception=e
+        return nothing
+    end
+end
+
+#read in a list of fnames, then take the
 #average/median of the wavelength solution
 #parameters (removing dither differences)
 #to have a stable average for the night
+#exp_dithpix: optional Dict (almanac exposure number => dithered_pixels
+#label) used by the deterministic night-frame anchor (Method A', above);
+#dithpix_direction: the telescope's verified DITHPIX-axis direction
+#(NIGHT_FRAME_DITHPIX_DIRECTION)
 function get_ave_night_wave_soln(
-        fname_list; fit_dither = false, wavetype = "sky", dporder = 1, dither_fname_list = nothing)
+        fname_list; fit_dither = false, wavetype = "sky", dporder = 1,
+        dither_fname_list = nothing, exp_dithpix = nothing, dithpix_direction = 1)
     #open first to get order of linear and non-linear parameters
 
     #guard against repetition
@@ -549,9 +846,34 @@ function get_ave_night_wave_soln(
             med_linParams .= nanmedian(updated_linParams, 3)[:, :, 1]
         end
 
+        # ---- Method A': deterministic night-frame convention (see above) ----
+        # per-exposure global dither offset (pixels) relative to the current,
+        # argmin-initialized frame; the dither transform is
+        # xt_new = ditherParams[1] + ditherParams[2] * xt with xt in units of
+        # (x - N_XPIX/2) / N_XPIX
+        exp_offset_pix = [nanmedian(all_ditherParams[:, 1, k]) * N_XPIX
+                          for k in 1:n_fnames]
+        # almanac exposure number parsed from each fname (same convention as
+        # the peak-fname construction in the refinement loop above)
+        exp_expid = map(unique_fname_list) do fname
+            parse(Int, split(split(split(fname, "/")[end], ".h5")[1], "_")[end - 1])
+        end
+        exp_labels = if isnothing(exp_dithpix)
+            fill(NaN, n_fnames)
+        else
+            Float64[get(exp_dithpix, e, NaN) for e in exp_expid]
+        end
+        anchor = night_frame_anchor(exp_offset_pix, exp_labels;
+            dithpix_direction = dithpix_direction)
+        pin_night_frame!(med_linParams, anchor.shift_pix)
+        frame_anchor = merge(anchor,
+            (exp_expid = exp_expid, exp_dithpix = exp_labels,
+                exp_offset_pix = exp_offset_pix))
+
     else
         med_nlParams = nanmedian((all_nlParams .- nlParam_offsets), 3)[:, :, 1]
         med_linParams = nanmedian((all_linParams .- linParam_offsets), 3)[:, :, 1]
+        frame_anchor = nothing
     end
 
     wporder = n_lin_coeffs - 1
@@ -574,7 +896,7 @@ function get_ave_night_wave_soln(
         end
     end
 
-    return med_linParams, med_nlParams, chipWaveSoln
+    return med_linParams, med_nlParams, chipWaveSoln, frame_anchor
 end
 
 function get_and_save_sky_dither_per_fiber(
@@ -1690,7 +2012,10 @@ function ingest_fpiLines(fname_list)
 end
 
 ## TODO local parallelization mode (which would also need to pamp inside of sky_wave_plots)
-function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir")
+# `almanac_file` provides the commanded dither positions (DITHPIX labels) for
+# the deterministic night-frame anchor (Method A'); when empty or unreadable
+# the anchor falls back to the absolute-catalog tie-break and says so.
+function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir", almanac_file = "")
 
     outname = joinpath(
         outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
@@ -1705,8 +2030,34 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
     if size(all1DObjectWavecal[mskMJD], 1) > 0
         all1DObjectWavecal_mjd = all1DObjectWavecal[mskMJD]
         # using all skyline wavelength solutions to determine median solution for SJD
-        night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
-            all1DObjectWavecal_mjd, fit_dither = true)
+        exp_dithpix = get_exp_dithpix_dict(almanac_file, tele, mjd)
+        night_linParams, night_nlParams, night_wave_soln, frame_anchor = get_ave_night_wave_soln(
+            all1DObjectWavecal_mjd, fit_dither = true, exp_dithpix = exp_dithpix,
+            dithpix_direction = get(NIGHT_FRAME_DITHPIX_DIRECTION, tele, 1))
+
+        if !isnothing(frame_anchor)
+            if frame_anchor.qa_dithpix_frozen_but_motion
+                @warn "NIGHT FRAME QA for $(tele) MJD $(mjd): DITHPIX frozen but dither motion detected. " *
+                      "The header labels are identical across exposures while the measured per-exposure " *
+                      "offsets form $(length(frame_anchor.cluster_n)) separated clusters " *
+                      "(cluster offsets $(round.(frame_anchor.cluster_offset_pix, digits = 3)) px) -- " *
+                      "57800-family ICS/header fault. Canonical cluster chosen by measured-position " *
+                      "ordering; see sky/frame_anchor in the wavecalNightAve file."
+            end
+            if frame_anchor.qa_dithpix_changed_but_no_motion
+                @warn "NIGHT FRAME QA for $(tele) MJD $(mjd): DITHPIX changed but no dither motion detected. " *
+                      "The header labels form >= 2 groups while the measured per-exposure offsets form a " *
+                      "single cluster -- possible stuck dither mechanism (ops-relevant); see " *
+                      "sky/frame_anchor in the wavecalNightAve file."
+            end
+            if frame_anchor.qa_dithpix_order_inconsistent
+                @warn "NIGHT FRAME QA for $(tele) MJD $(mjd): DITHPIX ordering inconsistent with measured " *
+                      "dither direction. The labels rank the clusters opposite to their measured pixel " *
+                      "positions (cluster offsets $(round.(frame_anchor.cluster_offset_pix, digits = 3)) px, " *
+                      "labels $(frame_anchor.cluster_dithpix)); measurement beats label -- canonical cluster " *
+                      "chosen by measured-position ordering. See sky/frame_anchor in the wavecalNightAve file."
+            end
+        end
 
         # using skylines to measure dither offsets from nightly skyline wavelength solution for SJD
         get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
@@ -1732,7 +2083,29 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
             f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
             f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
             f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
-        end	
+            if !isnothing(frame_anchor)
+                # audit block for the deterministic night-frame anchor
+                # (Method A'): which cluster is canonical, why, and the
+                # per-exposure evidence. exp_offset_pix are relative to the
+                # PRE-pin frame; post-pin offsets are exp_offset_pix - shift_pix.
+                g = create_group(f, "$(curr_wave_type)/frame_anchor")
+                g["mode"] = frame_anchor.mode
+                g["shift_pix"] = frame_anchor.shift_pix
+                g["canonical_cluster"] = frame_anchor.canonical_cluster
+                g["canonical_dithpix"] = frame_anchor.canonical_dithpix
+                g["cluster_n"] = collect(Int, frame_anchor.cluster_n)
+                g["cluster_offset_pix"] = collect(Float64, frame_anchor.cluster_offset_pix)
+                g["cluster_dithpix"] = collect(Float64, frame_anchor.cluster_dithpix)
+                g["dithpix_direction"] = frame_anchor.dithpix_direction
+                g["exp_expid"] = collect(Int, frame_anchor.exp_expid)
+                g["exp_cluster"] = collect(Int, frame_anchor.exp_cluster)
+                g["exp_dithpix"] = collect(Float64, frame_anchor.exp_dithpix)
+                g["exp_offset_pix"] = collect(Float64, frame_anchor.exp_offset_pix)
+                g["qa_dithpix_frozen_but_motion"] = Int(frame_anchor.qa_dithpix_frozen_but_motion)
+                g["qa_dithpix_changed_but_no_motion"] = Int(frame_anchor.qa_dithpix_changed_but_no_motion)
+                g["qa_dithpix_order_inconsistent"] = Int(frame_anchor.qa_dithpix_order_inconsistent)
+            end
+        end
 
         return outname
     else
