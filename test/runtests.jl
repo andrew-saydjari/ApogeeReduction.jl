@@ -7,6 +7,7 @@ using FITSIO: FITS
     include("exposureClassifier.jl")
     include("ar1D.jl")
     include("wavecal.jl")
+    include("skyline_peaks.jl")
     include("fpi_gate.jl")
     include("safe_jldsave.jl")
     include("lsf.jl")
