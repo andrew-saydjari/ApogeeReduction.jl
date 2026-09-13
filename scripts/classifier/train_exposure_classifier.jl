@@ -30,6 +30,9 @@ Pkg.instantiate();
 using HDF5, ArgParse, DataFrames, Random, Statistics, StatsBase, Printf, CSV, JLD2
 using LinearAlgebra: diag
 using DecisionTree
+# run with --project=<this repo>: ApogeeReduction is needed for safe_jldsave, so
+# the model artifact records the git provenance of the code that made it
+using ApogeeReduction
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -263,7 +266,13 @@ h5open(parg["out_results"], "w") do f
 end
 println("wrote ", parg["out_results"])
 
-jldsave(parg["out_model"];
+# safe_jldsave, not JLD2.jldsave: the artifact is a pinned calibration input, so
+# it should carry the same git provenance as every other product. The extra
+# "metadata/*" entries are additional top-level keys under JLD2.load, so
+# load_exposure_classifier (which reads model/classes/unknown_tau/flag_tau by
+# name) is unaffected — verified against a round-trip before switching.
+ApogeeReduction.safe_jldsave(parg["out_model"];
+    no_metadata = true,
     model = model_all,
     classes = classes,
     feature_names = featnames,
