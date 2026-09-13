@@ -169,6 +169,124 @@ using CSV, DataFrames, JLD2
         @test abs(AR.rough_wave(pmat[1, 1], rw_quartic) - pmat[2, 1]) < 0.05
     end
 
+    # ---- self-calibrating association (stage 1 of the LOO design) ---------
+    # 7 class-B lines with irregular spacing like the real chip-R list
+    sc_waves = [16502.4, 16553.8, 16620.0, 16692.4, 16708.9, 16800.0, 16903.7]
+    sc_df = mini_df([line_row("L$i", w - 0.15, w + 0.15, 0.5, 0.5, 1.0, "B")
+                     for (i, w) in enumerate(sc_waves)])
+    all_comps(d; skip = "") = vcat([[(r.subwave_1_ang, 0.5), (r.subwave_2_ang, 0.5)]
+                                    for r in eachrow(d) if r.label != skip]...)
+    function assigned_ok(pmat, d)
+        # is every fitted line's recovered pixel consistent with its assigned
+        # wavelength under the TRUE (quartic) model?
+        nbad = 0
+        for j in 1:size(pmat, 2)
+            truepix_wav = AR.rough_wave(pmat[1, j], rw_quartic)
+            nbad += abs(truepix_wav - pmat[2, j]) > 0.5
+        end
+        return nbad
+    end
+    rwd_q = Dict("apo" => Dict("R" => rw_quartic))
+    rwd_l = Dict("apo" => Dict("R" => rw_linear))
+
+    @testset "theft reproduced without self-calibration, killed with it" begin
+        # victim (L4) feature absent; unlisted thief pair 10.3 A away -- the
+        # 16702 -> 16692 mode. Without self-calibration the thief peak takes
+        # L4's label; with it, L4 goes unmeasured (correct: NaN, not wrong).
+        comps = all_comps(sc_df; skip = "L4")
+        push!(comps, (16702.036, 0.15))
+        push!(comps, (16703.244, 0.15))
+        flux = synth_flux(comps)
+        for rwd in (rwd_l, rwd_q)
+            pmat0, _, _, qa0 = AR.get_sky_peaks(flux, "apo", "R", rwd, sc_df;
+                self_calibrate = false)
+            @test assigned_ok(pmat0, sc_df) == 1        # the theft
+            pmat1, _, _, qa1 = AR.get_sky_peaks(flux, "apo", "R", rwd, sc_df;
+                self_calibrate = true)
+            @test assigned_ok(pmat1, sc_df) == 0        # no wrong assignment
+            @test !(4 in Int.(pmat1[end, :]))           # L4 unmeasured, not stolen
+            @test qa1[2]                                # converged
+        end
+    end
+
+    @testset "close thief (5.4 A, inside acceptance radius): emission cut" begin
+        # the 15546 -> 15540 geometry: the thief is INSIDE the 10 A radius,
+        # so re-association alone cannot reject it -- the final LOO
+        # consistency cut must
+        comps = all_comps(sc_df; skip = "L4")
+        push!(comps, (16697.65, 0.3))
+        push!(comps, (16697.95, 0.3))
+        flux = synth_flux(comps)
+        pmat0, _, _, _ = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df;
+            self_calibrate = false)
+        @test assigned_ok(pmat0, sc_df) == 1
+        pmat1, _, _, qa1 = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df;
+            self_calibrate = true)
+        @test assigned_ok(pmat1, sc_df) == 0
+        @test !(4 in Int.(pmat1[end, :]))
+        @test qa1[2] && qa1[3] >= 1                     # converged, >=1 pair cut
+    end
+
+    @testset "healthy fiber: converges immediately, no drops" begin
+        flux = synth_flux(all_comps(sc_df))
+        pmat, _, cnt, qa = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df;
+            self_calibrate = true)
+        @test cnt == 7 && assigned_ok(pmat, sc_df) == 0
+        @test qa == (1, true, 0)                        # one pass, converged, no drops
+    end
+
+    @testset "iteration cap respected and flagged" begin
+        comps = all_comps(sc_df; skip = "L4")
+        push!(comps, (16702.036, 0.15))
+        push!(comps, (16703.244, 0.15))
+        flux = synth_flux(comps)
+        # this scenario needs 2 iterations to converge; capping at 1 must
+        # return the loud not-converged flag rather than pretending
+        _, _, _, qa = AR.get_sky_peaks(flux, "apo", "R", rwd_l, sc_df;
+            self_calibrate = true, max_assoc_iter = 1)
+        @test qa[1] == 1
+        @test !qa[2]
+    end
+
+    @testset "seed decomposition: zeropoint is never load-bearing" begin
+        # dithers (and re-registrations) move the ZEROPOINT of the true
+        # solution while the shape terms are stable (measured: c0 moves
+        # ~0.1 A per dither and up to ~10 A across the era; c1/c2 edge
+        # effects are 100-1000x smaller). The association must therefore be
+        # invariant to zeropoint errors of the SEED, and tolerant of
+        # shape-term errors at many times their measured drift.
+        flux = synth_flux(all_comps(sc_df))
+        ref, _, _, _ = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df)
+        for dc0 in [-8.0, -3.0, 3.0, 8.0]
+            rw_shift = (rw_quartic[1], rw_quartic[2], rw_quartic[3], rw_quartic[4],
+                rw_quartic[5] + dc0, rw_quartic[6], rw_quartic[7],
+                rw_quartic[8], rw_quartic[9])
+            pmat, boff, cnt, qa = AR.get_sky_peaks(flux, "apo", "R",
+                Dict("apo" => Dict("R" => rw_shift)), sc_df)
+            @test cnt == size(ref, 2)
+            @test sort(Int.(pmat[end, :])) == sort(Int.(ref[end, :]))
+            @test maximum(abs.(sort(pmat[1, :]) .- sort(ref[1, :]))) < 0.01
+        end
+        # shape terms perturbed at ~10x the measured night-to-night drift
+        rw_shape = (rw_quartic[1], rw_quartic[2], rw_quartic[3], rw_quartic[4],
+            rw_quartic[5], rw_quartic[6] + 2.0, rw_quartic[7] + 0.3,
+            rw_quartic[8], rw_quartic[9])
+        pmat, _, cnt, qa = AR.get_sky_peaks(flux, "apo", "R",
+            Dict("apo" => Dict("R" => rw_shape)), sc_df)
+        @test cnt == size(ref, 2)
+        @test sort(Int.(pmat[end, :])) == sort(Int.(ref[end, :]))
+        @test qa[2]
+    end
+
+    @testset "assoc_only fast path matches the full path's associations" begin
+        flux = synth_flux(all_comps(sc_df))
+        amat, boff, cnt, qa = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df;
+            assoc_only = true)
+        pmat, _, _, _ = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df)
+        @test size(amat, 1) == 3 && cnt == size(pmat, 2)
+        @test sort(Int.(amat[3, :])) == sort(Int.(pmat[end, :]))
+    end
+
     @testset "ingest_skyLines_file masks non-class-B lines" begin
         mktempdir() do dir
             nfib = 8
