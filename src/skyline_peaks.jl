@@ -16,6 +16,17 @@ scripts/cal/make_roughwave_dict.jl) use it -- max error < 0.004 A vs the adopted
 solutions, where the old linear model erred by 5-17 A with chip-dependent
 curvature (the root cause of sky-line association thefts). 4-element (legacy)
 entries fall back to the linear model.
+
+This model is a SEED, never load-bearing for correctness, and its terms carry
+very different trust levels (measured across 90 pass-1 nights, 2016-2025):
+the ZEROPOINT (c0) moves ~0.1 A with every dither shift, 0.3-2.6 A night to
+night, and up to ~10 A across the era (APO re-registrations), so it is never
+trusted -- `get_sky_peaks` re-derives it per fiber/chip/exposure from the
+data (global offset scan, +-15 A). The SHAPE terms are 100-1000x more stable
+(c1 edge effect: ~8 mA within a night, 0.05-0.19 A night to night; c2+:
+single mA within-night), which is what justifies seeding them -- and even
+they are refined per fiber by the self-calibrating association correction
+before anything depends on them.
 """
 function rough_wave(pix, rw)
     if length(rw) >= 9
@@ -43,9 +54,37 @@ function rough_dispersion(pix, rw)
     end
 end
 
+"""
+    assign_segments(pred_wavs, bright_wavs; accept_radius = 10.0)
+
+Nearest-catalog-line assignment of detected peak segments given their
+predicted wavelengths: each segment goes to its nearest catalog line, each
+line keeps only its closest segment (`is_closest` deduplication), and
+assignments farther than `accept_radius` are rejected. Returns
+`(nearest_idx, d2th_wavs, msk2use)`.
+"""
+function assign_segments(pred_wavs, bright_wavs; accept_radius = 10.0)
+    n = length(pred_wavs)
+    nearest_idx = zeros(Int, n)
+    d2th_wavs = zeros(Float64, n)
+    for (i, w) in enumerate(pred_wavs)
+        nearest_idx[i] = argmin(abs.(w .- bright_wavs))
+        d2th_wavs[i] = abs(w - bright_wavs[nearest_idx[i]])
+    end
+    is_closest = zeros(Bool, n)
+    for nind in unique(nearest_idx)
+        matches = findall(x -> x == nind, nearest_idx)
+        is_closest[matches] .= false
+        is_closest[matches[argmin(d2th_wavs[matches])]] = true
+    end
+    return nearest_idx, d2th_wavs, is_closest .& (d2th_wavs .<= accept_radius)
+end
+
 function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
 				 med_flux_window = 31, flux_thresh = 97,
-				 max_pix_sep = 5, n_pad = 5, min_seg_length = 2)
+				 max_pix_sep = 5, n_pad = 5, min_seg_length = 2,
+				 self_calibrate = true, max_assoc_iter = 5, assoc_loo_nsigma = 7.0,
+				 assoc_only = false)
 
     #use running median to help identify skyline peaks in data
     #(especially for bright stars)
@@ -59,7 +98,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
     above_thresh = findall(x -> x > thresh, scaled_flux_vec)
 
     if size(above_thresh,1) < 1
-        return nothing, nothing, nothing
+        return nothing, nothing, nothing, (0, true, 0)
     end
 
     # Group indices into segments, combining those less than max_pix_sep pixels apart
@@ -173,27 +212,96 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
 
     # println("Best offset: $best_offset Å with $(max_good) good differences")
 
-    adjusted_wavs = seg_rough_wavs .+ best_offset
-    d2th_wavs = zeros(Float64, length(adjusted_wavs))
-    nearest_idx = zeros(Int, length(adjusted_wavs))
-    th_norm_flux = zeros(Float64, length(adjusted_wavs))
-    for (i, w) in enumerate(adjusted_wavs)
-        nearest_idx[i] = argmin(abs.(w .- bright_wavs))
-        d2th_wavs[i] = abs(w - bright_wavs[nearest_idx[i]])
-        th_norm_flux[i] = bright_lines.model_rel_int[nearest_idx[i]]
-    end
+    seg_pix = mean.(segments)
+    pred_wavs = seg_rough_wavs .+ best_offset
+    nearest_idx, d2th_wavs, msk2use = assign_segments(pred_wavs, bright_wavs)
 
-    is_closest = zeros(Bool, length(d2th_wavs))
-    for n in unique(nearest_idx)
-        matches = findall(x -> x == n, nearest_idx)
-        is_closest[matches] .= false
-        closest_match = matches[argmin(d2th_wavs[matches])]
-        is_closest[closest_match] = true
+    # ---- self-calibrating association -------------------------------------
+    # The rough model (quartic or legacy linear) is only a SEED: after the
+    # initial nearest-line assignment, a low-order correction to the rough
+    # model is fit to THIS fiber's own (segment pixel, assigned wavelength)
+    # pairs -- with leave-one-out rejection of inconsistent pairs (thresholds
+    # relative to the pairs' own scatter, no absolute wavelength numbers) --
+    # and all segments are re-associated under the corrected, data-driven
+    # model. Iterating to a fixed point makes the association depend on the
+    # night's own data, not on the hardcoded seed: a wrong seed (curvature
+    # error, instrument re-registration) is corrected here instead of
+    # silently mislabeling lines. Convergence = the segment->line assignment
+    # repeats; failure to converge within `max_assoc_iter` is flagged loudly
+    # (assoc_converged = false in the skyLinePeaks product).
+    assoc_niter = 0
+    assoc_converged = true
+    assoc_ndrop = 0
+    if self_calibrate
+        xnorm = (seg_pix .- (N_XPIX ÷ 2)) ./ N_XPIX
+        # scatter floor: segment centroids are means of integer pixel indices
+        # (quantized at the ~0.3 px level), expressed in wavelength through the
+        # model's own local dispersion -- a resolution scale, not a position
+        # lookup
+        floor_ang = 0.3 * abs(rough_dispersion(N_XPIX ÷ 2, rw))
+        prev_assign = nearest_idx .* msk2use
+        assoc_converged = false
+        for iter in 1:max_assoc_iter
+            assoc_niter = iter
+            use = findall(msk2use)
+            if length(use) < 5
+                # too few pairs to self-calibrate; keep the seed association
+                assoc_converged = true
+                break
+            end
+            # smooth wavelength-space correction to the seed model, robust to
+            # misassigned pairs via sequential LOO rejection
+            dlam = bright_wavs[nearest_idx[use]] .- seg_rough_wavs[use]
+            keep, cq, _ = loo_poly_reject(xnorm[use], dlam; porder = 2,
+                nsigma = assoc_loo_nsigma, max_drop_frac = 1 / 3,
+                scatter_floor = floor_ang)
+            assoc_ndrop = length(use) - count(keep)
+            pred_wavs = seg_rough_wavs .+ positional_poly_mat(xnorm, porder = 2) * cq
+            new_nearest, new_d2, new_msk = assign_segments(pred_wavs, bright_wavs)
+            new_assign = new_nearest .* new_msk
+            converged_now = (new_assign == prev_assign)
+            nearest_idx, d2th_wavs, msk2use = new_nearest, new_d2, new_msk
+            if converged_now
+                assoc_converged = true
+                break
+            end
+            prev_assign = new_assign
+        end
+        # final consistency cut: pairs inconsistent with the converged
+        # data-driven model are removed from the emitted association entirely.
+        # (A stolen label whose own feature is absent re-associates to the
+        # thief peak whenever the thief sits inside the acceptance radius --
+        # e.g. the 5.7 A 15546->15540 mode; it fails this cut instead, so the
+        # label goes unmeasured rather than silently wrong.)
+        use = findall(msk2use)
+        if length(use) >= 5
+            dlam = bright_wavs[nearest_idx[use]] .- seg_rough_wavs[use]
+            keep, _, _ = loo_poly_reject(xnorm[use], dlam; porder = 2,
+                nsigma = assoc_loo_nsigma, max_drop_frac = 1 / 3,
+                scatter_floor = floor_ang)
+            assoc_ndrop = length(use) - count(keep)
+            msk2use[use[.!keep]] .= false
+        end
     end
+    assoc_qa = (assoc_niter, assoc_converged, assoc_ndrop)
 
-    msk2use = is_closest .& (d2th_wavs .<= 10)
+    th_norm_flux = [bright_lines.model_rel_int[nearest_idx[i]]
+                    for i in eachindex(nearest_idx)]
     if count(msk2use) < 1
-        return nothing, nothing, nothing
+        return nothing, nothing, nothing, assoc_qa
+    end
+
+    if assoc_only
+        # association-stage result without the (expensive) profile fits:
+        # rows are [segment centroid pixel; assigned catalog centroid; linindx]
+        sel = findall(msk2use)
+        amat = zeros(Float64, 3, length(sel))
+        for (k, i) in enumerate(sel)
+            ref = nearest_idx[i]
+            amat[:, k] .= [seg_pix[i], bright_lines.wave_cen_ang[ref],
+                bright_lines.linindx[ref]]
+        end
+        return amat, best_offset, length(sel), assoc_qa
     end
     max_obs_flux = maximum(segment_fluxes[msk2use])
     obs_norm_flux = segment_fluxes ./ max_obs_flux
@@ -207,7 +315,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
     # every selected (class A/B) row is a clean fit-eligible Lambda-doublet by
     # construction of the generated list, so no per-row cleanliness mask is needed
     # msk2use .&= (abs.(obs_norm_flux .- th_norm_flux) .<= 0.3)
-    cen_pixs = mean.(segments[msk2use])
+    cen_pixs = seg_pix[msk2use]
 
     ######
 
@@ -306,7 +414,7 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
     th_norm_flux = map(x -> x[3], tout)
     th_norm_flux ./= maximum(th_norm_flux)
     mskFlux = ones(Bool, length(cen_pixs)) #.& (abs.(obs_norm_flux[msk2use] .- th_norm_flux) .<= 0.15) # chip b needs this, but chip a/c hates it
-    return pmat[:, mskFlux], best_offset, count(mskFlux)
+    return pmat[:, mskFlux], best_offset, count(mskFlux), assoc_qa
 end
 
 function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_mode = "commit_same")
@@ -327,6 +435,16 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     end
     pout = map(get_sky_peaks_partial, eachcol(flux_1d))
     boff = map(x -> replace_data_1(x[2]), pout)
+    # self-calibrating association QA (see get_sky_peaks): iterations used,
+    # convergence, and number of LOO-rejected pairs, per fiber
+    assoc_niter = map(x -> x[4][1], pout)
+    assoc_converged = map(x -> x[4][2], pout)
+    assoc_ndrop = map(x -> x[4][3], pout)
+    n_unconverged = count(.!assoc_converged)
+    if n_unconverged > 0
+        println("ASSOC NOT CONVERGED for $(n_unconverged) fibers in $(fname): " *
+                "self-calibrating sky-line association hit max iterations")
+    end
 
     unique_skyline_inds = sort(unique(vcat(map(x -> get_last_ind(x[1]), pout)...)))
     # wavecal class per line (aligned with the sky_line_mat rows), recorded in the
@@ -392,7 +510,9 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     # attrs(f["boff"])["axis_1"] = "fibers"
     # close(f)
 
-    safe_jldsave(outname, sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, line_class = line_class, no_metadata = true)
+    safe_jldsave(outname, sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, line_class = line_class,
+        assoc_niter = collect(assoc_niter), assoc_converged = collect(assoc_converged),
+        assoc_ndrop = collect(assoc_ndrop), no_metadata = true)
 
     return
 end
