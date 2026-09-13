@@ -1,0 +1,11 @@
+# sha256 checksums of the cached sky line-list source files (verify: sha256sum -c).
+# Retrieval 2026-09-12 (see scripts/cal/make_sky_linelist.jl header for URLs and citations).
+# The MoLLIST-OH files were retrieved as .bz2 from ExoMol and stored decompressed here;
+# the original archives had sha256
+#   d24dd7e4152c7773b85aed0c406a99881d4ef2d3d8746baa557713349014c48e  16O-1H__MoLLIST-OH.states.bz2
+#   fde49b6b7be7bc1b5d1c8d9a6a0c7635eba0e6c13f4fd7e4d47d2befd603dbda  16O-1H__MoLLIST-OH.trans.bz2
+d60485ca93c2c2e49e453a748a2fa3a5fdf9ce2f87f77d5a6e0048b2a92a7e32  16O-1H__MoLLIST-OH.states
+1757f77d89d5e0377d219b5f5d057953f0d7e91993e718224197d0c6ab755690  16O-1H__MoLLIST-OH.trans
+1bd8269a737d4392dcb320b22e702eaf341077af35b2863e20be250b88da70f6  oliva2015_table1.dat
+f422ef73e0461680c8264a706f915ba86d4edb7d08ed5055439cc192cf99b9ee  rousselot_vac.txt
+44189530877db5c942fb7073a4280e04cc8c9c2f4d9a471df85b6c79e9162ade  drp_airglow.txt

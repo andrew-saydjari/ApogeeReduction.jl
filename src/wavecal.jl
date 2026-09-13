@@ -1,5 +1,6 @@
 using HDF5
 using Polynomials: Polynomial, fit
+using LinearAlgebra: qr
 
 function linear_loss_fit(x, y; wporder = 2, returnL2only = false, linparam = nothing)
     A = positional_poly_mat(x, porder = wporder)
@@ -277,13 +278,15 @@ function ChipPolyParams2Params(chipPolyParams)
 end
 
 # Sky line wavecal
-#function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
-function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same")
-    outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
-    if check_file(outname, mode = checkpoint_mode)
-        return outname
-    end
+"""
+    sky_wavecal_chipPolyParams0(fname; cporder = 0, fibInds = 1:N_FIBERS)
 
+Initial guesses for the (low-order) chip-transform polynomial parameters of
+the per-fiber sky wavelength solution, chosen per telescope from the file
+name. Factored out of `get_and_save_sky_wavecal` so offline validation can
+run the identical fit.
+"""
+function sky_wavecal_chipPolyParams0(fname; cporder = 0, fibInds = 1:N_FIBERS)
     # initial guess for the (low-order)chip polynomial parameters
     if occursin("_apo_", fname)
         # chipPolyParams0 = [-1.0716 1.00111
@@ -323,7 +326,6 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         scale_func_chip3 = Polynomial([1.0, 0.0])
     end
 
-    fibInds = 1:N_FIBERS
     chipPolyParams0 = zeros(Float64, (size(fibInds, 1), N_CHIPS, cporder + 1))
     chipPolyParams0[:, 1, 1] .= offset_func_chip1.(fibInds)
     chipPolyParams0[:, 2, 1] .= 0.0
@@ -333,15 +335,39 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         chipPolyParams0[:, 2, 2] .= 1.0
         chipPolyParams0[:, 3, 2] .= scale_func_chip3.(fibInds)
     end
+    return chipPolyParams0
+end
+
+#function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
+function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same")
+    outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
+    if check_file(outname, mode = checkpoint_mode)
+        return outname
+    end
+
+    fibInds = 1:N_FIBERS
+    chipPolyParams0 = sky_wavecal_chipPolyParams0(fname; cporder = cporder, fibInds = fibInds)
 
     sky_line_uxlst, sky_line_fwlst, sky_line_chipInt = ingest_skyLines_exp(fname)
     if size(sky_line_uxlst, 1) < 1
         return nothing
     end
-    linParams, nlParams,
-    resid_vec = get_sky_wavecal(
+    linParams, nlParams, resid_vec,
+    loo_resid, loo_dropped, loo_status = get_sky_wavecal(
         sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
         chipPolyParams0; cporder = cporder, wporder = wporder)
+    # remove LOO-rejected assignments from the ingest arrays so the
+    # interpolated-parameter constant-offset refit below cannot see them
+    for fibIndx in fibInds
+        bad = findall(view(loo_dropped, fibIndx, :))
+        sky_line_uxlst[bad, fibIndx] .= NaN
+        sky_line_fwlst[bad, fibIndx] .= NaN
+    end
+    n_wholesale = count(loo_status .== LOO_WHOLESALE)
+    if n_wholesale > 0
+        println("LOO WHOLESALE flag on $(n_wholesale) fibers in $(fname): " *
+                "association-scale failure survived to the wavelength solution")
+    end
     resid_xt = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(resid_xt, NaN)
 
@@ -429,7 +455,9 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         resid_xt = interp_resid_xt,
         raw_linParams = linParams, raw_nlParams = nlParams,
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln,
-        raw_resid_xt = resid_xt, no_metadata = true) # KEVIN FIX THIS!!!!
+        raw_resid_xt = resid_xt,
+        loo_resid = loo_resid, loo_dropped = collect(loo_dropped),
+        loo_status = collect(loo_status), no_metadata = true) # KEVIN FIX THIS!!!!
     return outname
 end
 
@@ -718,35 +746,513 @@ function get_sky_dither_per_fiber(
     end
 end
 
+"""
+    loo_linear_residuals(A, y)
+
+Exact leave-one-out (LOO) residuals of the least-squares fit `y ~ A c`,
+computed in closed form from one QR factorization: `r_i = e_i / (1 - h_ii)`,
+where `e` are the in-sample residuals and `h_ii` the leverages (diagonal of
+the hat matrix). `r_i` equals `y_i` minus the prediction of the fit performed
+WITHOUT point i -- no per-point refits are needed. Returns `(r_loo, leverage)`;
+points whose leverage is within 1e-10 of 1 (the point fully determines the
+fit, so its LOO prediction is undefined) carry NaN.
+"""
+function loo_linear_residuals(A, y)
+    F = qr(A)
+    c = F \ y
+    e = y .- A * c
+    Qthin = Matrix(F.Q)
+    h = vec(sum(abs2, Qthin, dims = 2))
+    r = similar(e)
+    for i in eachindex(e)
+        r[i] = h[i] < 1 - 1e-10 ? e[i] / (1 - h[i]) : NaN
+    end
+    return r, h
+end
+
+"""
+    each_combination(f, n, k)
+
+Call `f(idx)` for every k-element combination `idx` (an Int vector, reused
+in place -- copy it if you keep it) of `1:n`. Standard lexicographic
+next-combination iteration; no dependencies.
+"""
+function each_combination(f, n, k)
+    k <= n || return nothing
+    idx = collect(1:k)
+    while true
+        f(idx)
+        j = k
+        while j >= 1 && idx[j] == n - k + j
+            j -= 1
+        end
+        j == 0 && break
+        idx[j] += 1
+        for l in (j + 1):k
+            idx[l] = idx[l - 1] + 1
+        end
+    end
+    return nothing
+end
+
+"""
+    lms_poly_classify(x, y; porder = 2, nsigma = 7.0, scatter_floor = 0.0)
+
+Least-median-of-squares-style robust outlier classification against a
+polynomial trend: every (porder+2)-element subset of the points is fit by
+least squares, the winning core is the one minimizing the median absolute
+residual over ALL points, the scatter scale is 1.4826 x that minimal median
+(bounded below by `scatter_floor`), and a point is kept when its |residual|
+against the core fit, normalized by its prediction-leverage factor
+`sqrt(1 + h)` (a point far from the core -- e.g. a chip-edge line -- is
+predicted by extrapolation and legitimately misses by more), is <= `nsigma`
+x scale. Because the core is chosen combinatorially, the classification
+survives up to ~half the points being corrupted (where sequential
+leave-one-out deletion suffers masking: the corrupted fit inflates every
+residual and no single point stands out). The threshold is a ratio against
+the data's own scatter -- never an absolute wavelength number. Returns
+`(keep::BitVector, core_coeffs, scale)`.
+"""
+function lms_poly_classify(x, y; porder = 2, nsigma = 7.0, scatter_floor = 0.0)
+    n = length(x)
+    k = porder + 2
+    if n < k + 1
+        # too few points to distinguish core from contamination
+        A = positional_poly_mat(x, porder = porder)
+        return trues(n), A \ y, NaN
+    end
+    best_score = Inf
+    best_coeffs = zeros(porder + 1)
+    best_idx = collect(1:k)
+    resid = zeros(n)
+    Afull = positional_poly_mat(x, porder = porder)
+    each_combination(n, k) do idx
+        A = positional_poly_mat(x[idx], porder = porder)
+        c = try
+            A \ y[idx]
+        catch
+            return
+        end
+        resid .= abs.(y .- Afull * c)
+        score = median(resid)
+        if score < best_score
+            best_score = score
+            best_coeffs .= c
+            best_idx .= idx
+        end
+    end
+    s = max(1.4826 * best_score, scatter_floor)
+    Acore = positional_poly_mat(x[best_idx], porder = porder)
+    keep = trues(n)
+    for i in 1:n
+        h = i in best_idx ? 0.0 : prediction_leverage(Acore, view(Afull, i, :))
+        keep[i] = abs(y[i] - (view(Afull, i, :)' * best_coeffs)) <=
+                  nsigma * s * sqrt(1 + h)
+    end
+    # refit the polynomial on everything kept (more stable than the tiny core)
+    ki = findall(keep)
+    coeffs = length(ki) >= porder + 1 ?
+             positional_poly_mat(x[ki], porder = porder) \ y[ki] : best_coeffs
+    return keep, coeffs, s
+end
+
+"""
+    loo_poly_reject(x, y; porder = 2, nsigma = 7.0, max_drop_frac = 1/3,
+                    scatter_floor = 0.0)
+
+Robust polynomial fit `y ~ poly(x)`: an LMS combinatorial core
+(`lms_poly_classify`) first protects against heavy contamination, then
+sequential leave-one-out rejection refines the kept set. In the sequential
+stage a point is an outlier when its |LOO residual| exceeds `nsigma` times
+the robust scatter (1.4826 x median |LOO residual|) of the OTHER points --
+all thresholds are ratios against the data's own scatter, never absolute
+wavelength numbers. Dropping stops when clean or when `max_drop_frac` of
+the points are out (`capped = true`; the caller should treat the fit as
+suspect). `scatter_floor` bounds the scatter estimate from below (e.g. by a
+resolution scale such as the segment-centroid pixel quantization) so a run
+of unusually consistent points cannot make the threshold arbitrarily tight.
+Returns `(keep::BitVector, coeffs, capped)`.
+"""
+function loo_poly_reject(x, y; porder = 2, nsigma = 7.0, max_drop_frac = 1 / 3,
+        scatter_floor = 0.0)
+    n = length(x)
+    keep, _, _ = lms_poly_classify(x, y; porder = porder, nsigma = nsigma,
+        scatter_floor = scatter_floor)
+    maxdrop = max(floor(Int, n * max_drop_frac), n - count(keep))
+    capped = n - count(keep) >= maxdrop && count(keep) < n
+    while true
+        ki = findall(keep)
+        A = positional_poly_mat(x[ki], porder = porder)
+        r, h = loo_linear_residuals(A, y[ki])
+        # studentized: e/sqrt(1-h) has common variance sigma^2, so edge
+        # (high-leverage) points are not over-penalized by the 1/(1-h) LOO
+        # inflation
+        absr = abs.(r) .* sqrt.(max.(1 .- h, 0.0))
+        worst, worst_ratio = 0, 0.0
+        for i in eachindex(ki)
+            isnan(absr[i]) && continue
+            others = [absr[j] for j in eachindex(ki) if j != i && !isnan(absr[j])]
+            isempty(others) && continue
+            s = max(1.4826 * median(others), scatter_floor)
+            ratio = s > 0 ? absr[i] / s : Inf
+            if ratio > worst_ratio
+                worst_ratio, worst = ratio, i
+            end
+        end
+        if worst_ratio > nsigma && worst > 0
+            if n - count(keep) >= maxdrop
+                capped = true
+                break
+            end
+            keep[ki[worst]] = false
+        else
+            break
+        end
+    end
+    ki = findall(keep)
+    A = positional_poly_mat(x[ki], porder = porder)
+    return keep, A \ y[ki], capped
+end
+
+"""
+    prediction_leverage(A, a)
+
+`a' (A'A)^-1 a` for a design matrix `A` and a prediction row `a` -- the
+leverage of an out-of-sample point. The variance of a holdout residual is
+`sigma^2 (1 + h)`, so holdout residuals must be normalized by `sqrt(1 + h)`
+before comparison against the in-sample scatter (an excluded point at the
+edge of the fit range is predicted by extrapolation and legitimately misses
+by more than an interior one).
+"""
+function prediction_leverage(A, a)
+    R = qr(A).R
+    z = R' \ collect(a)
+    return sum(abs2, z)
+end
+
+# loo_status codes recorded per fiber in the waveCalSkyLine product
+const LOO_OK = Int8(0)        # every measured line passed the LOO test
+const LOO_DROPPED = Int8(1)   # >=1 line failed, was dropped from the fit + flagged
+const LOO_WHOLESALE = Int8(2) # drop cap hit: association-scale failure, fit suspect
+const LOO_UNTESTED = Int8(3)  # too few measured lines to LOO-test
+
+"""
+    fit_fiber_sky_wavecal(xv, yv, chipIntv, chipPolyParams; wporder, cporder)
+
+One per-fiber sky wavelength-solution fit (the loop body of
+`get_sky_wavecal`): LBFGS over the chip-transform (nonlinear) parameters with
+the wavelength polynomial solved linearly at each step. On return
+`chipPolyParams` is left consistent with the OPTIMAL nonlinear parameters.
+Returns `(nlParamsOpt, linParamsOpt, linResid)`.
+"""
+function fit_fiber_sky_wavecal(xv, yv, chipIntv, chipPolyParams; wporder = 2, cporder = 1)
+    inparams = ChipPolyParams2Params(chipPolyParams)
+    function nonlinear_loss_fit_partial(p)
+        nonlinear_loss_fit!(chipPolyParams, p, xv, yv, chipIntv;
+            wporder = wporder, cporder = cporder, returnL2only = true)
+    end
+    res = optimize(
+        nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+    nlParamsOpt = Optim.minimizer(res)
+    linResid,
+    linParamsOpt = nonlinear_loss_fit!(
+        chipPolyParams, nlParamsOpt, xv, yv, chipIntv;
+        wporder = wporder, cporder = cporder, returnL2only = false)
+    # leave chipPolyParams at the optimum (the last LBFGS evaluation need not be it)
+    params2ChipPolyParams!(chipPolyParams, nlParamsOpt, cporder)
+    return nlParamsOpt, linParamsOpt, linResid
+end
+
+"""
+    loo_validate_fiber(xv, yv, chipIntv, chipPolyParams0;
+                       wporder = 4, cporder = 0, loo_nsigma = 12.0,
+                       chip_screen_nsigma = 12.0, loo_max_drop_frac = 1/3)
+
+Leave-one-out validation of every sky line feeding one fiber's wavelength
+solution, in three passes:
+
+1. **Per-chip robust screen**: within each chip, the (x, catalog-wavelength)
+   pairs are classified against a quadratic trend with an LMS combinatorial
+   core (`lms_poly_classify`). Misassignments -- the measured peak actually
+   belongs to a neighboring feature -- sit off the trend by the line
+   separation (the known theft modes: 5.7 A for 15546->15540, ~10 A for
+   16702->16692, 27.4 A for the 16442 label landing on 16414), while correct
+   lines follow it to the within-chip truncation scale (~0.1 A). The
+   combinatorial core survives several simultaneous misassignments, where a
+   joint least-squares fit would smear the corruption into every residual
+   and mask it.
+2. **Joint fit + sequential LOO**: the full 3-chip solution is fit on the
+   surviving lines, and each line's exact LOO residual (`loo_linear_residuals`
+   at the linear stage, nonlinear chip parameters refit between drops) is
+   tested against `loo_nsigma` times the robust scatter of the OTHER lines'
+   LOO residuals. Correct assignments sit at the measurement-noise level
+   (5-30 mA in the healthy corpus) -- 2-4 orders of magnitude below a
+   misassignment.
+3. **Rescue**: every screened-out line gets a holdout residual against the
+   final cleaned solution (it took no part in that fit -- this IS its LOO
+   residual); lines consistent with the kept lines' own LOO scatter are
+   re-admitted and the solution refit once, so an over-eager per-chip screen
+   cannot silently thin the fit.
+
+Every threshold is a ratio against the fiber's own scatter -- never an
+absolute wavelength number -- so no hardcoded pixel->wavelength lookup is
+load-bearing for correctness. If more than `loo_max_drop_frac` of the lines
+end up dropped the fiber is flagged `LOO_WHOLESALE` (association-scale
+failure; the self-calibrating re-association in `get_sky_peaks` should have
+prevented it).
+
+Returns `(dropped, loo_resid, status, nlParams, linParams, resid)`; `resid`
+is NaN for dropped lines (they are excluded from the returned fit), and
+`loo_resid` for a dropped line is its holdout residual against the final
+cleaned solution.
+"""
+function loo_validate_fiber(xv, yv, chipIntv, chipPolyParams0;
+        wporder = 4, cporder = 0, loo_nsigma = 12.0, chip_screen_nsigma = 12.0,
+        loo_max_drop_frac = 1 / 3)
+    nline = length(xv)
+    dropped = falses(nline)
+    loo_resid = fill(NaN, nline)
+    resid = fill(NaN, nline)
+    msk = .!isnan.(xv)
+    n0 = count(msk)
+    nparam = (wporder + 1) + 2 * (cporder + 1)
+    chipPolyParams = copy(chipPolyParams0)
+    if n0 < nparam + 3
+        # not enough lines for a meaningful LOO test; fit as before, flag untested
+        nl, lin, lr = fit_fiber_sky_wavecal(
+            xv[msk], yv[msk], chipIntv[msk], chipPolyParams;
+            wporder = wporder, cporder = cporder)
+        resid[msk] .= lr
+        return dropped, loo_resid, LOO_UNTESTED, nl, lin, resid
+    end
+
+    # ---- pass 1: per-chip LMS screen --------------------------------------
+    # Two passes: first collect each chip's own LMS scatter scale, then
+    # classify with every chip's scale floored by the median of the chips'
+    # scales. On a 5-line chip the LMS median is the 3rd-smallest residual of
+    # a 4-point core -- essentially interpolation noise -- and without the
+    # cross-chip floor the threshold collapses and honest edge lines get
+    # flagged; the floor is still derived entirely from this fiber's own
+    # measurements (never an absolute wavelength number).
+    chip_ci = [findall((chipIntv .== c) .& msk) for c in 1:N_CHIPS]
+    chip_s = fill(NaN, N_CHIPS)
+    for c in 1:N_CHIPS
+        length(chip_ci[c]) >= 5 || continue
+        _, _, s = lms_poly_classify(xv[chip_ci[c]], yv[chip_ci[c]];
+            porder = 2, nsigma = chip_screen_nsigma)
+        chip_s[c] = s
+    end
+    s_floor = any(.!isnan.(chip_s)) ? median(filter(!isnan, chip_s)) : 0.0
+    for c in 1:N_CHIPS
+        length(chip_ci[c]) >= 5 || continue
+        keep, _, _ = lms_poly_classify(xv[chip_ci[c]], yv[chip_ci[c]];
+            porder = 2, nsigma = chip_screen_nsigma, scatter_floor = s_floor)
+        dropped[chip_ci[c][.!keep]] .= true
+    end
+    active = msk .& .!dropped
+    if count(active) < nparam + 1
+        # screen left too little to fit -- distrust it, fall back to all lines
+        dropped .= false
+        active = copy(msk)
+    end
+
+    # ---- pass 2: joint fit + sequential LOO -------------------------------
+    maxdrop = max(floor(Int, n0 * loo_max_drop_frac), count(dropped))
+    status = LOO_OK
+    local nl, lin, lr, ai, A_active, r_std
+    function joint_fit_and_loo!()
+        chipPolyParams .= chipPolyParams0
+        ai = findall(active)
+        nl, lin, lr = fit_fiber_sky_wavecal(
+            xv[ai], yv[ai], chipIntv[ai], chipPolyParams;
+            wporder = wporder, cporder = cporder)
+        xt = zeros(Float64, length(ai))
+        for c in 1:N_CHIPS
+            m = chipIntv[ai] .== c
+            xt[m] .= transform_x_chips(xv[ai][m], chipPolyParams[c, :])
+        end
+        A_active = positional_poly_mat(xt, porder = wporder)
+        r, h = loo_linear_residuals(A_active, yv[ai])
+        loo_resid[ai] .= r
+        # studentized: e/sqrt(1-h) has common variance sigma^2, so the ratio
+        # test does not over-penalize high-leverage (chip-edge) lines, whose
+        # raw LOO residuals are inflated by 1/(1-h)
+        r_std = r .* sqrt.(max.(1 .- h, 0.0))
+        return r_std
+    end
+    function worst_loo(r)
+        absr = abs.(r)
+        worst, worst_ratio = 0, 0.0
+        for i in eachindex(r)
+            isnan(absr[i]) && continue
+            others = [absr[j] for j in eachindex(r) if j != i && !isnan(absr[j])]
+            isempty(others) && continue
+            s = 1.4826 * median(others)
+            ratio = s > 0 ? absr[i] / s : Inf
+            if ratio > worst_ratio
+                worst_ratio, worst = ratio, i
+            end
+        end
+        return worst, worst_ratio
+    end
+    while true
+        r = joint_fit_and_loo!()
+        worst, worst_ratio = worst_loo(r)
+        if worst_ratio > loo_nsigma && worst > 0
+            if count(dropped) >= maxdrop
+                status = LOO_WHOLESALE
+                break
+            end
+            dropped[ai[worst]] = true
+            active[ai[worst]] = false
+        else
+            break
+        end
+    end
+
+    # ---- pass 3: rescue screened lines consistent with the clean fit ------
+    di = findall(dropped)
+    if !isempty(di) && status != LOO_WHOLESALE
+        s_kept = 1.4826 * median(abs.(filter(!isnan, r_std)))
+        rescued = false
+        for i in di
+            xt_i = transform_x_chips(xv[i], chipPolyParams[chipIntv[i], :])
+            Ai = positional_poly_mat([xt_i], porder = wporder)
+            loo_resid[i] = yv[i] - (Ai * lin)[1]
+            # a holdout residual has variance sigma^2 (1 + h_out): normalize
+            # before comparing to the kept lines' (studentized) scatter
+            h_out = prediction_leverage(A_active, vec(Ai))
+            if s_kept > 0 && abs(loo_resid[i]) / sqrt(1 + h_out) <= loo_nsigma * s_kept
+                dropped[i] = false
+                active[i] = true
+                rescued = true
+            end
+        end
+        if rescued
+            r = joint_fit_and_loo!()
+            # one more sequential guard after the refit
+            while true
+                worst, worst_ratio = worst_loo(r)
+                if !(worst_ratio > loo_nsigma && worst > 0)
+                    break
+                end
+                if count(dropped) >= maxdrop
+                    status = LOO_WHOLESALE
+                    break
+                end
+                dropped[ai[worst]] = true
+                active[ai[worst]] = false
+                r = joint_fit_and_loo!()
+            end
+        end
+    end
+
+    if status != LOO_WHOLESALE && any(dropped)
+        status = LOO_DROPPED
+    end
+    if count(dropped) > n0 ÷ 2
+        status = LOO_WHOLESALE
+    end
+    # cross-chip wholesale tripwire: under the JOINT model the LOO residuals
+    # of correct lines are at the (chip-independent) measurement-noise level,
+    # so a chip whose kept lines still scatter far above its siblings' has a
+    # corrupted association that the within-chip screen could not see (>=
+    # half a chip consistently wrong is invisible from inside the chip --
+    # the other chips supply the scale anchor, still from the night's own
+    # data). Flag only; recovery belongs to the association stage.
+    if status != LOO_WHOLESALE
+        chip_loo_scale = fill(NaN, N_CHIPS)
+        for c in 1:N_CHIPS
+            vals = [abs(r_std[k]) for (k, i) in enumerate(ai)
+                    if chipIntv[i] == c && !isnan(r_std[k])]
+            length(vals) >= 3 && (chip_loo_scale[c] = 1.4826 * median(vals))
+        end
+        for c in 1:N_CHIPS
+            isnan(chip_loo_scale[c]) && continue
+            others = [chip_loo_scale[cc]
+                      for cc in 1:N_CHIPS if cc != c && !isnan(chip_loo_scale[cc])]
+            isempty(others) && continue
+            if chip_loo_scale[c] > loo_nsigma * max(median(others), eps())
+                status = LOO_WHOLESALE
+            end
+        end
+    end
+    resid[ai] .= lr
+    # final holdout residuals of everything still dropped
+    for i in findall(dropped)
+        xt_i = transform_x_chips(xv[i], chipPolyParams[chipIntv[i], :])
+        Ai = positional_poly_mat([xt_i], porder = wporder)
+        loo_resid[i] = yv[i] - (Ai * lin)[1]
+        resid[i] = NaN
+    end
+    return dropped, loo_resid, status, nl, lin, resid
+end
+
 function get_sky_wavecal(
-        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2)
+        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0;
+        cporder = 1, wporder = 2,
+        loo_reject = true, loo_nsigma = 12.0, loo_max_drop_frac = 1 / 3)
+    nline = size(sky_line_uxlst, 1)
     linParams = zeros(Float64, N_FIBERS, wporder + 1)
     nlParams = zeros(Float64, N_FIBERS, 2 * (cporder + 1))
-    resid_vec = zeros(Float64, N_FIBERS, size(sky_line_uxlst, 1))
+    resid_vec = zeros(Float64, N_FIBERS, nline)
     fill!(resid_vec, NaN)
+    loo_resid = fill(NaN, N_FIBERS, nline)
+    loo_dropped = falses(N_FIBERS, nline)
+    loo_status = fill(LOO_UNTESTED, N_FIBERS)
     for i in 1:N_FIBERS
         xv = sky_line_uxlst[:, i]
         yv = sky_line_fwlst[:, i]
         chipIntv = sky_line_chipInt[:, i]
         msk = .!isnan.(xv)
-        chipPolyParams = copy(chipPolyParams0[i, :, :])
-        inparams = ChipPolyParams2Params(chipPolyParams)
-        function nonlinear_loss_fit_partial(inparams)
-            nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
-                wporder = wporder, cporder = cporder, returnL2only = true)
+        if count(msk) == 0
+            continue
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
-        nlParamsOpt = Optim.minimizer(res)
-        linResid,
-        linParamsOpt = nonlinear_loss_fit!(
-            chipPolyParams, nlParamsOpt, xv[msk], yv[msk], chipIntv[msk];
-            wporder = wporder, cporder = cporder, returnL2only = false)
-        nlParams[i, :] = nlParamsOpt
-        linParams[i, :] = linParamsOpt
-        resid_vec[i, msk] = linResid
+        if loo_reject
+            d, rl, st, nlp, lp, rv = loo_validate_fiber(
+                xv, yv, chipIntv, chipPolyParams0[i, :, :];
+                wporder = wporder, cporder = cporder,
+                loo_nsigma = loo_nsigma, loo_max_drop_frac = loo_max_drop_frac)
+            loo_dropped[i, :] .= d
+            loo_resid[i, :] .= rl
+            loo_status[i] = st
+            nlParams[i, :] .= nlp
+            linParams[i, :] .= lp
+            resid_vec[i, :] .= rv
+        else
+            chipPolyParams = copy(chipPolyParams0[i, :, :])
+            nlParamsOpt, linParamsOpt, linResid = fit_fiber_sky_wavecal(
+                xv[msk], yv[msk], chipIntv[msk], chipPolyParams;
+                wporder = wporder, cporder = cporder)
+            nlParams[i, :] = nlParamsOpt
+            linParams[i, :] = linParamsOpt
+            resid_vec[i, msk] = linResid
+        end
     end
-    return linParams, nlParams, resid_vec
+    # cross-fiber wholesale tripwire: a fiber whose kept-line residual
+    # scatter is far above the exposure's typical fiber has no
+    # self-consistent solution. "Consistently bad" is invisible from inside
+    # one fiber when most of its lines are corrupted together (the per-fiber
+    # ratio tests are scale-free by design); the other fibers of the same
+    # exposure supply the missing scale anchor -- still the night's own data,
+    # never an absolute number.
+    if loo_reject
+        s_fib = fill(NaN, N_FIBERS)
+        for i in 1:N_FIBERS
+            vals = abs.(filter(!isnan, resid_vec[i, :]))
+            length(vals) >= 3 && (s_fib[i] = 1.4826 * median(vals))
+        end
+        med_s = median(filter(!isnan, s_fib))
+        if !isnan(med_s) && med_s > 0
+            for i in 1:N_FIBERS
+                if !isnan(s_fib[i]) && s_fib[i] > loo_nsigma * med_s &&
+                   loo_status[i] != LOO_UNTESTED
+                    loo_status[i] = LOO_WHOLESALE
+                end
+            end
+        end
+    end
+    return linParams, nlParams, resid_vec, loo_resid, loo_dropped, loo_status
 end
 
 # FPI line wavecal
@@ -1595,9 +2101,23 @@ function ingest_skyLines_file(fileName)
         println(fileName)
         read(f["sky_line_mat_clean"])
     end
+    # wavecal class per line (see WAVECAL_CLASS_CODES): only class B (code 2)
+    # enters the wavelength solution; class-A guards are fit for association
+    # protection and QA but NaN-masked here, which removes them from every
+    # downstream fit (per-exposure, nightAve, dither) via the existing NaN
+    # handling. Files written before the class column existed carry no
+    # line_class dataset and are ingested unmasked (all lines were class B).
+    line_class = if haskey(f, "line_class")
+        read(f["line_class"])
+    else
+        fill(2, size(sky_line_mat_clean, 1))
+    end
     close(f)
     sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
+    not_for_solution = line_class .!= 2
+    sky_line_xlst[not_for_solution, :] .= NaN
+    sky_line_wlst[not_for_solution, :] .= NaN
     return sky_line_xlst, sky_line_wlst
 end
 

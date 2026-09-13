@@ -1,0 +1,19 @@
+# Quartic rough wavelength model per (telescope, chip):
+#   lambda(pix) = sum_k c_k * x^k,  x = (pix - 1024) / 2048,  lambda vacuum Angstroms.
+# Fit from the adopted (FPI) nightAve wavelength solutions (median over fibers),
+# reference nights apo 60105 and lco 60105 (pass-1 DR21 products), 2026-09-12.
+# Max |residual| vs the reference solution < 0.004 A for every (tele, chip), vs
+# 9-17 A for the previous linear rough model -- the curvature error of the linear
+# model is what made the sky-line association fragile (a single global offset
+# cannot place all lines when the shape error varies across the chip).
+# Consumed by scripts/cal/make_roughwave_dict.jl to regenerate data/roughwave_dict.jld2.
+# Cheap QA that the reference is still valid: the nightly per-chip best_offset from
+# get_sky_peaks should sit near 0; regenerate if the spectrograph is ever
+# re-registered by more than ~3 A.
+tele,chip,c0,c1,c2,c3,c4,max_resid_ang
+apo,R,16719.943094,-483.275754,-46.582182,1.197764,0.022371,0.0023
+apo,G,16150.582377,-579.427336,-43.137998,1.035810,0.008389,0.0013
+apo,B,15478.934688,-668.744074,-39.978619,1.005594,-0.158626,0.0040
+lco,R,16726.514483,-486.218519,-46.633922,1.189487,-0.036879,0.0011
+lco,G,16152.483219,-582.476488,-43.181618,0.943888,0.064841,0.0016
+lco,B,15477.159561,-671.879618,-40.060805,0.921793,-0.076076,0.0013

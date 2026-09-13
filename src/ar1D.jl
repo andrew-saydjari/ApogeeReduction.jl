@@ -915,8 +915,10 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         if isnothing(backupWave_fname) || (!all(isfinite.(backupWaveSoln)))
             chipWaveSoln = zeros(N_XPIX, N_FIBERS, N_CHIPS)
             for (chipind, chip) in enumerate(CHIP_LIST)
-                chipWaveSoln[:, :, chipind] .= rough_linear_wave.(
-                    1:N_XPIX, a = roughwave_dict[tele][chip][1], b = roughwave_dict[tele][chip][2])
+                # quartic rough model when available (falls back to linear for
+                # legacy 4-element roughwave_dict entries)
+                chipWaveSoln[:, :, chipind] .= rough_wave.(
+                    1:N_XPIX, Ref(roughwave_dict[tele][chip]))
             end
             if !(image_type in ["dark", "internalflat", "quartzflat", "domeflat"])
                 println("No wavecal found for $(fname), using rough linear fallback as fallback")
