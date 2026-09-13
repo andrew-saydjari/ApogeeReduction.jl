@@ -138,8 +138,13 @@ GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/
 # LONGER EXISTS, so any caller still pointing at it fails loudly at startup
 # rather than silently skipping the check. See mved.txt in the old directory.
 # Only the v6 artifact moved; v1-v5 and the sweep outputs stay behind.
+#
+# 2026-09-13: v7 — retrained on pass-1 features with twilight-census ground
+# truth (training manifest: metadata/exposure_classifier_training_manifest_v7.csv,
+# tooling: scripts/classifier/). The v7 artifact must be copied into cal_ref/
+# before this config lands (hard error at startup otherwise, by design).
 EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
-                   "exposure_classifier/exposure_classifier_rf_v6.jld2")
+                   "exposure_classifier/exposure_classifier_rf_v7.jld2")
 
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {

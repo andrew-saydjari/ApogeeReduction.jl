@@ -94,7 +94,7 @@ function parse_commandline()
         required = false
         help = "exposure-type classifier artifact (JLD2). A calibration input, configured by path like --caldir_darks / --gain_read_cal_dir; airflow/dags/ar_common.py sets it for production. The post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). A path that does not exist is a hard error."
         arg_type = String
-        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_rf_v6.jld2"
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_rf_v7.jld2"
     end
     return parse_args(s)
 end

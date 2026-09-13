@@ -32,7 +32,7 @@
 #   AR_CALDIR_DARKS       dark cal dir  [2025_07_31/outdir_ref/]
 #   AR_CALDIR_FLATS       flat cal dir  [2025_07_31/outdir_ref/]
 #   AR_GAIN_READ_CAL_DIR  gain/readnoise cal dir [2026_09_06/pass_clean/]
-#   AR_EXP_CLASS_MODEL    exposure-type classifier artifact; unset = pinned v6
+#   AR_EXP_CLASS_MODEL    exposure-type classifier artifact; unset = pinned v7
 #                         default (check ON), "" = check OFF
 #   AR_WORKERS            Distributed workers for pipeline.jl / pipeline_2d_1d
 #                         in local mode [24 — headroom on 32-core ccalin051]
@@ -69,7 +69,7 @@ AR_JULIA_VERSION=${AR_JULIA_VERSION:-"1.11.0"}
 AR_CHECKPOINT_MODE=${AR_CHECKPOINT_MODE:-"commit_exists"}
 AR_CHIPS=${AR_CHIPS:-"RGB"}
 # Exposure-type classifier: ON BY DEFAULT, matching the production DAGs.
-# Unset -> pass no flag -> pipeline.jl uses its pinned v6 default.
+# Unset -> pass no flag -> pipeline.jl uses its pinned v7 default.
 # Set to "" -> pass --exp_class_model "" -> check off, deliberately.
 # ${VAR+set} distinguishes unset from set-to-empty; that is the mechanism.
 if [ "${AR_EXP_CLASS_MODEL+set}" = "set" ]; then
@@ -126,7 +126,7 @@ echo "  tele=$tele mjd=$mjd outdir=$outdir"
 echo "  almanac_src=$AR_ALMANAC_SRC"
 echo "  raw cluster=$AR_RAW_CLUSTER darks=$AR_CALDIR_DARKS flats=$AR_CALDIR_FLATS"
 echo "  gain/read=$AR_GAIN_READ_CAL_DIR workers=$AR_WORKERS julia=$AR_JULIA_VERSION"
-echo "  checkpoint_mode=$AR_CHECKPOINT_MODE chips=$AR_CHIPS exp_class_model='${AR_EXP_CLASS_MODEL-(pinned v6 default)}'"
+echo "  checkpoint_mode=$AR_CHECKPOINT_MODE chips=$AR_CHIPS exp_class_model='${AR_EXP_CLASS_MODEL-(pinned v7 default)}'"
 if [ "$AR_SLURM" = "true" ]; then
     echo "  mode=slurm SLURM_NTASKS=$SLURM_NTASKS nodes=${SLURM_NNODES:-?} nodelist=${SLURM_JOB_NODELIST:-?}"
 else
