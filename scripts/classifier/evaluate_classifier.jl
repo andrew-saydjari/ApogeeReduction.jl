@@ -144,3 +144,24 @@ end
 for v in values(groups)
     println("  identical group: expnums ", sort(v))
 end
+
+# ---------- 6. dark_persist (drives dark-frame masking) ----------
+# `exposure_predicted_bad` masks a commanded dark whenever the prediction is not
+# dark_q0t0u0, so the dark_persist class is the mechanism that keeps
+# persistence-contaminated darks out of dark cal stacks. Its labels are
+# constructed, not commanded, and the yield is ~2% of prev-bright darks — so it
+# is the class most sensitive to how the training pool was sampled. Compare the
+# two models on that population directly.
+println("\n================ DARK_PERSIST (dark-frame masking) ================")
+dk = man[(man.labeled .== "dark_q0t0u0") .& ok, :]
+dres = DataFrame(model = String[], n = Int[], pred_dark = Int[], pred_persist = Int[],
+    pred_other = Int[])
+for (nm, p) in (("v6", dk.v6_pred), ("v7", dk.v7_pred))
+    push!(dres, (nm, nrow(dk), sum(p .== "dark_q0t0u0"), sum(p .== "dark_persist"),
+        sum((p .!= "dark_q0t0u0") .& (p .!= "dark_persist"))))
+end
+show(dres, allrows = true, allcols = true)
+CSV.write(joinpath(parg["outdir"], "darkpersist_v6v7.csv"), dres)
+np = sum(man.content_label .== "dark_persist")
+nprec = sum((man.content_label .== "dark_persist") .& (man.v7_pred .== "dark_persist"))
+println("\nv7 dark_persist content labels: ", np, "; held-out recall: ", nprec, "/", np)

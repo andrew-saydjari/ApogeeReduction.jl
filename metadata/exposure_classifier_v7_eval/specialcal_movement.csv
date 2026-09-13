@@ -1,0 +1,10 @@
+cal_type,labeled,v6_pred,v7_pred,count
+b2b,quartzflat_q1t0u0,quartzflat_q1t0u0,quartzflat_q1t0u0,36
+rdL,internalflat_q0t0u0,internalflat_q0t0u0,internalflat_q0t0u0,6
+rdL,dark_q0t0u0,dark_q0t0u0,dark_q0t0u0,1
+sat,internalflat_q0t0u0,internalflat_q0t0u0,internalflat_q0t0u0,9
+spQF,quartzflat_q1t0u0,quartzflat_q1t0u0,quartzflat_q1t0u0,33
+uD,dark_q0t0u0,dark_q0t0u0,dark_q0t0u0,371
+uD,dark_q?t?u?,dark_q0t0u0,dark_q0t0u0,6
+uF,internalflat_q0t0u0,internalflat_q0t0u0,internalflat_q0t0u0,202
+uF,internalflat_q0t0u0,dark_q0t0u0,dark_q0t0u0,29

@@ -246,8 +246,24 @@ configured by path exactly like `caldir_darks` / `caldir_flats` /
 swapping models is a config change beside the other calibration inputs. The
 version is pinned (v7, retrained 2026-09-13 on pass-1 features with
 twilight-census ground truth; training manifest at
-`metadata/exposure_classifier_training_manifest_v7.csv`, retraining tooling in
+`metadata/exposure_classifier_training_manifest_v7.csv`, old-vs-new evaluation
+tables at `metadata/exposure_classifier_v7_eval/`, artifact checksum at
+`metadata/exposure_classifier_v7.sha256`, retraining tooling in
 `scripts/classifier/`) — never a glob, never newest-wins.
+
+The artifact itself is not in git (241 MB, and it is a calibration input like
+any other): it lives in `cal_ref/exposure_classifier/` and is referenced by
+path. To retrain, run the four `scripts/classifier/` stages in order, put the
+new artifact in `cal_ref/exposure_classifier/`, then move the pinned default —
+`exposure_classifier_v7.sha256` records which bytes the pinned v7 config means.
+
+One behaviour difference to know before swapping: **v7 predicts `dark_persist`
+on 0.8% of commanded darks where v6 predicted 5.1%**, so v7 masks roughly a
+quarter as many darks out of the dark cal stacks (`exposure_predicted_bad`
+excludes a commanded dark whenever the prediction is not `dark_q0t0u0`). Both
+rates are consistent with each model's own training labels, and no independent
+persistence truth exists to referee them — see the 2026_09_13 retrain report
+§4.6.
 
 To disable deliberately: `pipeline.jl --exp_class_model ""`, or
 `AR_EXP_CLASS_MODEL="" ./run_all.sh ...`. Leaving `AR_EXP_CLASS_MODEL` unset

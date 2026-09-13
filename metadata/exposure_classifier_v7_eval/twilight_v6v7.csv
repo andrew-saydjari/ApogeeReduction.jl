@@ -1,0 +1,4 @@
+truth,n,v6_twi,v7_twi,v6_correct,v7_correct,v6_pct,v7_pct
+nightsky,763,741,752,737,751,96.6,98.4
+twilight,122,121,118,121,118,99.2,96.7
+daytime,41,39,31,39,31,95.1,75.6

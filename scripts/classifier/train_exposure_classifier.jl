@@ -51,6 +51,10 @@ function parse_commandline()
         "--out_results"
         required = true
         arg_type = String
+        "--out_confusion"
+        required = true
+        help = "cross-validated confusion matrix CSV (rows = content label, cols = predicted)"
+        arg_type = String
         "--out_model"
         required = true
         arg_type = String
@@ -120,22 +124,39 @@ twfaint = .!census_locked .& (orig_class .== "twilightflat_q0t0u0") .&
 content[twfaint] .= "twilightflat_faint"
 
 # (3) dark-level frames under illuminated labels -> content = dark
+#
+# CENSUS PRECEDENCE. Census-truth rows are exempt from this clause in BOTH
+# directions, and that exemption is load-bearing — it was measured, not assumed:
+#   - they are excluded from the reference pool `dm` that sets the thresholds.
+#     Commanded-"dark" exposures the census identifies as night-sky flats carry
+#     real sky signal (median census signal ~120 counts vs a clean dark's
+#     floor). They are a few dozen rows out of ~1,200 commanded darks per
+#     observatory, so they land in the top percentiles and it is THEY, not
+#     darks, that set the 0.95/0.99 quantiles. Leaving them in inflates
+#     thr_cont / thr_arc and, through the same `cleanmask`, thr_persist in
+#     clause (4): the first v7 build got 18 dark_persist labels with them
+#     excluded and 16 with them in, against 56 for v6.
+#   - their content is not overwritten. With them included, 77 census night-sky
+#     flats were relabeled dark_q0t0u0 — and those 77 had the SAME median
+#     measured sky signal (119.8) as the 681 kept as twilightflat_faint, i.e.
+#     the cut was slicing a homogeneous population rather than separating
+#     signal-free from signal-bearing frames. It cost 7 points of night-sky
+#     accuracy against census truth (96.6% for v6 -> 89.5%; 98.4% once exempt).
+# This is what makes clause (1)'s "overrides the commanded label entirely" true:
+# the override has to cover the thresholds derived from that label too.
 for o in ("apo", "lco")
-    dm = (obs .== o) .& (orig_class .== "dark_q0t0u0") .& ok
+    dm = (obs .== o) .& (orig_class .== "dark_q0t0u0") .& ok .& .!census_locked
     thr_cont = quantile(q90max[dm], 0.95)
     thr_arc = quantile(arcline[dm], 0.95)
-    # census-truth rows are NOT exempt here: a "night-sky flat" with neither
-    # detectable lines nor continuum is, as content, a dark — same as v6.
-    # Only the twilightflat_faint clause can touch census rows (their content
-    # is always a twilight class), so bright census twilights are unaffected.
-    om = obs .== o
+    om = (obs .== o) .& .!census_locked
     isdarklike = om .& ok .& (
         (in.(content, Ref(CONT_ILLUM)) .& (q90max .< thr_cont)) .|
         (in.(content, Ref(ARC_ILLUM)) .& (arcline .< thr_arc) .& (q90max .< thr_cont)) .|
         ((content .== "twilightflat_faint") .& (arcline .< thr_arc) .& (q90max .< thr_cont)))
     content[isdarklike] .= "dark_q0t0u0"
     println("$o: thr_cont=", round(thr_cont, digits = 2), " thr_arc=",
-        round(thr_arc, digits = 1), "; relabeled dark-content: ", sum(isdarklike))
+        round(thr_arc, digits = 1), "; relabeled dark-content: ", sum(isdarklike),
+        " (census rows exempt: ", sum((obs .== o) .& census_locked), ")")
 end
 
 # (4) dark_persist from sequence prior + flux evidence
@@ -154,7 +175,11 @@ h5open(parg["almanac_file"], "r") do f
     end
 end
 prev_bright(o, m, e) = get(prevtype, (o, m, e - 1), "") in PERSIST_SOURCES
-darkmask = (orig_class .== "dark_q0t0u0") .& ok
+# census rows exempt, same reasoning as clause (3): a commanded-dark night-sky
+# flat is neither a clean dark (it has sky signal, so it corrupts the reference
+# quantile) nor a persistence-contaminated dark (its excess flux is sky, not
+# afterglow, so calling it dark_persist teaches the class the wrong thing).
+darkmask = (orig_class .== "dark_q0t0u0") .& ok .& .!census_locked
 cleanmask = darkmask .& .!prev_bright.(obs, mjd, expnum)
 thr_persist = Dict(o => quantile(q90max[cleanmask .& (obs .== o)], 0.99)
 for o in ("apo", "lco"))
@@ -216,6 +241,8 @@ cmdf = DataFrame(cm, Symbol.(shortname.(classes)))
 cmdf.given = classes
 show(cmdf[:, vcat("given", names(cmdf)[1:(end - 1)])], allrows = true, allcols = true)
 println("\ncross-validated accuracy: ", round(sum(diag(cm)) / sum(cm), digits = 5))
+CSV.write(parg["out_confusion"], cmdf[:, vcat("given", names(cmdf)[1:(end - 1)])])
+println("wrote ", parg["out_confusion"])
 
 h5open(parg["out_results"], "w") do f
     f["proba"] = proba

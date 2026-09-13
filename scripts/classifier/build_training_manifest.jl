@@ -57,6 +57,10 @@ function parse_commandline()
         default = 57618
         help = "restrict truth-set joins to mjd >= this"
         arg_type = Int
+        "--dark_topup"
+        default = 5000
+        help = "extra commanded-dark exposures WITH A BRIGHT PREDECESSOR to add to the training pool beyond the stratified sample, split evenly apo/lco (0 disables). dark_persist labels are constructed, not commanded (labeled dark AND previous exposure bright AND flux above the 0.99 quantile of clean darks) and only ~2% of prev-bright darks qualify, so the plain --nper stratification starves the class: 978 prev-bright darks yielded 18 labels where v6 had 56, halving held-out recall. Since dark_persist is what makes exposure_predicted_bad keep persistence-contaminated darks out of dark cal stacks, that shortfall is a calibration problem, not a cosmetic one. Prev-bright darks are identifiable from the almanac alone, so this top-up costs no extra metadata, only feature extraction."
+        arg_type = Int
     end
     return parse_args(s)
 end
@@ -152,6 +156,29 @@ for k in df.key[truthin]
     push!(picked, k)
 end
 df.role[in.(df.key, Ref(picked)) .& (df.role .== "")] .= "train_pool"
+
+# ---- targeted top-up: prev-bright darks, for dark_persist label support ----
+# (see --dark_topup help). Deliberately NOT a --nper increase: raising nper
+# across the board would multiply the already-saturated common strata to buy the
+# same handful of dark_persist rows.
+if parg["dark_topup"] > 0
+    PERSIST_SOURCES = ["internalflat", "quartzflat", "domeflat", "arclamp"]
+    prevtype = Dict(df.key[j] => df.image_type[j] for j in 1:nrow(df))
+    prev_bright(k) = get(prevtype, (k[1], k[2], k[3] - 1), "") in PERSIST_SOURCES
+    iscand = (df.labeled .== "dark_q0t0u0") .& (df.role .== "") .& prev_bright.(df.key)
+    rng2 = MersenneTwister(parg["seed"] + 1)
+    nadd = 0
+    for o in ("apo", "lco")
+        idx = findall(iscand .& (df.obs .== o))
+        n = min(length(idx), parg["dark_topup"] ÷ 2)
+        sub = idx[sort(randperm(rng2, length(idx))[1:n])]
+        df.role[sub] .= "train_pool"
+        df.truth_source[sub] .= "almanac_label_darktopup"
+        nadd += n
+        println("dark top-up $o: $n of $(length(idx)) available prev-bright darks")
+    end
+    println("dark top-up total: ", nadd)
+end
 
 sel = df[df.role .!= "", :]
 println("manifest rows: ", nrow(sel))
