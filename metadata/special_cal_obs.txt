@@ -11,6 +11,8 @@ lco    60044    44820002-44820024    spQF        "sparsePak quartz flat"
 lco    60755    51930001-51930005    sat         "saturation internal flats, 170 reads"
 apo    60823    52610012-52610015    sat         "saturation internal flats, 450 reads"
 
+apo    57952    23900001-23900009    rdL         "read-count ladder, internal flats at 58/60/3/6/12/24/48 reads with darks at 60 and 3 interleaved; calibration-only night"
+
 apo    57126    15640002-15640021    uD          "ultra dark, 100 reads"
 apo    57581    20190002-20190030    uD          "ultra dark, 100 reads"
 apo    57949    23870002-23870031    uD          "ultra dark, 100 reads"
@@ -37,3 +39,8 @@ lco    58233    26710030-26710058    uF          "ultra flat, 30 reads"
 lco    58311    27490032-27490060    uF          "ultra flat, 30 reads"
 lco    58926    33640033-33640061    uF          "ultra flat, 30 reads"
 lco    59236    36740003-36740031    uF          "ultra flat, 30 reads"
+
+apo    60007    44450011-44450014    twL         "twilight flat ladder, 15/20/25/35 reads, config 8904, comment 'Twilight flat for solar spectra'"
+apo    60008    44460011-44460015    twL         "twilight flat ladder, 15/25/9/3/35 reads (rungs not in monotonic order), config 8925, comment 'Twilight flats for solar spectra'"
+apo    60212    46500010-46500015    twL         "twilight flat ladder, 15/15/20/25/30/40 reads, config 10680; exp 46500012-46500013 (20 and 25 reads) carry IMAGETYP=object in the header and a blank comment, but they are twilight rungs -- see apo 60213 for the same ladder fully typed"
+apo    60213    46510011-46510016    twL         "twilight flat ladder, 15/15/20/25/30/40 reads, config 10707; same ladder as apo 60212 taken the next night, with all six rungs correctly typed twilightflat"

@@ -124,6 +124,13 @@ end
         fnameType, teleloc, mjdloc, expnumloc, chiploc, image_type = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)
         #thresholds are ~20% of typical value (of smallest flux chip, and smallest flux from dome vs quartz) from days when lamps were on
+        # n.b. flux_med_thresh is assigned but DELIBERATELY NOT USED: the gate
+        # below tests flux_68p only. Turning the median test on is held pending
+        # the post-pass-1 classifier work (AKS 2026-09-08, "let's see how far we
+        # can get with the classifier after pass1"), because on the testbed
+        # corpus it fixes a confirmed false acceptance but also false-rejects at
+        # least one genuinely good faint LCO quartzflat. Do not enable it as a
+        # drive-by cleanup; do not delete it either.
         if teleloc == "apo"
             flux_med_thresh = 16
             flux_68p_thresh = 40

@@ -1,7 +1,7 @@
 using Pkg;
 Pkg.instantiate();
 using JLD2, ArgParse, DataFrames, HDF5
-using ApogeeReduction: safe_jldsave, read_almanac_exp_df
+using ApogeeReduction: safe_jldsave, read_almanac_exp_df, EXPFLAG_PREDICTED_BAD
 
 ## Parse command line arguments
 function parse_commandline()
@@ -32,16 +32,52 @@ function parse_commandline()
         help = "comma-separated MJD list to restrict to (default \"0\" = all MJDs in the almanac file; a single value selects that day)"
         arg_type = String
         default = "0"
+        "--use_exposure_class"
+        required = false
+        help = "drop exposures whose almanac exposure_flags carry bit 2^0 (predicted_bad); needs an almanac decorated by scripts/cal/decorate_almanac_exptype.jl, and is a no-op with a loud note when that group is absent"
+        arg_type = Bool
+        default = true
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
 
+"""
+Exposure numbers whose `exposure_flags` carry `EXPFLAG_PREDICTED_BAD`, from the
+`exposure_class` group written into the almanac by
+`decorate_almanac_exptype.jl`, aligned to the `exposures` table by exposure
+number.
+
+Returns `nothing` when the decoration is absent, which is the state of every
+almanac built before that step joined the DAG — the caller must then keep every
+exposure rather than silently dropping, or silently keeping on a guess.
+
+Only `EXPFLAG_PREDICTED_BAD` excludes. An exposure with no verdict carries
+`EXPFLAG_NOTRUN` instead — and by the mutual-exclusion invariant never the
+predicted_bad bit — so it is kept: "we did not look" is never grounds for
+exclusion.
+"""
+function exposure_class_bad_set(f, tele, mjd)
+    haskey(f, "exposure_class") || return nothing
+    grp = "exposure_class/$(tele)/$(mjd)"
+    haskey(f, grp) || return nothing
+    g = f[grp]
+    (haskey(g, "exposure_flags") && haskey(g, "exposure")) || return nothing
+    fl = read(g["exposure_flags"])
+    ex = read(g["exposure"])
+    Set(Int(ex[i]) for i in eachindex(ex)
+    if (UInt8(fl[i]) & EXPFLAG_PREDICTED_BAD) != 0x00)
+end
+
 mjdexp_list = Int[]
 expid_list = String[]
 dfindx_list = Int[]
 tele_list = String[]
+n_dropped = 0
+dropped_rows = String[]
+n_nights_undecorated = 0
+n_nights_total = 0
 f = h5open(parg["almanac_file"])
 tele2do = if parg["tele"] == "both"
     keys(f["raw"])
@@ -66,13 +102,50 @@ for tele in tele2do
             #i.e. quartz
             good_exp .&= (df.n_read .>= 3) .& (df.lamp_quartz .== 1)
         end
+        # Exposure-type classifier veto. This is the ONLY thing the predicted_bad
+        # mask is allowed to exclude: bad flats from the trace/fluxing runlists.
+        # It never removes an exposure from the reduction itself.
+        global n_nights_total += 1
+        badset = parg["use_exposure_class"] ?
+                 exposure_class_bad_set(f, tele, tstmjd) : nothing
+        if parg["use_exposure_class"] && isnothing(badset)
+            global n_nights_undecorated += 1
+        end
+
         dfindx_list_loc = findall(good_exp)
         for dfindx in dfindx_list_loc
+            if !isnothing(badset) && (df.exposure[dfindx] in badset)
+                global n_dropped += 1
+                push!(dropped_rows,
+                    "  DROPPED $(tele) $(tstmjd) exp $(df.exposure[dfindx]) " *
+                    "($(parg["flat_type"])flat): exposure_flags bit 2^0 (predicted_bad) set")
+                continue
+            end
             push!(mjdexp_list, tstmjd_int)
             push!(expid_list, df.exposure_string[dfindx])
             push!(dfindx_list, dfindx)
             push!(tele_list, tele)
         end
+    end
+end
+
+# Loud, never silent: a filter you cannot see in the log is the failure mode
+# this whole path exists to fix.
+println("make_runlist_fiber_flats: $(parg["flat_type"])flat runlist -> $(length(mjdexp_list)) exposures kept")
+if !parg["use_exposure_class"]
+    println("  exposure-class filter: DISABLED via --use_exposure_class false")
+elseif n_nights_total == 0
+    println("  exposure-class filter: no nights selected, nothing to filter")
+elseif n_nights_undecorated == n_nights_total
+    println("  exposure-class filter: NO-OP — no exposure_class group in $(parg["almanac_file"]) " *
+            "for any of the $(n_nights_total) night(s). Run scripts/cal/decorate_almanac_exptype.jl " *
+            "after pipeline.jl to populate it.")
+else
+    println("  exposure-class filter: ACTIVE on $(n_nights_total - n_nights_undecorated) of " *
+            "$(n_nights_total) night(s) ($(n_nights_undecorated) undecorated, kept in full); " *
+            "$(n_dropped) exposure(s) dropped")
+    for row in dropped_rows
+        println(row)
     end
 end
 

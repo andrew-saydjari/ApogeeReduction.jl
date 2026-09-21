@@ -4,8 +4,10 @@ using FITSIO: FITS
 # The file structure in test roughly mirrors that of src.  Each file is included below.
 @testset verbose=true "ApogeeReduction.jl" begin
     include("ar3D.jl")
+    include("exposureClassifier.jl")
     include("ar1D.jl")
     include("wavecal.jl")
+    include("fpi_gate.jl")
     include("safe_jldsave.jl")
     include("lsf.jl")
 end

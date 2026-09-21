@@ -106,7 +106,18 @@ AR_CALDIR_DARKS=${AR_CALDIR_DARKS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07
 AR_CALDIR_FLATS=${AR_CALDIR_FLATS:-"/mnt/ceph/users/sdssv/work/asaydjari/2025_07_31/outdir_ref/"}
 AR_GAIN_READ_CAL_DIR=${AR_GAIN_READ_CAL_DIR:-"/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"}
 AR_WORKERS=${AR_WORKERS:-24}    # local (AR_SLURM=false) mode only
+# Goldens are generated WITHOUT the exposure classifier. That 2026-08-31
+# decision is preserved verbatim even though the classifier is now ON by
+# default everywhere else: a golden baseline is a fixed reference, and
+# quietly changing what produced it would invalidate the comparison.
+# Setting the variable (rather than leaving it unset) is what turns the
+# check off, so this assignment must stay ABOVE the resolution below.
 AR_EXP_CLASS_MODEL=""           # decision: goldens without the classifier
+if [ "${AR_EXP_CLASS_MODEL+set}" = "set" ]; then
+    exp_class_opt=(--exp_class_model "$AR_EXP_CLASS_MODEL")
+else
+    exp_class_opt=()
+fi
 # First line of MANIFEST.md. This body drives more than the golden baselines
 # (submit_testbed.sh runs the same chain over the DR21 200-MJD set), and a
 # manifest that calls a testbed "Golden baselines" mislabels the record — the
@@ -296,7 +307,7 @@ for tele in "${teles[@]}"; do
         --chips "RGB" --caldir_darks "$AR_CALDIR_DARKS" --caldir_flats "$AR_CALDIR_FLATS" \
         --cluster "$AR_RAW_CLUSTER" --gain_read_cal_dir "$AR_GAIN_READ_CAL_DIR" \
         --checkpoint_mode "$AR_CHECKPOINT_MODE" "${workers_args[@]}" \
-        ${AR_EXP_CLASS_MODEL:+--exp_class_model "$AR_EXP_CLASS_MODEL"}
+        "${exp_class_opt[@]}"
     stage_end
 done
 
@@ -393,10 +404,31 @@ for pat in \
     "Exposure-type check" \
     "Error reported by Slack API" \
     ; do
-    n=$(grep -c "$pat" "$logfile" || true)
+    # Exclude this census's own output lines: they are appended to $logfile,
+    # so on a resumed run every pattern would match its previous "census:" line
+    # (measured in job 7001233: eleven categories with a true count of 0 read as
+    # 1x, and arclamp read 263x against a true 260).
+    n=$(grep -v '^census: ' "$logfile" | grep -c "$pat" || true)
     echo "census: ${n}x \"$pat\""
 done
 stage_end
+
+# ---- arM diagnostics are NOT censused here ----------------------------------
+# arM reports per-spectrum problems with bare `println`, not `@warn`, so neither
+# the census above nor the triage below sees any of it (1,708 dropped spectra
+# went uncounted in job 7001233). It cannot be censused from this script either:
+# this stage runs at the end of the REDUCTION, before arM has run, so it could
+# only ever report zero.
+#
+# Run test/regression/arm_census.sh AFTER the arM stage. It reads `ingestBit` and
+# `skyBit` out of the arM batch PRODUCTS, not out of the log -- arMADGICS no
+# longer prints the sky-guard verdict at all, and the log never showed the
+# informational ingestBit values in the first place. Pass arM's output directory;
+# the log argument is optional and only feeds the few diagnostics that still have
+# no product column (currently the prior-support guard):
+#     test/regression/arm_census.sh "$ARM_OUTDIR/raw" "$SLURM_SUBMIT_LOG"
+# Measured: 16,523 batch products / 1,622,474 spectra in ~3m15s with 8 workers.
+
 
 # ---- stage: warnings triage (full inventory + diff vs adjudicated baseline) --
 stage_begin "warnings triage"
@@ -438,7 +470,7 @@ fi
     echo "- generated: $(date -Is) by ${USER} ($([ "$AR_SLURM" = "true" ] && echo "slurm job ${SLURM_JOB_ID}, nodes ${SLURM_JOB_NODELIST}" || echo "local on $(hostname), ${AR_WORKERS} workers"))"
     echo "- mode: ONE bulk run over all test days (run_bulk.sh sequence), runname ${runname}"
     echo "- julia: ${AR_JULIA_VERSION}; checkpoint_mode: ${AR_CHECKPOINT_MODE}"
-    echo "- exp_class_model: (none — production run_all.sh behavior)"
+    echo "- exp_class_model: ${AR_EXP_CLASS_MODEL-(pinned v6 default — classifier ON, matching run_all.sh)}"
     echo "- almanac: ${AR_ALMANAC_SRC} (bulk raw/-layout file, consumed directly; days selected via the runlist makers' --mjds per tele)"
     echo "- raw: cluster ${AR_RAW_CLUSTER}"
     echo "- cals: darks ${AR_CALDIR_DARKS}; flats ${AR_CALDIR_FLATS}; gain/read ${AR_GAIN_READ_CAL_DIR}"
