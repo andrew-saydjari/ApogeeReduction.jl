@@ -391,6 +391,48 @@ function generate_html(mjd, outdir, categories)
     return html
 end
 
+"""
+    live_public_url_slug()
+
+The slug the web server is actually serving right now.
+
+`PUBLIC_URL_SLUG` is the *declared* value, but the served directory gets
+renamed from time to time and a pinned environment value then goes stale with
+no error anywhere: link construction still succeeds and every link posted to
+Slack 404s. That happened on 2026-09-07 and went unnoticed until 2026-09-21.
+So treat the filesystem as the authority: the public_www directory holds
+exactly one directory and its name IS the live slug. The declared value wins
+when it matches a directory that is really there; otherwise, if there is
+exactly one candidate, use it and say so. Fall back to the declared value
+when public_www cannot be read, so this can only add robustness.
+
+Never print or commit the slug itself — it is an unauthenticated bearer
+credential for that whole directory.
+"""
+function live_public_url_slug()
+    declared = get(ENV, "PUBLIC_URL_SLUG", "")
+    # asaydjari's, not the running account's: the URL built below is the
+    # ~asaydjari one, so that is the directory whose name is the slug.
+    www = get(ENV, "AR_PUBLIC_WWW_DIR", "/mnt/home/asaydjari/public_www")
+    served = try
+        filter(d -> isdir(joinpath(www, d)), readdir(www))
+    catch
+        @warn "cannot read $www; using PUBLIC_URL_SLUG as declared"
+        return declared
+    end
+    (declared != "" && declared in served) && return declared
+    if length(served) == 1
+        @warn "PUBLIC_URL_SLUG is stale: no such directory under $www. " *
+              "Using the one directory that is served instead — fix the " *
+              "deployed airflow_env.sh so this stops being a guess."
+        return only(served)
+    end
+    @warn "PUBLIC_URL_SLUG is stale and $www holds $(length(served)) " *
+          "candidate directories; cannot pick one. Links will be wrong " *
+          "until the deployed airflow_env.sh is updated."
+    return declared
+end
+
 function main()
     parg = parse_commandline()
     mjd = parg["mjd"]
@@ -411,7 +453,7 @@ function main()
     # Public-URL path stubs come from the environment (PUBLIC_URL_SLUG for the
     # asaydjari public_www dir; PUBLIC_URL_SLUG_KMCKINNON, optional, for
     # kmckinnon's). Never hardcode these or derive them from API tokens.
-    public_url_slug = ENV["PUBLIC_URL_SLUG"]
+    public_url_slug = live_public_url_slug()
     kmckinnon_slug = get(ENV, "PUBLIC_URL_SLUG_KMCKINNON", "")
     url = replace(dir,
         "/uufs/chpc.utah.edu/common/home/sdss42/" => "https://data.sdss5.org/sas/")
