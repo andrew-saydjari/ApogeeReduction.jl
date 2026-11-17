@@ -48,8 +48,8 @@ function parse_commandline()
         default = false
         # ---- stage 2
         "--block_mode"
-        help = "detect (from the data) | supplied (--boundaries) | supplied+detect | none (one block)"
-        default = "detect"
+        help = "none (DEFAULT: one all-time block per telescope) | detect (blocks from the data) | supplied (--boundaries) | supplied+detect. The data-detected change points are reported as QA in every mode."
+        default = "none"
         "--boundaries"
         help = "file with lines '<tele> <mjd>' = first MJD of a new block"
         default = ""
@@ -199,6 +199,7 @@ function qa_plots(tele, S, D)
         q <= 2 && (ax.ylabel = labs[q] * " (1e-4)")
         g = D.night_ok
         scatter!(ax, S.mjds[g], y[g], markersize = 4, color = :deepskyblue)
+        for m in D.detected_mjd; vlines!(ax, [m], color = :orange, linestyle = :dot, linewidth = 2); end
         for m in D.bmjd; vlines!(ax, [m], color = :orange, linewidth = 2); end
         for m in D.starts_offset_mjd; vlines!(ax, [m], color = :gray, linestyle = :dash); end
         if q <= 2
@@ -207,7 +208,7 @@ function qa_plots(tele, S, D)
             end
         end
     end
-    Label(fig[0, 1], "$(tele): comb chip transform per night (fiber median). orange = block boundaries (scale), gray dashed = offset events (QA only)")
+    Label(fig[0, 1], "$(tele): comb chip transform per night (fiber median). orange solid = block boundaries used, orange dotted = detected scale change points (QA), gray dashed = offset events (QA)")
     save(joinpath(pdir, "qa_$(tele)_night_series.png"), fig)
     fig = Figure(size = (1500, 700))
     for (j, nm) in enumerate(("R", "B"))
@@ -229,6 +230,7 @@ if "derive" in stages
         h5open(joinpath(WORKDIR, "stage2_$(tele).h5"), "w") do f
             f["mjds"] = S.mjds; f["night_series"] = D.ser; f["night_ok"] = UInt8.(D.night_ok)
             f["block_starts_mjd"] = isempty(D.bmjd) ? Int[] : D.bmjd
+            f["detected_scale_change_mjd"] = isempty(D.detected_mjd) ? Int[] : D.detected_mjd
             f["offset_event_mjd"] = isempty(D.starts_offset_mjd) ? Int[] : D.starts_offset_mjd
             for (k, b) in enumerate(D.blocks)
                 g = create_group(f, "block_$(k)")
@@ -238,6 +240,18 @@ if "derive" in stages
             end
         end
         CSV.write(joinpath(WORKDIR, "stage2_$(tele)_rejected.csv"), DataFrame(rejected))
+        ## data-detected change points of the night-median chip scales (QA in every block mode):
+        ## the step at each, from the night medians of the 20 nights on either side
+        cp_rows = NamedTuple[]
+        um = S.mjds[D.used]
+        for m in D.detected_mjd
+            k = findfirst(==(m), um); lo = max(1, k - P["min_block_nights"]); hi = min(length(um), k + P["min_block_nights"] - 1)
+            push!(cp_rows, (tele = tele, mjd = m, used_as_block_boundary = m in D.bmjd,
+                step_bR = median(D.ser[D.used[k:hi], 1]) - median(D.ser[D.used[lo:(k - 1)], 1]),
+                step_bB = median(D.ser[D.used[k:hi], 2]) - median(D.ser[D.used[lo:(k - 1)], 2])))
+        end
+        CSV.write(joinpath(WORKDIR, "stage2_$(tele)_detected_change_points.csv"),
+            isempty(cp_rows) ? DataFrame(tele = String[], mjd = Int[], used_as_block_boundary = Bool[], step_bR = Float64[], step_bB = Float64[]) : DataFrame(cp_rows))
         CSV.write(joinpath(WORKDIR, "stage2_$(tele)_fiber_model_cv.csv"), DataFrame(D.cv))
         CSV.write(joinpath(WORKDIR, "stage2_$(tele)_blocks.csv"), DataFrame(
             [(tele = tele, block = k, data_mjd_min = b.data_mjd_min, data_mjd_max = b.data_mjd_max, n_nights = b.n_nights,
@@ -249,7 +263,7 @@ if "derive" in stages
             status = S.status, bR = D.ser[:, 1], bB = D.ser[:, 2], aR = D.ser[:, 3], aB = D.ser[:, 4]))
         qa_plots(tele, S, D)
         logt("stage 2 $(tele): $(count(D.night_ok)) nights used, $(length(D.blocks)) block(s) starting $(join([b.data_mjd_min for b in D.blocks], ", ")); " *
-             "fiber model $(join(D.model, ",")); offset events (QA) at $(join(D.starts_offset_mjd, ", ")); $(length(rejected)) rejections")
+             "fiber model $(join(D.model, ",")); detected scale change points (QA) at $(join(D.detected_mjd, ", ")); offset events (QA) at $(join(D.starts_offset_mjd, ", ")); $(length(rejected)) rejections")
     end
 end
 
@@ -285,6 +299,8 @@ if "write" in stages
     for (k, v) in stage2_params(); prov["stage2_" * k] = string(v); end
     for tele in TELES
         bl = blocks[tele]
+        prov["$(tele)_detected_scale_change_mjd_qa"] = h5open(f -> join(string.(read(f["detected_scale_change_mjd"])), ","),
+            joinpath(WORKDIR, "stage2_$(tele).h5"), "r")
         prov["$(tele)_blocks"] = join(["[$(b.mjd_start), $(b.mjd_end)] data $(b.data_mjd_min)-$(b.data_mjd_max) n=$(b.n_nights)" for b in bl], "; ")
         st = CSV.read(joinpath(WORKDIR, "stage1_$(tele)_nights.csv"), DataFrame)
         prov["$(tele)_stage1_counts"] = join(["$(r.status)=$(r.nrow)" for r in eachrow(combine(groupby(st, :status), nrow))], ", ")

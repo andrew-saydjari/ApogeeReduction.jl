@@ -229,6 +229,8 @@ function stage2_derive(S, tele; P, rejected)
     isempty(used) && error("$(tele): no usable comb nights")
     ## block boundaries (indices into `used`)
     mode = P["block_mode"]
+    ## change points of the scale are ALWAYS detected and reported (QA, and for matching to a shared
+    ## time-block definition); they define the blocks only in the "detect" modes
     starts_scale = detect_blocks(S.mjds[used], ser[used, 1:2]; min_nights = P["min_block_nights"],
         nsigma = P["block_nsigma"], min_step = [P["block_min_step"], P["block_min_step"]])
     ## offsets are NOT used for the blocks; their change points are reported for QA (hardware events)
@@ -324,7 +326,7 @@ function stage2_derive(S, tele; P, rejected)
         push!(blocks, ChipTransformBlock(minimum(dm), maximum(dm), minimum(dm), maximum(dm), length(inb),
             scale, serr, offs, collect(filled)))
     end
-    return (; blocks, ser, night_ok, ok, used, bmjd, starts_offset_mjd = S.mjds[used][starts_offset], cv, model = [r.fiber_model for r in cv])
+    return (; blocks, ser, night_ok, ok, used, bmjd, detected_mjd = S.mjds[used][starts_scale], starts_offset_mjd = S.mjds[used][starts_offset], cv, model = [r.fiber_model for r in cv])
 end
 
 """Coverage: block k serves [first night of k (or `cover_from` for k = 1), first night of k+1 - 1]
