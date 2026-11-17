@@ -1367,7 +1367,13 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
     end
 
-    #loop over the exposures and make the expected waveCalNightfpiDither output
+    #loop over the exposures and make the expected waveCalNightfpiDither output.
+    #Each exposure's dithered grid goes into its own buffer: chipWaveSoln above is
+    #the night solution at the reference (first-exposure) dither, and it is what
+    #gets saved to waveCalFPI, returned, and stored as nightAve_wave_soln. Writing
+    #the per-exposure grids into chipWaveSoln made all three the LAST exposure's
+    #dithered grid instead.
+    expChipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
     for fname_ind in 1:n_fnames
         curr_outname = replace(replace(
             replace(fname_list[fname_ind], "fpiPeaks" => "waveCalNightfpiDither"),
@@ -1382,7 +1388,7 @@ function comb_exp_get_and_save_fpi_wavecal(
                 xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
                 Ax = positional_poly_mat(xt, porder = wporder)
                 yt = Ax * linParams[fibIndx, :]
-                chipWaveSoln[:, fibIndx, chipIndx] .= yt
+                expChipWaveSoln[:, fibIndx, chipIndx] .= yt
             end
         end
 
@@ -1391,7 +1397,7 @@ function comb_exp_get_and_save_fpi_wavecal(
             linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
                 fname_ind, :, :],
             resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
-            chipWaveSoln = chipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
+            chipWaveSoln = expChipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
     end
     safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
         exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
