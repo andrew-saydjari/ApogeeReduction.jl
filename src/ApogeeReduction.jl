@@ -25,6 +25,10 @@ include("utils.jl")
 # acceptance gate for the FPI nightly wavelength solution
 # (uses nanmedian from utils.jl and fiberID2fiberIndx from fileNameHandling.jl)
 include("fpi_gate.jl")
+# corpus-level FPI fiber-index homogeneity survey
+# (uses get_fps_plate_divide from fileNameHandling.jl and
+#  read_almanac_exp_df from utils.jl, included above)
+include("fpi_homogeneity.jl")
 include("wavecal.jl")
 include("skyline_peaks.jl")
 include("arclamp_peaks.jl")
