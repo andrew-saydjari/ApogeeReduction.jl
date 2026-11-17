@@ -106,6 +106,18 @@ covers `manual_fps_position_stars`, `..._10`, `..._apogee_10`, and
 const ENGINEERING_CARTON_PREFIXES = ["manual_fps_position_stars"]
 
 """
+almanac fiber categories that count as SCIENCE fibers for the engineering carton
+check (`almanac_config_cartons`). `veto_location_boss` / `veto_location_apogee`
+are real catalog stars placed at the veto locations of manually built FPS designs
+and are reduced as `"sci"` (see `ALMANAC_CATEGORY_TO_FIBER_TYPE`). A design made
+almost entirely of them (15 standards, ~35 sky, ~240 veto_location, zero
+`science`) is therefore judged by clause 1 over their cartons
+(`ops_gaia_brightneighbors`, `ops_2mass_psc_brightneighbors`), not treated as a
+science-less configuration.
+"""
+const ALMANAC_SCIENCE_CATEGORIES = ("science", "veto_location_boss", "veto_location_apogee")
+
+"""
 "Dominated by" is defined as **purity**: ALL of the configuration's *science*
 fibers must carry an engineering carton (`frac >= ENGINEERING_CARTON_PURITY`,
 i.e. exactly 1.0) before the exposure is flagged engineering.
@@ -152,7 +164,7 @@ i.e. `engineering := CLAUSE 1 OR CLAUSE 2` where
 
 - **clause 1** — the configuration HAS science fibers and *all* of them carry an
   engineering carton (`ENGINEERING_CARTON_PURITY`);
-- **clause 2** — the configuration has ZERO `category == "science"` fibers AND
+- **clause 2** — the configuration has ZERO science fibers (`ALMANAC_SCIENCE_CATEGORIES`) AND
   *any* fiber, of any category, carries an engineering carton.
 
 This is deliberately NOT a general "when science is empty, fall back to all
@@ -329,7 +341,7 @@ end
     exposure_is_engineering(cartons; purity, warn_frac, basis, label)
 
 Carton check for one exposure. `cartons` is the list of `firstcarton` values of
-the configuration's **science** fibers (`category == "science"`), or of all
+the configuration's **science** fibers (category in `ALMANAC_SCIENCE_CATEGORIES`), or of all
 carton-bearing fibers when the config has no science fibers at all and the
 configuration has none (clause 2); `basis` records which.
 
@@ -390,7 +402,7 @@ end
 Apply BOTH clauses of the engineering rule to one configuration and return the
 verdict NamedTuple `(engineering, frac, carton, nsci, basis)`.
 
-- `sci_cartons` — `firstcarton` of the `category == "science"` fibers
+- `sci_cartons` — `firstcarton` of the science fibers (category in `ALMANAC_SCIENCE_CATEGORIES`)
 - `all_cartons` — `firstcarton` of EVERY fiber in the configuration
 
 Clause 1 (science fibers exist): purity over `sci_cartons`, `basis = "science"`.
@@ -438,9 +450,15 @@ Read one configuration's `firstcarton` column from an open almanac HDF5 file `f`
 (group `<root>/<tele>/<mjd>/fibers/<config_id>`; pass `root = ""` for the
 rootless layout some older almanac files use).
 
-Returns `(science, all)`: the cartons of the `category == "science"` fibers, and
-the cartons of every fiber (empty carton strings dropped from `all`, since a
-blank carton carries no information for either clause).
+Returns `(science, all)`: the cartons of the science fibers (category in
+`ALMANAC_SCIENCE_CATEGORIES`), and the cartons of every fiber (empty carton
+strings dropped from `all`, since a blank carton carries no information for
+either clause).
+
+A fiber that almanac relabelled `"offtarget"` (assigned but not on target) is
+classified by its `original_category` when that column is present: this check
+is about what the configuration was DESIGNED to observe, which a positioner
+failing to reach its target does not change.
 
 Returns both empty — never throws — when any of the following holds, which is
 the correct "not engineering" answer rather than an error:
@@ -462,7 +480,12 @@ function almanac_config_cartons(f, tele, mjd, config_id; root::AbstractString = 
         rename!(df, lowercase.(names(df)))
         ("category" in names(df) && "firstcarton" in names(df)) || return empty_result
         cart = String[strip(String(c)) for c in df.firstcarton]
-        sci = strip.(String.(df.category)) .== "science"
+        cat = strip.(String.(df.category))
+        if "original_category" in names(df)
+            orig = strip.(String.(df.original_category))
+            cat = ifelse.(cat .== "offtarget", orig, cat)
+        end
+        sci = in.(cat, Ref(ALMANAC_SCIENCE_CATEGORIES))
         return (science = cart[sci], all = filter(!isempty, cart))
     catch e
         @warn "almanac_config_cartons: could not read $(path); treating as non-engineering" exception = e

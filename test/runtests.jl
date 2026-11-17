@@ -6,6 +6,7 @@ using FITSIO: FITS
     include("ar3D.jl")
     include("exposureClassifier.jl")
     include("ar1D.jl")
+    include("fiber_types.jl")
     include("wavecal.jl")
     include("fpi_gate.jl")
     include("fpi_homogeneity.jl")
