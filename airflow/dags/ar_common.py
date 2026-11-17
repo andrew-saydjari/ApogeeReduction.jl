@@ -80,6 +80,12 @@ SDSSCORE_DIR = os.path.join(RAW_ROOT, "sdsscore")
 # public_www slug dir (public_www/<PUBLIC_URL_SLUG>/apogee_logs -> this dir).
 APOGEE_LOGS_DIR = "/mnt/ceph/users/sdssv/work/apogee_logs"
 
+# The directory the web server exports as
+# https://users.flatironinstitute.org/~asaydjari/<slug>/ — the slug is the
+# name of the single directory inside it. Overridable for tests.
+PUBLIC_WWW_DIR = os.environ.get(
+    "AR_PUBLIC_WWW_DIR", os.path.expanduser("~asaydjari/public_www"))
+
 JULIA_VERSION = "1.11.0"  # keep in sync with run_all.sh
 
 # almanac: run from a LOCAL git clone with an editable-install env, exactly
@@ -156,6 +162,11 @@ FAILURE_HINTS = {
                 "confSummary files exist: sdsscore staleness, an "
                 "uninitialized new config-range submodule, or an "
                 "upstream-empty range repo (seen for lco 10021XXX)."),
+    "wait_for_raw": ("the night never reached the CCA raw mirror. Check "
+                     "whether Utah has it (staging "
+                     "<obs>/log/mos/<mjd>/transfer-<mjd>.done); if it does, "
+                     "the Utah->CCA sync is stalled and only AKS can "
+                     "restart it."),
 }
 
 
@@ -180,15 +191,58 @@ def night_date_str(mjd: int) -> str:
     return str(date(1858, 11, 17) + td(days=int(mjd)))
 
 
+def live_public_url_slug() -> str:
+    """The slug the web server is actually serving right now.
+
+    PUBLIC_URL_SLUG in the deployed airflow_env.sh is the *declared* value,
+    but the served directory gets renamed from time to time and a pinned env
+    value then goes stale with no error anywhere: link construction still
+    succeeds, and every link posted to Slack 404s. That happened on
+    2026-09-07 (directory renamed; airflow_env.sh last written 2026-09-06)
+    and went unnoticed until 2026-09-21.
+
+    So treat the filesystem as the authority: PUBLIC_WWW_DIR holds exactly
+    one directory and its name IS the live slug. The declared value wins
+    when it matches a directory that is really there; otherwise, if there is
+    exactly one candidate, use it and say so in the task log. Fall back to
+    the declared value when PUBLIC_WWW_DIR cannot be read (e.g. a worker on
+    a host without the home mount), so this can only add robustness.
+
+    Never print or commit the slug itself — it is an unauthenticated bearer
+    credential for that whole directory (.github/scripts/
+    check_no_public_web_tokens.py).
+    """
+    declared = os.environ.get("PUBLIC_URL_SLUG", "")
+    try:
+        served = sorted(
+            d for d in os.listdir(PUBLIC_WWW_DIR)
+            if os.path.isdir(os.path.join(PUBLIC_WWW_DIR, d)))
+    except OSError as e:
+        print(f"[slug] cannot read {PUBLIC_WWW_DIR} ({e}); "
+              "using PUBLIC_URL_SLUG as declared")
+        return declared
+    if declared and declared in served:
+        return declared
+    if len(served) == 1:
+        print(f"[slug] PUBLIC_URL_SLUG is stale: no such directory under "
+              f"{PUBLIC_WWW_DIR}. Using the one directory that is served "
+              "instead — fix airflow_env.sh so this stops being a guess.")
+        return served[0]
+    print(f"[slug] PUBLIC_URL_SLUG is stale and {PUBLIC_WWW_DIR} holds "
+          f"{len(served)} candidate directories; cannot pick one. "
+          "Links will be wrong until airflow_env.sh is updated.")
+    return declared
+
+
 def public_log_url(tele: str, mjd: int) -> str | None:
-    """Public exposure-list URL for a night, built from PUBLIC_URL_SLUG.
+    """Public exposure-list URL for a night, built from the live slug.
 
     Ported from ar_main.py's initial_notification, which interpolated
     SLACK_TOKEN into the URL back when the public_www dir was named after
     the token; the dir is now named after the decoupled PUBLIC_URL_SLUG,
     and public_www/<slug>/apogee_logs symlinks to APOGEE_LOGS_DIR.
     """
-    slug = os.environ.get("PUBLIC_URL_SLUG", "")
+    slug = live_public_url_slug()
     if not slug:
         return None
     return (f"https://users.flatironinstitute.org/~asaydjari/{slug}/"
@@ -266,6 +320,46 @@ def raw_sync_has_run(tele: str, mjd: int) -> bool:
         if os.path.exists(f"{RAW_ROOT}/{tele}/{later}/{later}.md5sum"):
             return True
     return False
+
+
+def latest_transferred_night(tele: str) -> int | None:
+    """Newest night in the CCA raw mirror that carries its transfer-complete
+    marker, or None if the mirror cannot be read / holds no complete night."""
+    try:
+        nights = sorted((int(d) for d in os.listdir(f"{RAW_ROOT}/{tele}")
+                         if d.isdigit()), reverse=True)
+    except OSError:
+        return None
+    for mjd in nights:
+        if os.path.exists(f"{RAW_ROOT}/{tele}/{mjd}/{mjd}.md5sum"):
+            return mjd
+    return None
+
+
+def raw_sync_stall_note(min_days: int = 2) -> str:
+    """One sentence naming a stalled Utah->CCA raw sync, else ''.
+
+    The daily has exactly one way to fail with no information in it: both
+    observatories' wait_for_raw sensors soft-fail or hold, and the run dies
+    on dagrun_timeout with a generic ':rotating_light: DAG run ... failed or
+    timed out'. That is what 2026-09-21 looked like, and the actual cause —
+    nothing had reached the raw mirror since mjd 61301 while Utah had 61302
+    and 61303 — took a filesystem walk to find. Put it in the message.
+
+    Quiet (returns '') unless BOTH observatories are at least min_days
+    behind, so an ordinary weathered-out night says nothing.
+    """
+    now = int(current_mjd())
+    last = {t: latest_transferred_night(t) for t in ("apo", "lco")}
+    behind = [now - m for m in last.values() if m is not None]
+    if len(behind) < 2 or min(behind) < min_days:
+        return ""
+    newest = ", ".join(f"{t}={m}" for t, m in sorted(last.items()))
+    return (f" Raw mirror is stale: newest transferred night {newest} "
+            f"(now mjd {now}) — nothing has arrived for {min(behind)} days. "
+            "If Utah has those nights (staging "
+            "<obs>/log/mos/<mjd>/transfer-<mjd>.done) the Utah->CCA sync is "
+            "stalled and only AKS can restart it.")
 
 
 # ---------------------------------------------------------------------------
@@ -355,8 +449,13 @@ def notify_dag_failure(context):
     dag_id = getattr(dag_run, "dag_id", "?")
     run_id = getattr(dag_run, "run_id", "?")
     label = "[TEST] " if p.get("test_label") else ""
+    try:
+        stall = raw_sync_stall_note()
+    except Exception:  # a diagnosis must never eat the alert
+        stall = ""
     text = (f"{label}:rotating_light: DAG run `{dag_id}` `{run_id}` failed "
-            f"or timed out (dagrun_timeout is the Airflow-3 SLA substitute).")
+            f"or timed out (dagrun_timeout is the Airflow-3 SLA "
+            f"substitute).{stall}")
     if p.get("slack_mode", "full") == "full":
         slack_post(text, channel=p.get("slack_channel") or None)
     else:
