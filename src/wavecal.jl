@@ -476,11 +476,16 @@ end
 #      is a redundant cross-check rather than a different rule. Every
 #      cluster is an equally correct frame; the ordering is a
 #      run-independent sorting convention, not a correctness judgment.
-#   3. APPLY one global scalar shift to the night frame (polynomial
-#      composition, `pin_night_frame!`) so it coincides with the canonical
-#      cluster. The subsequent per-exposure dither refits against the pinned
-#      frame absorb the shift exactly, so per-exposure composed solutions are
-#      unchanged (up to float roundoff).
+#   3. APPLY one global linear map xt -> shift + scale * xt to the night
+#      frame (polynomial composition, `pin_night_frame!`) so it coincides
+#      with the canonical cluster: the cluster's median dither OFFSET and its
+#      median dither SCALE. Pinning only the offset left the argmin
+#      reference exposure's own dither scale (~1.5e-5, i.e. ~0.015 px at the
+#      chip edges) in the night frame, so two runs whose reference fell in
+#      different clusters still differed by ~+-200 m/s on chips R and B. The
+#      subsequent per-exposure dither refits against the pinned frame absorb
+#      the map exactly (the dither model is itself linear in xt), so
+#      per-exposure composed solutions are unchanged (up to float roundoff).
 #
 # Three QA conditions are flagged (warning + metadata in the night wavecal
 # product, `sky/frame_anchor/`):
@@ -579,7 +584,10 @@ Inputs (aligned vectors, one entry per exposure):
   pixel position (LCO), -1 means it decreases (APO).
 
 Returns a NamedTuple with the shift to fold into the night frame
-(`shift_pix`, NaN when no exposure has a finite offset), the selection `mode`
+(`shift_pix`, NaN when no exposure has a finite offset), the scale to fold in
+(`scale_pin`: the median of `exp_scale` over the canonical cluster's members;
+1.0 when `exp_scale` is not given or has no finite canonical entry), the
+selection `mode`
 ("dithpix_group", "measured_position", "measured_position_override",
 "single_cluster", "single_valid_cluster" or "none"), the per-exposure cluster
 assignment (`exp_cluster`, 0 = unclustered), per-cluster summaries, and the
@@ -599,7 +607,7 @@ measurement wins ("measured_position_override") and
 """
 function night_frame_anchor(exp_offset_pix, exp_dithpix;
         gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX, label_tol = NIGHT_FRAME_DITHPIX_TOL,
-        dithpix_direction = 1)
+        dithpix_direction = 1, exp_scale = nothing)
     n_exp = length(exp_offset_pix)
     clusters = cluster_offsets_1d(exp_offset_pix; gap_pix = gap_pix)
 
@@ -621,7 +629,7 @@ function night_frame_anchor(exp_offset_pix, exp_dithpix;
     end
 
     if isempty(clusters)
-        return (shift_pix = NaN, mode = "none", canonical_cluster = 0,
+        return (shift_pix = NaN, scale_pin = 1.0, mode = "none", canonical_cluster = 0,
             canonical_dithpix = NaN, exp_cluster = exp_cluster,
             cluster_n = cluster_n, cluster_offset_pix = cluster_offset_pix,
             cluster_dithpix = cluster_dithpix,
@@ -667,7 +675,12 @@ function night_frame_anchor(exp_offset_pix, exp_dithpix;
         end
     end
 
-    return (shift_pix = cluster_offset_pix[canonical], mode = mode,
+    # dither scale of the canonical cluster (median over its members)
+    canon_scales = isnothing(exp_scale) ? Float64[] :
+                   filter(isfinite, collect(Float64, exp_scale[clusters[canonical]]))
+    scale_pin = isempty(canon_scales) ? 1.0 : median(canon_scales)
+
+    return (shift_pix = cluster_offset_pix[canonical], scale_pin = scale_pin, mode = mode,
         canonical_cluster = canonical,
         canonical_dithpix = cluster_dithpix[canonical], exp_cluster = exp_cluster,
         cluster_n = cluster_n, cluster_offset_pix = cluster_offset_pix,
@@ -679,21 +692,24 @@ function night_frame_anchor(exp_offset_pix, exp_dithpix;
 end
 
 """
-    pin_night_frame!(med_linParams, shift_pix)
+    pin_night_frame!(med_linParams, shift_pix, scale = 1.0)
 
-Fold one global scalar shift into the night-average solution by substituting
-`xt -> xt + shift_pix / N_XPIX` in every fiber's wavelength polynomial
-(exactly the composition machinery used by the dither refinement rounds).
-After pinning, exposures of the canonical cluster refit to dither offsets
-~ 0. The per-exposure dither transforms are refit downstream against the
-pinned frame (`get_and_save_sky_dither_per_fiber`), and a refit dither offset
-shifts by exactly `-shift`, so per-exposure composed wavelength solutions are
-unchanged up to float roundoff.
+Fold one global linear map into the night-average solution by substituting
+`xt -> shift_pix / N_XPIX + scale * xt` in every fiber's wavelength
+polynomial (exactly the composition machinery used by the dither refinement
+rounds). With the canonical cluster's median dither offset and scale, the
+exposures of that cluster refit to dither (offset, scale) ~ (0, 1). The
+per-exposure dither transforms are refit downstream against the pinned frame
+(`get_and_save_sky_dither_per_fiber`); a refit dither (b, a) becomes
+((b - shift) / scale, a / scale), so per-exposure composed wavelength
+solutions are unchanged up to float roundoff. A non-finite `scale` is
+treated as 1.0 (offset-only pin); a non-finite `shift_pix` is a no-op.
 """
-function pin_night_frame!(med_linParams, shift_pix)
+function pin_night_frame!(med_linParams, shift_pix, scale = 1.0)
     isfinite(shift_pix) || return med_linParams
+    isfinite(scale) || (scale = 1.0)
     n_lin_coeffs = size(med_linParams, 2)
-    shift_poly = Polynomial([shift_pix / N_XPIX, 1.0])
+    shift_poly = Polynomial([shift_pix / N_XPIX, scale])
     for fibIndx in 1:size(med_linParams, 1)
         curr_coeffs = Polynomial(med_linParams[fibIndx, :])(shift_poly).coeffs
         n_curr_use_coeffs = min(size(curr_coeffs, 1), n_lin_coeffs)
@@ -864,9 +880,14 @@ function get_ave_night_wave_soln(
         else
             Float64[get(exp_dithpix, e, NaN) for e in exp_expid]
         end
+        # per-exposure global dither scale (median over fibers); folded into
+        # the frame together with the offset so the night frame does not
+        # inherit the argmin reference exposure's own scale
+        exp_scale = dporder > 0 ?
+                    [nanmedian(all_ditherParams[:, 2, k]) for k in 1:n_fnames] : nothing
         anchor = night_frame_anchor(exp_offset_pix, exp_labels;
-            dithpix_direction = dithpix_direction)
-        pin_night_frame!(med_linParams, anchor.shift_pix)
+            dithpix_direction = dithpix_direction, exp_scale = exp_scale)
+        pin_night_frame!(med_linParams, anchor.shift_pix, anchor.scale_pin)
         frame_anchor = merge(anchor,
             (exp_expid = exp_expid, exp_dithpix = exp_labels,
                 exp_offset_pix = exp_offset_pix))
@@ -2174,10 +2195,12 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
                 # audit block for the deterministic night-frame anchor
                 # (Method A'): which cluster is canonical, why, and the
                 # per-exposure evidence. exp_offset_pix are relative to the
-                # PRE-pin frame; post-pin offsets are exp_offset_pix - shift_pix.
+                # PRE-pin frame; post-pin offsets are
+                # (exp_offset_pix - shift_pix) / scale_pin.
                 g = create_group(f, "$(curr_wave_type)/frame_anchor")
                 g["mode"] = frame_anchor.mode
                 g["shift_pix"] = frame_anchor.shift_pix
+                g["scale_pin"] = frame_anchor.scale_pin
                 g["canonical_cluster"] = frame_anchor.canonical_cluster
                 g["canonical_dithpix"] = frame_anchor.canonical_dithpix
                 g["cluster_n"] = collect(Int, frame_anchor.cluster_n)

@@ -244,15 +244,143 @@ using HDF5
                 end
             end
 
+            # offset + SCALE pin: against a frame pinned with (s, c) the refit
+            # dither is ((off - s) / c, scale / c); composition unchanged
+            c_pin = 1.0 + 1.5e-5
+            pinned_sc = ApogeeReduction.pin_night_frame!(copy(med_linParams), shift_pix, c_pin)
+            for (off, scale) in ((2.1e-4, 1.0), (-3.7e-4, 0.999985), (0.0, 1.00002))
+                for fib in (1, 150, 300)
+                    p_old = evalpoly.(off .+ scale .* xt, Ref(med_linParams[fib, :]))
+                    p_new = evalpoly.(((off - s) / c_pin) .+ (scale / c_pin) .* xt,
+                        Ref(pinned_sc[fib, :]))
+                    @test maximum(abs.(p_new .- p_old)) < 1e-9
+                end
+            end
+            # a non-finite scale falls back to the offset-only pin
+            @test ApogeeReduction.pin_night_frame!(copy(med_linParams), shift_pix, NaN) == pinned
+
+            # the anchor's scale_pin is the canonical cluster's median scale
+            # (1.0 when no scales are given)
+            exp_scale = [isodd(i) ? 1.0 + 2e-7 * i : 1.0 + 1.5e-5 for i in eachindex(offsets)]
+            res_sc = AR.night_frame_anchor(offsets, labels; exp_scale = exp_scale)
+            canon_members = findall(res_sc.exp_cluster .== res_sc.canonical_cluster)
+            @test res_sc.scale_pin == median(exp_scale[canon_members])
+            @test res_sc.shift_pix == AR.night_frame_anchor(offsets, labels).shift_pix
+            @test AR.night_frame_anchor(offsets, labels).scale_pin == 1.0
+
             # NaN shift (no clusterable exposures) leaves the frame untouched
             unpinned = ApogeeReduction.pin_night_frame!(copy(med_linParams), NaN)
             @test unpinned == med_linParams
 
-            # empty input: mode "none", NaN shift, no crash
+            # empty input: mode "none", NaN shift, unit scale, no crash
             res_none = AR.night_frame_anchor(Float64[], Float64[])
             @test res_none.mode == "none"
             @test isnan(res_none.shift_pix)
+            @test res_none.scale_pin == 1.0
         end
+    end
+
+    @testset "night frame does not inherit the reference exposure's dither scale" begin
+        # Two runs of one synthetic ABBA night that differ only by a tiny noise
+        # realization in the per-exposure sky solutions -- enough to
+        # flip the argmin reference exposure into the OTHER dither cluster. The
+        # sky-line peaks are identical. The clusters differ in dither SCALE by
+        # 1.5e-5 (the size measured on apo 58500), so a night frame that pinned
+        # only the offset would still differ by ~1e-2 A at the chip edges.
+        AR = ApogeeReduction
+        nfib, nx = AR.N_FIBERS, AR.N_XPIX
+        # per-fiber wavelength polynomial in the registered coordinate
+        # xt = (pix - 1024) / 2048 (chip G untransformed), ~ -0.28 A/pix
+        base = hcat(16000.0 .+ 0.01 .* (1:nfib), fill(-580.0, nfib),
+            fill(-3.0, nfib), fill(0.5, nfib))
+        nl = repeat([-1.07 1.0 1.0755 1.0], nfib)          # [R0 R1 B0 B1], cporder 1
+        chip_tr = (R = (-1.07, 1.0), G = (0.0, 1.0), B = (1.0755, 1.0))
+        # true per-exposure dither xt -> d1 + d2 xt: cluster A at 0 px, cluster
+        # B at +0.478 px; small fixed within-cluster scale spread
+        isB = [false, true, true, false, false, true, true, false]
+        n_exp = length(isB)
+        d1 = [(b ? 0.478 : 0.0) / nx for b in isB]
+        d2 = 1.0 .+ 1.5e-5 .* isB .+ 1e-7 .* [0, 1, -1, 2, -2, 0, 2, 1]
+        compose(lin, a, b) = AR.Polynomial(lin)(AR.Polynomial([a, b])).coeffs
+        true_lin = [permutedims(hcat([compose(base[f, :], d1[k], d2[k]) for f in 1:nfib]...))
+                    for k in 1:n_exp]
+        # a run's per-exposure sky solutions: the truth with a tiny per-fiber
+        # position jitter (sigma 5e-4 px, below the ~1e-3 px seen between real
+        # runs); the jitter realization is all that differs between two runs
+        function noisy_lin(seed)
+            r = MersenneTwister(seed)
+            return [permutedims(hcat([compose(base[f, :], d1[k] + 5e-4 / nx * randn(r), d2[k])
+                                      for f in 1:nfib]...)) for k in 1:n_exp]
+        end
+        # sky-line peaks: the same pixel positions in every fiber (passes the
+        # cross-fiber scatter cut), wavelengths from each exposure's TRUE solution
+        xpix = collect(range(30.0, 2018.0, length = 40))
+        function write_night(dir, lins)
+            fnames = String[]
+            for k in 1:n_exp
+                tag = "apo_60000_$(lpad(k, 8, '0'))"
+                wf = joinpath(dir, "waveCalSkyLine_$(tag)_object.h5")
+                h5open(wf, "w") do f
+                    write(f, "linParams", lins[k])
+                    write(f, "nlParams", nl)
+                end
+                for (chip, (a, b)) in pairs(chip_tr)
+                    xt = a .+ b .* ((xpix .- nx ÷ 2) ./ nx)
+                    mat = fill(NaN, length(xpix), 2, nfib)
+                    for f in 1:nfib
+                        mat[:, 1, f] .= xpix
+                        mat[:, 2, f] .= AR.Polynomial(base[f, :]).(d1[k] .+ d2[k] .* xt)
+                    end
+                    h5open(joinpath(dir, "skyLinePeaks_$(tag)_$(chip)_object.h5"), "w") do f
+                        write(f, "sky_line_mat_clean", mat)
+                    end
+                end
+                push!(fnames, wf)
+            end
+            return fnames
+        end
+        # the reference (argmin) exposure get_ave_night_wave_soln seeds from
+        function ref_exposure(lins)
+            L = cat(lins..., dims = 3)
+            m0 = AR.nanmedian(L, 3)
+            off = AR.nanmedian(L .- m0, 2)
+            m = AR.nanmedian(L .- off, 3)
+            return argmin(vec(sum((L .- m) .^ 2, dims = (1, 2))))
+        end
+        lins1 = noisy_lin(1)
+        ref1 = ref_exposure(lins1)
+        seed2 = findfirst(s -> isB[ref_exposure(noisy_lin(s))] != isB[ref1], 2:200) + 1
+        lins2 = noisy_lin(seed2)
+        @test isB[ref_exposure(lins2)] != isB[ref1]     # the reference really flips
+
+        runs = map((lins1, lins2)) do lins
+            AR.get_ave_night_wave_soln(write_night(mktempdir(), lins);
+                fit_dither = true, dithpix_direction = 1)
+        end
+        (lin1, _, wave1, anc1), (lin2, _, wave2, anc2) = runs
+        canon = findall(.!isB)       # direction +1: lowest measured position = A
+        for anc in (anc1, anc2)
+            @test anc.mode == "measured_position"
+            @test findall(anc.exp_cluster .== anc.canonical_cluster) == canon
+        end
+        # the same night frame in both runs: compare the fiber-median wavelength
+        # at every pixel of every chip (the per-fiber scatter is the runs'
+        # genuine jitter difference; an offset-only pin leaves ~1e-2 A here)
+        dwave_fibmed = maximum(abs, AR.nanmedian(wave1 .- wave2, 2))
+        println("scale-pin test: ref ", ref1, " -> ", ref_exposure(lins2), " (seed ", seed2,
+            "), max |fiber-median dwave| = ", dwave_fibmed, " A, max |dwave| = ",
+            maximum(abs, wave1 .- wave2), " A")
+        @test dwave_fibmed < 1e-4                   # ~2 m/s
+        @test maximum(abs, wave1 .- wave2) < 2e-3   # per-fiber jitter only
+        # ... and that frame is the canonical cluster's own (median offset,
+        # median scale) solution, whichever exposure seeded the refinement
+        target = permutedims(hcat([compose(base[f, :], median(d1[canon]), median(d2[canon]))
+                                   for f in 1:nfib]...))
+        for L in (lin1, lin2)
+            @test abs(median(L[:, 1] .- target[:, 1])) < 1e-5
+            @test abs(median(L[:, 2] .- target[:, 2])) < 1e-6
+        end
+        @test anc1.scale_pin ≈ median(d2[canon]) / d2[ref_exposure(lins1)] rtol = 1e-6
     end
 
     @testset "interpolate_wave_params: no slit-edge bias, outliers rejected" begin
