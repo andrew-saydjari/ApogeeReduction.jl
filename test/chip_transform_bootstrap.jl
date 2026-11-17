@@ -38,8 +38,13 @@ using HDF5
                       --stage collect,derive,write --root $(root) --tele apo --workdir $(wd)
                       --version bootstrap_test --cover_from 59000 --cover_to 99999 --qa_plots false`,
             "AR_CHIP_TRANSFORM_CAL" => joinpath(dir, "nonexistent", "chiptransform.h5"),
-            "JULIA_NUM_THREADS" => "1", "OPENBLAS_NUM_THREADS" => "1")
-        @test success(pipeline(cmd; stdout = devnull, stderr = devnull))
+            "JULIA_NUM_THREADS" => "1", "OPENBLAS_NUM_THREADS" => "1",
+            # Pkg.test points the load path at its sandbox; the driver runs in the package's own project
+            "JULIA_LOAD_PATH" => "@:@stdlib", "JULIA_PROJECT" => pkgdir(ApogeeReduction))
+        logf = joinpath(dir, "driver.log")
+        ok = success(pipeline(cmd; stdout = logf, stderr = logf))
+        ok || println(read(logf, String))
+        @test ok
         calp = joinpath(wd, "bootstrap_test.h5")
         @test isfile(calp)
         cal = ApogeeReduction.load_chip_transform_cal(calp)

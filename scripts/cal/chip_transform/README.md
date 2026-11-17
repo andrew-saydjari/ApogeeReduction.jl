@@ -91,6 +91,82 @@ All parameters are command-line flags. They are recorded in the file.
   (`--fiber_poly_degree`). The model with the smaller error on both chips is used. Fibers
   without usable comb data get the smooth value and are flagged `fiber_filled`.
 
+## Bootstrap: rebuilding from an empty reference area
+
+The file is derived **only from FPI comb fits**. No stage of the rebuild driver reads a
+chip-transform file:
+
+- stages `collect`, `derive` and `write` never open one;
+- `check` evaluates the file `write` has just produced, or `--cal`;
+- `test/chip_transform_bootstrap.jl` runs `collect,derive,write` with no file anywhere, with
+  the pipeline default pointing at a missing path and with `AR_CHIP_TRANSFORM_CAL` set to
+  another missing path.
+
+The comb fits come from the normal 2D→1D wavelength stage of `pipeline_2d_1d.jl`
+(`fpi_medwavecal_skyline_dither` → `comb_exp_get_and_save_fpi_wavecal`). That stage writes
+`apred/<mjd>/waveCalFPI_<tele>_<mjd>_arclamp.h5` and the gate verdict in
+`wavecal/wavecalNightAve_<tele>_<mjd>.h5`. The FPI fit frees the chip scale itself (cporder 1);
+it uses the sky solution only as a seed. So from an empty reference area:
+
+```bash
+# 0. nothing in cal_ref/chip_transform/ (or a file you do not want to reuse)
+
+# 1. reduce with the chip transform OFF ("none" = bootstrap mode: sky fit with chip scale 1).
+#    Bulk/daily SLURM scripts:
+export AR_CHIP_TRANSFORM_CAL=none
+sbatch scripts/bulk/run_bulk.sh <mjd_start> <mjd_end> <outdir>/
+#    or, calling the 2D->1D pipeline directly:
+#    julia --project=. pipeline_2d_1d.jl ... --chip_transform_cal none
+#    (the daily DAG: CHIP_TRANSFORM_CAL = "none" in airflow/dags/ar_common.py)
+
+# 2. rebuild the file from the comb fits that reduction wrote
+bash scripts/cal/chip_transform/run_chip_transform.sh <outdir> <workdir> chiptransform_<release> 6 \
+     --cover_from <release start MJD> --cover_to 99999 --cover_note "bootstrap from <outdir>"
+
+# 3. install it under a NEW name and point the defaults at it
+cp <workdir>/chiptransform_<release>.h5 /mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/
+#    pipeline_2d_1d.jl --chip_transform_cal default and CHIP_TRANSFORM_CAL in ar_common.py
+
+# 4. re-run the 2D->1D stage with the file ON (the sky wavecal recomputes by itself because its
+#    chip_transform_id changed; --checkpoint_mode clobber also rebuilds the commit-keyed
+#    downstream products)
+unset AR_CHIP_TRANSFORM_CAL
+```
+
+If a reduction made with the file ON already exists, step 1 is not needed: its comb fits are
+equally valid inputs (see "Circularity").
+
+- Comb fits that are missing in the reduction can be re-run by the driver
+  (`--run_missing true`, outputs only in `--workdir`).
+- The re-run is seeded from the stored sky solution with its chip scales replaced by 1
+  (`--rerun_seed scale1`, the default), whatever configuration made that solution.
+
+### Circularity: one pass is enough
+
+The comb fit frees the chip scale, but it is seeded from the night's sky solution, which the
+file changes. Measured on copies of pass-1 inputs (`2026_11_17/chipscale_pr`, table
+`t10_circularity_*`; 13 APO and 12 LCO FPS nights):
+
+- **Method.** Each night's comb fit was redone with production settings, seeded from sky
+  solutions of up to 12 object exposures fitted twice: with the file OFF and with the file ON
+  (`chiptransform_pass1dr21_v2_allblock.h5`).
+- **The per-fiber scales move by little.** Median per-fiber all-time change ON − OFF:
+  - APO: `b_R` −2.8e-6, `b_B` −1.0e-6;
+  - LCO: `b_R` −3.2e-6, `b_B` −1.0e-6.
+- **That is below the noise.** The changes are smaller than the comb's own night-to-night
+  scatter on the same nights (3.9–6.5e-6) and below the 1e-5 block-step threshold. They are
+  0.3–1 m/s of per-chip shape.
+- **It is the same size as any other seed change.** Re-seeding with the file OFF from 12
+  instead of all sky exposures moves the scales by +1 to +12e-6.
+- **One pass is enough.**
+  - The feedback gain (change in the derived scale ÷ change in the seed's scale) is 0.01–0.03.
+  - A second pass would therefore move the scales by ≲ 1e-7, so the procedure above needs no
+    second pass.
+  - Rebuilding from a reduction made with the file ON is equivalent to bootstrapping from one
+    made with it OFF, to within that 1e-6 level.
+- One APO night (59393) was excluded: its comb re-fit failed even with the file OFF from the
+  12-exposure seed, so it says nothing about circularity.
+
 ## Running a full rebuild before a release
 
 ```bash
