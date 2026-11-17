@@ -980,9 +980,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # trace provenance of all three chips (the metadata above is the first chip's only):
     # exposure-level OR of the night-level trace bits and the per-chip trace levels;
     # the per-fiber, per-chip detail is the `bitmsk_trace` stack written below.
-    metadata["trace_flags"] = reduce(|, bitmsk_trace_stack; init = 0) & ~TRACE_FIBER_UNLIT
-    metadata["trace_level_chips"] = trace_level_chips
-    metadata["trace_level_max"] = maximum(trace_level_chips)
+    merge!(metadata, trace_exposure_summary(bitmsk_trace_stack, trace_level_chips))
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
     chipBit_stack[.!(noBadBits)] .+= 2^4 # call pixels with bad bits thrown bad
@@ -1131,15 +1129,8 @@ function process_1D(fname;
     metadata = merge(metadata, trace_metadata)
     # Per-fiber trace bitmask (src/trace_qa.jl): written into traceMain by make_traceMain; for
     # a traceMain made before that, derived from its trace_type and heights (TRACE_QA_MISSING).
-    bitmsk_trace = h5open(traceFname, "r") do f
-        haskey(f, "bitmsk_trace") ? Int.(read(f["bitmsk_trace"])) : nothing
-    end
-    if isnothing(bitmsk_trace)
-        bitmsk_trace = trace_bits_from_metadata(regularized_trace_params, trace_metadata)
-        metadata["trace_flags"] = reduce(|, bitmsk_trace; init = 0) & ~TRACE_FIBER_UNLIT
-        metadata["trace_level"] = endswith(string(get(trace_metadata, "trace_type", "")), "_fallback") ?
-                                  TRACE_LEVEL_FIXED_FALLBACK : TRACE_LEVEL_OWN_FLAT
-    end
+    bitmsk_trace, trace_md_legacy = trace_bits_for_1d(traceFname, regularized_trace_params, trace_metadata)
+    metadata = merge(metadata, trace_md_legacy)
 
     # Carry the exposure-type classifier's verdict into the 1D products, so a
     # downstream consumer reading a 1D file can see WHETHER the frame was judged

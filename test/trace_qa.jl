@@ -4,7 +4,9 @@ using ApogeeReduction: trace_peak_census, trace_identify_slit, fill_unlit_fibers
                        TraceCandidate, trace_fiber_bits, trace_bits_from_metadata,
                        write_trace_qa, read_trace_qa, trace_qa_path, make_traceMain,
                        trace_reference_positions, trace_level_bits, trace_bit_names,
-                       night_science_mid_exposure, read_metadata,
+                       night_science_mid_exposure, read_metadata, flat_trace_qa,
+                       trace_light_qa, trace_bits_for_1d, trace_exposure_summary,
+                       trace_extract, get_default_trace_hyperparams, bad_pix_bits,
                        TRACE_FIBER_UNLIT, TRACE_FIXED_FALLBACK, TRACE_UNGATED, TRACE_QA_MISSING,
                        TRACE_OTHER_FLAT, TRACE_TEMPLATE_ONLY, TRACE_BAD_BITS,
                        TRACE_LEVEL_OWN_FLAT, TRACE_LEVEL_FIXED_FALLBACK, TRACE_LEVEL_NONE,
@@ -35,6 +37,21 @@ function synth_trace(R; nx = 2048, shift = 0.0, height = 1000.0)
         tp[x, :, 3] .= 1.0 + 0.05 * u
     end
     return tp
+end
+
+# a 2048 x 2048 flat image[x, y] with Gaussian fibers along `tp` (heights from tp[:, :, 1])
+function synth_image(tp; noise = 3.0, rng = MersenneTwister(11), width = 1.0)
+    nx = size(tp, 1)
+    img = noise .* randn(rng, nx, 2048)
+    for x in 1:nx, f in axes(tp, 2)
+        c = tp[x, f, 2]
+        h = tp[x, f, 1]
+        h == 0 && continue
+        for y in max(1, floor(Int, c - 6)):min(2048, ceil(Int, c + 6))
+            img[x, y] += h * exp(-0.5 * ((y - c) / width)^2)
+        end
+    end
+    return img, fill(1 / noise^2, nx, 2048), zeros(Int, nx, 2048)
 end
 
 @testset "trace QA and robust identification" begin
@@ -142,7 +159,7 @@ end
         @test trace_id_match(shifted, q.lit, id) < 0.7
 
         good = Dict{String, Any}("outcome" => "ok", "lamp_ok" => true, "has_trace" => true,
-            "nlit" => 300, "fit_rms" => 0.005, "spacing_rms" => 0.004, "spacing_nbad" => 0,
+            "nlit" => 300, "fit_rms" => 0.005, "light_mismatch_frac" => 0.0,
             "id_match_frac" => 1.0, "id_ok" => true, "id_reason" => "ok", "sat_frac" => 0.0)
         @test trace_gate(good) == (2, String[])
         sat = merge(good, Dict("sat_frac" => 0.2))
@@ -152,6 +169,57 @@ end
         l, r = trace_gate(Dict{String, Any}("outcome" => "lamp_off", "lamp_ok" => false,
             "has_trace" => false, "id_ok" => false, "id_reason" => "id_too_few_peaks", "sat_frac" => 0.0))
         @test l == 0 && r[1] == "outcome:lamp_off" && "lamp_off" in r && "no_trace" in r
+    end
+
+    @testset "QA record of a flat image, light check" begin
+        tp = synth_trace(R; shift = 1.3)
+        tp[:, 151:180, 1] .= 0.0
+        img, iv, pm = synth_image(tp)
+        q = flat_trace_qa(img, iv, pm, "apo", "G"; trace_params = tp, refpos = R)
+        @test q["outcome"] == "ok" && q["lamp_ok"] && q["id_ok"]
+        @test q["nlit"] == 270 && q["id_nlit"] == 270
+        @test q["light_mismatch_frac"] == 0.0
+        @test q["light_offset_med"] < 0.1
+        @test q["id_match_frac"] == 1.0
+        @test isapprox(q["trace_shift_px"], 1.3 - 1.5 * 0.0; atol = 0.2)
+        @test q["gate_level"] == 2 && q["gate_reasons"] == ""
+        # the same light with a trace that twists half the slit onto the wrong place at x > 1500
+        # (LCO 60702 G/R in 0.4.0): every fiber is smooth, the light check fails it
+        bad = copy(tp)
+        for x in 1500:2048
+            bad[x, 151:300, 2] .+= 3.5 * (x - 1500) / 548
+        end
+        qb = flat_trace_qa(img, iv, pm, "apo", "G"; trace_params = bad, refpos = R)
+        @test qb["light_mismatch_frac"] > 0.3
+        @test qb["gate_level"] == 0 && occursin("light", qb["gate_reasons"])
+        # lamp off: a named outcome with its metrics
+        dark = 2.0 .* randn(MersenneTwister(2), 2048, 2048)
+        qd = flat_trace_qa(dark, iv, pm, "apo", "G"; trace_params = nothing, outcome = "lamp_off",
+            refpos = R)
+        @test !qd["lamp_ok"] && qd["outcome"] == "lamp_off" && qd["gate_level"] == 0
+        @test startswith(qd["gate_reasons"], "outcome:lamp_off")
+    end
+
+    @testset "robust trace_extract on a synthetic flat with a dark bundle" begin
+        truth = synth_trace(R; shift = 2.0)
+        truth[:, 151:180, 1] .= 0.0
+        img, iv, pm = synth_image(truth; noise = 2.0)
+        hp = get_default_trace_hyperparams("apo", "G", profile_path = DATA_DIR, plot_path = mktempdir())
+        qa = Dict{String, Any}()
+        tp, _ = trace_extract(img, iv, "apo", "99999", "0001", "G", hp..., "synthetic";
+            good_pixels = (pm .& bad_pix_bits) .== 0, median_trace_pos_path = DATA_DIR,
+            identify = "robust", qa = qa)
+        @test size(tp) == (2048, 300, 3)
+        @test qa["outcome"] == "ok" && qa["id_reason"] == "ok" && qa["n_unlit"] == 30
+        xs = 100:1948
+        lit = setdiff(1:300, 151:180)
+        dl = abs.(tp[xs, lit, 2] .- truth[xs, lit, 2])
+        @test median(dl) < 0.05
+        du = abs.(tp[xs, 151:180, 2] .- truth[xs, 151:180, 2])
+        @test maximum(du) < 0.3
+        @test all(tp[:, 151:180, 1] .== 0)
+        @test_throws ErrorException trace_extract(img, iv, "apo", "99999", "0001", "G", hp...,
+            "synthetic"; median_trace_pos_path = DATA_DIR, identify = "template")
     end
 
     @testset "choice of the night's trace" begin
@@ -201,6 +269,34 @@ end
         @test all(b .== (TRACE_FIXED_FALLBACK | TRACE_QA_MISSING))
         b = trace_bits_from_metadata(tp, Dict{String, Any}("trace_type" => "quartz"))
         @test b[24] == (TRACE_FIBER_UNLIT | TRACE_QA_MISSING) && b[1] == TRACE_QA_MISSING
+    end
+
+    @testset "trace bits in the 1D products" begin
+        mktempdir() do d
+            tp = synth_trace(R)
+            tp[:, 30, 1] .= 0.0
+            legacy = joinpath(d, "legacy.h5")
+            h5open(f -> (f["regularized_trace_params"] = tp), legacy, "w")
+            bits, md = trace_bits_for_1d(legacy, tp, Dict{String, Any}("trace_type" => "quartz_fallback"))
+            @test all(bits .== (TRACE_FIXED_FALLBACK | TRACE_QA_MISSING))
+            @test md["trace_level"] == TRACE_LEVEL_FIXED_FALLBACK
+            @test md["trace_flags"] == (TRACE_FIXED_FALLBACK | TRACE_QA_MISSING)
+            bits, md = trace_bits_for_1d(legacy, tp, Dict{String, Any}("trace_type" => "quartz"))
+            @test bits[30] == (TRACE_FIBER_UNLIT | TRACE_QA_MISSING) && md["trace_flags"] == TRACE_QA_MISSING
+            stored = joinpath(d, "new.h5")
+            h5open(stored, "w") do f
+                f["regularized_trace_params"] = tp
+                f["bitmsk_trace"] = fill(TRACE_UNGATED, 300)
+            end
+            bits, md = trace_bits_for_1d(stored, tp, Dict{String, Any}("trace_type" => "quartz"))
+            @test all(bits .== TRACE_UNGATED) && isempty(md)
+        end
+        st = zeros(Int, 3, 300)
+        st[2, 7] = TRACE_FIBER_UNLIT
+        st[3, :] .= TRACE_OTHER_FLAT
+        s = trace_exposure_summary(st, [0, 0, 0])
+        @test s["trace_flags"] == TRACE_OTHER_FLAT && s["trace_level_max"] == 0
+        @test trace_exposure_summary(zeros(Int, 3, 300), [0, 4, -2])["trace_level_max"] == 4
     end
 
     @testset "QA records and traceMain" begin

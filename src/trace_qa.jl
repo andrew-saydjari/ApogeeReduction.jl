@@ -105,14 +105,14 @@ mis-walked flats are not).
 """
 const TRACE_GATE_FIT_RMS_MAX = 0.05
 """
-Maximum robust RMS (px) of the fiber-to-fiber spacing pattern change along x (each band's
-spacing pattern minus the central band's, after removing a smooth trend over fibers). A block
-of fibers latching onto a neighbouring alias, or an outward column walk that twists half the
-slit, shows up here even when every fiber is individually smooth.
+Maximum fraction of lit fibers, in the worst band across the chip, whose trace center is
+more than 1 px from the nearest fiber peak of the light (`trace_light_qa`, 9 bands). A block of fibers
+on the wrong alias, or an outward column walk that twists half the slit, fails here even when
+every fiber is individually smooth; so does a defocused or partially lit flat. (The spacing
+pattern statistics `spacing_rms`/`spacing_nbad` are recorded but not gated: on faint early LCO
+flats they fire on traces the light check accepts.)
 """
-const TRACE_GATE_SPACING_RMS_MAX = 0.05
-"Maximum number of (fiber, band) spacing deviations > 1 px."
-const TRACE_GATE_SPACING_NBAD_MAX = 0
+const TRACE_GATE_LIGHT_MISMATCH_MAX = 0.02
 """
 Minimum fraction of lit fibers whose central position agrees (< 0.35 spacing) with the
 whole-slit identification of the light (`trace_identify_slit`). A labelling error moves
@@ -521,10 +521,11 @@ end
 
 """
     trace_light_qa(image_data, noise_image, good_pixels, trace_params, lit;
-        xs = 128:256:1920, half = 32, tol = 1.0)
+        xs = (128, 384, ..., 1025, ..., 1920), half = 32, tol = 1.0)
 
 Does the trace sit on the light at every part of the chip? For bands of `2 half + 1` columns
-centered at `xs`, find the fiber peaks of the light (`trace_peak_census`) and, for every lit
+centered at `xs` (every 256 columns plus the chip center, where production's center fit pins the
+trace; LCO 57803 G in 0.4.0 was off by up to 2 px there only), find the fiber peaks of the light (`trace_peak_census`) and, for every lit
 fiber, the distance from its trace center (band median) to the nearest peak. Returns
 `light_offset_med` (median |distance|, px), `light_offset_p99`, `light_nbad` (fiber-bands
 with |distance| > `tol` px) and `light_mismatch_frac` (the worst band's fraction of lit fibers
@@ -534,7 +535,8 @@ fiber's curve is individually smooth; so does a defocused or partially lit flat,
 does not resolve into fiber peaks.
 """
 function trace_light_qa(image_data, noise_image, good_pixels, trace_params::AbstractArray{<:Real, 3},
-        lit::AbstractVector{Bool}; xs = 128:256:1920, half = 32, tol = 1.0)
+        lit::AbstractVector{Bool}; xs = (128, 384, 640, 896, 1025, 1152, 1408, 1664, 1920), half = 32,
+        tol = 1.0)
     nx = size(trace_params, 1)
     dall = Float64[]
     worst = 0.0
@@ -682,9 +684,8 @@ function trace_gate(qa::AbstractDict)
     if get(qa, "has_trace", false)
         g("nlit", 0) >= TRACE_GATE_NLIT_MIN || push!(hard, "nlit")
         (isfinite(g("fit_rms")) && g("fit_rms") <= TRACE_GATE_FIT_RMS_MAX) || push!(hard, "fit_rms")
-        (isfinite(g("spacing_rms")) && g("spacing_rms") <= TRACE_GATE_SPACING_RMS_MAX) ||
-            push!(hard, "spacing_rms")
-        g("spacing_nbad", 1) <= TRACE_GATE_SPACING_NBAD_MAX || push!(hard, "spacing_nbad")
+        (isfinite(g("light_mismatch_frac")) && g("light_mismatch_frac") <= TRACE_GATE_LIGHT_MISMATCH_MAX) ||
+            push!(hard, "light_mismatch")
         (isfinite(g("id_match_frac")) && g("id_match_frac") >= TRACE_GATE_ID_MATCH_MIN) ||
             push!(hard, "id_match")
     else
@@ -938,7 +939,8 @@ function make_traceMain(outdir, tele, mjd, chip; select = "last", fallback = "fi
     md["trace_gate_level"] = gl
     md["trace_gate_reasons"] = isnothing(qa) ? (level == TRACE_LEVEL_OWN_FLAT ? "qa_missing" : "") :
                                string(get(qa, "gate_reasons", ""))
-    for k in ("fit_rms", "spacing_rms", "id_match_frac", "sat_frac", "id_margin", "id_shift_px")
+    for k in ("fit_rms", "light_mismatch_frac", "spacing_rms", "id_match_frac", "sat_frac", "id_margin",
+        "id_shift_px", "trace_shift_px")
         md["trace_qa_" * k] = isnothing(qa) ? NaN : Float64(get(qa, k, NaN))
     end
     for k in ("nlit", "spacing_nbad")
@@ -969,4 +971,43 @@ function make_traceMain(outdir, tele, mjd, chip; select = "last", fallback = "fi
         @warn "traceMain $(tele) $(mjd) $(chip): level $(level), flags $(join(trace_bit_names(md["trace_flags"]), ",")) ($(md["trace_gate_reasons"]))"
     end
     return level
+end
+
+# ---------------------------------------------------------------------------------------------
+# 1D products
+# ---------------------------------------------------------------------------------------------
+"""
+    trace_bits_for_1d(traceFname, regularized_trace_params, trace_metadata) -> (bits, md)
+
+The per-fiber `bitmsk_trace` an ar1D product of this traceMain carries: the stored dataset
+(written by `make_traceMain`), or, for a traceMain made before that, `trace_bits_from_metadata`
+plus the `trace_flags` / `trace_level` metadata it implies (`md`, empty otherwise: a new
+traceMain's metadata already holds them).
+"""
+function trace_bits_for_1d(traceFname, regularized_trace_params, trace_metadata::AbstractDict)
+    bits = h5open(traceFname, "r") do f
+        haskey(f, "bitmsk_trace") ? Int.(read(f["bitmsk_trace"])) : nothing
+    end
+    md = Dict{String, Any}()
+    if isnothing(bits)
+        bits = trace_bits_from_metadata(regularized_trace_params, trace_metadata)
+        md["trace_flags"] = reduce(|, bits; init = 0) & ~TRACE_FIBER_UNLIT
+        md["trace_level"] = endswith(string(get(trace_metadata, "trace_type", "")), "_fallback") ?
+                            TRACE_LEVEL_FIXED_FALLBACK : TRACE_LEVEL_OWN_FLAT
+    end
+    return bits, md
+end
+
+"""
+    trace_exposure_summary(bitmsk_trace_stack, trace_level_chips) -> Dict
+
+Exposure-level trace provenance of a chip-combined (ar1Duni*) product: `trace_flags` (OR of the
+night-level bits over chips and fibers), `trace_level_chips` and `trace_level_max`.
+"""
+function trace_exposure_summary(bitmsk_trace_stack::AbstractMatrix{<:Integer},
+        trace_level_chips::AbstractVector{<:Integer})
+    return Dict{String, Any}(
+        "trace_flags" => reduce(|, bitmsk_trace_stack; init = 0) & ~TRACE_FIBER_UNLIT,
+        "trace_level_chips" => collect(Int, trace_level_chips),
+        "trace_level_max" => maximum(trace_level_chips))
 end
