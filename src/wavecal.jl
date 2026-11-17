@@ -1526,6 +1526,31 @@ function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5
     return func, keep
 end
 
+"""
+    interpolate_wave_params(fibInds, nlParams, linParams) -> (interp_nlParams, interp_linParams)
+
+Regularise per-fiber wavelength-solution parameters across the slit by fitting each
+parameter as a smooth, outlier-clipped polynomial in fiber index
+(`fit_poly_without_outliers`, 3 sigma, iterated), so bad or missing (NaN) fibers are
+replaced by the smooth value.
+
+- `linParams[:, 1]` (constant term): quadratic in fiber, fitted separately within
+  each 30-fiber MTP block. Callers refit this term per fiber afterwards.
+- every other column of `linParams` and every column of `nlParams` (the chip
+  offsets and, for cporder > 0, the chip scales): quadratic in fiber over the whole
+  slit.
+
+The higher-order terms (`linParams[:, 3:end]`) and the chip parameters used to be
+fitted LINEARLY in fiber. Their real fiber dependence is curved, and because these
+parameters are strongly correlated within a fiber the linear fit left
+opposite-sign per-chip wavelength errors at the slit edges (fibers 1-30 and
+271-300) that the later per-fiber constant refit cannot remove: about
+-350 to -490 / +270 to +310 / +40 to +160 m/s (chips R/G/B) in the sky-line
+residuals of the delivered regularised sky solutions. Quadratic-in-fiber fits for
+all terms remove that bowing with the same fiber-to-fiber noise reduction. Structure
+on scales of tens of fibers that no global low-order polynomial follows (up to
+~50-100 m/s on single chips) is still smoothed over, as before.
+"""
 function interpolate_wave_params(fibInds, nlParams, linParams)
     mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
     unique_mtp = 1:10
@@ -1543,22 +1568,18 @@ function interpolate_wave_params(fibInds, nlParams, linParams)
                                          nanmedian((linParams[keep_mtp, 1] .- func_eval)[keep])
     end
 
-    #need a second order poly for first order term
-    j = 2
-    func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
-    func_eval = func.(fibInds)
-    interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
-
-    #need a first order poly for higher order terms
-    for j in 3:size(linParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 1)
+    #second order poly in fiber for the first and all higher order terms
+    #(a first order poly for the higher order terms bowed the slit edges)
+    for j in 2:size(linParams, 2)
+        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
         func_eval = func.(fibInds)
         interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
     end
 
-    #use a first order poly for the chip offset,scale parameters
+    #second order poly in fiber for the chip offset,scale parameters
+    #(a first order poly bowed the slit edges, with opposite signs on chips R and G)
     for j in 1:size(nlParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 1)
+        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2)
         func_eval = func.(fibInds)
         interp_nlParams[:, j] .= func_eval .+ nanmedian((nlParams[:, j] .- func_eval)[keep])
     end
