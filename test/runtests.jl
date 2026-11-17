@@ -10,6 +10,7 @@ using FITSIO: FITS
     include("chip_transform.jl")
     include("chip_transform_bootstrap.jl")
     include("fpi_gate.jl")
+    include("fpi_homogeneity.jl")
     include("safe_jldsave.jl")
     include("lsf.jl")
     include("readonly_opens.jl")
