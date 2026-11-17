@@ -10,4 +10,5 @@ using FITSIO: FITS
     include("fpi_gate.jl")
     include("safe_jldsave.jl")
     include("lsf.jl")
+    include("readonly_opens.jl")
 end

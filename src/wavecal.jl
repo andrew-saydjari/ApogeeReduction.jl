@@ -347,8 +347,11 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
 
     # iterpolate between fibers to
     # regularize the nlParams and linParams
+    # sky lines per fiber: fibers with too few lines for a well-determined per-fiber
+    # fit are not used to estimate the per-MTP-block steps
+    n_lines_per_fiber = vec(sum(.!isnan.(sky_line_uxlst), dims = 1))
     interp_nlParams, interp_linParams = interpolate_wave_params(
-        fibInds, nlParams, linParams)
+        fibInds, nlParams, linParams; n_lines = n_lines_per_fiber)
 
     # do final pass with interp params to
     # get a new constant-term for wave soln
@@ -744,15 +747,14 @@ function get_ave_night_wave_soln(
     end
     unique_fname_list = unique(fname_list)
 
-    f = h5open(unique_fname_list[1], "r+")
-
-    linParams, nlParams = try
-        read(f["linParams"]), read(f["nlParams"])
-    catch
-        println(unique_fname_list[1])
-        read(f["linParams"]), read(f["nlParams"])
+    linParams, nlParams = h5open(unique_fname_list[1], "r") do f
+        try
+            read(f["linParams"]), read(f["nlParams"])
+        catch
+            println(unique_fname_list[1])
+            read(f["linParams"]), read(f["nlParams"])
+        end
     end
-    close(f)
 
     n_fnames = size(unique_fname_list, 1)
     n_lin_coeffs = size(linParams, 2)
@@ -769,17 +771,16 @@ function get_ave_night_wave_soln(
     fill!(all_nlParams, NaN)
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        linParams, nlParams = try
-            read(f["linParams"]), read(f["nlParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["linParams"]), read(f["nlParams"])
+        linParams, nlParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["linParams"]), read(f["nlParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["linParams"]), read(f["nlParams"])
+            end
         end
         all_linParams[:, :, fname_ind] .= linParams[:, :]
         all_nlParams[:, :, fname_ind] .= nlParams[:, :]
-        close(f)
     end
 
     med_linParams = nanmedian(all_linParams, 3)
@@ -1689,7 +1690,13 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
     end
 
-    #loop over the exposures and make the expected waveCalNightfpiDither output
+    #loop over the exposures and make the expected waveCalNightfpiDither output.
+    #Each exposure's dithered grid goes into its own buffer: chipWaveSoln above is
+    #the night solution at the reference (first-exposure) dither, and it is what
+    #gets saved to waveCalFPI, returned, and stored as nightAve_wave_soln. Writing
+    #the per-exposure grids into chipWaveSoln made all three the LAST exposure's
+    #dithered grid instead.
+    expChipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
     for fname_ind in 1:n_fnames
         curr_outname = replace(replace(
             replace(fname_list[fname_ind], "fpiPeaks" => "waveCalNightfpiDither"),
@@ -1704,7 +1711,7 @@ function comb_exp_get_and_save_fpi_wavecal(
                 xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
                 Ax = positional_poly_mat(xt, porder = wporder)
                 yt = Ax * linParams[fibIndx, :]
-                chipWaveSoln[:, fibIndx, chipIndx] .= yt
+                expChipWaveSoln[:, fibIndx, chipIndx] .= yt
             end
         end
 
@@ -1713,7 +1720,7 @@ function comb_exp_get_and_save_fpi_wavecal(
             linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
                 fname_ind, :, :],
             resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
-            chipWaveSoln = chipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
+            chipWaveSoln = expChipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
     end
     safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
         exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
@@ -1848,7 +1855,39 @@ function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5
     return func, keep
 end
 
-function interpolate_wave_params(fibInds, nlParams, linParams)
+"""
+    interpolate_wave_params(fibInds, nlParams, linParams;
+        block_steps = true, block_min_fibers = 10, block_nsigma = 4.0,
+        n_lines = nothing, block_min_lines = 12)
+        -> (interp_nlParams, interp_linParams)
+
+Regularise per-fiber wavelength-solution parameters across the slit by fitting each
+parameter as a smooth, outlier-clipped polynomial in fiber index
+(`fit_poly_without_outliers`, 3 sigma, iterated), so bad or missing (NaN) fibers are
+replaced by the smooth value.
+
+- `linParams[:, 1]` (constant term): quadratic in fiber, fitted separately within
+  each 30-fiber MTP block. Callers refit this term per fiber afterwards.
+- every other column of `linParams` and every column of `nlParams` (the chip
+  offsets and, for cporder > 0, the chip scales): quadratic in fiber over the whole
+  slit, plus (`block_steps = true`) one constant step per 30-fiber MTP block, see
+  [`mtp_block_steps`](@ref). If `n_lines` (sky lines per fiber) is given, fibers
+  with fewer than `block_min_lines` lines (an under- or barely-determined per-fiber
+  fit; 7 parameters for cporder 0, wporder 4) do not contribute to the steps. A block
+  with fewer than `block_min_fibers` usable fibers keeps the smooth solution.
+
+The higher-order terms and the chip parameters used to be fitted LINEARLY in fiber,
+which bowed the slit edges by up to ~0.5 km/s per chip (fixed by fitting them
+quadratically). A smooth curve over the whole slit still misses that every MTP block
+sits slightly off the curve in ALL these parameters together: with the smooth-only regulariser the sky-line residuals step by
+up to ~+-100 m/s per chip from block to block (LCO chips R and B worst), while the
+unregularised per-fiber fits are flat. Because the parameters are strongly correlated
+within a fiber, the steps have to be applied to all of them jointly: a step in the
+chip offsets alone makes the block-to-block residuals worse, not better.
+"""
+function interpolate_wave_params(fibInds, nlParams, linParams;
+        block_steps = true, block_min_fibers = 10, block_nsigma = 4.0,
+        n_lines = nothing, block_min_lines = 12)
     mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
     unique_mtp = 1:10
 
@@ -1865,39 +1904,87 @@ function interpolate_wave_params(fibInds, nlParams, linParams)
                                          nanmedian((linParams[keep_mtp, 1] .- func_eval)[keep])
     end
 
-    #need a second order poly for first order term
-    j = 2
-    func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
-    func_eval = func.(fibInds)
-    interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
-
-    #need a first order poly for higher order terms
-    for j in 3:size(linParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 1)
+    #second order poly in fiber for the first and all higher order terms
+    #(a first order poly for the higher order terms bowed the slit edges)
+    for j in 2:size(linParams, 2)
+        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
         func_eval = func.(fibInds)
         interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
     end
 
-    #use a first order poly for the chip offset,scale parameters
+    #second order poly in fiber for the chip offset,scale parameters
+    #(a first order poly bowed the slit edges, with opposite signs on chips R and G)
     for j in 1:size(nlParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 1)
+        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2)
         func_eval = func.(fibInds)
         interp_nlParams[:, j] .= func_eval .+ nanmedian((nlParams[:, j] .- func_eval)[keep])
+    end
+
+    #per-MTP-block steps, applied to all smoothed parameters jointly
+    if block_steps
+        n_nl = size(nlParams, 2)
+        lin_cols = 2:size(linParams, 2)
+        for mtp_ind in unique_mtp
+            in_mtp = findall(mtp_inds .== mtp_ind)
+            isempty(in_mtp) && continue
+            resids = hcat(nlParams[in_mtp, :] .- interp_nlParams[in_mtp, :],
+                linParams[in_mtp, lin_cols] .- interp_linParams[in_mtp, lin_cols])
+            if !isnothing(n_lines)
+                resids[n_lines[in_mtp] .< block_min_lines, :] .= NaN
+            end
+            steps = mtp_block_steps(resids; min_fibers = block_min_fibers, nsigma = block_nsigma)
+            isnothing(steps) && continue #too few good fibers: keep the smooth solution
+            interp_nlParams[in_mtp, :] .+= steps[1:n_nl]'
+            interp_linParams[in_mtp, lin_cols] .+= steps[(n_nl + 1):end]'
+        end
     end
 
     return interp_nlParams, interp_linParams
 end
 
+"""
+    mtp_block_steps(resids; min_fibers = 10, nsigma = 4.0, max_iter = 5) -> steps or nothing
+
+Step of one MTP block off the smooth across-slit solution, for all parameters jointly.
+`resids` is (fibers in the block) x (parameters): per-fiber fitted value minus the
+smooth value. The parameters of one fiber are strongly correlated, so ONE set of fibers
+is used for every parameter: a fiber is kept only if all its parameters are finite and
+each lies within `nsigma` robust sigma (1.4826 MAD over the kept fibers) of the block
+median, iterated. The step is the MEAN over the kept fibers (a mean over a common
+fiber set is a consistent wavelength solution; per-parameter medians mix fibers and
+are not). Returns `nothing` if fewer than `min_fibers` fibers survive, in which case
+the caller keeps the smooth solution for the block.
+"""
+function mtp_block_steps(resids::AbstractMatrix; min_fibers = 10, nsigma = 4.0, max_iter = 5)
+    finite = vec(all(isfinite, resids, dims = 2))
+    good = copy(finite)
+    for _ in 1:max_iter
+        sum(good) < min_fibers && return nothing
+        new_good = copy(finite)
+        for j in axes(resids, 2)
+            med = median(resids[good, j])
+            sig = 1.4826 * median(abs.(resids[good, j] .- med))
+            if sig > 0
+                new_good .&= abs.(resids[:, j] .- med) .<= nsigma * sig
+            end
+        end
+        new_good == good && break
+        good = new_good
+    end
+    sum(good) < min_fibers && return nothing
+    return vec(mean(resids[good, :], dims = 1))
+end
+
 function ingest_fpiLines_file(fileName)
     # Read in fpi line peaks data
-    f = h5open(fileName, "r+")
-    fpi_line_mat, fpi_line_cov_mat = try
-        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
-    catch
-        println(fileName)
-        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+    fpi_line_mat, fpi_line_cov_mat = h5open(fileName, "r") do f
+        try
+            read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+        catch
+            println(fileName)
+            read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+        end
     end
-    close(f)
 
     fpi_line_xlst = fpi_line_mat[:, 2, :]
     fpi_line_xlst_errs = zeros(Float64, size(fpi_line_xlst))
@@ -1910,14 +1997,14 @@ end
 
 function ingest_skyLines_file(fileName)
     # Read in sky line peaks data
-    f = h5open(fileName, "r+")
-    sky_line_mat_clean = try
-        read(f["sky_line_mat_clean"])
-    catch
-        println(fileName)
-        read(f["sky_line_mat_clean"])
+    sky_line_mat_clean = h5open(fileName, "r") do f
+        try
+            read(f["sky_line_mat_clean"])
+        catch
+            println(fileName)
+            read(f["sky_line_mat_clean"])
+        end
     end
-    close(f)
     sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
     return sky_line_xlst, sky_line_wlst
@@ -2311,16 +2398,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        linParams = try
-            read(f["linParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["linParams"])
+        linParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["linParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["linParams"])
+            end
         end
-
-        close(f)
 
         for pind in 1:n_lin_coeffs
             scatter!(axis_dict["$(pind)"], 301 .- fiber_inds, linParams[:, pind],
@@ -2351,16 +2436,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        nlParams = try
-            read(f["nlParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["nlParams"])
+        nlParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["nlParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["nlParams"])
+            end
         end
-
-        close(f)
 
         for pind in 1:n_nl_coeffs
             scatter!(axis_dict["$(pind)"], 301 .- fiber_inds, nlParams[:, pind],
@@ -2410,16 +2493,14 @@ function sky_wave_plots(
     dlam_dx[(begin + 1):end, :, :] .= diff(night_wave_soln, dims = 1)
     dlam_dx[begin, :, :] .= dlam_dx[begin + 1, :, :]
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        chipWaveSoln = try
-            read(f["chipWaveSoln"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["chipWaveSoln"])
+        chipWaveSoln = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["chipWaveSoln"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["chipWaveSoln"])
+            end
         end
-
-        close(f)
 
         dx = nanmedian(nanmedian((night_wave_soln .- chipWaveSoln) ./ dlam_dx, 1), 3)[1, :, 1]
 
@@ -2483,16 +2564,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        chipWaveSoln = try
-            read(f["chipWaveSoln"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["chipWaveSoln"])
+        chipWaveSoln = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["chipWaveSoln"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["chipWaveSoln"])
+            end
         end
-
-        close(f)
 
         dx = nanmedian(nanmedian((night_wave_soln .- chipWaveSoln) ./ dlam_dx, 1), 3)[1, :, 1]
 

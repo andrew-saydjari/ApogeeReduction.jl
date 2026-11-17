@@ -268,10 +268,9 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     sname = split(split(fname, "/")[end], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
 
-    f = jldopen(fname, "r+")
-    flux_1d = f["flux_1d"]
-    extract_trace_centers = f["extract_trace_centers"]
-    close(f)
+    flux_1d, extract_trace_centers = jldopen(fname, "r") do f
+        f["flux_1d"], f["extract_trace_centers"]
+    end
     function get_sky_peaks_partial(flux_1d)
         get_sky_peaks(flux_1d, tele, chip, roughwave_dict, df_sky_lines)
     end
