@@ -21,7 +21,7 @@ function parse_commandline()
     s = ArgParseSettings(description = "Rebuild the FPI-comb chip-transform calibration")
     @add_arg_table s begin
         "--stage"
-        help = "collect | derive | write | check | all"
+        help = "collect | derive | write | check | all, or a comma-separated list (e.g. collect,derive,write)"
         default = "all"
         "--root"
         help = "reduction root holding apred/<mjd>/ and wavecal/ (read-only unless --run_missing writes into --workdir)"
@@ -46,6 +46,9 @@ function parse_commandline()
         help = "stage 1: run the production comb fit (into --workdir) for nights with FPI exposures but no comb file"
         arg_type = Bool
         default = false
+        "--rerun_seed"
+        help = "stage 1, --run_missing only: seed of the re-run comb fit. scale1 (default; bootstrap: the stored sky solution's chip scales, if any, are replaced by 1, so the re-fit never depends on an earlier chip-transform file) | stored (seed exactly as stored)"
+        default = "scale1"
         # ---- stage 2
         "--block_mode"
         help = "none (DEFAULT: one all-time block per telescope) | detect (blocks from the data) | supplied (--boundaries) | supplied+detect. The data-detected change points are reported as QA in every mode."
@@ -122,6 +125,10 @@ function parse_commandline()
         "--arc_lines_dir"
         help = "optional directory of arclines_<tele>_<mjd>.h5 identified arc line tables"
         default = ""
+        "--qa_plots"
+        help = "stage 2: write the QA plots (needs CairoMakie)"
+        arg_type = Bool
+        default = true
         "--max_sky_exp"
         arg_type = Int
         default = 4
@@ -153,9 +160,9 @@ add_workers()
     include(joinpath($(@__DIR__), "chip_transform_stages.jl"))
     include(joinpath($(@__DIR__), "chip_transform_check.jl"))
 end
-using CairoMakie
+## CairoMakie is loaded only when QA plots are made (stage 2), so the derivation itself stays light
 
-stages = P["stage"] == "all" ? ["collect", "derive", "write", "check"] : [P["stage"]]
+stages = P["stage"] == "all" ? ["collect", "derive", "write", "check"] : String.(split(P["stage"], ","))
 t_start = time()
 logt(msg) = (println(Dates.format(now(), "HH:MM:SS"), "  [", round(Int, time() - t_start), " s] ", msg); flush(stdout))
 
@@ -168,10 +175,11 @@ end
 
 # ------------------------------------------------------------------------------ stage 1
 if "collect" in stages
+    write(joinpath(WORKDIR, "stage1_settings.txt"), "run_missing=$(P["run_missing"]) rerun_seed=$(P["rerun_seed"])")
     for tele in TELES
         mjds = list_nights(ROOT, tele; mjd_min = P["mjd_min"], mjd_max = P["mjd_max"])
         logt("stage 1 $(tele): $(length(mjds)) nights with a nightly wavelength file")
-        st = pmap(m -> (m, try; stage1_night(ROOT, tele, m, WORKDIR; run_missing = P["run_missing"]); "ok"; catch e; "ERROR " * sprint(showerror, e)[1:min(end, 200)]; end), mjds)
+        st = pmap(m -> (m, try; stage1_night(ROOT, tele, m, WORKDIR; run_missing = P["run_missing"], rerun_seed = P["rerun_seed"]); "ok"; catch e; "ERROR " * sprint(showerror, e)[1:min(end, 200)]; end), mjds)
         errs = [s for s in st if s[2] != "ok"]
         isempty(errs) || (println("stage 1 errors:"); foreach(println, errs))
         S = stage1_gather(WORKDIR, tele, [m for (m, s) in st if s == "ok"])
@@ -261,7 +269,10 @@ if "derive" in stages
               n_fibers_filled = count(b.fiber_filled)) for (k, b) in enumerate(D.blocks)]))
         CSV.write(joinpath(WORKDIR, "stage2_$(tele)_night_series.csv"), DataFrame(tele = tele, mjd = S.mjds, used = D.night_ok,
             status = S.status, bR = D.ser[:, 1], bB = D.ser[:, 2], aR = D.ser[:, 3], aB = D.ser[:, 4]))
-        qa_plots(tele, S, D)
+        if P["qa_plots"]
+            @eval Main using CairoMakie
+            Base.invokelatest(qa_plots, tele, S, D)
+        end
         logt("stage 2 $(tele): $(count(D.night_ok)) nights used, $(length(D.blocks)) block(s) starting $(join([b.data_mjd_min for b in D.blocks], ", ")); " *
              "fiber model $(join(D.model, ",")); detected scale change points (QA) at $(join(D.detected_mjd, ", ")); offset events (QA) at $(join(D.starts_offset_mjd, ", ")); $(length(rejected)) rejections")
     end
@@ -294,6 +305,8 @@ if "write" in stages
         "input_root" => ROOT, "telescopes" => join(TELES, ","),
         "mjd_min_arg" => string(P["mjd_min"]), "mjd_max_arg" => string(P["mjd_max"]),
         "cover_from" => string(P["cover_from"]), "cover_to" => string(P["cover_to"]), "cover_note" => P["cover_note"],
+        "stage1_settings" => (f = joinpath(WORKDIR, "stage1_settings.txt"); isfile(f) ? read(f, String) : "unknown"),
+        "needs_chip_transform_file" => "no (stages 1-3 never read one; stage 4 checks the file just written or --cal)",
         "fixed_terms_in_pipeline" => "scale (b_R, b_B); offsets stored for QA only",
         "nlParams_layout" => "a_R, b_R, a_B, b_B (x' = a_c + b_c * ximport, ximport = (pixel - 1024) / 2048)")
     for (k, v) in stage2_params(); prov["stage2_" * k] = string(v); end

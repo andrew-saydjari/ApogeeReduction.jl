@@ -89,7 +89,9 @@ fi
 # Comb-measured chip-transform calibration (scripts/cal/chip_transform): ON BY DEFAULT,
 # same mechanism as AR_EXP_CLASS_MODEL above:
 #   unset         -> no flag: pipeline_2d_1d.jl uses its pinned cal_ref file
-#   set to ""     -> OFF, deliberately (sky fit keeps chip scale 1)
+#   set to none   -> OFF, deliberately (sky fit keeps chip scale 1; also the bootstrap mode
+#                    for rebuilding the file from scratch, see scripts/cal/chip_transform/README.md)
+#   set to ""     -> OFF as well
 #   set to a path -> that file
 # A missing or unreadable file is a hard error in pipeline_2d_1d.jl.
 if [ "${AR_CHIP_TRANSFORM_CAL+set}" = "set" ]; then

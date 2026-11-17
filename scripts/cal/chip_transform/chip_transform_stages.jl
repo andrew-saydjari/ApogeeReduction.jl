@@ -63,7 +63,7 @@ read-write, so they must never be pointed at a finished reduction), the fit's ou
 to the copies, and the reduction root is only ever read. Same entry point, settings and acceptance gate as
 `fpi_medwavecal_skyline_dither`, seeded from the night's stored sky solution.
 """
-function run_missing_comb(root, tele, mjd, fpi_files, workdir)
+function run_missing_comb(root, tele, mjd, fpi_files, workdir; rerun_seed = "scale1")
     wd = joinpath(workdir, "stage1_combfits", string(mjd)); mkpath(wd)
     links = String[]
     for fn in fpi_files, chip in CHIP_LIST
@@ -82,6 +82,14 @@ function run_missing_comb(root, tele, mjd, fpi_files, workdir)
         read(f["sky/nightAve_linParams"]), read(f["sky/nightAve_nlParams"])
     end
     linP = reshape(linP, size(linP, 1), size(linP, 2)); nlP = reshape(nlP, size(nlP, 1), size(nlP, 2))
+    ## bootstrap seed: a sky solution made WITH a chip-transform file stores (a_R, b_R, a_B, b_B); drop the
+    ## fixed scales so the comb fit starts from chip scale 1 exactly as in a reduction without the file
+    ## (the comb fit frees b itself; see README, "Circularity")
+    if rerun_seed == "scale1" && size(nlP, 2) == 4
+        nlP = nlP[:, [1, 3]]
+    elseif !(rerun_seed in ("scale1", "stored"))
+        error("unknown --rerun_seed $(rerun_seed)")
+    end
     out = comb_exp_get_and_save_fpi_wavecal(links, linP, nlP; FPI_COMB_FIT_KWARGS..., verbose = false,
         checkpoint_mode = "commit_same")
     out === nothing && return nothing, "fpi_solution"
@@ -96,7 +104,7 @@ Stage-1 record of one night: per-fiber comb chip parameters (a_R, b_R, a_B, b_B)
 comb peaks used per fiber and chip, and the per-fiber residual RMS. Cached per night in
 `workdir/stage1/<tele>/<mjd>.h5` (resumable).
 """
-function stage1_night(root, tele, mjd, workdir; run_missing = false)
+function stage1_night(root, tele, mjd, workdir; run_missing = false, rerun_seed = "scale1")
     cache = joinpath(workdir, "stage1", tele, "$(mjd).h5")
     isfile(cache) && return cache
     status = "used"; src = comb_path(root, tele, mjd)
@@ -115,7 +123,7 @@ function stage1_night(root, tele, mjd, workdir; run_missing = false)
             # the reduction ran the comb fit (or its light check) and the gate refused it
             status = "rejected_gate_" * qa.failed_guard
         elseif run_missing
-            p, st = run_missing_comb(root, tele, mjd, fpi_files, workdir)
+            p, st = run_missing_comb(root, tele, mjd, fpi_files, workdir; rerun_seed = rerun_seed)
             if p === nothing
                 status = "rejected_rerun_" * st
             else
