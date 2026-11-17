@@ -33,6 +33,9 @@ include("wavecal.jl")
 include("skyline_peaks.jl")
 include("arclamp_peaks.jl")
 include("spectraInterpolation.jl")
+# per-flat trace QA, gate, night trace choice, whole-slit identification, trace bits
+# (uses utils.jl helpers; called by traceExtract_GH.jl and ar1D.jl)
+include("trace_qa.jl")
 include("traceExtract_GH.jl")
 # lsf.jl depends on traceExtract_GH.jl (int_gauss_hermite_term) and
 # fileNameHandling.jl (adjFiberIndx2FiberIndx), included above

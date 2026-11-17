@@ -86,6 +86,14 @@ else
     exp_class_opt=()
     exp_class_on=true
 fi
+# Trace choices (src/trace_qa.jl). Each unset/empty -> no flag -> the pre-existing behaviour:
+#   AR_TRACE_IDENTIFY  production|robust     make_traces_from_flats.jl --trace_identify
+#   AR_TRACE_SELECT    last|gated            pipeline_2d_1d.jl --trace_select
+#   AR_TRACE_FALLBACK  fixed_file|none       pipeline_2d_1d.jl --trace_fallback
+trace_identify_opt=(); trace_main_opt=()
+if [ -n "${AR_TRACE_IDENTIFY:-}" ]; then trace_identify_opt=(--trace_identify "$AR_TRACE_IDENTIFY"); fi
+if [ -n "${AR_TRACE_SELECT:-}" ]; then trace_main_opt+=(--trace_select "$AR_TRACE_SELECT"); fi
+if [ -n "${AR_TRACE_FALLBACK:-}" ]; then trace_main_opt+=(--trace_fallback "$AR_TRACE_FALLBACK"); fi
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -181,11 +189,11 @@ if [ "$run_2d_only" != "true" ]; then
         do
             print_elapsed_time "Fitting Traces from $flat_type Flats for $tele"
             mkdir -p ${outdir}${flat_type}_flats
-            julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode
+            julia +$julia_version --project=$base_dir $base_dir/scripts/cal/make_traces_from_flats.jl --tele $tele --trace_dir ${outdir} --runlist $flatrunlist --flat_type $flat_type --slack_quiet true --checkpoint_mode $checkpoint_mode "${trace_identify_opt[@]}"
 
             print_elapsed_time "Running 2D->1D Pipeline without relFlux for $flat_type Flats for $tele"
             mkdir -p ${outdir}/apredrelflux
-            julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode $checkpoint_mode
+            julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $flatrunlist --outdir $outdir --runname $runname --relFlux false --waveSoln false --checkpoint_mode $checkpoint_mode "${trace_main_opt[@]}"
         done
 
         print_elapsed_time "Making relFlux for $flat_type Flats"
@@ -197,7 +205,7 @@ if [ "$run_2d_only" != "true" ]; then
     do
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
         mkdir -p ${outdir}/wavecal
-        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode
+        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode "${trace_main_opt[@]}"
     done
     # ## Plots
     #     print_elapsed_time "Making Plots"

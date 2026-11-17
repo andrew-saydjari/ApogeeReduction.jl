@@ -411,7 +411,22 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib,
         max_prof_fib, all_y_prof, all_y_prof_deriv, flat_fname;
         good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
-        low_throughput_thresh = 0.05, median_trace_pos_path = "./data/")
+        low_throughput_thresh = 0.05, median_trace_pos_path = "./data/",
+        identify::AbstractString = "production", qa = nothing)
+    # `identify` selects how fibers are found and labelled at the chip center and how unlit
+    # fibers are placed (src/trace_qa.jl):
+    #   "production" (default): the pre-existing path, unchanged.
+    #   "robust": template-free whole-slit identification (`trace_peak_census` +
+    #       `trace_identify_slit`, refused with a named reason when ambiguous), and unlit fibers
+    #       placed from lit neighbours on both sides along the reference spacing pattern
+    #       (`fill_unlit_fibers_robust!`). The per-column Gauss-Hermite refinement of lit fibers
+    #       (the outward column walk) is the same code in both modes.
+    # `qa`, if a Dict, receives `outcome` ("ok" or the named reason the flat was refused) and
+    # the identification statistics; the return value is unchanged ([] , [] when refused).
+    identify in ("production", "robust") ||
+        error("trace_extract: identify must be \"production\" or \"robust\", got $(identify)")
+    setqa!(k, v) = (isnothing(qa) || (qa[k] = v); nothing)
+    setqa!("identify", String(identify))
 
     # TODO actually get these from the arguments
     if tele == "apo"
@@ -438,39 +453,12 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     noise_image = 1 ./ sqrt.(ivar_image)
     #     n_center_cols = 100 # +/- n_cols to use from middle to sum to find peaks
 
-    # Cutout image in x direction
-    r = (mid - n_center_cols):(mid + n_center_cols)
-    cutout_fluxes = image_data[r, :]'
-    cutout_errs = noise_image[r, :]'
-    cutout_masks = good_pixels[r, :]'
-
-    # Mask bad pixels
-    cutout_fluxes[.!cutout_masks] .= 0
-    cutout_ivars = cutout_errs .^ -2
-    cutout_ivars[.!cutout_masks] .= 0
-    cutout_errs[.!cutout_masks] .= Inf
-
-    #use median to mask large outlier fluxes from average
-    med_flux = nanzeromedian(cutout_fluxes, 2)
-    sigma_dists = (cutout_fluxes .- med_flux) .* (cutout_ivars .^ (0.5))
-    good_sigmas = (abs.(sigma_dists) .< 5) .& (cutout_ivars .!= 0)
-
-    cutout_fluxes[.!good_sigmas] .= 0
-    cutout_ivars[.!good_sigmas] .= 0
-    cutout_errs[.!good_sigmas] .= Inf
-
-    y_vals = range(start = 1, stop = size(cutout_fluxes, 1), step = 1)
-
-    comb_ivars = nansum(cutout_ivars, 2)
+    # Collapse the central columns into one spatial profile (outlier-rejected, ivar-weighted);
+    # see `trace_center_band` in src/trace_qa.jl (factored out unchanged).
+    comb_fluxes, comb_errs, comb_ivars = trace_center_band(image_data, noise_image, good_pixels;
+        mid = mid, n_center_cols = n_center_cols)
+    y_vals = range(start = 1, stop = size(comb_fluxes, 1), step = 1)
     good_ivars = comb_ivars .> 0
-
-    # ivar-weight combine fluxes
-    comb_errs = zeros(size(comb_ivars)) .+ Inf
-    comb_fluxes = zeros(size(comb_ivars))
-    comb_fluxes[good_ivars] = nansum((cutout_fluxes .* cutout_ivars), 2)[good_ivars] ./
-                              comb_ivars[good_ivars]
-
-    comb_errs[good_ivars] = comb_ivars[good_ivars] .^ (-0.5)
 
     sigma = 0.5 # smoothing length, pixels
 
@@ -553,6 +541,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     tele_string = "$(tele)_$(mjd)_$(expid)_$(chip)"
     verbose && println("$(tele_string) Original identified peaks ", size(good_y_vals))
 
+    if identify == "production"
     curr_fiber_inds = ceil.(Int, round.(prior_center_to_fiber_func.(float.(good_y_vals))))
     expect_trace_pos = prior_fiber_to_center_func.(float.(curr_fiber_inds))
     med_offset = nanmedian(expect_trace_pos - good_y_vals)
@@ -805,6 +794,74 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     #save the middle-of-detector best fit parameters for first guess
     best_fit_ave_params = copy(new_params)
+    else # identify == "robust"
+    # ---- whole-slit identification, no per-peak rounding (src/trace_qa.jl) ----
+    offset_inds = range(-4, 4, step = 1)
+    best_model_offset_inds = range(start = -10, stop = 10, step = 1)
+    all_rel_fluxes = comb_fluxes
+    all_rel_errs = comb_errs
+    census = trace_peak_census(comb_fluxes, comb_errs)
+    refpos = prior_trace_pos[sortperm(prior_fiber_inds)]
+    ident = trace_identify_slit(census.y, refpos; nfib = N_FIBERS,
+        census_nslots = census.nslots, census_slots = census.slots)
+    setqa!("id_reason", ident.reason)
+    setqa!("id_margin", ident.margin)
+    setqa!("id_shift_px", ident.a)
+    setqa!("id_nlit", count(ident.matched))
+    setqa!("census_nslots", census.nslots)
+    setqa!("census_median_snr", census.median_snr)
+    if !ident.ok
+        @warn "Skipping trace fitting of $(flat_fname): fiber identification refused ($(ident.reason); margin $(round(ident.margin, digits = 2)), $(length(census.y)) peaks, $(census.nslots) census slots)"
+        setqa!("outcome", ident.reason)
+        return [], []
+    end
+    start_pos = clamp.(ident.positions, 11, 2048 - 11)
+    good_y_vals = floor.(Int, round.(start_pos))
+    fit_inds = good_y_vals .+ offset_inds'
+    best_model_fit_inds = good_y_vals .+ best_model_offset_inds'
+    curr_fiber_inds = clamp.(collect(1:N_FIBERS), min_prof_fib, max_prof_fib)
+    first_guess_params = zeros(Float64, N_FIBERS, 3)
+    first_guess_params[:, 1] .= max.(0.01, maximum(all_rel_fluxes[fit_inds], dims = 2))
+    first_guess_params[:, 2] .= start_pos
+    first_guess_params[:, 3] .= 0.7
+    first_guess_params[:, 1] .*= (2 * π)^0.5 * first_guess_params[:, 3]
+    p1 = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
+        fit_inds, best_model_fit_inds, offset_inds,
+        curr_fiber_inds, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
+        n_iter = 10, return_cov = false,
+        use_first_guess_heights = false, max_center_move = 2,
+        min_widths = 0.5, max_widths = 2.0)
+    # widths smoothed over fiber index from the bright fibers (unlit fibers take the smooth value)
+    hm1 = nanmedian(p1[isfinite.(p1[:, 1]), 1])
+    wok = isfinite.(p1[:, 3]) .& isfinite.(p1[:, 1]) .& (p1[:, 1] .> 0.2 * hm1)
+    wsm = zeros(N_FIBERS)
+    for f in 1:N_FIBERS
+        wts = exp.(-0.5 .* (((1:N_FIBERS) .- f) ./ 10.0) .^ 2) .* wok
+        wsm[f] = sum(wts) > 0 ? sum(wts .* replace(p1[:, 3], NaN => 0.0)) / sum(wts) : 0.7
+    end
+    first_guess_params[:, 1] .= max.(0.01, ifelse.(isfinite.(p1[:, 1]), p1[:, 1], 0.01))
+    first_guess_params[:, 2] .= ifelse.(wok .& isfinite.(p1[:, 2]), p1[:, 2], start_pos)
+    first_guess_params[:, 3] .= wsm
+    fit_inds = floor.(Int, round.(first_guess_params[:, 2])) .+ offset_inds'
+    best_model_fit_inds = floor.(Int, round.(first_guess_params[:, 2])) .+ best_model_offset_inds'
+    new_params = fit_gaussians(all_rel_fluxes, all_rel_errs, first_guess_params,
+        fit_inds, best_model_fit_inds, offset_inds,
+        curr_fiber_inds, x_prof_min, x_prof_max_ind,
+        n_sub, min_prof_fib, all_y_prof, all_y_prof_deriv,
+        n_iter = 20, return_cov = false,
+        use_first_guess_heights = true, max_center_move = 3,
+        min_widths = 0.8 .* first_guess_params[:, 3],
+        max_widths = 1.2 .* first_guess_params[:, 3])
+    # an unlit slot keeps its identified position (its fit is noise and may wander onto a neighbour)
+    hm2 = nanmedian(new_params[isfinite.(new_params[:, 1]), 1])
+    unl = .!(isfinite.(new_params[:, 1]) .& isfinite.(new_params[:, 2]) .&
+             (new_params[:, 1] .> low_throughput_thresh * hm2))
+    new_params[unl, 2] .= start_pos[unl]
+    new_params[unl, 3] .= wsm[unl]
+    new_params[unl, 1] .= ifelse.(isfinite.(new_params[unl, 1]), new_params[unl, 1], 0.0)
+    best_fit_ave_params = copy(new_params)
+    end # identification
 
     good_results = isfinite.(new_params[:,2])
     new_params = new_params[good_results,:]
@@ -872,6 +929,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     verbose && println("$(tele_string) Possible number of peaks:", size(best_fit_ave_params))
 
+    if identify == "production"
     #remove the edge possible peaks if they have no throughput, because they likely don't exist
     #    good_throughput_fibers = (best_fit_ave_params[:, 1] ./ med_flux) .> 0.2
     good_throughput_fibers = ((best_fit_ave_params[:, 1] ./ med_flux) .> low_throughput_thresh) .& (isfinite.(best_fit_ave_params[:,2]))
@@ -939,6 +997,7 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         keep_fibers = (curr_fiber_inds .>= 1) .& (curr_fiber_inds .<= 300)
         best_fit_ave_params = best_fit_ave_params[keep_fibers, :]
     end
+    end # production edge truncation (robust: exactly 300 identified slots)
 
     curr_fiber_inds = clamp.(range(1, size(best_fit_ave_params, 1)), min_prof_fib, max_prof_fib)
 
@@ -959,11 +1018,15 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
     curr_fiber_inds = curr_fiber_inds[good_throughput_fibers]
 
     verbose && println("$(tele_string) Final number of good throughput peaks:", size(best_fit_ave_params))
+    setqa!("n_detected", n_detected_peaks)
+    setqa!("n_good_throughput", size(best_fit_ave_params, 1))
     if size(best_fit_ave_params,1) == 0
         @warn "Skipping trace fitting of $(flat_fname) because 0 traces were found to have detectable flux."
+        setqa!("outcome", "no_flux")
         return [],[]
     elseif n_detected_peaks != N_FIBERS
         @warn "Skipping trace fitting of $(flat_fname) because $(n_detected_peaks) traces were found instead of the expected $(N_FIBERS)"
+        setqa!("outcome", "trace_count")
         return [],[]
     end
 
@@ -1088,6 +1151,15 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
 
     final_param_outputs[:, good_throughput_fibers, :] .= param_outputs[:, :, :]
     final_param_output_covs[:, good_throughput_fibers, :, :] .= param_output_covs[:, :, :, :]
+
+    setqa!("n_unlit", length(low_throughput_fibers))
+    setqa!("outcome", "ok")
+    if identify == "robust"
+        # unlit fibers from lit neighbours on both sides along the reference spacing pattern
+        refpos_all = prior_fiber_to_center_func.(float.(1:size(final_param_outputs, 2)))
+        fill_unlit_fibers_robust!(final_param_outputs, low_throughput_fibers, refpos_all)
+        return final_param_outputs, final_param_output_covs
+    end
 
     #extrapolate from nearby good fibers for low throughput ones
     good_throughput_fibers = findall(good_throughput_fibers)

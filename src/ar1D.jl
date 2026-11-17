@@ -853,6 +853,8 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     thrpt_stack = zeros(N_CHIPS, N_FIBERS)
     bitmsk_thrpt_stack = zeros(Int, N_CHIPS, N_FIBERS)
+    bitmsk_trace_stack = zeros(Int, N_CHIPS, N_FIBERS)
+    trace_level_chips = fill(-2, N_CHIPS) # -2: not recorded (1D file made before trace levels)
 
     ingestBit = zeros(Int, N_FIBERS)
 
@@ -945,8 +947,13 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         extract_trace_centers = f["extract_trace_centers"]
         relthrpt = f["relthrpt"]
         bitmsk_relthrpt = f["bitmsk_relthrpt"]
+        # 1D files made before the trace bitmask existed carry no `bitmsk_trace`
+        bitmsk_trace = haskey(f, "bitmsk_trace") ? f["bitmsk_trace"] :
+                       fill(TRACE_QA_MISSING, N_FIBERS)
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))
+        trace_level_chips[chipind] = get(metadata_lst[end], "trace_level", -2)
+        bitmsk_trace_stack[chipind, :] .= bitmsk_trace
 
         flux_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= flux_1d[end:-1:1, :]
         ivar_stack[(1:N_XPIX) .+ (3 - chipind) * N_XPIX, :] .= ivar_1d[end:-1:1, :]
@@ -970,6 +977,12 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # should add a check all entries of metadata_lst to be equal
     metadata = metadata_lst[1]
     metadata["wavecal_type"] = wavecal_type # add wavecal type to metadata
+    # trace provenance of all three chips (the metadata above is the first chip's only):
+    # exposure-level OR of the night-level trace bits and the per-chip trace levels;
+    # the per-fiber, per-chip detail is the `bitmsk_trace` stack written below.
+    metadata["trace_flags"] = reduce(|, bitmsk_trace_stack; init = 0) & ~TRACE_FIBER_UNLIT
+    metadata["trace_level_chips"] = trace_level_chips
+    metadata["trace_level_max"] = maximum(trace_level_chips)
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
     chipBit_stack[.!(noBadBits)] .+= 2^4 # call pixels with bad bits thrown bad
@@ -1055,7 +1068,8 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
         extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack,
-        bitmsk_relthrpt = bitmsk_thrpt_stack, bitmsk_ingest = ingestBit)
+        bitmsk_relthrpt = bitmsk_thrpt_stack, bitmsk_ingest = ingestBit,
+        bitmsk_trace = bitmsk_trace_stack)
     return
 end
 
@@ -1115,6 +1129,17 @@ function process_1D(fname;
     end
     trace_metadata = read_metadata(traceFname)
     metadata = merge(metadata, trace_metadata)
+    # Per-fiber trace bitmask (src/trace_qa.jl): written into traceMain by make_traceMain; for
+    # a traceMain made before that, derived from its trace_type and heights (TRACE_QA_MISSING).
+    bitmsk_trace = h5open(traceFname, "r") do f
+        haskey(f, "bitmsk_trace") ? Int.(read(f["bitmsk_trace"])) : nothing
+    end
+    if isnothing(bitmsk_trace)
+        bitmsk_trace = trace_bits_from_metadata(regularized_trace_params, trace_metadata)
+        metadata["trace_flags"] = reduce(|, bitmsk_trace; init = 0) & ~TRACE_FIBER_UNLIT
+        metadata["trace_level"] = endswith(string(get(trace_metadata, "trace_type", "")), "_fallback") ?
+                                  TRACE_LEVEL_FIXED_FALLBACK : TRACE_LEVEL_OWN_FLAT
+    end
 
     # Carry the exposure-type classifier's verdict into the 1D products, so a
     # downstream consumer reading a 1D file can see WHETHER the frame was judged
@@ -1220,7 +1245,7 @@ function process_1D(fname;
         # we probably want to append info from the fiber dictionary from alamanac into the file name
         safe_jldsave(outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
             extract_trace_centers = regularized_trace_params[:, :, 2],
-            relthrpt, bitmsk_relthrpt, fiberTypeList,
+            relthrpt, bitmsk_relthrpt, fiberTypeList, bitmsk_trace,
             trace_used_param_fname = traceFname)
     else
         dirName = dirname(outfname)
@@ -1229,7 +1254,7 @@ function process_1D(fname;
         end
         safe_jldsave(
             outfname, metadata; flux_1d, ivar_1d, mask_1d, dropped_pixels_mask_1d,
-            extract_trace_centers = regularized_trace_params[:, :, 2],
+            extract_trace_centers = regularized_trace_params[:, :, 2], bitmsk_trace,
             trace_used_param_fname = traceFname)
     end
     close(falm)
