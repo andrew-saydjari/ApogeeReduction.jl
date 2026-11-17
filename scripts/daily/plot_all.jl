@@ -176,18 +176,16 @@ function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
     fname_ind = first_fname_ind
     fname = fname_list[fname_ind]
 
-    f = h5open(fname, "r+")
-
-    linParams, nlParams, ditherParams, resid_vec, resid_xt = try
-        read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]),
-        read(f["resid_xt"])
-    catch
-        println(fname)
-        read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]),
-        read(f["resid_xt"])
+    linParams, nlParams, ditherParams, resid_vec, resid_xt = h5open(fname, "r") do f
+        try
+            read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]),
+            read(f["resid_xt"])
+        catch
+            println(fname)
+            read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]),
+            read(f["resid_xt"])
+        end
     end
-
-    close(f)
 
     n_dither_coeffs = size(ditherParams, 2)
     all_ditherParams = zeros(Float64, (n_fnames, N_FIBERS, n_dither_coeffs))
@@ -203,18 +201,16 @@ function dither_plotter(fname_list, fname_expid_strings, mjd, tele)
 	    resid_plot_fnames[fname_ind] = ""
             continue
 	end
-        f = h5open(fname, "r+")
-
-        linParams, nlParams, ditherParams, resid_vec, resid_xt = try
-            read(f["linParams"]),
-            read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]), read(f["resid_xt"])
-        catch
-            println(fname)
-            read(f["linParams"]),
-            read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]), read(f["resid_xt"])
+        linParams, nlParams, ditherParams, resid_vec, resid_xt = h5open(fname, "r") do f
+            try
+                read(f["linParams"]),
+                read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]), read(f["resid_xt"])
+            catch
+                println(fname)
+                read(f["linParams"]),
+                read(f["nlParams"]), read(f["ditherParams"]), read(f["resid_vec"]), read(f["resid_xt"])
+            end
         end
-
-        close(f)
 
         all_ditherParams[fname_ind, :, :] .= ditherParams
 
@@ -332,7 +328,7 @@ for mjd_ind in 1:size(unique_mjds, 1)
     ditherParams_Path, resid_plot_fnames = dither_plotter(
         all1DObjectFPIDither, all1DObject_expid_strings, mjd, tele)
 
-    f = h5open(outname, "r+")
+    f = h5open(outname, "r")
 
     linParams, nlParams, ditherParams, exposure_names = try
         read(f["linParams"]), read(f["nlParams"]), read(f["ditherParams"]),

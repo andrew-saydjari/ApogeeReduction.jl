@@ -447,15 +447,14 @@ function get_ave_night_wave_soln(
     end
     unique_fname_list = unique(fname_list)
 
-    f = h5open(unique_fname_list[1], "r+")
-
-    linParams, nlParams = try
-        read(f["linParams"]), read(f["nlParams"])
-    catch
-        println(unique_fname_list[1])
-        read(f["linParams"]), read(f["nlParams"])
+    linParams, nlParams = h5open(unique_fname_list[1], "r") do f
+        try
+            read(f["linParams"]), read(f["nlParams"])
+        catch
+            println(unique_fname_list[1])
+            read(f["linParams"]), read(f["nlParams"])
+        end
     end
-    close(f)
 
     n_fnames = size(unique_fname_list, 1)
     n_lin_coeffs = size(linParams, 2)
@@ -472,17 +471,16 @@ function get_ave_night_wave_soln(
     fill!(all_nlParams, NaN)
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        linParams, nlParams = try
-            read(f["linParams"]), read(f["nlParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["linParams"]), read(f["nlParams"])
+        linParams, nlParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["linParams"]), read(f["nlParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["linParams"]), read(f["nlParams"])
+            end
         end
         all_linParams[:, :, fname_ind] .= linParams[:, :]
         all_nlParams[:, :, fname_ind] .= nlParams[:, :]
-        close(f)
     end
 
     med_linParams = nanmedian(all_linParams, 3)
@@ -1595,14 +1593,14 @@ end
 
 function ingest_fpiLines_file(fileName)
     # Read in fpi line peaks data
-    f = h5open(fileName, "r+")
-    fpi_line_mat, fpi_line_cov_mat = try
-        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
-    catch
-        println(fileName)
-        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+    fpi_line_mat, fpi_line_cov_mat = h5open(fileName, "r") do f
+        try
+            read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+        catch
+            println(fileName)
+            read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+        end
     end
-    close(f)
 
     fpi_line_xlst = fpi_line_mat[:, 2, :]
     fpi_line_xlst_errs = zeros(Float64, size(fpi_line_xlst))
@@ -1615,14 +1613,14 @@ end
 
 function ingest_skyLines_file(fileName)
     # Read in sky line peaks data
-    f = h5open(fileName, "r+")
-    sky_line_mat_clean = try
-        read(f["sky_line_mat_clean"])
-    catch
-        println(fileName)
-        read(f["sky_line_mat_clean"])
+    sky_line_mat_clean = h5open(fileName, "r") do f
+        try
+            read(f["sky_line_mat_clean"])
+        catch
+            println(fileName)
+            read(f["sky_line_mat_clean"])
+        end
     end
-    close(f)
     sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
     return sky_line_xlst, sky_line_wlst
@@ -1965,16 +1963,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        linParams = try
-            read(f["linParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["linParams"])
+        linParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["linParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["linParams"])
+            end
         end
-
-        close(f)
 
         for pind in 1:n_lin_coeffs
             scatter!(axis_dict["$(pind)"], 301 .- fiber_inds, linParams[:, pind],
@@ -2005,16 +2001,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        nlParams = try
-            read(f["nlParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["nlParams"])
+        nlParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["nlParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["nlParams"])
+            end
         end
-
-        close(f)
 
         for pind in 1:n_nl_coeffs
             scatter!(axis_dict["$(pind)"], 301 .- fiber_inds, nlParams[:, pind],
@@ -2064,16 +2058,14 @@ function sky_wave_plots(
     dlam_dx[(begin + 1):end, :, :] .= diff(night_wave_soln, dims = 1)
     dlam_dx[begin, :, :] .= dlam_dx[begin + 1, :, :]
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        chipWaveSoln = try
-            read(f["chipWaveSoln"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["chipWaveSoln"])
+        chipWaveSoln = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["chipWaveSoln"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["chipWaveSoln"])
+            end
         end
-
-        close(f)
 
         dx = nanmedian(nanmedian((night_wave_soln .- chipWaveSoln) ./ dlam_dx, 1), 3)[1, :, 1]
 
@@ -2137,16 +2129,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        chipWaveSoln = try
-            read(f["chipWaveSoln"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["chipWaveSoln"])
+        chipWaveSoln = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["chipWaveSoln"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["chipWaveSoln"])
+            end
         end
-
-        close(f)
 
         dx = nanmedian(nanmedian((night_wave_soln .- chipWaveSoln) ./ dlam_dx, 1), 3)[1, :, 1]
 
