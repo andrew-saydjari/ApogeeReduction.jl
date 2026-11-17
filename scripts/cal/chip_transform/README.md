@@ -99,4 +99,22 @@ of identified lamp lines).
 
 ## Measured cost (pass-1 DR21, ccalin051, 3 single-threaded workers)
 
-COST_TABLE
+Measured on the full pass-1 DR21 archive:
+
+- 3733 nights: APO 2084, LCO 1649.
+- 2111 comb nights used: APO 1046, LCO 1065.
+- 196 nights were refused by the FPI gate.
+
+| stage | wall time | peak memory |
+|---|---|---|
+| 1 `collect`, cold | ~9 min (APO 4.0 + LCO 4.6) | 3.2 GB main + ~1.5 GB per worker |
+| 1 `collect`, warm (all nights cached) | 2.6 min, 1 worker | 1.9 GB |
+| 2 `derive`, both telescopes | 2.1 min, serial | 1.9 GB |
+| 3 `write` | 11 s | |
+| 4 `check`, 320 nights (up to 4 sky exposures and all arc sequences per night) | 9.2 min (~5 s per night per worker) | 1.9 GB main |
+| comb re-fit of one missing night (`--run_missing`) | 116-138 s per night, single-threaded | |
+
+- The comb re-fit reproduces the stored pass-1 chip scales to <= 7e-12.
+- Stages 1 and 4 are embarrassingly parallel over nights and scale with `--workers` or the
+  number of Slurm tasks. Stages 2 and 3 are serial and cheap.
+- A full rebuild from stored comb fits is therefore ~25 min on one node with 3 workers.
