@@ -101,6 +101,102 @@ using HDF5
             end
         end
     end
+
+    @testset "interpolate_wave_params: per-MTP-block steps, joint across parameters" begin
+        # Curved fiber dependence as above, plus a constant step per 30-fiber MTP
+        # block that is shared (with fixed per-parameter signs, i.e. correlated)
+        # by every non-constant parameter, plus noise, gross outliers, a NaN fiber
+        # and one block with only 4 finite fibers. A smooth-only regulariser leaves
+        # each block off by ~ its step; the block steps must recover them, and the
+        # nearly empty block must fall back to the smooth solution.
+        rng = MersenneTwister(20261118)
+        nfib = ApogeeReduction.N_FIBERS
+        fibInds = collect(1:nfib)
+        u = (fibInds .- (nfib + 1) / 2) ./ ((nfib - 1) / 2)
+        blk = (fibInds .- 1) .÷ 30 .+ 1
+        lin_spec = [(16000.0, 0.5, 0.25, 0.01), (130.0, 0.02, 0.05, 0.002),
+            (-3.0, 0.002, 0.005, 2e-4), (0.5, 1e-3, 2.5e-3, 1e-4), (-0.2, 5e-4, 1e-3, 4e-5)]
+        nl_spec = [(-1.070, 2e-4, 5e-4, 2e-5), (1.0755, -1e-4, 5e-4, 2e-5)]
+        truth(s) = s[1] .+ s[2] .* u .+ s[3] .* u .^ 2
+        lin_noise = [s[4] for s in lin_spec]
+        nl_noise = [s[4] for s in nl_spec]
+        # block step amplitudes in units of the per-fiber noise; one pattern for all
+        # parameters, with per-parameter signs (correlated, as in the real fits)
+        step_units = [6.0, -5.0, 4.0, -6.0, 5.0, -4.0, 6.0, -5.0, 3.0, -6.0]
+        lin_sign = [0.0, 1.0, -1.0, 1.0, -1.0]   # the per-MTP constant term has no step here
+        nl_sign = [1.0, -1.0]
+        lin_true = reduce(hcat, truth.(lin_spec)) .+
+                   step_units[blk] .* (lin_sign .* lin_noise)'
+        nl_true = reduce(hcat, truth.(nl_spec)) .+ step_units[blk] .* (nl_sign .* nl_noise)'
+        linParams = lin_true .+ lin_noise' .* randn(rng, nfib, length(lin_spec))
+        nlParams = nl_true .+ nl_noise' .* randn(rng, nfib, length(nl_spec))
+        outliers = [3, 17, 150, 222, 296]
+        for (k, f) in enumerate(outliers)
+            sgn = isodd(k) ? 1 : -1
+            linParams[f, :] .+= sgn .* 200 .* lin_noise
+            nlParams[f, :] .-= sgn .* 200 .* nl_noise
+        end
+        linParams[60, :] .= NaN
+        nlParams[60, :] .= NaN
+        sparse_block = 7                     # fibers 181-210: only 4 finite fibers
+        dead = setdiff(findall(blk .== sparse_block), [183, 191, 199, 207])
+        linParams[dead, :] .= NaN
+        nlParams[dead, :] .= NaN
+
+        interp_nl, interp_lin = ApogeeReduction.interpolate_wave_params(
+            fibInds, nlParams, linParams)
+        smooth_nl, smooth_lin = ApogeeReduction.interpolate_wave_params(
+            fibInds, nlParams, linParams; block_steps = false)
+        @test all(isfinite, interp_lin) && all(isfinite, interp_nl)
+
+        # block-mean error in noise units, per non-constant parameter and block
+        function block_errors(P_nl, P_lin)
+            E = Float64[]
+            for (P, T, N, cols) in ((P_nl, nl_true, nl_noise, 1:2), (P_lin, lin_true, lin_noise, 2:5))
+                for j in cols, b in 1:10
+                    b == sparse_block && continue
+                    push!(E, mean((P[blk .== b, j] .- T[blk .== b, j]) ./ N[j]))
+                end
+            end
+            E
+        end
+        E_new = block_errors(interp_nl, interp_lin)
+        E_smooth = block_errors(smooth_nl, smooth_lin)
+        # the steps are recovered: every block mean within 1 noise unit of the truth
+        @test maximum(abs.(E_new)) < 1.0
+        # and the smooth-only (pre-block-step) regulariser fails that same check
+        @test maximum(abs.(E_smooth)) > 3.0
+        # the nearly empty block keeps the smooth solution (no step from 4 fibers)
+        in_sparse = blk .== sparse_block
+        @test interp_nl[in_sparse, :] == smooth_nl[in_sparse, :]
+        @test interp_lin[in_sparse, 2:end] == smooth_lin[in_sparse, 2:end]
+        # fibers with too few sky lines do not contribute to the steps: a block whose
+        # fibers all have 6 lines keeps the smooth solution, the others are unchanged
+        n_lines = fill(18, nfib)
+        n_lines[blk .== 2] .= 6
+        lines_nl, lines_lin = ApogeeReduction.interpolate_wave_params(
+            fibInds, nlParams, linParams; n_lines = n_lines)
+        @test lines_nl[blk .== 2, :] == smooth_nl[blk .== 2, :]
+        @test lines_lin[blk .== 2, 2:end] == smooth_lin[blk .== 2, 2:end]
+        @test lines_nl[blk .!= 2, :] == interp_nl[blk .!= 2, :]
+        # outlier and NaN fibers get their block's solution, not their own values
+        for (P, T, N, cols) in ((interp_nl, nl_true, nl_noise, 1:2),
+            (interp_lin, lin_true, lin_noise, 2:5))
+            for j in cols
+                r = (P[:, j] .- T[:, j]) ./ N[j]
+                @test maximum(abs.(r[vcat(outliers, 60)])) < 3.0
+                @test maximum(abs.(r[.!in_sparse])) < 5.0
+            end
+        end
+        # the block step itself: joint fiber selection, nothing below min_fibers
+        R = randn(rng, 30, 3) .+ [1.0 -2.0 3.0]
+        R[5, 2] = 50.0                       # outlier in ONE parameter drops the whole fiber
+        R[9, :] .= NaN
+        st = ApogeeReduction.mtp_block_steps(R)
+        kept = setdiff(1:30, [5, 9])
+        @test st ≈ vec(mean(R[kept, :], dims = 1)) atol = 1e-12
+        @test isnothing(ApogeeReduction.mtp_block_steps(R[1:9, :]; min_fibers = 10))
+    end
 end
 
 # ---------------------------------------------------------------------------

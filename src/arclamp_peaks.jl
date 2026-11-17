@@ -860,12 +860,9 @@ function get_and_save_fpi_peaks(fname; data_path = "./data/", checkpoint_mode = 
 
     sname = split(fname, "_")
     tele, mjd, expid, chip = sname[(end - 4):(end - 1)]
-    f = jldopen(fname, "r+")
-    flux_1d = f["flux_1d"]
-    ivar_1d = f["ivar_1d"]
-    mask_1d = f["mask_1d"]
-    extract_trace_centers = f["extract_trace_centers"]
-    close(f)
+    flux_1d, ivar_1d, mask_1d, extract_trace_centers = jldopen(fname, "r") do f
+        f["flux_1d"], f["ivar_1d"], f["mask_1d"], f["extract_trace_centers"]
+    end
 
     n_pixels = size(flux_1d, 1)
     n_fibers = size(flux_1d, 2)
@@ -955,12 +952,9 @@ function get_and_save_arclamp_peaks(fname; checkpoint_mode = "commit_same")
 
     sname = split(fname, "_")
     tele, mjd, chip, expid = sname[(end - 4):(end - 1)]
-    f = jldopen(fname, "r+")
-    flux_1d = f["flux_1d"]
-    ivar_1d = f["ivar_1d"]
-    mask_1d = f["mask_1d"]
-    extract_trace_centers = f["extract_trace_centers"]
-    close(f)
+    flux_1d, ivar_1d, mask_1d, extract_trace_centers = jldopen(fname, "r") do f
+        f["flux_1d"], f["ivar_1d"], f["mask_1d"], f["extract_trace_centers"]
+    end
 
     n_pixels = size(flux_1d, 1)
     n_fibers = size(flux_1d, 2)
