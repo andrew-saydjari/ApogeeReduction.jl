@@ -142,10 +142,14 @@ EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
                    "exposure_classifier/exposure_classifier_rf_v6.jld2")
 
 # Comb-measured chip-transform calibration (HDF5 built by
-# scripts/cal/chip_transform/build_chip_transform.jl). "" = off: the sky-line
-# wavelength fit keeps chip scale b = 1 (the behaviour before this option existed).
-# Set to the installed file to fix the R/B chip scales to the comb's values.
-CHIP_TRANSFORM_CAL = ""
+# scripts/cal/chip_transform/build_chip_transform.jl): the sky-line wavelength fit
+# fixes the R/B chip scales to the comb's per-fiber values instead of 1. ON by
+# default, like EXP_CLASS_MODEL; set to "" to turn it off deliberately (chip scale 1).
+# A path that does not exist or cannot be read is a hard error at pipeline_2d_1d.jl
+# startup, never a silent fallback. Rebuild before each release (see the README in
+# scripts/cal/chip_transform/) and point this at the new versioned file.
+CHIP_TRANSFORM_CAL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
+                      "chip_transform/chiptransform_pass1dr21_v2_allblock.h5")
 
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {

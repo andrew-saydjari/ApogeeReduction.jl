@@ -47,9 +47,34 @@ end
 struct ChipTransformCal
     path::String
     calibration_version::String
+    fingerprint::String     # FNV-1a 64-bit hash of the file's bytes (see `file_fingerprint`)
     provenance::Dict{String, String}
     blocks::Dict{String, Vector{ChipTransformBlock}}
 end
+
+"""
+    file_fingerprint(path) -> String
+
+FNV-1a 64-bit hash of a file's bytes, as 16 hex digits. Identifies the exact calibration file
+a product was made with (two files with the same version string but different contents get
+different fingerprints). Dependency-free; the calibration files are ~100 KB.
+"""
+function file_fingerprint(path::AbstractString)
+    h = 0xcbf29ce484222325
+    for b in read(path)
+        h = (h ⊻ UInt64(b)) * 0x00000100000001b3
+    end
+    return string(h, base = 16, pad = 16)
+end
+
+"""
+    chip_transform_id(cal) -> String
+
+The identity of the chip-transform input recorded in (and checked against) the metadata of
+every sky wavelength product: "none" without a calibration, else "<version>:<fingerprint>".
+"""
+chip_transform_id(::Nothing) = "none"
+chip_transform_id(cal::ChipTransformCal) = "$(cal.calibration_version):$(cal.fingerprint)"
 
 function Base.show(io::IO, cal::ChipTransformCal)
     nb = join(["$(t): $(length(b)) block(s)" for (t, b) in sort(collect(cal.blocks))], ", ")
@@ -143,7 +168,7 @@ function load_chip_transform_cal(path::AbstractString)
                             for i in eachindex(ms)]
             check_chip_transform_blocks(tele, blocks[tele])
         end
-        return ChipTransformCal(String(path), version, prov, blocks)
+        return ChipTransformCal(String(path), version, file_fingerprint(path), prov, blocks)
     end
 end
 
@@ -153,7 +178,8 @@ end
 The block whose inclusive [mjd_start, mjd_end] contains `mjd`, or `nothing` if the file has no
 block for this telescope and MJD (the caller then keeps the b = 1 behaviour and says so).
 Which MJDs a block serves (e.g. whether the first FPS block is extended back over the plate
-era) is decided when the file is built and recorded in its provenance, not here.
+era) is decided when the file is built and recorded in its provenance, not here. The sky fit
+treats an MJD without a block as an error (see `get_and_save_sky_wavecal`).
 """
 function chip_transform_block(cal::ChipTransformCal, tele::AbstractString, mjd::Integer)
     bl = get(cal.blocks, String(tele), nothing)

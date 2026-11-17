@@ -290,32 +290,42 @@ block for this exposure's telescope and MJD, the chip scales b_c are FIXED to th
 comb-measured values instead of 1 (the offsets a_c stay free, the number of fitted
 parameters is unchanged). The scales are not fitted and therefore not smoothed across
 fibers; the stored `nlParams` then have the cporder-1 layout (a_R, b_R, a_B, b_B), which
-every downstream consumer already handles. With `chip_transform_cal = nothing` (the default)
-the result is identical to before.
+every downstream consumer already handles. With `chip_transform_cal = nothing` the result is
+identical to before. A calibration without a block for the exposure's telescope and MJD is an
+error, never a silent b = 1.
+
+Checkpointing: the product's metadata records `chip_transform_id` ("none", or
+"<calibration version>:<file fingerprint>"). An existing product is reused only if
+`check_file` accepts it AND it was made with the same chip-transform input (a product without
+the key was made with b = 1, i.e. "none"); otherwise it is recomputed.
 """
 function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same",
         chip_transform_cal = nothing)
     outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
-    if check_file(outname, mode = checkpoint_mode)
+    ct_id = chip_transform_id(chip_transform_cal)
+    if check_file(outname, mode = checkpoint_mode) &&
+       string(get(read_metadata(outname), "chip_transform_id", "none")) == ct_id
         return outname
     end
 
     # comb-measured chip scales from the calibration file (nothing = b fixed to 1)
     fixed_chip_scales = nothing
-    metadata = Dict{String, Any}("chip_transform_cal" => "none")
+    metadata = Dict{String, Any}("chip_transform_cal" => "none", "chip_transform_id" => ct_id)
     if !isnothing(chip_transform_cal)
         cporder == 0 || throw(ArgumentError(
             "a fixed chip scale replaces b = 1 of the cporder-0 sky fit; got cporder = $(cporder)"))
         tele_str, mjd_str = split(basename(fname), "_")[2:3]
         fixed_chip_scales = chip_scales(chip_transform_cal, tele_str, parse(Int, mjd_str))
         if isnothing(fixed_chip_scales)
-            @warn "Chip-transform calibration $(chip_transform_cal.calibration_version) has no block " *
-                  "for $(tele_str) MJD $(mjd_str); the sky fit keeps chip scale b = 1 for $(basename(fname))"
-            metadata["chip_transform_cal"] = "no_block"
-        else
-            metadata["chip_transform_cal"] = chip_transform_cal.path
-            metadata["chip_transform_version"] = chip_transform_cal.calibration_version
+            throw(ArgumentError("chip-transform calibration $(chip_transform_cal.path) " *
+                "($(chip_transform_cal.calibration_version)) has no block for $(tele_str) MJD $(mjd_str) " *
+                "($(basename(fname))). Rebuild it with a coverage that includes this MJD " *
+                "(build_chip_transform.jl --cover_from/--cover_to) or run with --chip_transform_cal \"\" " *
+                "to fit with chip scale 1 deliberately."))
         end
+        metadata["chip_transform_cal"] = chip_transform_cal.path
+        metadata["chip_transform_version"] = chip_transform_cal.calibration_version
+        metadata["chip_transform_fingerprint"] = chip_transform_cal.fingerprint
     end
 
     # initial guess for the (low-order)chip polynomial parameters

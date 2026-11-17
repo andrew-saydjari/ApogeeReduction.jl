@@ -85,10 +85,13 @@ else
     exp_class_opt=()
     exp_class_on=true
 fi
-# Comb-measured chip-transform calibration (scripts/cal/chip_transform): OFF unless
-# AR_CHIP_TRANSFORM_CAL is set to a file, in which case the sky-line wavelength fit fixes
-# the R/B chip scales to that file's values (pipeline_2d_1d.jl --chip_transform_cal).
-if [ -n "${AR_CHIP_TRANSFORM_CAL:-}" ]; then
+# Comb-measured chip-transform calibration (scripts/cal/chip_transform): ON BY DEFAULT,
+# same mechanism as AR_EXP_CLASS_MODEL above:
+#   unset         -> no flag: pipeline_2d_1d.jl uses its pinned cal_ref file
+#   set to ""     -> OFF, deliberately (sky fit keeps chip scale 1)
+#   set to a path -> that file
+# A missing or unreadable file is a hard error in pipeline_2d_1d.jl.
+if [ "${AR_CHIP_TRANSFORM_CAL+set}" = "set" ]; then
     chip_cal_opt=(--chip_transform_cal "$AR_CHIP_TRANSFORM_CAL")
 else
     chip_cal_opt=()

@@ -14,15 +14,32 @@ three chips; chips R and B are mapped onto it by `x' = a_c + b_c * x`
 - When `b = 1` is forced, the shared quartic absorbs the scale error as 65-95 m/s of per-chip
   curvature.
 
-The calibration file holds the comb's chip scales per fiber, in blocks of time. With
-`pipeline_2d_1d.jl --chip_transform_cal <file>`, the sky fit fixes `b_c` to the file's values
-instead of 1:
+The calibration file holds the comb's chip scales per fiber, by default in one all-time block
+per telescope. The sky fit (`pipeline_2d_1d.jl --chip_transform_cal <file>`) fixes `b_c` to the
+file's values instead of 1:
 
 - the offsets stay free;
 - the number of fitted parameters is unchanged;
 - the stored `nlParams` take the cporder-1 layout `(a_R, b_R, a_B, b_B)`.
 
-With no file configured, nothing changes.
+**It is ON by default.** The pinned default is
+`/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5`,
+set in `pipeline_2d_1d.jl`'s arg table and in `airflow/dags/ar_common.py` (`CHIP_TRANSFORM_CAL`).
+
+- **Off switch:** `--chip_transform_cal ""`, `CHIP_TRANSFORM_CAL = ""`, or
+  `AR_CHIP_TRANSFORM_CAL=""` for the SLURM scripts. This gives chip scale 1, exactly the
+  behaviour from before the calibration existed.
+- **Hard errors, never a silent fallback to scale 1:**
+  - a configured file that is missing or unreadable;
+  - a file with no block for the exposure's telescope and MJD.
+- **Checkpointing:** each `waveCalSkyLine` product records `chip_transform_id`
+  (`<version>:<FNV-1a fingerprint of the file>`, or `none`). A stored product is reused only if
+  it was made with the same file. Changing the file (or turning the feature on or off)
+  recomputes the sky wavecal even under `commit_same` / `commit_exists`.
+  - Products downstream of it (`waveCalNightskyDither`, `waveCalFPI`, `waveCalNightfpiDither`
+    and the reinterpolated `ar1D`) are checkpointed on the code commit only. After changing the
+    calibration file at the same code commit, re-run `pipeline_2d_1d.jl` with
+    `--checkpoint_mode clobber` so they are rebuilt from the new sky solutions.
 
 Nothing learned is written into the source. Every number comes from the comb fits of a
 reduction, through `build_chip_transform.jl`, into a versioned HDF5 file that carries its own
@@ -40,7 +57,7 @@ provenance:
 | stage | what | output in `--workdir` |
 |---|---|---|
 | `collect` (1) | Per night with a nightly wavelength file: the comb fit's per-fiber `(a_R, b_R, a_B, b_B)`, comb peaks used per fiber/chip, and residual RMS. Nights the FPI gate refused are kept and marked. With `--run_missing true`, nights that have FPI exposures and no gate verdict are re-fitted with the production comb fit (`FPI_COMB_FIT_KWARGS`, same gate). The fit writes only into `--workdir`; the reduction root is never modified. | `stage1/<tele>/<mjd>.h5`, `stage1_<tele>_nights.csv` |
-| `derive` (2) | Robust per-fiber chip transform per block of time. See the rules below. | `stage2_<tele>.h5`, `stage2_<tele>_{blocks,night_series,rejected,fiber_model_cv}.csv`, `qa/qa_<tele>_*.png` |
+| `derive` (2) | Robust per-fiber chip transform, one all-time block per telescope by default. See the rules below. | `stage2_<tele>.h5`, `stage2_<tele>_{blocks,night_series,rejected,fiber_model_cv,detected_change_points}.csv`, `qa/qa_<tele>_*.png` |
 | `write` (3) | The calibration file with provenance. `--cover_from` / `--cover_to` extend the first and last blocks, e.g. back over the plate era. | `<version>.h5` |
 | `check` (4) | Re-evaluates sky (and, with `--arc_lines_dir`, arc) solutions on a sample of nights under four hypotheses: `scale1` (production sky), `cal_scale` (this change), `cal_scale_off` (scale and offset from the file), and `free_scale` (cporder-1 freedom, production arcs). Metrics are on held-out lines (exact leave-one-line-out), zero-point bias, and the shape against the comb where one exists. | `stage4/<tag>/`, `stage4_<tag>_{per_night,summary_vs_scale1,summary_vs_free_scale,flat_rv}.csv` |
 
@@ -53,14 +70,19 @@ All parameters are command-line flags. They are recorded in the file.
   `--clip_nsigma` robust sigma off that night's quadratic-in-fiber trend.
 - **Night cut.** A night is dropped if fewer than `--night_min_fibers` fibers remain. A night
   is also dropped if its median scale is a `--clip_nsigma` outlier within its block.
-- **Blocks** (`--block_mode detect`). Binary segmentation runs on the nightly fiber-median
-  `b_R` and `b_B`:
-  - noise comes from successive differences;
-  - outlier nights are screened against a running median;
-  - a split is accepted if both sides have at least `--min_block_nights` nights, the step is
-    significant at more than `--block_nsigma`, and its size exceeds `--block_min_step`.
+- **Blocks.** The default is `--block_mode none`: one all-time block per telescope.
+  - Change points of the scale are detected and reported in every mode
+    (`stage2_<tele>_detected_change_points.csv`, dotted lines in the QA plot, and the
+    file's provenance). They are kept for matching against a shared time-block definition
+    (traces and other calibrations).
+  - `--block_mode detect` uses them as block boundaries. Detection is binary segmentation on
+    the nightly fiber-median `b_R` and `b_B`:
+    - noise comes from successive differences;
+    - outlier nights are screened against a running median;
+    - a split is accepted if both sides have at least `--min_block_nights` nights, the step
+      is significant at more than `--block_nsigma`, and its size exceeds `--block_min_step`.
   - Boundaries can also be supplied (`--block_mode supplied` or `supplied+detect`,
-    `--boundaries`), or the whole range can be one block (`none`).
+    `--boundaries`), e.g. from a shared time-block definition.
   - Step changes of the offsets are reported as hardware events (QA only).
 - **Per block.** For each fiber, the median over nights after `--clip_nsigma` clipping, with
   its standard error.
@@ -76,21 +98,24 @@ cd <ApogeeReduction.jl checkout at the release commit>
 # local (one node): N single-threaded workers
 bash scripts/cal/chip_transform/run_chip_transform.sh <reduction root> <workdir> chiptransform_<release> 6 \
      --cover_from <release start MJD> --cover_to 99999 \
-     --cover_note "first FPS block extended over the plate era; plate-era check: <link to stage-4 tables>"
+     --cover_note "one all-time block extended over the plate era; plate-era check: <path to stage-4 tables>"
 # Slurm (every task = one worker; the script holds the #SBATCH header)
 sbatch scripts/cal/chip_transform/run_chip_transform.sh <reduction root> <workdir> chiptransform_<release> 0 --cover_from ...
 ```
 
 Then:
 
-1. Read `qa/qa_<tele>_night_series.png` (blocks against hardware events) and
-   `stage2_<tele>_rejected.csv`.
+1. Read `qa/qa_<tele>_night_series.png` (the detected change points against hardware events),
+   `stage2_<tele>_detected_change_points.csv` and `stage2_<tele>_rejected.csv`.
 2. Read `stage4_check_summary_vs_scale1.csv`. Held-out line RMS must not get worse, and the
    `cal_scale` zero-point shifts are the expected bias.
-3. Copy `<version>.h5` next to the other calibration inputs and point
-   `--chip_transform_cal` at it. On the daily DAG this is `CHIP_TRANSFORM_CAL` in
-   `airflow/dags/ar_common.py`; on the SLURM scripts it is `AR_CHIP_TRANSFORM_CAL`.
-   Products record the file and version in their `metadata`.
+3. Install `<version>.h5` in `/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/`.
+   Then point the defaults at it:
+   - `--chip_transform_cal` in `pipeline_2d_1d.jl`'s arg table;
+   - `CHIP_TRANSFORM_CAL` in `airflow/dags/ar_common.py`.
+
+   Never overwrite an installed version; install a new file name. Products record the file,
+   version and fingerprint in their `metadata`.
 
 A plate-era validation set (nights without a comb, plus FPS controls) is passed as
 `--check_nights <file>` with lines `<tele> <mjd> <category>`. Arc lines are passed as

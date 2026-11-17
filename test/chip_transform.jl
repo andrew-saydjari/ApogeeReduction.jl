@@ -133,13 +133,34 @@ end
             @test meta["chip_transform_cal"] == calp
             @test meta["chip_transform_version"] == "test_v1"
 
-            # an MJD the file does not cover keeps b = 1 (and says so in the metadata)
+            @test meta["chip_transform_id"] == ApogeeReduction.chip_transform_id(cal)
+            @test meta["chip_transform_fingerprint"] == ApogeeReduction.file_fingerprint(calp)
+
+            # checkpointing ("commit_exists": the stored product passes check_file whatever the commit):
+            # same calibration -> reused; different calibration, or none -> recomputed
+            t1 = mtime(out1)
+            sleep(1.1)
+            ApogeeReduction.get_and_save_sky_wavecal(fname; checkpoint_mode = "commit_exists", chip_transform_cal = cal)
+            @test mtime(out1) == t1                      # reused
+            out0 = ApogeeReduction.get_and_save_sky_wavecal(fname; checkpoint_mode = "commit_exists")
+            @test mtime(out0) > t1                       # off: recomputed with b = 1
+            @test size(h5open(f -> read(f["nlParams"]), out0), 2) == 2
+            @test h5open(f -> read(f["metadata"]), out0)["chip_transform_id"] == "none"
+            calp3 = joinpath(dir, "cal3.h5")
+            synthetic_chip_cal(calp3; blocks_apo = [(60000, 61000, bR + 1e-6, bB)], version = "test_v1")
+            cal3 = ApogeeReduction.load_chip_transform_cal(calp3)
+            @test cal3.fingerprint != cal.fingerprint    # same version string, different content
+            ApogeeReduction.get_and_save_sky_wavecal(fname; checkpoint_mode = "commit_exists", chip_transform_cal = cal)
+            t2 = mtime(out1); sleep(1.1)
+            ApogeeReduction.get_and_save_sky_wavecal(fname; checkpoint_mode = "commit_exists", chip_transform_cal = cal3)
+            @test mtime(out1) > t2                       # changed file -> recomputed
+            @test h5open(f -> read(f["nlParams"]), out1)[1, 2] == bR + 1e-6
+
+            # an MJD the file does not cover is an error, never a silent b = 1
             synthetic_chip_cal(calp; blocks_apo = [(59000, 59999, bR, bB)])
             cal2 = ApogeeReduction.load_chip_transform_cal(calp)
-            out2 = ApogeeReduction.get_and_save_sky_wavecal(fname; checkpoint_mode = "clobber", chip_transform_cal = cal2)
-            nl2, meta2 = h5open(f -> (read(f["nlParams"]), read(f["metadata"])), out2)
-            @test size(nl2, 2) == 2
-            @test meta2["chip_transform_cal"] == "no_block"
+            @test_throws ArgumentError ApogeeReduction.get_and_save_sky_wavecal(fname; checkpoint_mode = "clobber",
+                chip_transform_cal = cal2)
         end
     end
 end

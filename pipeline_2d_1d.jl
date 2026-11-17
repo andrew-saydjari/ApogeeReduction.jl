@@ -76,9 +76,9 @@ function parse_commandline()
         default = false
         "--chip_transform_cal"
         required = false
-        help = "comb-measured chip-transform calibration file (HDF5, built by scripts/cal/chip_transform/build_chip_transform.jl). A calibration input configured by path like --exp_class_model. If set, the sky-line wavelength fit fixes the R/B chip scales to the file's values instead of 1. Empty (the default) keeps the previous behaviour. A path that does not exist is a hard error."
+        help = "comb-measured chip-transform calibration file (HDF5, built by scripts/cal/chip_transform/build_chip_transform.jl). A calibration input configured by path like --exp_class_model; ON BY DEFAULT with the pinned file below (airflow/dags/ar_common.py sets it for production). The sky-line wavelength fit then fixes the R/B chip scales to the file's values instead of 1. Pass an empty string to turn it off deliberately (chip scale 1, the pre-calibration behaviour). A path that does not exist or cannot be read is a hard error, never a silent fallback to scale 1."
         arg_type = String
-        default = ""
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
     end
     return parse_args(s)
 end
@@ -91,9 +91,13 @@ if !parg["relFlux"] && parg["waveSoln"]
     error("Should not perform wavelength solution when relFlux is false. Set --waveSoln=false or --relFlux=true")
 end
 
-# a configured calibration input that is missing is a hard error at startup, never a silent b = 1
+# the chip-transform calibration is ON by default; a configured file that is missing is a hard
+# error at startup (an unreadable one fails when it is loaded), never a silent chip scale 1
 if !isempty(parg["chip_transform_cal"]) && !isfile(parg["chip_transform_cal"])
-    error("--chip_transform_cal $(parg["chip_transform_cal"]) does not exist")
+    error("chip-transform calibration file $(parg["chip_transform_cal"]) (--chip_transform_cal) does not exist. " *
+          "Install the file there, point --chip_transform_cal (production: CHIP_TRANSFORM_CAL in " *
+          "airflow/dags/ar_common.py; SLURM scripts: AR_CHIP_TRANSFORM_CAL) at an existing file, or pass " *
+          "--chip_transform_cal \"\" to run with chip scale 1 deliberately.")
 end
 
 workers_per_node = parg["workers_per_node"]
@@ -412,7 +416,8 @@ if parg["relFlux"]
     ## comb-measured chip transform (calibration input; nothing = chip scale fixed to 1)
     @everywhere CHIP_TRANSFORM_CAL = isempty($(parg["chip_transform_cal"])) ? nothing :
                                      load_chip_transform_cal($(parg["chip_transform_cal"]))
-    isempty(parg["chip_transform_cal"]) || println("Sky wavecal chip scales from ", CHIP_TRANSFORM_CAL)
+    println(isempty(parg["chip_transform_cal"]) ? "Sky wavecal chip scales: OFF (chip scale 1, --chip_transform_cal \"\")" :
+            "Sky wavecal chip scales from $(CHIP_TRANSFORM_CAL) [$(ApogeeReduction.chip_transform_id(CHIP_TRANSFORM_CAL))]")
 
     ## get wavecal from sky line peaks
     #only need to give one chip's list because internal
