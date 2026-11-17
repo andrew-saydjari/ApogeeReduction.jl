@@ -85,6 +85,14 @@ else
     exp_class_opt=()
     exp_class_on=true
 fi
+# Comb-measured chip-transform calibration (scripts/cal/chip_transform): OFF unless
+# AR_CHIP_TRANSFORM_CAL is set to a file, in which case the sky-line wavelength fit fixes
+# the R/B chip scales to that file's values (pipeline_2d_1d.jl --chip_transform_cal).
+if [ -n "${AR_CHIP_TRANSFORM_CAL:-}" ]; then
+    chip_cal_opt=(--chip_transform_cal "$AR_CHIP_TRANSFORM_CAL")
+else
+    chip_cal_opt=()
+fi
 
 runname="allobs_${tele}_${mjd}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -186,7 +194,7 @@ if [ "$run_2d_only" != "true" ]; then
 
     ## 2D->1D
     print_elapsed_time "Running 2D->1D Pipeline for $tele"
-    julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+    julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname "${chip_cal_opt[@]}"
     
     ## Plots
     print_elapsed_time "Making Plots"

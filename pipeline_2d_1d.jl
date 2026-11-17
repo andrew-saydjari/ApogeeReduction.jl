@@ -74,6 +74,11 @@ function parse_commandline()
         help = "move uncalibrated (no flats/darks etc.) 2d data forward"
         arg_type = Bool
         default = false
+        "--chip_transform_cal"
+        required = false
+        help = "comb-measured chip-transform calibration file (HDF5, built by scripts/cal/chip_transform/build_chip_transform.jl). A calibration input configured by path like --exp_class_model. If set, the sky-line wavelength fit fixes the R/B chip scales to the file's values instead of 1. Empty (the default) keeps the previous behaviour. A path that does not exist is a hard error."
+        arg_type = String
+        default = ""
     end
     return parse_args(s)
 end
@@ -84,6 +89,11 @@ mkpath(dirNamePlots) # will work even if it already exists
 # if we are not refluxing, we should not be doing the wavelength solution
 if !parg["relFlux"] && parg["waveSoln"]
     error("Should not perform wavelength solution when relFlux is false. Set --waveSoln=false or --relFlux=true")
+end
+
+# a configured calibration input that is missing is a hard error at startup, never a silent b = 1
+if !isempty(parg["chip_transform_cal"]) && !isfile(parg["chip_transform_cal"])
+    error("--chip_transform_cal $(parg["chip_transform_cal"]) does not exist")
 end
 
 workers_per_node = parg["workers_per_node"]
@@ -130,7 +140,8 @@ flush(stdout);
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither,
                            fpi_medwavecal_skyline_dither,
-                           safe_jldsave, process_1D, check_file, modify_saved_dict
+                           safe_jldsave, process_1D, check_file, modify_saved_dict,
+                           load_chip_transform_cal
 
     ###decide order to look for traces from these cal types (i.e. dome or quartz flats)
     trace_type_order = ["quartz","dome"]
@@ -398,6 +409,11 @@ if parg["relFlux"]
     mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
     println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
+    ## comb-measured chip transform (calibration input; nothing = chip scale fixed to 1)
+    @everywhere CHIP_TRANSFORM_CAL = isempty($(parg["chip_transform_cal"])) ? nothing :
+                                     load_chip_transform_cal($(parg["chip_transform_cal"]))
+    isempty(parg["chip_transform_cal"]) || println("Sky wavecal chip scales from ", CHIP_TRANSFORM_CAL)
+
     ## get wavecal from sky line peaks
     #only need to give one chip's list because internal
     #logic handles finding other chips when ingesting data
@@ -406,7 +422,7 @@ if parg["relFlux"]
         replace.(all1DObjecta, "ar1Dcal" => "skyLinePeaks"), "ar1D" => "skyLinePeaks")
     desc = "Skyline wavelength solutions:"
     @everywhere get_and_save_sky_wavecal_partial(fname) = get_and_save_sky_wavecal(
-        fname, checkpoint_mode = parg["checkpoint_mode"])
+        fname, checkpoint_mode = parg["checkpoint_mode"], chip_transform_cal = CHIP_TRANSFORM_CAL)
     all1DObjectWavecal = @showprogress desc=desc pmap(
         get_and_save_sky_wavecal_partial, all1DObjectSkyPeaks)
     good_fnames = .!isnothing.(all1DObjectWavecal)

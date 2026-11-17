@@ -141,6 +141,12 @@ GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/
 EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
                    "exposure_classifier/exposure_classifier_rf_v6.jld2")
 
+# Comb-measured chip-transform calibration (HDF5 built by
+# scripts/cal/chip_transform/build_chip_transform.jl). "" = off: the sky-line
+# wavelength fit keeps chip scale b = 1 (the behaviour before this option existed).
+# Set to the installed file to fix the R/B chip scales to the comb's values.
+CHIP_TRANSFORM_CAL = ""
+
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
     "tunnel_check": ("The Utah ControlMaster (ssh alias `mwm`) is down. Only "
