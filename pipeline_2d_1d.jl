@@ -74,6 +74,21 @@ function parse_commandline()
         help = "move uncalibrated (no flats/darks etc.) 2d data forward"
         arg_type = Bool
         default = false
+        "--arclamp_wavecal"
+        required = false
+        help = "write the stage-1 arc-lamp night product arclampWaveCalNight_<tele>_<mjd>.h5 (read by nothing yet; default false)"
+        arg_type = Bool
+        default = false
+        "--arclamp_linelist"
+        required = false
+        help = "arc line list for --arclamp_wavecal (default: data/arclamp_linelist_v1.csv in the repository)"
+        arg_type = String
+        default = ""
+        "--arclamp_linelist_selection"
+        required = false
+        help = "selection column of the arc line list (use_default, use_with_neon, use_with_blended, prelim_classB)"
+        arg_type = String
+        default = "use_default"
     end
     return parse_args(s)
 end
@@ -130,6 +145,7 @@ flush(stdout);
                            get_and_save_arclamp_peaks, get_and_save_fpi_peaks,
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither,
                            fpi_medwavecal_skyline_dither,
+                           get_and_save_arclamp_night_wavecal, load_arclamp_linelist,
                            safe_jldsave, process_1D, check_file, modify_saved_dict
 
     ###decide order to look for traces from these cal types (i.e. dome or quartz flats)
@@ -446,6 +462,27 @@ if parg["relFlux"]
             wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"],
             almanac_file = almanac_file)
         @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
+    end
+
+    ## stage-1 arc-lamp night product (off by default; nothing downstream reads it yet).
+    ## It needs the arc ar1Dcal files and, for the sequence gate, the per-exposure sky/FPI
+    ## wavelength solutions written above.
+    if parg["arclamp_wavecal"] && size(all1DArclamp, 1) > 0
+        almanac_file_arc = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
+        sendto(workers(), almanac_file_arc = almanac_file_arc)
+        @everywhere arclamp_linelist = load_arclamp_linelist(
+            parg["arclamp_linelist"] == "" ? ApogeeReduction.ARCLAMP_LINELIST_DEFAULT :
+            parg["arclamp_linelist"]; selection = parg["arclamp_linelist_selection"])
+        @everywhere arclamp_night_partial(mjd) = try
+            get_and_save_arclamp_night_wavecal(parg["tele"], mjd;
+                apred_dir = joinpath(parg["outdir"], "apred"), almanac_file = almanac_file_arc,
+                linelist = arclamp_linelist, checkpoint_mode = parg["checkpoint_mode"])
+        catch e
+            @warn "arc-lamp night product failed for $(parg["tele"]) $(mjd)" exception = e
+            nothing
+        end
+        desc = "Arc-lamp night products (stage 1): "
+        @showprogress desc=desc pmap(arclamp_night_partial, unique_mjds)
     end
 
     # ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name

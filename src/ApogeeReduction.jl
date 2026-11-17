@@ -32,6 +32,9 @@ include("fpi_homogeneity.jl")
 include("wavecal.jl")
 include("skyline_peaks.jl")
 include("arclamp_peaks.jl")
+# stage-1 arc-lamp wavelength calibration (new night product, read by nothing yet;
+# uses fit_gauss_and_bias from arclamp_peaks.jl and positional_poly_mat from wavecal.jl)
+include("arclamp_wavecal.jl")
 include("spectraInterpolation.jl")
 include("traceExtract_GH.jl")
 # lsf.jl depends on traceExtract_GH.jl (int_gauss_hermite_term) and
