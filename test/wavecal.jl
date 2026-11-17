@@ -218,6 +218,37 @@ using HDF5
             @test !res.qa_dithpix_order_inconsistent
         end
 
+        @testset "recorded labels never choose the cluster (measured positions only)" begin
+            # whatever the labels say -- honest, swapped, frozen, missing, a
+            # few wrong within the night -- the canonical membership and the
+            # shift are those of the measured pick
+            ref = AR.night_frame_anchor(offsets, fill(NaN, length(offsets)))
+            labels_wrong = copy(labels)
+            labels_wrong[[1, 4]] .= labels[[2, 3]]   # two exposures mislabeled
+            for labs in (labels, reverse(labels), fill(13.496, length(offsets)),
+                    fill(0.0, length(offsets)), labels_wrong)
+                res = AR.night_frame_anchor(offsets, labs)
+                @test res.canonical_cluster == ref.canonical_cluster
+                @test res.shift_pix == ref.shift_pix
+                @test res.exp_cluster == ref.exp_cluster
+            end
+            # three measured clusters (e.g. an unrecorded full-step move
+            # within the night) with labels tied on the two NON-extreme
+            # clusters: the labels used to restrict the pool to those two;
+            # now the extreme measured cluster is canonical and the
+            # disagreement is flagged
+            offs3 = vcat(offsets, -1.0 .+ 0.02 .* randn(rng, 4))
+            labs3 = vcat(fill(13.0, length(offsets)), fill(14.0, 4))
+            res3 = AR.night_frame_anchor(offs3, labs3)
+            @test length(res3.cluster_n) == 3
+            @test res3.canonical_cluster == 1            # lowest position (dir +1)
+            @test isapprox(res3.shift_pix, -1.0, atol = 0.05)
+            @test res3.mode == "measured_position_override"
+            @test res3.qa_dithpix_order_inconsistent
+            @test res3.shift_pix ==
+                  AR.night_frame_anchor(offs3, fill(NaN, length(offs3))).shift_pix
+        end
+
         @testset "(e) pin_night_frame! leaves composed per-exposure solutions invariant" begin
             NXP = ApogeeReduction.N_XPIX
             n_lin_coeffs = 5

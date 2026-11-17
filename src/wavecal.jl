@@ -454,15 +454,17 @@ end
 #      fitted dither offsets (1-D single-link, gap threshold
 #      NIGHT_FRAME_CLUSTER_GAP_PIX). Commanded-vs-measured differences and
 #      header label faults cannot corrupt the grouping.
-#   2. SELECT the canonical cluster with the almanac DITHPIX
-#      (`dithered_pixels`) values used as LABELS ONLY (an ordering, never a
-#      shift): canonical = cluster with the smallest median valid DITHPIX.
-#      When the labels cannot discriminate (tied / frozen / missing), fall
-#      back to MEASURED-POSITION ORDERING: canonical = the cluster at the
-#      extreme measured position that corresponds to the smallest DITHPIX
-#      under the telescope's verified DITHPIX-axis direction
-#      (NIGHT_FRAME_DITHPIX_DIRECTION: lowest position at LCO, highest at
-#      APO). Cluster ORDERING by position is frame-shift invariant: a
+#   2. SELECT the canonical cluster from MEASURED POSITIONS ONLY:
+#      canonical = the candidate cluster (>= 2 members) at the extreme
+#      measured position that corresponds to the smallest DITHPIX under the
+#      telescope's DITHPIX-axis direction (NIGHT_FRAME_DITHPIX_DIRECTION:
+#      lowest position at LCO, highest at APO). The recorded almanac DITHPIX
+#      (`dithered_pixels`) never chooses the cluster and never shifts
+#      anything: it is only a cross-check that names the selected cluster
+#      and raises the QA flags below when it disagrees with the
+#      measurement (recorded dither positions are not trusted -- wrong or
+#      missing labels change a QA flag, not the frame).
+#      Cluster ORDERING by position is frame-shift invariant: a
 #      convention flip shifts every exposure's offset by the same amount, so
 #      the differences between cluster medians (~0.5 px separation vs
 #      ~0.001 px cross-run noise) survive -- only ABSOLUTE offsets are
@@ -472,8 +474,7 @@ end
 #      labels are honest (verified corpus-wide against saved products: APO
 #      direction -1 on 133/133 label-discriminating nights 57643-61227, LCO
 #      +1 on 113/113 nights 57851-61230, era-stable, no exceptions) -- the
-#      two rules select the SAME cluster by construction and the label rule
-#      is a redundant cross-check rather than a different rule. Every
+#      label is a redundant cross-check rather than a selection rule. Every
 #      cluster is an equally correct frame; the ordering is a
 #      run-independent sorting convention, not a correctness judgment.
 #   3. APPLY one global linear map xt -> shift + scale * xt to the night
@@ -578,7 +579,8 @@ Inputs (aligned vectors, one entry per exposure):
 - `exp_offset_pix`: fitted global dither offset of each exposure relative to
   the current night frame, in pixels (NaN where the dither fit failed).
 - `exp_dithpix`: almanac `dithered_pixels` label per exposure (NaN where
-  missing). Used for ORDERING only, never as a shift.
+  missing). A cross-check only: it sets `mode` and the QA flags but never
+  chooses the canonical cluster and never shifts anything.
 - `dithpix_direction`: the telescope's verified DITHPIX-axis direction
   (`NIGHT_FRAME_DITHPIX_DIRECTION`); +1 means DITHPIX increases with measured
   pixel position (LCO), -1 means it decreases (APO).
@@ -595,15 +597,15 @@ three QA flags.
 
 Selection details: clusters with >= 2 members are preferred as canonical
 candidates (guards against a stray single-exposure cluster from one bad fit);
-when only singleton clusters exist they all remain candidates. The DITHPIX
-rule picks the candidate whose median valid label is the unique minimum (by
-more than `label_tol`); a tie, frozen or missing label situation falls back
-to measured-position ordering over the tied candidates (the extreme median
-position that maps to smallest DITHPIX under `dithpix_direction` —
-frame-shift-invariant, and coincident with the label rule whenever labels
-are honest). When the label rule and the measured ordering disagree, the
-measurement wins ("measured_position_override") and
-`qa_dithpix_order_inconsistent` is raised.
+when only singleton clusters exist they all remain candidates. The canonical
+cluster is ALWAYS the measured-position pick: the candidate at the extreme
+median position that maps to the smallest DITHPIX under `dithpix_direction`
+(frame-shift-invariant). The labels then only classify the outcome:
+"dithpix_group" when the pick is the unique smallest-label candidate (by more
+than `label_tol`), "measured_position" when the pick is among tied smallest
+labels or no candidate has a valid label, and "measured_position_override"
+(with `qa_dithpix_order_inconsistent`) when the smallest valid label sits on
+a different candidate than the measured pick.
 """
 function night_frame_anchor(exp_offset_pix, exp_dithpix;
         gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX, label_tol = NIGHT_FRAME_DITHPIX_TOL,
@@ -650,28 +652,26 @@ function night_frame_anchor(exp_offset_pix, exp_dithpix;
     # last (highest position) for direction -1 (APO).
     measured_pick(pool) = dithpix_direction >= 0 ? pool[1] : pool[end]
     qa_order = false
-    canonical, mode = if length(cand) == 1
-        cand[1], (length(clusters) == 1 ? "single_cluster" : "single_valid_cluster")
+    # The canonical cluster depends on MEASURED positions only; the
+    # recorded DITHPIX labels never choose it (they are not trusted), they
+    # only classify the outcome and raise the order-inconsistency flag.
+    canonical = measured_pick(cand)
+    mode = if length(cand) == 1
+        length(clusters) == 1 ? "single_cluster" : "single_valid_cluster"
     else
         labs = cluster_dithpix[cand]
         finite_labs = filter(isfinite, labs)
         min_lab = isempty(finite_labs) ? NaN : minimum(finite_labs)
         at_min = [c for (c, l) in zip(cand, labs) if isfinite(l) && l <= min_lab + label_tol]
-        if length(at_min) == 1
-            # labels discriminate: smallest-DITHPIX cluster. By the verified
-            # sign convention this coincides with the measured-position pick;
-            # if it does not, the measurement beats the label.
-            if at_min[1] == measured_pick(cand)
-                at_min[1], "dithpix_group"
-            else
-                qa_order = true
-                measured_pick(cand), "measured_position_override"
-            end
+        if isempty(at_min)
+            "measured_position"                 # no valid labels at all
+        elseif !(canonical in at_min)
+            qa_order = true                     # smallest label elsewhere
+            "measured_position_override"
+        elseif length(at_min) == 1
+            "dithpix_group"                     # labels agree and discriminate
         else
-            # labels tied/frozen/missing: measured-position ordering over the
-            # tied candidate pool (all candidates when no labels are valid)
-            pool = isempty(at_min) ? cand : at_min
-            measured_pick(pool), "measured_position"
+            "measured_position"                 # labels tied / frozen
         end
     end
 
@@ -724,8 +724,8 @@ end
 
 Commanded dither positions for the night: a Dict mapping the almanac
 `exposure` number to its `dithered_pixels` value (the DITHPIX header label).
-Returns `nothing` when the almanac (or the column) is unavailable, in which
-case the night-frame anchor falls back to measured-position ordering.
+Returns `nothing` when the almanac (or the column) is unavailable; the
+night-frame anchor then runs without the label cross-check (same frame).
 Never throws: label plumbing must not be able to fail a night.
 """
 function get_exp_dithpix_dict(almanac_file, tele, mjd)
@@ -739,7 +739,7 @@ function get_exp_dithpix_dict(almanac_file, tele, mjd)
         to_i(x) = x isa AbstractString ? parse(Int, x) : Int(x)
         return Dict(to_i(e) => to_f(d) for (e, d) in zip(df.exposure, df.dithered_pixels))
     catch e
-        @warn "Night-frame anchor: could not read DITHPIX labels from $(almanac_file) for $(tele) $(mjd); falling back to measured-position ordering." exception=e
+        @warn "Night-frame anchor: could not read DITHPIX labels from $(almanac_file) for $(tele) $(mjd); running without the label cross-check (the frame is chosen from measured positions either way)." exception=e
         return nothing
     end
 end
@@ -2120,9 +2120,10 @@ function ingest_fpiLines(fname_list)
 end
 
 ## TODO local parallelization mode (which would also need to pamp inside of sky_wave_plots)
-# `almanac_file` provides the commanded dither positions (DITHPIX labels) for
-# the deterministic night-frame anchor (Method A'); when empty or unreadable
-# the anchor falls back to the absolute-catalog tie-break and says so.
+# `almanac_file` provides the recorded dither positions (DITHPIX labels) that
+# the deterministic night-frame anchor (Method A') uses as a QA cross-check;
+# the canonical cluster itself is chosen from measured positions only, so an
+# empty or unreadable almanac changes the QA flags, never the frame.
 function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir", almanac_file = "")
 
     outname = joinpath(
