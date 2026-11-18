@@ -215,7 +215,10 @@ rejected because PostgreSQL reads them as ms and Airflow as s.
   2026-11-17 run left a 96-byte stub that made every retry skip. almanac
   writes to `<file>.partial`, moved into place only on exit 0, so a killed
   or failed run never leaves a stub at the real path, and a failed
-  `almanac_clobber` re-run keeps the previous good file. Old-layout files
+  `almanac_clobber` re-run keeps the previous good file. almanac is never
+  pointed at an existing output: it opens its output in append mode and
+  fails on a truncated stub, so on the old DAG even `almanac_clobber` could
+  not recover a killed night. Old-layout files
   (pre-`raw/`, before 2026-09) count as absent and are rebuilt, which is
   what the current pipeline needs anyway.
 - **"0 % CPU is not a hang".** Before almanac starts, the task log says
@@ -226,6 +229,12 @@ rejected because PostgreSQL reads them as ms and Airflow as s.
   from *inside* almanac right before the lookup (worker side,
   `apogee.py`, before `create_apogee_id_lookup()`) belongs to almanac
   itself and is left to the almanac PR.
+- **Manual runs without a data interval.** A trigger without
+  `--logical-date` has no `data_interval_start` in Airflow 3;
+  `setup.mjd`/`setup.date_mjd` fall back to `logical_date`, then
+  `run_after`, then now, and with conf `mjd` the date label is derived
+  from the MJD (`ar_common.date_label_from_mjd`, the same convention as the
+  scheduled arithmetic, checked for every day of a year in the tests).
 - **stale_run_guard** is the DAG's first task. Limitation: a run that had
   already passed it before an outage resumes where it stopped.
 - **Re-running a failed night**: a fresh trigger, not clearing tasks —

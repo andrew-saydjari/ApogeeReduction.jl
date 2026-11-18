@@ -283,14 +283,28 @@ Use a **fresh trigger** of the night with `almanac_clobber`:
 
 ```bash
 airflow dags list-runs apogee_daily --state failed     # find the night
+MJD=61360
+NOW=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
 airflow dags trigger apogee_daily \
-    --conf '{"mjd": 61360, "almanac_clobber": true}'
-# optional: name it, e.g. -r manual__rerun_61360_20261118
+    --logical-date "$NOW" \
+    --run-id "manual__rerun_${MJD}_$(date -u +%Y%m%dT%H%M%SZ)" \
+    --conf "{\"mjd\": $MJD, \"almanac_clobber\": true}"
 ```
 
 (Checked against `--help` of the deployed Airflow 3.3.1: `dags trigger`
 takes `-c/--conf`, `-r/--run-id`, `-l/--logical-date`; `dags list-runs`
 takes `--state`.) Notes:
+
+- **Pass `--logical-date`.** In Airflow 3 a trigger without it creates a
+  run with no data interval; before this change `setup.date_mjd` then
+  failed with `KeyError: 'data_interval_start'` (seen 2026-11-17 on the
+  61360 re-run). `setup.mjd`/`setup.date_mjd` now fall back to
+  `logical_date`, then `run_after`, then now, and with `mjd` in conf the
+  date label is derived from the MJD itself (it used to come from the
+  trigger time, i.e. name the wrong night for a past-day re-run), so the
+  command also works without `--logical-date` once this is promoted. Keep
+  passing it anyway: production on the pre-promotion DAG needs it. The
+  logical date only has to be unique; the night comes from `mjd`.
 
 - A manual run is never "stale"; it waits while another run is active
   (`max_active_runs=1`), and stays queued while the DAG is paused.
@@ -298,10 +312,20 @@ takes `--state`.) Notes:
   both observatories; for the one that already succeeded, almanac is
   rebuilt (clobber) and run_all.sh's `checkpoint_mode=commit_exists` skips
   existing products.
-- `almanac_clobber` is no longer needed to get past a stub left by a killed
-  run (an existing file is reused only if it holds the night), but it
-  forces a fresh almanac, which is what a re-run after a DB/tunnel problem
-  should have.
+- A killed almanac used to leave a truncated 96-byte HDF5 stub, and
+  **`almanac_clobber` did not recover from it** on the pre-change DAG:
+  almanac opens its output in append mode and failed on the truncated
+  file (`OSError: Unable to synchronously open file (truncated file:
+  eof = 96 ...)`; the earlier note that append mode would write into the
+  stub was wrong). Before re-running a night on the **pre-promotion** DAG,
+  move such a stub aside by hand (e.g. `mv allobs_lco_61360.h5
+  allobs_lco_61360.h5.stub-YYYYMMDD` in `/mnt/ceph/users/sdssv/work/daily/almanac/`).
+  With this change almanac never touches an existing output: it writes a
+  fresh `<file>.partial` that replaces the file only on success, an
+  existing file is reused only if it opens and holds the night, and no
+  stub is left by a killed run in the first place. `almanac_clobber` then
+  just forces a fresh almanac, which is what a re-run after a DB/tunnel
+  problem should have.
 
 **Why not clear the failed run's tasks.** On 2026-11-17 clearing tasks of a
 failed run did not restart it (the exact cause could not be established

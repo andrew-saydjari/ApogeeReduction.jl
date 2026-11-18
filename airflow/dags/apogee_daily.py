@@ -35,7 +35,9 @@ Trigger a manual/backfill run with e.g.:
   airflow dags trigger apogee_daily --conf '{"mjd": 61284}'
 Re-run a FAILED night with a fresh trigger (not by clearing tasks; see
 airflow/INSTALL.md, "Re-running a failed night"):
-  airflow dags trigger apogee_daily --conf '{"mjd": N, "almanac_clobber": true}'
+  airflow dags trigger apogee_daily --logical-date <now, ISO> \\
+      --run-id manual__rerun_<N>_<stamp> \\
+      --conf '{"mjd": N, "almanac_clobber": true}'
 Smoke-test conf (MUST force local mode — the default is slurm — and the
 dev channel; summaries are the only posts in summary_only):
   {"mjd": ..., "mode": "local", "outdir": ".../o3_dag_test/",
@@ -51,7 +53,6 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 # make sibling ar_common importable regardless of how the bundle is parsed
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -108,9 +109,12 @@ def compute_mjd(**context):
     if override >= 0:
         print(f"mjd from param override: {override}")
         return override
-    dis = context["data_interval_start"]
-    mjd = int(C.mjd_of(dis)) - 1
-    print(f"mjd from data_interval_start={dis}: {mjd}")
+    # A manual trigger without --logical-date has no data interval in
+    # Airflow 3 (2026-11-17: KeyError 'data_interval_start'); fall back to
+    # logical_date, then run_after, then now (C.run_reference_time).
+    ref, src = C.run_reference_time(context)
+    mjd = int(C.mjd_of(ref)) - 1
+    print(f"mjd from {src}={ref}: {mjd}")
     return mjd
 
 
@@ -118,12 +122,17 @@ def compute_date_mjd(**context):
     """ar_main.py setup.date_mjd, verbatim semantics:
         (data_interval_start astimezone America/New_York
          - timedelta(days=2)).strftime('%Y-%m-%d')
-    (zoneinfo replaces pytz)."""
-    dis = context["data_interval_start"]
-    date = (dis.astimezone(ZoneInfo("America/New_York"))
-            - timedelta(days=2)).strftime("%Y-%m-%d")
-    print(f"date_mjd from data_interval_start={dis}: {date}")
-    return date
+    (zoneinfo replaces pytz).
+
+    Manual runs (2026-11-17): when conf gives `mjd`, the label is derived
+    from that MJD (C.date_label_from_mjd, the same convention), not from
+    the trigger time, which named the wrong night for past-day re-runs.
+    Without a data interval (a trigger without --logical-date, which made
+    this task fail with KeyError 'data_interval_start') the reference time
+    falls back to logical_date, then run_after, then now."""
+    label, src = C.compute_date_label(context)
+    print(f"date_mjd from {src}: {label}")
+    return label
 
 
 # ---------------------------------------------------------------------------

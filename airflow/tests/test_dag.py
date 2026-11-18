@@ -136,6 +136,25 @@ class DagImport(unittest.TestCase):
         ctx["logical_date"] = datetime.now(timezone.utc)
         D.stale_run_guard(**ctx)
 
+    def test_setup_tasks_without_data_interval(self):
+        """A manual trigger without --logical-date has no data interval
+        (2026-11-17: KeyError 'data_interval_start' in setup.date_mjd)."""
+        import apogee_daily as D
+
+        class Run:
+            run_type = "manual"
+            run_after = datetime(2026, 11, 18, 2, tzinfo=timezone.utc)
+            logical_date = None
+
+        ctx = {"params": {"mjd": 61360, "almanac_clobber": True},
+               "dag_run": Run(), "logical_date": None}
+        self.assertEqual(D.compute_mjd(**ctx), 61360)
+        self.assertEqual(D.compute_date_mjd(**ctx), "2026-11-15")
+        ctx["params"] = {"mjd": -1}
+        self.assertEqual(D.compute_mjd(**ctx), 61361)  # from run_after
+        self.assertEqual(D.compute_date_mjd(**ctx), "2026-11-15")
+        D.stale_run_guard(**{**ctx, "params": {"stale_run_max_age_h": 36}})
+
     def test_every_bash_command_renders_and_parses(self):
         """Render each BashOperator template with stand-in context and run
         `bash -n` on it (catches quoting mistakes in the nested bash -c)."""
@@ -234,6 +253,26 @@ class AlmanacStepEndToEnd(unittest.TestCase):
         r = self.run_step("ok", almanac_clobber="true")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.calls(), 2)
+
+    def test_truncated_file_with_clobber_is_replaced(self):
+        """2026-11-17: with almanac_clobber, almanac itself failed opening
+        the killed run's truncated 96-byte file to append. almanac must
+        never be pointed at an existing output: it writes a fresh .partial
+        that replaces the file on success."""
+        with open(self.af, "wb") as f:
+            f.write(b"\x89HDF\r\n\x1a\n" + b"\0" * 88)  # 96-byte stub
+        r = self.run_step("ok", almanac_clobber="true")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(self.log) as f:
+            outputs = [ln.strip() for ln in f if not ln.startswith("fake")]
+        self.assertEqual(outputs, [self.af + ".partial"])
+        chk = subprocess.run(
+            [H5_PYTHON, os.path.join(REPO, "airflow", "scripts",
+                                     "check_almanac_output.py"),
+             self.af, "lco", "61360", "--fibers"],
+            capture_output=True, text=True)
+        self.assertEqual(chk.returncode, 0, chk.stdout)
+        self.assertFalse(os.path.exists(self.af + ".partial"))
 
     def test_failure_leaves_no_stub(self):
         r = self.run_step("fail")

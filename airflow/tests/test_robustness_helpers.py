@@ -122,6 +122,59 @@ class StaleRun(unittest.TestCase):
         self.assertIsNone(C.stale_run_reason("scheduled", None, self.NOW, 36))
 
 
+class ManualRunDates(unittest.TestCase):
+    """setup.mjd / setup.date_mjd for runs without a data interval
+    (2026-11-17: a trigger without --logical-date -> KeyError
+    'data_interval_start' in setup.date_mjd)."""
+
+    T = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)  # 7 am ET
+
+    def test_reference_time_fallbacks(self):
+        class Run:
+            run_after = datetime(2026, 11, 18, 1, tzinfo=timezone.utc)
+            logical_date = None
+        self.assertEqual(C.run_reference_time(
+            {"data_interval_start": self.T, "logical_date": None}),
+            (self.T, "data_interval_start"))
+        self.assertEqual(C.run_reference_time({"logical_date": self.T}),
+                         (self.T, "logical_date"))
+        self.assertEqual(C.run_reference_time(
+            {"data_interval_start": None, "dag_run": Run()}),
+            (Run.run_after, "dag_run.run_after"))
+        now = datetime(2026, 11, 18, 2, tzinfo=timezone.utc)
+        self.assertEqual(C.run_reference_time({}, now=now), (now, "now"))
+
+    def test_label_from_mjd_matches_the_scheduled_arithmetic(self):
+        # the run of 2026-11-17 processed mjd 61360, labelled 2026-11-15
+        label, _ = C.compute_date_label({"data_interval_start": self.T,
+                                         "params": {"mjd": -1}})
+        self.assertEqual(label, "2026-11-15")
+        self.assertEqual(C.date_label_from_mjd(61360), "2026-11-15")
+        # and for every 7 am ET trigger over a year (DST both ways)
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        day = datetime(2026, 1, 1, 7, tzinfo=et)
+        for i in range(366):
+            t = (day + timedelta(days=i)).replace(hour=7)
+            with self.subTest(t=t):
+                sched, _ = C.compute_date_label({"data_interval_start": t,
+                                                 "params": {}})
+                mjd = int(C.mjd_of(t)) - 1
+                self.assertEqual(sched, C.date_label_from_mjd(mjd))
+
+    def test_manual_run_with_mjd_and_no_data_interval(self):
+        ctx = {"params": {"mjd": 61360, "almanac_clobber": True}}
+        label, src = C.compute_date_label(ctx)
+        self.assertEqual(label, "2026-11-15")
+        self.assertIn("param mjd=61360", src)
+
+    def test_manual_run_without_mjd_or_data_interval(self):
+        now = datetime(2026, 11, 18, 2, tzinfo=timezone.utc)
+        label, src = C.compute_date_label({"params": {"mjd": -1}}, now=now)
+        self.assertEqual(label, "2026-11-15")  # 2026-11-17 21:00 ET - 2 d
+        self.assertTrue(src.startswith("now="))
+
+
 class StepCmdAnnounce(unittest.TestCase):
     def test_announce_goes_before_the_redirected_command(self):
         cmd = C.step_cmd("almanac", "true", "lco", announce="hello")

@@ -306,7 +306,8 @@ def stale_run_reason(run_type, logical_date, now,
             "AR_STALE_RUN_MAX_AGE_H). This run outlived an outage; it is "
             "failed without running anything so it cannot run on top of "
             "today's run. To process that night, trigger a fresh run: "
-            "airflow dags trigger apogee_daily --conf "
+            "airflow dags trigger apogee_daily --logical-date <now ISO> "
+            "--run-id manual__rerun_<MJD>_<stamp> --conf "
             "'{\"mjd\": <MJD>, \"almanac_clobber\": true}' "
             "(see airflow/INSTALL.md, 'Re-running a failed night').")
 
@@ -379,6 +380,65 @@ def night_date_str(mjd: int) -> str:
     """Civil UTC date (YYYY-MM-DD) on which the night's MJD began."""
     from datetime import date, timedelta as td
     return str(date(1858, 11, 17) + td(days=int(mjd)))
+
+
+def _ctx_get(context, key):
+    """context[key] or None: Airflow 3 omits data_interval_* for runs
+    without a data interval, and Context objects may raise KeyError."""
+    try:
+        return context.get(key)
+    except (KeyError, AttributeError):
+        try:
+            return context[key]
+        except (KeyError, TypeError):
+            return None
+
+
+def run_reference_time(context, now=None):
+    """(datetime, source) the run's night arithmetic is based on:
+    data_interval_start (scheduled runs: the trigger time on this
+    CronTriggerTimetable instance), else logical_date, else the dag_run's
+    run_after, else now (UTC). A manual `airflow dags trigger` without
+    --logical-date has no data interval in Airflow 3."""
+    for key in ("data_interval_start", "logical_date"):
+        val = _ctx_get(context, key)
+        if val is not None:
+            return val, key
+    dag_run = _ctx_get(context, "dag_run")
+    for key in ("run_after", "logical_date"):
+        val = getattr(dag_run, key, None)
+        if val is not None:
+            return val, f"dag_run.{key}"
+    return (now or datetime.now(timezone.utc)), "now"
+
+
+def date_label_from_mjd(mjd: int) -> str:
+    """setup.date_mjd's label for a given night MJD.
+
+    Same convention as the scheduled arithmetic: a run at time T processes
+    mjd = int(mjd(T)) - 1 and labels it (T in America/New_York) - 2 days.
+    For the 7 am ET trigger that label is the civil date on which MJD-1
+    began, e.g. mjd 61360 (run of 2026-11-17) -> '2026-11-15'."""
+    return night_date_str(int(mjd) - 1)
+
+
+def compute_date_label(context, now=None) -> tuple[str, str]:
+    """(label, source description) for setup.date_mjd: from conf `mjd`
+    when given (>= 0), else ar_main.py's
+    (reference time in America/New_York - 2 days)."""
+    from datetime import timedelta as td
+    from zoneinfo import ZoneInfo
+    params = _ctx_params(context)
+    try:
+        override = int(params.get("mjd", -1))
+    except (TypeError, ValueError):
+        override = -1
+    if override >= 0:
+        return date_label_from_mjd(override), f"param mjd={override}"
+    ref, src = run_reference_time(context, now=now)
+    label = (ref.astimezone(ZoneInfo("America/New_York"))
+             - td(days=2)).strftime("%Y-%m-%d")
+    return label, f"{src}={ref}"
 
 
 def public_log_url(tele: str, mjd: int) -> str | None:
