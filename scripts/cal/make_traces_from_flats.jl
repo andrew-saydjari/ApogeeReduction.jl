@@ -37,6 +37,11 @@ function parse_commandline()
         help = "checkpoint mode (clobber, commit_exists, commit_same)"
         arg_type = String
         default = "commit_same"
+        "--trace_identify"
+        required = false
+        help = "fiber identification on the flat: \"robust\" (default: template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl) or \"production\" (the pre-existing path). The per-column refinement of lit fibers is the same in both."
+        arg_type = String
+        default = "robust"
         "--almanac_file"
         required = false
         help = "almanac hdf5 file; used to identify the FPI guide fibers from the night's configurations for the dome-flat trace plots. If empty, FPI fibers are not annotated."
@@ -64,7 +69,9 @@ end
     using JLD2, ProgressMeter, ArgParse, Glob, StatsBase, ParallelDataTransfer
     using ApogeeReduction
     using ApogeeReduction: get_cal_file, get_fpi_fiberIDs_from_almanac, get_fps_plate_divide, trace_extract,
-                           safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace
+                           safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace,
+                           trace_lamp_metrics, flat_trace_qa, write_trace_qa, read_trace_qa, trace_qa_path,
+                           trace_reference_positions
 end
 
 @passobj 1 workers() parg # make it available to all workers
@@ -75,6 +82,8 @@ end
     include(joinpath(proj_path, "src/makie_plotutils.jl"))
 
     chips = collect(String, split(parg["chips"], ""))
+    parg["trace_identify"] in ("production", "robust") ||
+        error("--trace_identify must be production or robust, got $(parg["trace_identify"])")
 
     # make summary plots and gifs and send to slack in outer loop
 
@@ -119,74 +128,104 @@ end
         end
     end
 
-    function make_traces(fname, flat_type; checkpoint_mode = "commit_same")
+    # Every flat gets a QA record (`<flat_type>TraceQA_<tele>_<mjd>_<exp>_<chip>.h5`, next to
+    # the trace file): the outcome ("ok", or the NAMED reason it was refused: lamp_off,
+    # trace_count, no_flux, id_*, fit_error) and the gate metrics (src/trace_qa.jl). A refusal is
+    # still a refusal -- the same flats are dropped as before in the default mode -- but it is no
+    # longer silent: create_traceMain and anyone auditing a night read the reason from the record.
+    function write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
+            trace_params, outcome, extra)
+        qa = flat_trace_qa(image_data, ivar_image, pix_bitmask_image, teleloc, chiploc;
+            trace_params = trace_params, outcome = outcome,
+            refpos = trace_reference_positions(teleloc, chiploc; data_path = joinpath(proj_path, "data")),
+            extra = extra)
+        write_trace_qa(qaname, qa)
+        return qa
+    end
+
+    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "robust")
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, teleloc, mjdloc, expnumloc, chiploc, image_type = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)
-        #thresholds are ~20% of typical value (of smallest flux chip, and smallest flux from dome vs quartz) from days when lamps were on
-        # n.b. flux_med_thresh is assigned but DELIBERATELY NOT USED: the gate
-        # below tests flux_68p only. Turning the median test on is held pending
-        # the post-pass-1 classifier work (AKS 2026-09-08, "let's see how far we
-        # can get with the classifier after pass1"), because on the testbed
-        # corpus it fixes a confirmed false acceptance but also false-rejects at
-        # least one genuinely good faint LCO quartzflat. Do not enable it as a
-        # drive-by cleanup; do not delete it either.
-        if teleloc == "apo"
-            flux_med_thresh = 16
-            flux_68p_thresh = 40
-        elseif teleloc == "lco"
-            flux_med_thresh = 10
-            flux_68p_thresh = 10
-        end
-        
+        # Lamp-off gate (unchanged; now `trace_lamp_metrics` in src/trace_qa.jl): flux_68p must
+        # reach ~20% of the typical value (of the smallest-flux chip, and smallest flux from dome
+        # vs quartz) from days when lamps were on: 40 (APO), 10 (LCO).
+        # n.b. the median test (16 APO / 10 LCO) is DELIBERATELY NOT USED: turning it on is held
+        # pending the post-pass-1 classifier work (AKS 2026-09-08, "let's see how far we can get
+        # with the classifier after pass1"), because on the testbed corpus it fixes a confirmed
+        # false acceptance but also false-rejects at least one genuinely good faint LCO
+        # quartzflat. Do not enable it as a drive-by cleanup; do not delete it either. It is
+        # recorded in the QA record as `flux_med`.
+
         savename = joinpath(parg["trace_dir"], "$(flat_type)_flats", "$(mjdloc)", "$(flat_type)Trace_$(teleloc)_$(mjdloc)_$(expnumloc)_$(chiploc).h5")
-        if check_file(savename, mode = checkpoint_mode)
+        qaname = trace_qa_path(parg["trace_dir"], flat_type, teleloc, mjdloc, expnumloc, chiploc)
+        extra = Dict{String, Any}("flat_type" => String(flat_type), "mjd" => parse(Int, mjdloc),
+            "expnum" => parse(Int, expnumloc), "image_file" => String(fname),
+            "trace_file" => "", "identify" => String(identify))
+        trace_done = check_file(savename, mode = checkpoint_mode)
+        if trace_done && check_file(qaname, mode = checkpoint_mode)
             return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
         end
-        
-        f = jldopen(fname)
+
+        f = jldopen(fname, "r")
         image_data = f["dimage"][1:N_XPIX, 1:N_XPIX]
         ivar_image = f["ivarimage"][1:N_XPIX, 1:N_XPIX]
         pix_bitmask_image = f["pix_bitmask"][1:N_XPIX, 1:N_XPIX]
         close(f)
 
+        if trace_done
+            # trace kept by the checkpoint (e.g. made before QA records existed): add its QA record
+            extra["trace_file"] = savename
+            extra["identify"] = "unknown(checkpointed)"
+            write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
+                load(savename, "trace_params"), "ok", extra)
+            return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
+        end
+
         good_pixels = ((pix_bitmask_image .& bad_pix_bits) .== 0)
-        flux_summary = nanzeropercentile(image_data[good_pixels],percent_vec=[16,50,84])
-        flux_med = flux_summary[2]
-        flux_68p = 0.5*(flux_summary[3]-flux_summary[1])
-        if flux_68p < flux_68p_thresh
+        lamp = trace_lamp_metrics(image_data, pix_bitmask_image, teleloc)
+        flux_med, flux_68p = lamp.flux_med, lamp.flux_68p
+        if !lamp.lamp_ok
             @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2))) was skipped for appearing to have the lamp turned off. Used $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))% of the pixels for this calculation."
+            write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
+                nothing, "lamp_off", extra)
             return nothing
         end
-    
+
         (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
-    
-        # trace_params,
-        # trace_param_covs = trace_extract(
-        #     image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-        #     med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv
-        #     ; good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
 
+        tqa = Dict{String, Any}()
         trace_params, trace_param_covs = try
             trace_extract(
                 image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
                 med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
 		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname; 
-                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
-        catch
+                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
+                identify = identify, qa = tqa)
+        catch e
             println("Trace fitting failed for $(fname)")
             println("Flux info is (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%)")
-            trace_params, trace_param_covs = trace_extract(
+            extra["fit_error"] = first(sprint(showerror, e), 500)
+            write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
+                nothing, "fit_error", extra)
+            # retried once as before (a second failure propagates, as before)
+            trace_extract(
                 image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
                 med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
 		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname;
-                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"))
+                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
+                identify = identify, qa = tqa)
+        end
+        for k in ("n_detected", "n_good_throughput", "n_unlit")
+            haskey(tqa, k) && (extra[k] = tqa[k])
         end
 
         if size(trace_params,1) == 0
 	    # KEVIN should look at what is going on with these weird LCO early MJD (e.g. 57801) cases more closely in future
-            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%) was skipped for not having the correct amount of traces."
+            @warn "File $(fname) (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%) was skipped: $(get(tqa, "outcome", "not the correct amount of traces"))."
+            write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
+                nothing, get(tqa, "outcome", "trace_count"), extra)
             return nothing
 	end
 
@@ -194,13 +233,17 @@ end
 
         mkpath(dirname(savename))
         safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
+        extra["trace_file"] = savename
+        write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
+            trace_params, "ok", extra)
     
         return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
     end
 end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
-@everywhere make_traces_partial(fname) = make_traces(fname, parg["flat_type"], checkpoint_mode = parg["checkpoint_mode"])
+@everywhere make_traces_partial(fname) = make_traces(fname, parg["flat_type"], checkpoint_mode = parg["checkpoint_mode"],
+    identify = parg["trace_identify"])
 plot_paths = @showprogress desc=desc pmap(make_traces_partial, flist)
 
 if !parg["slack_quiet"]
@@ -209,7 +252,10 @@ if !parg["slack_quiet"]
         thread("$(parg["flat_type"])Flat Traces for $(parg["tele"]) $(chips) from SJD $(minimum(unique_mjds)) to $(maximum(unique_mjds))")
         for (filename, heights_widths_path) in zip(flist, plot_paths)
             if isnothing(heights_widths_path)
-                thread("WARNING: File $(filename) was skipped for appearing to have the lamp turned off.")
+                sname = split(split(basename(filename), ".h5")[1], "_")
+                qa = read_trace_qa(trace_qa_path(parg["trace_dir"], parg["flat_type"], sname[end - 4], sname[end - 3], sname[end - 2], sname[end - 1]))
+                why = isnothing(qa) ? "unknown reason" : get(qa, "outcome", "unknown reason")
+                thread("WARNING: File $(filename) was skipped: $(why).")
                 continue
             end
             thread("Here is the median flux and width per fiber for $(filename)", heights_widths_path)

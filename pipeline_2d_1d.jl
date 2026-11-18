@@ -74,6 +74,16 @@ function parse_commandline()
         help = "move uncalibrated (no flats/darks etc.) 2d data forward"
         arg_type = Bool
         default = false
+        "--trace_select"
+        required = false
+        help = "how the night's trace is chosen among its flats (src/trace_qa.jl): \"gated\" (default: only flats that pass the trace QA gate; ranked by gate level, quartz before dome, closeness to the night's median science exposure, fit_rms, exposure number) or \"last\" (the pre-existing rule: the lexically last quartz trace of the night, else the last dome trace). Either way the choice, its QA and the candidate table are written into the traceMain metadata and the per-fiber bitmsk_trace."
+        arg_type = String
+        default = "gated"
+        "--trace_fallback"
+        required = false
+        help = "what a night with no eligible flat gets: \"none\" (default: no trace; the night's exposures are not extracted and are listed in the log) or \"fixed_file\" (the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK). The own-night and template levels that replace the fixed file arrive with the epoch templates (PR B)."
+        arg_type = String
+        default = "none"
         "--chip_transform_cal"
         required = false
         help = "comb-measured chip-transform calibration file (HDF5, built by scripts/cal/chip_transform/build_chip_transform.jl). A calibration input configured by path like --exp_class_model; ON BY DEFAULT with the pinned file below (airflow/dags/ar_common.py sets it for production). The sky-line wavelength fit then fixes the R/B chip scales to the file's values instead of 1. Pass the word none (or an empty string) to turn it off deliberately: chip scale 1, the pre-calibration behaviour, and the bootstrap mode used to rebuild the file from scratch (scripts/cal/chip_transform/README.md, Bootstrap). A path that does not exist or cannot be read is a hard error, never a silent fallback to scale 1."
@@ -85,6 +95,11 @@ end
 parg = parse_commandline()
 dirNamePlots = parg["outdir"] * "plots/"
 mkpath(dirNamePlots) # will work even if it already exists
+
+parg["trace_select"] in ("last", "gated") ||
+    error("--trace_select must be \"last\" or \"gated\", got $(parg["trace_select"])")
+parg["trace_fallback"] in ("fixed_file", "none") ||
+    error("--trace_fallback must be \"fixed_file\" or \"none\", got $(parg["trace_fallback"])")
 
 # if we are not refluxing, we should not be doing the wavelength solution
 if !parg["relFlux"] && parg["waveSoln"]
@@ -150,6 +165,7 @@ flush(stdout);
                            comb_exp_get_and_save_fpi_wavecal, skyline_medwavecal_skyline_dither,
                            fpi_medwavecal_skyline_dither,
                            safe_jldsave, process_1D, check_file, modify_saved_dict,
+                           make_traceMain, TRACE_LEVEL_NONE,
                            load_chip_transform_cal
 
     ###decide order to look for traces from these cal types (i.e. dome or quartz flats)
@@ -216,71 +232,23 @@ end
     all2D = vcat(all2Dperchip...)
 end
 
-### This should move to ar1D.jl
-
-# make trace param file copies for each date
-# searching outwards from the given mjd, 
-# looking for cal types in the order of trace_type_order
-@everywhere function create_traceMain(mjd,chip,trace_type_order;
-				       tele = parg["tele"],
-				       outdir = parg["outdir"],
-				       checkpoint_mode = "commit_same")
-
-    traceMain_fname = outdir * "apred/$(mjd)/traceMain_$(tele)_$(mjd)_$(chip).h5"
-    if check_file(traceMain_fname, mode = checkpoint_mode)
-        return
-    end
-    orig_trace_param_fname = nothing
-    trace_type = nothing
-    found_match = false
-
-    for check_trace_type in trace_type_order
-        # check for different cal types in preferential
-        # order given by trace_type_order
-
-        traceList = sort(glob("$(check_trace_type)Trace_$(tele)_$(mjd)_*_$(chip).h5",
-            outdir * "$(check_trace_type)_flats/$(mjd)/"))
-        if length(traceList) >= 1
-            orig_trace_param_fname = traceList[end]
-            trace_type = check_trace_type
-            found_match = true
-            break
-        end
-    end
-
-    if !found_match
-        orig_trace_param_fname = joinpath(proj_path, "data", "fallback_traces", "traceMain_$(tele)_60933_$(chip).h5")
-        trace_type = "quartz_fallback"
-        if !isfile(orig_trace_param_fname)
-            error("Fallback trace file $(orig_trace_param_fname) does not exist")
-        end
-    end
-
-    # TODO (probably for KM): 
-    #     -use all the night's flats (quartz and dome) to define
-    #          the time-evolution of trace params, then save
-    #          that output (likely using this function)
-    # KM says: this should be okay because ultimately we will
-	# be using information about how the trace parameters change as a function
-    # of time over a night, whose outputs we will want to save
-    # (ie final version will produce a new trace param file per tele/mjd/chip combo) 
-    
-    # come back to why this symlink does not work
-    # is this causing memory bloat?
-    cp(orig_trace_param_fname, traceMain_fname, force = true)
-    trace_metadata = Dict{String, Any}()
-    trace_metadata["trace_type"] = trace_type
-    trace_metadata["trace_found_match"] = found_match
-    trace_metadata["trace_orig_param_fname"] = orig_trace_param_fname
-
-    modify_saved_dict(traceMain_fname, "metadata", trace_metadata)
-    return
+# The night's trace per chip: `make_traceMain` (src/trace_qa.jl) picks it among ALL the
+# night's per-flat traces (quartz, then dome) by --trace_select, falls back by --trace_fallback,
+# and writes the decision, the QA of the chosen flat, the candidate table, the trace level and
+# the per-fiber bitmsk_trace into the traceMain file. With --trace_select last --trace_fallback
+# fixed_file the chosen file is exactly the previous one.
+@everywhere function create_traceMain(mjd, chip, trace_type_order;
+        tele = parg["tele"],
+        outdir = parg["outdir"],
+        checkpoint_mode = "commit_same")
+    make_traceMain(outdir, tele, mjd, chip;
+        select = parg["trace_select"], fallback = parg["trace_fallback"],
+        fallback_file = joinpath(proj_path, "data", "fallback_traces", "traceMain_$(tele)_60933_$(chip).h5"),
+        type_order = trace_type_order,
+        almanac_file = joinpath(outdir, "almanac/$(parg["runname"]).h5"),
+        checkpoint_mode = checkpoint_mode)
 end
 
-# we should do somthing smart to assemble the traces from a night into a single file
-# that gives us the trace of a fiber as a funciton of time or something
-# for now, for each MJD, take the first one (or do that in the trace cal step)
-# I think dome flats needs to swtich to dome_flats/mjd/
 @time "Finding traceMain files" begin
     # Create all (mjd, chip) combinations for parallel processing
     mjd_chip_combinations = [(mjd, chip) for mjd in unique_mjds for chip in CHIP_LIST]
@@ -291,7 +259,19 @@ end
         outdir = parg["outdir"],
         checkpoint_mode = parg["checkpoint_mode"])
     
-    pmap(create_traceMain_wrapper, mjd_chip_combinations)
+    trace_levels = pmap(create_traceMain_wrapper, mjd_chip_combinations)
+    # --trace_fallback none: a night without a trace on any chip is not extracted at all
+    # (every later stage works per night on all three chips); listed loudly here.
+    no_trace_mjds = unique([mc[1] for (mc, lv) in zip(mjd_chip_combinations, trace_levels)
+                            if lv == TRACE_LEVEL_NONE])
+    if !isempty(no_trace_mjds)
+        @warn "--trace_fallback none: $(length(no_trace_mjds)) night(s) of $(parg["tele"]) have no own-night trace and are NOT extracted: $(join(sort(no_trace_mjds), ", "))"
+        drop_night(path) = any(m -> occursin("/apred/$(m)/", path), no_trace_mjds)
+        all2D = filter(!drop_night, all2D)
+        all2Dperchip = [filter(!drop_night, v) for v in all2Dperchip]
+        unique_mjds = filter(m -> !(m in no_trace_mjds), unique_mjds)
+        @everywhere unique_mjds = $unique_mjds
+    end
 end
 flush(stdout);
 
