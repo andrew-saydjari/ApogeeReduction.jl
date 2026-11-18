@@ -50,6 +50,9 @@ function parse_cli()
         "--chip_transform_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
         "--exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
         "--sky_fiber_term"; arg_type = String; default = "static"
+        "--fiber_term_file"; arg_type = String; default = ""; help = "per-fiber table for --sky_fiber_term stored"
+        "--sky_line_fibers"; arg_type = String; default = "all"; help = "pooled sky terms from all | faint (sky + faint-target) fibers"
+        "--sky_faint_snr"; arg_type = Float64; default = 20.0
         "--prefps_time"; arg_type = String; default = "skyshift"; help = "arc route: skyshift (arc fit shifted to each exposure's sky lines minus the global arc-sky offset)"
         "--mode_offset_file"; arg_type = String; default = "default"; help = "global mode offsets (default = data/wavecal_mode_offsets_v1.csv; \"\" = none, offsets 0, flagged)"
         "--sky_exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
@@ -99,7 +102,8 @@ const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset
     noadjacent_route = A_["noadjacent_route"], fps_route = A_["fps_route"], mode_offset_file = A_["mode_offset_file"],
     anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
     chip_transform_file = A_["chip_transform_file"],
-    exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], prefps_time = A_["prefps_time"],
+    exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], fiber_term_file = A_["fiber_term_file"],
+    sky_line_fibers = A_["sky_line_fibers"], sky_faint_snr = A_["sky_faint_snr"], prefps_time = A_["prefps_time"],
     sky_exp_terms = A_["sky_exp_terms"],
     shape_template_file = A_["shape_template_file"], shape_template_block = A_["shape_template_block"],
     arcwin_nights = A_["arcwin_nights"], nsig = A_["nsig"],
