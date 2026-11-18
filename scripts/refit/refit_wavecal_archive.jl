@@ -1,22 +1,24 @@
 # Archive-scale arc + FPI wavelength REFIT driver (design stages 3-6) on existing pass-1 products.
 #
-# Phases (run in order; each is resumable and skips finished work):
+# Every night is processed independently of every other night (AKS 2026-11-18); global inputs are
+# stored calibration files only (chip scales, comb mode-velocity reference, mode offsets, template).
+# Phases (each is resumable and skips finished work):
 #   prep   write <outroot>/config.txt (switches, code commit, calibration fingerprints) and the
 #          night list <outroot>/nights.csv; refuses to run into an outroot made with other switches.
-#   1      per night: arc night fit (stage A) -> arc-anchored comb (stage B; nights without an arc
-#          anchor are marked `deferred`).
-#   2      per night: comb for deferred nights from the nearest arc-anchored neighbour cavity
-#          (arcwin), FPI fibers (stage C), assembly per exposure (stage D).
-#   3      single process: run table, cross-night comb checks (FSR continuity, cavity jumps),
-#          counts; writes run_table.csv, crossnight_flags.csv, run_summary.txt.
+#   night  per night, all stages: arc night fit (A) -> arc-anchored comb (B) -> FPI fibers (C) ->
+#          assembly per exposure (D). The default.
+#   1, 2   only with the opt-in cross-night arcwin (--arcwin_nights > 0): 1 = arc + comb (nights without
+#          an arc anchor `deferred`), 2 = arcwin comb from a neighbour night's cavity, C, D.
+#   3      single process, read-only summary: run table, comb table, counts (run_table.csv,
+#          comb_table.csv, run_summary.txt). Cross-night comb QA is a separate post-hoc script
+#          (scripts/arcfirst/crossnight_comb_qa.jl) that changes nothing.
 # Workers claim nights through lock directories (atomic mkdir), so any number of workers on any
 # number of nodes can run a phase concurrently; a failed night is logged and flagged, never fatal.
 # pass1_dr21 is only ever opened read-only; outputs go only under --outroot.
 #
 # usage (from the repository root):
 #   julia --project=. scripts/refit/refit_wavecal_archive.jl --phase prep --outroot DIR [switches]
-#   julia --project=. scripts/refit/refit_wavecal_archive.jl --phase 1 --worker K --outroot DIR [switches]
-#   julia --project=. scripts/refit/refit_wavecal_archive.jl --phase 2 --worker K --outroot DIR [switches]
+#   julia --project=. scripts/refit/refit_wavecal_archive.jl --phase night --worker K --outroot DIR [switches]
 #   julia --project=. scripts/refit/refit_wavecal_archive.jl --phase 3 --outroot DIR [switches]
 # Variant reruns: give a new --outroot and --reuse_from BASE; products of stages that the changed
 # switches do not invalidate are symlinked from BASE instead of recomputed.
@@ -47,11 +49,10 @@ function parse_cli()
         "--neon_line_offset_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/neon_line_offsets_v1.csv"
         "--chip_transform_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
         "--exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
-        "--sky_fiber_term"; arg_type = String; default = "full"
-        "--prefps_time"; arg_type = String; default = "regularised"
+        "--sky_fiber_term"; arg_type = String; default = "static"
+        "--prefps_time"; arg_type = String; default = "skyshift"; help = "arc route: skyshift (arc fit shifted to each exposure's sky lines minus the global arc-sky offset)"
+        "--mode_offset_file"; arg_type = String; default = "default"; help = "global mode offsets (default = data/wavecal_mode_offsets_v1.csv; \"\" = none, offsets 0, flagged)"
         "--sky_exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
-        "--reg_weight_apo"; arg_type = Float64; default = 0.825
-        "--reg_weight_lco"; arg_type = Float64; default = 0.65
         "--shape_template_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/template_shape_v1.h5"
         "--shape_template_block"; arg_type = String; default = "all"
         "--plate_shape"; arg_type = String; default = "arc"; help = "plate-era shape, both telescopes: arc | template"
@@ -64,18 +65,15 @@ function parse_cli()
         "--anchor_max_candidates"; arg_type = Int; default = 3
         "--anchor_pattern_tol_px"; arg_type = Float64; default = 0.02
         "--anchor_lamp_tol_px"; arg_type = Float64; default = 0.1
-        "--anchor_trend"; arg_type = String; default = "both"; help = "verified_pair continuity: both | trailing | off"
-        "--anchor_trend_nights"; arg_type = Int; default = 10
-        "--anchor_trend_ms"; arg_type = Float64; default = 20.0
-        "--anchor_trend_min_nights"; arg_type = Int; default = 4
+        "--cavity_ref_check"; arg_type = String; default = "on"; help = "verified_pair: per-night check of the comb's fixed-mode velocity against the stored global reference: on | off"
+        "--cavity_ref_file"; arg_type = String; default = "default"
+        "--cavity_ref_ms"; arg_type = Float64; default = 30.0
+        "--noadjacent_route"; arg_type = String; default = "stored_cavity"; help = "verified_pair night without an adjacent pair: stored_cavity | any"
         "--fps_route"; arg_type = String; default = "fpifib"; help = "fpifib | sky (experiment)"
-        "--plate_tie_check"; arg_type = String; default = "replace"; help = "replace | off"
-        "--plate_tie_ms"; arg_type = Float64; default = 300.0
         "--anchor_pairing"; arg_type = String; default = "block"
         "--anchor_block_h"; arg_type = Float64; default = 1.5
-        "--arcwin_nights"; arg_type = Int; default = 15
+        "--arcwin_nights"; arg_type = Int; default = 0; help = "0 = off (default; no cross-night input); > 0 = opt-in neighbour-night cavity (phases 1 + 2)"
         "--nsig"; arg_type = Float64; default = 8.0
-        "--sky_anchor_window_h"; arg_type = Float64; default = 1.5
         "--pos_match_px"; arg_type = Float64; default = 0.25
         "--xcheck_threshold_ms"; arg_type = Float64; default = 60.0
         "--comb_arc_qa_ms"; arg_type = Float64; default = 150.0
@@ -97,14 +95,14 @@ const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset
     anchor_block = A_["anchor_block"], anchor_prefer = A_["anchor_prefer"], anchor_samepos = A_["anchor_samepos"],
     anchor_adjacency = A_["anchor_adjacency"], anchor_max_candidates = A_["anchor_max_candidates"],
     anchor_pattern_tol_px = A_["anchor_pattern_tol_px"], anchor_lamp_tol_px = A_["anchor_lamp_tol_px"],
-    anchor_trend = A_["anchor_trend"], anchor_trend_nights = A_["anchor_trend_nights"], anchor_trend_ms = A_["anchor_trend_ms"],
-    anchor_trend_min_nights = A_["anchor_trend_min_nights"], fps_route = A_["fps_route"],
-    plate_tie_check = A_["plate_tie_check"], plate_tie_ms = A_["plate_tie_ms"], anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
+    cavity_ref_check = A_["cavity_ref_check"], cavity_ref_file = A_["cavity_ref_file"], cavity_ref_ms = A_["cavity_ref_ms"],
+    noadjacent_route = A_["noadjacent_route"], fps_route = A_["fps_route"], mode_offset_file = A_["mode_offset_file"],
+    anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
     chip_transform_file = A_["chip_transform_file"],
     exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], prefps_time = A_["prefps_time"],
-    sky_exp_terms = A_["sky_exp_terms"], reg_weight_apo = A_["reg_weight_apo"], reg_weight_lco = A_["reg_weight_lco"],
+    sky_exp_terms = A_["sky_exp_terms"],
     shape_template_file = A_["shape_template_file"], shape_template_block = A_["shape_template_block"],
-    arcwin_nights = A_["arcwin_nights"], nsig = A_["nsig"], sky_anchor_window_h = A_["sky_anchor_window_h"],
+    arcwin_nights = A_["arcwin_nights"], nsig = A_["nsig"],
     pos_match_px = A_["pos_match_px"], xcheck_threshold_ms = A_["xcheck_threshold_ms"],
     comb_arc_qa_ms = A_["comb_arc_qa_ms"], coeff_degree = A_["coeff_degree"])
 AR.refit_check_config(CFG)
@@ -122,6 +120,8 @@ function config_lines()
     push!(L, "fingerprint_neon_offset_file=$(AR.refit_fingerprint(CFG.neon_offset_file))")
     push!(L, "fingerprint_neon_line_offset_file=$(AR.refit_fingerprint(CFG.neon_line_offset_file))")
     push!(L, "fingerprint_shape_template_file=$(AR.refit_fingerprint(CFG.shape_template_file))")
+    push!(L, "fingerprint_cavity_ref_file=$(AR.refit_fingerprint(AR._refit_default_path(CFG.cavity_ref_file, AR.COMB_MODE_REF_DEFAULT)))")
+    push!(L, "fingerprint_mode_offset_file=$(AR.refit_fingerprint(AR._refit_default_path(CFG.mode_offset_file, AR.MODE_OFFSETS_DEFAULT)))")
     ll = AR.load_arclamp_linelist()
     push!(L, "linelist_file=$(ll.path)")
     push!(L, "fingerprint_linelist=$(ll.fingerprint)")
@@ -200,7 +200,7 @@ function invalidated_stages(base)
         foreach(s -> push!(inv, s), split(get(AR.REFIT_SWITCH_STAGES, k, "arc,comb,fpifib,assemble"), ","))
     end
     # downstream closure
-    order = ["arc", "comb", "anchorcheck", "fpifib", "assemble"]
+    order = ["arc", "comb", "fpifib", "assemble"]
     if !isempty(inv)
         first_bad = minimum(findfirst(==(s), order) for s in inv)
         foreach(s -> push!(inv, s), order[first_bad:end])
@@ -268,20 +268,20 @@ function phase12(phase)
         claim(phase, tele, mjd) || continue
         foreach(st -> link_reused(st, tele, mjd), AR.REFIT_STAGES)   # products of valid stages from --reuse_from
         recs = Tuple{String, String, Float64}[]
-        if phase == 1
+        if phase == 0 || phase == 1
             st, dt = run_stage("arc", tele, mjd, () -> AR.refit_night_arc(tele, mjd; apred_dir = APRED,
                 almanac_file = ALMANAC, outroot = OUT, cfg = CFG))
             push!(recs, ("arc", st, dt))
             st, dt = run_stage("comb", tele, mjd, () -> AR.refit_night_comb(tele, mjd; apred_dir = APRED,
                 wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = false, almanac_file = ALMANAC))
             push!(recs, ("comb", st, dt))
-        else
+        end
+        if phase == 2
             st, dt = run_stage("comb", tele, mjd, () -> AR.refit_night_comb(tele, mjd; apred_dir = APRED,
                 wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = true, almanac_file = ALMANAC); force_retry_deferred = true)
             push!(recs, ("comb2", st, dt))
-            st, dt = run_stage("anchorcheck", tele, mjd, () -> AR.refit_night_anchorcheck(tele, mjd; apred_dir = APRED,
-                wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, almanac_file = ALMANAC))
-            push!(recs, ("anchorcheck", st, dt))
+        end
+        if phase == 0 || phase == 2
             st, dt = run_stage("fpifib", tele, mjd, () -> AR.refit_night_fpifib(tele, mjd; apred_dir = APRED,
                 outroot = OUT, cfg = CFG))
             push!(recs, ("fpifib", st, dt))
@@ -347,20 +347,8 @@ function phase3()
         end
         push!(rows, row; cols = :union)
     end
-    # cross-night comb checks: (ii) FSR continuity (lambda at a fixed fiber/pixel jumping by ~ an
-    # integer FSR between consecutive comb nights) and (iii) cavity L against the trailing 15 nights (> 8 sigma)
-    flags = DataFrame(tele = String[], mjd = Int[], check = String[], value = Float64[])
-    for tele in ("apo", "lco")
-        C = sort(combrows[combrows.tele .== tele, :], :mjd)
-        nrow(C) < 2 && continue
-        # shared kernel (also the in-order pipeline's cross-night step): each night vs earlier nights only
-        for (m, chk, v) in AR.crossnight_comb_flags(C.mjd, C.lam_G_f150_p1024, C.L)
-            push!(flags, (tele, m, chk, v))
-        end
-    end
     CSV.write(joinpath(OUT, "run_table.csv"), rows)
     CSV.write(joinpath(OUT, "comb_table.csv"), combrows)
-    CSV.write(joinpath(OUT, "crossnight_flags.csv"), flags)
     open(joinpath(OUT, "run_summary.txt"), "w") do io
         println(io, "arc + FPI refit run summary, $(now()); outroot $(OUT); code $(CODE_COMMIT)")
         for s in AR.REFIT_STAGES
@@ -374,7 +362,6 @@ function phase3()
             println(io, @sprintf("%-40s %8d", n, sum(v)))
         end
         println(io, "exposures: ", sum(rows.n_exp))
-        println(io, "cross-night comb flags: ", nrow(flags))
     end
     print(read(joinpath(OUT, "run_summary.txt"), String))
 end
@@ -386,8 +373,11 @@ if ph == "prep"
     nf = joinpath(OUT, "nights.csv")
     isfile(nf) || CSV.write(nf, build_nights())
     rm(joinpath(OUT, "locks"); force = true, recursive = true)
-    foreach(d -> mkpath(joinpath(OUT, d)), ("arc", "comb", "anchorcheck", "fpifib", "exp", "status", "timing", "logs"))
+    foreach(d -> mkpath(joinpath(OUT, d)), ("arc", "comb", "fpifib", "exp", "status", "timing", "logs"))
     println("prep done: $(nrow(load_nights())) nights; config $(joinpath(OUT, "config.txt"))")
+elseif ph == "night"
+    CFG.arcwin_nights > 0 && error("--phase night runs every night independently; --arcwin_nights > 0 needs phases 1 then 2")
+    phase12(0)
 elseif ph == "1" || ph == "2"
     phase12(parse(Int, ph))
 elseif ph == "3"

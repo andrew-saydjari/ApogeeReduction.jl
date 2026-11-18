@@ -6,16 +6,16 @@
 #   <outroot>/exp/waveCalRefit_<tele>_<mjd>.h5             stage D (stages 5 + 6, per exposure)
 #   <outroot>/status/<stage>_<tele>_<mjd>.txt              one line: status [reason]
 # A stage is skipped when its product or a terminal status exists (resumable); `deferred` (stage B
-# waiting for neighbour nights) and `fail` are not terminal for the stage that wrote them when the
-# driver is asked to retry.
+# waiting for neighbour nights; only with the opt-in arcwin) and `fail` are not terminal for the stage
+# that wrote them when the driver is asked to retry. Every night is processed independently of every
+# other night (AKS 2026-11-18); global inputs are stored calibration files only.
 
-const REFIT_STAGES = ("arc", "comb", "anchorcheck", "fpifib", "assemble")
+const REFIT_STAGES = ("arc", "comb", "fpifib", "assemble")
 
 refit_path(outroot, stage, tele, mjd) = joinpath(outroot,
-    stage == "arc" ? "arc" : stage == "comb" ? "comb" : stage == "anchorcheck" ? "anchorcheck" :
-    stage == "fpifib" ? "fpifib" : "exp",
+    stage == "arc" ? "arc" : stage == "comb" ? "comb" : stage == "fpifib" ? "fpifib" : "exp",
     (stage == "arc" ? "arclampWaveCalNight" : stage == "comb" ? "waveCalFPIArc" :
-     stage == "anchorcheck" ? "anchorCheck" : stage == "fpifib" ? "fpiGuidePos" : "waveCalRefit") * "_$(tele)_$(mjd).h5")
+     stage == "fpifib" ? "fpiGuidePos" : "waveCalRefit") * "_$(tele)_$(mjd).h5")
 refit_status_path(outroot, stage, tele, mjd) = joinpath(outroot, "status", "$(stage)_$(tele)_$(mjd).txt")
 
 function refit_write_status(outroot, stage, tele, mjd, status::AbstractString, reason = "")
@@ -210,6 +210,9 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
         anchor_max_candidates = cfg.anchor_max_candidates, anchor_pattern_tol_px = cfg.anchor_pattern_tol_px,
         anchor_lamp_tol_px = cfg.anchor_lamp_tol_px, anchor_adjacency = cfg.anchor_adjacency,
         anchor_block_h = cfg.anchor_block_h, exclude_seqs, force = force_pair,
+        cavity_ref = cfg.cavity_ref_check == "on" ? comb_mode_reference(cfg.cavity_ref_file, String(tele), mjd) : NaN,
+        cavity_ref_ms = cfg.cavity_ref_ms,
+        stored_cavity = cfg.noadjacent_route == "stored_cavity" ? comb_cavity_reference(cfg.cavity_ref_file, String(tele), mjd) : nothing,
         seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"])) : nothing, arcf, "r"))
     Q.ok || return nothing, "arc_unmatched: " * Q.reason
     keep === nothing || (Q = merge(Q, keep))
@@ -301,6 +304,9 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     st, reason = refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg, pass1_comb = p1,
         provenance = prov, almanac_file, force_pair, keep)
     st === nothing || return st
+    # arcwin (a neighbouring night's cavity) is a cross-night input: opt-in only (arcwin_nights > 0)
+    cfg.arcwin_nights > 0 || return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noanchor",
+        reason * "; no arc anchor tonight (arcwin off)")
     allow_arcwin || return refit_write_status(outroot, "comb", tele, mjd, "deferred", reason)
     nb = refit_neighbour_cavity(outroot, tele, mjd, cfg.arcwin_nights)
     nb === nothing && return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noanchor",
@@ -315,107 +321,6 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     prov["arcwin_reason"] = reason
     write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = isfile(arcf) ? arcf : "", provenance = prov)
     return refit_write_status(outroot, "comb", tele, mjd, "ok_arcwin", reason)
-end
-
-# ------------------------------------------------------------------------------------------
-# stage B2 (phase 2): cross-night continuity of a verified_pair anchor
-# ------------------------------------------------------------------------------------------
-"""Fixed-mode velocities of the strict candidates of a stored verified_pair comb (empty otherwise)."""
-function refit_strict_vmodes(fn)
-    C = try
-        load_refit_comb(fn)
-    catch
-        return Float64[]
-    end
-    startswith(C.anchor_kind, "verified_pair") || return Float64[]
-    return [v for (v, c) in zip(C.vp_vmode_ms, C.vp_class) if c == "strict" && isfinite(v)]
-end
-
-"""
-    refit_night_anchorcheck(tele, mjd; apred_dir, wavecal_dir, outroot, cfg, almanac_file)
-
-Phase-2 continuity step of `anchor_block = "verified_pair"`: the fixed-mode comb velocity of the
-night's chosen pair against the median over neighbouring nights (same telescope, within
-`anchor_trend_nights`; both sides, or earlier nights only for `anchor_trend = "trailing"`) of each
-night's median strict-candidate velocity (needs `anchor_trend_min_nights`). Off by more than
-`anchor_trend_ms`: the night's other candidate closest to the trend replaces the anchor if it is
-within `anchor_trend_ms` (forced comb refit), else the anchor is kept and flagged. Writes
-`anchorcheck/anchorCheck_<tele>_<mjd>.h5` (trend, delta, decision, outlier flag) and a status.
-Neighbour values come from the phase-1 candidate table (`vp_vmode_ms`), which a swap does not change,
-so the result does not depend on the order in which workers process nights.
-"""
-function refit_night_anchorcheck(tele, mjd; apred_dir, wavecal_dir = "", outroot, cfg::RefitConfig, almanac_file = "",
-        history_roots = String[], refit_comb = nothing)
-    out = refit_path(outroot, "anchorcheck", tele, mjd)
-    isfile(out) && return "done"
-    combf = refit_path(outroot, "comb", tele, mjd)
-    (cfg.anchor_block == "verified_pair" && cfg.anchor_trend != "off") ||
-        return refit_write_status(outroot, "anchorcheck", tele, mjd, "off")
-    isfile(combf) || return refit_write_status(outroot, "anchorcheck", tele, mjd, "nocomb")
-    C = load_refit_comb(combf)
-    (startswith(C.anchor_kind, "verified_pair") && !isempty(C.vp_vmode_ms) && C.anchor_rank >= 1) ||
-        return refit_write_status(outroot, "anchorcheck", tele, mjd, "notapplicable", C.anchor_kind)
-    rx = Regex("^waveCalFPIArc_$(tele)_(\\d+)\\.h5\$")
-    W = cfg.anchor_trend_nights
-    vals = Float64[]
-    seen = Set{Int}()
-    # this run's comb products, then `history_roots` (in-order daily: earlier runs' roots = trailing nights)
-    for root in vcat(String[outroot], collect(String, history_roots))
-        d = joinpath(root, "comb")
-        isdir(d) || continue
-        for fn in readdir(d)
-            m = match(rx, fn); m === nothing && continue
-            mj = parse(Int, m.captures[1])
-            (mj == mjd || abs(mj - mjd) > W || mj in seen) && continue
-            (cfg.anchor_trend == "trailing" && mj > mjd) && continue
-            v = refit_strict_vmodes(joinpath(d, fn))
-            isempty(v) || (push!(vals, median(v)); push!(seen, mj))
-        end
-    end
-    v0 = C.vp_vmode_ms[C.anchor_rank]
-    trend = length(vals) >= cfg.anchor_trend_min_nights ? median(vals) : NaN
-    delta = v0 - trend
-    decision = "ok"
-    newrank = C.anchor_rank
-    if !isfinite(trend)
-        decision = "unchecked"
-    elseif abs(delta) > cfg.anchor_trend_ms
-        alt = [i for i in eachindex(C.vp_vmode_ms) if i != C.anchor_rank && isfinite(C.vp_vmode_ms[i]) &&
-               abs(C.vp_vmode_ms[i] - trend) <= cfg.anchor_trend_ms]
-        if isempty(alt)
-            decision = "outlier"
-        else
-            i = alt[argmin(abs.(C.vp_vmode_ms[alt] .- trend))]
-            keep = h5open(combf, "r") do f
-                (; vp_seq = Int.(read(f["vp_seq"])), vp_fpi = String.(read(f["vp_fpi"])),
-                    vp_class = String.(read(f["vp_class"])), vp_b_px = Float64.(read(f["vp_b_px"])),
-                    vp_a_ms = Float64.(read(f["vp_a_ms"])), vp_lamp_px = Float64.(read(f["vp_lamp_px"])),
-                    vp_verified = Bool.(read(f["vp_verified"])), vp_L = Float64.(read(f["vp_L"])),
-                    vp_eps = Float64.(read(f["vp_eps"])), vp_vmode_ms = Float64.(read(f["vp_vmode_ms"])),
-                    anchor_rank = i, anchor_kind = "verified_pair:" * C.vp_class[i] * ":trend_swap",
-                    anchor_bits = WAVE_ANCHOR_FALLBACK | (C.vp_class[i] == "strict" ? 0 : WAVE_ANCHOR_NOT_PREFERRED) |
-                                  (Bool(read(f["vp_verified"])[i]) ? 0 : WAVE_ANCHOR_UNVERIFIED))
-            end
-            # forced comb refit of the swapped pair: the refit's gather by default; the in-order chain
-            # passes its own (`refit_comb`, same shared refit_comb_anchor_stage underneath)
-            st = refit_comb === nothing ?
-                 refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg, allow_arcwin = false, almanac_file,
-                     force_pair = (C.vp_seq[i], C.vp_fpi[i]), keep) :
-                 refit_comb((C.vp_seq[i], C.vp_fpi[i]), keep)
-            decision = st == "ok_arc" ? "swap" : "outlier"
-            st == "ok_arc" && (newrank = i)
-        end
-    end
-    mkpath(dirname(out))
-    tmp = out * ".tmp$(getpid())"
-    safe_jldsave(tmp, Dict{String, Any}("product" => "anchorCheck", "tele" => String(tele), "mjd" => Int(mjd),
-            "mode" => cfg.anchor_trend, "window_nights" => W, "threshold_ms" => cfg.anchor_trend_ms);
-        trend_ms = trend, n_trend_nights = length(vals), vmode_ms = v0, delta_ms = delta, decision = decision,
-        rank_before = C.anchor_rank, rank_after = newrank,
-        vmode_after_ms = C.vp_vmode_ms[newrank], delta_after_ms = C.vp_vmode_ms[newrank] - trend,
-        outlier = decision == "outlier")
-    mv(tmp, out; force = true)
-    return refit_write_status(outroot, "anchorcheck", tele, mjd, decision, "delta $(round(delta, digits = 1)) m/s")
 end
 
 # ------------------------------------------------------------------------------------------
@@ -551,20 +456,13 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         C.n_slip > 0 && (combbits |= WAVE_COMB_MODE_SLIP)
         C.inconsistent && (combbits |= WAVE_COMB_ARC_INCONSISTENT)
         combbits |= C.anchor_bits
-        acf = refit_path(outroot, "anchorcheck", tele, mjd)
-        isfile(acf) && h5open(f -> Bool(read(f["outlier"])), acf, "r") && (combbits |= WAVE_ANCHOR_TREND_OUTLIER)
         C.anchor == COMB_ANCHOR_ARC && (combbits |= arcbits)   # an arcwin comb carries no arc flags
     end
-    # reference position cluster of the arcs (most used sequences; ties -> the reference sequence's)
-    refcl = 0
-    if A !== nothing
-        cls = refit_arc_clusters(A)
-        cnt = [count(==(cl), A.clus_u) for cl in cls]
-        refcl = cls[argmax(cnt)]
-        count(==(maximum(cnt)), cnt) > 1 && (refcl = A.clus_u[1])
-    end
-    wreg = tele == "apo" ? cfg.reg_weight_apo : cfg.reg_weight_lco
     vpxG = tele == "apo" ? 5253.0 : 5281.0
+    vpx = tele == "apo" ? (4231.0, 5253.0, 6328.0) : (4256.0, 5281.0, 6359.0)
+    # GLOBAL arc-sky offset per chip (stored calibration, not tonight's data): the sky line list's level
+    # against the arc fit at the same position; zeros (flagged) without the file
+    Osky, omiss = refit_mode_offsets(cfg.mode_offset_file, String(tele), "arc_sky"; era)
     nE = length(exps)
     tmid = fill(NaN, nE)
     p1type = fill("", nE)
@@ -630,9 +528,9 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         if route[k] == :pass1 && A !== nothing
             best = 0
             bo = Inf
-            if sky !== nothing   # measured position: the cluster whose arc model the sky matches best
+            if sky !== nothing   # measured position: the cluster whose (fixed-state) arc fit the sky matches best
                 for cl in refit_arc_clusters(A)
-                    st = refit_arc_state(A, tmid[k], cl; mode = :time)
+                    st = refit_arc_state(A, NaN, cl; mode = :nearest)
                     st === nothing && continue
                     m = arcmodel(st)
                     v = refit_sky_velocities(sky, (f, c, p) -> m(f, c, [p])[1])
@@ -645,7 +543,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
                     end
                 end
             end
-            usesky = best != 0 && cfg.prefps_time != "arc"
+            usesky = best != 0
             if best == 0
                 # no sky: the cluster of the nearest used sequence in time (position NOT measured)
                 j = isfinite(tmid[k]) ? argmin(abs.(A.tseq_u .- tmid[k])) : 1
@@ -656,22 +554,18 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             end
             clus[k] = best
             pos_off_px[k] = isfinite(bo) ? bo : NaN
-            # state of the relative model: (c) reference cluster time model; (a) fixed reference
-            # state; (b) or no sky: the exposure's own cluster time model
-            st = if usesky && cfg.prefps_time == "regularised"
-                refit_arc_state(A, tmid[k], refcl; mode = :time)
-            elseif usesky && cfg.prefps_time == "sky"
-                refit_arc_state(A, NaN, refcl; mode = :nearest)
-            else
-                refit_arc_state(A, tmid[k], best; mode = :time)
-            end
+            # night solution = the arc fit at a FIXED state (no arc time model): with sky lines, the matched
+            # cluster's reference sequence (the exposure is then shifted onto its own sky lines in pass B);
+            # without sky lines (calibration frames), the state of the nearest arc sequence in time
+            st = usesky ? refit_arc_state(A, NaN, best; mode = :nearest) : refit_arc_state(A, tmid[k], best; mode = :nearest)
             models[k] = shapemodel(st)
             Tp === nothing && (bits[k] |= WAVE_SHAPE_ARC)
             route[k] = :arc
             absname[k] = "arc"
             # relative name says which shape: arc shape ("arc...") or the comb template ("comb...")
-            relname[k] = (Tp === nothing ? "arc" : "comb") * ((usesky && cfg.prefps_time == "sky") ? "skypool" : "time")
-            bits[k] |= arcbits | WAVE_REL_ARC_TIME
+            relname[k] = (Tp === nothing ? "arc" : "comb") * (usesky ? "skyshift" : "nearest")
+            bits[k] |= arcbits
+            usesky || (bits[k] |= WAVE_REL_ARC_NEAREST)
             (C !== nothing || (FP !== nothing && kind == "object")) && (bits[k] |= WAVE_FPIFIB_UNAVAILABLE)
         end
         fpi_gated_off && (bits[k] |= WAVE_FPI_GATED_OFF)
@@ -690,53 +584,6 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
                 fz[:, :, k] .= Float32.(z)
                 fs[:, :, k] .= Float32.(s)
             end
-        end
-    end
-    # ---------------- anchors (arc-anchored; never an absolute sky level) and cluster steps
-    anchor_night = false
-    tie_replaced = false
-    thA = fill(NaN, 3, 3)                 # arc route anchor: reference-cluster exposures near arcs
-    steps = Dict{Int, Matrix{Float64}}()  # cluster -> step (3 x 3) from the sky
-    arck = [k for k in 1:nE if route[k] == :arc && hassky[k] && any(isfinite, view(theta, :, :, k))]
-    if A !== nothing && !isempty(arck)
-        refk = [k for k in arck if clus[k] == refcl]
-        near = [k for k in refk if any(abs.(A.tseq_u .- tmid[k]) .* 24 .<= cfg.sky_anchor_window_h)]
-        if isempty(near)
-            near = isempty(refk) ? arck : refk
-            anchor_night = true
-        end
-        for c in 1:3, q in 1:3
-            thA[q, c] = _arc_nanmedian([theta[q, c, k] for k in near])
-        end
-        # plate-era arc-sky tie check: the zero point of the tie (sky - arc model at the reference
-        # exposures) is the arc-sky line-ensemble offset, stable to ~30-40 m/s per chip; a tie far from it
-        # means the arcs and the science exposures they are tied to were not at the same position
-        if era == "plate" && cfg.plate_tie_check == "replace" && haskey(REFIT_PLATE_TIE_REF, String(tele))
-            ref = REFIT_PLATE_TIE_REF[String(tele)]
-            if isfinite(thA[1, 2]) && abs(thA[1, 2] - ref[2]) > cfg.plate_tie_ms
-                thA[1, :] .= ref
-                tie_replaced = true
-            end
-        end
-        for cl in unique(clus[arck])
-            S = zeros(3, 3)
-            if cl != refcl
-                kk = [k for k in arck if clus[k] == cl]
-                for c in 1:3, q in 1:3
-                    S[q, c] = _arc_nanmedian([theta[q, c, k] - thA[q, c] for k in kk])
-                end
-            end
-            # a chip whose step is unmeasured takes the other chips' step in pixels (a dither step is a
-            # detector-wide shift); stretch / tilt steps default to 0
-            vpx = tele == "apo" ? (4231.0, 5253.0, 6328.0) : (4256.0, 5281.0, 6359.0)
-            pxs = [S[1, c] / vpx[c] for c in 1:3 if isfinite(S[1, c])]
-            for c in 1:3
-                isfinite(S[1, c]) || (S[1, c] = isempty(pxs) ? 0.0 : median(pxs) * vpx[c])
-                for q in 2:3
-                    isfinite(S[q, c]) || (S[q, c] = 0.0)
-                end
-            end
-            steps[cl] = S
         end
     end
     fpianchor = [let s = [k for k in 1:nE if route[k] == :fpifib && isfinite(vraw[c, k])]
@@ -774,18 +621,20 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             wtype[k] = absname[k] * "_" * relname[k]
             G = refit_eval_grid(models[k], px_all)
             T = zeros(3, 3)
-            if route[k] == :arc && hassky[k] && cfg.prefps_time != "arc" && haskey(steps, clus[k])
-                S = steps[clus[k]]
-                for c in 1:3, q in 1:3
-                    dep = theta[q, c, k] - thA[q, c]
-                    # a chip without a usable sky term (< 3 lines) still gets its cluster's step
-                    T[q, c] = !isfinite(dep) ? S[q, c] :
-                              cfg.prefps_time == "sky" ? dep : S[q, c] + wreg * (dep - S[q, c])
+            if route[k] == :arc && hassky[k] && any(isfinite, view(theta, 1, :, k))
+                # shift the arc fit onto this exposure's own sky lines: T = theta - O (global arc-sky offset);
+                # a chip with < 3 sky lines takes the measured chips' zero point in pixels, stretch/tilt 0
+                pxs = [(theta[1, c, k] - Osky[1, c]) / vpx[c] for c in 1:3 if isfinite(theta[1, c, k])]
+                for c in 1:3
+                    if isfinite(theta[1, c, k])
+                        for q in 1:3
+                            T[q, c] = isfinite(theta[q, c, k]) ? theta[q, c, k] - Osky[q, c] : 0.0
+                        end
+                    else
+                        T[1, c] = median(pxs) * vpx[c]
+                    end
                 end
-                anchor_night && (bits[k] |= WAVE_SKY_ANCHOR_NIGHT)
-                tie_replaced && (bits[k] |= WAVE_ARC_SKY_TIE_REPLACED)
-                d0 = [theta[1, c, k] - thA[1, c] - S[1, c] for c in 1:3]
-                xres_chip[:, k] .= Float32.(d0)
+                omiss && (bits[k] |= WAVE_MODE_OFFSET_MISSING)
             elseif route[k] == :fpifib
                 d0 = [vraw[c, k] - fpianchor[c] for c in 1:3]
                 xres_chip[:, k] .= Float32.(d0)
@@ -794,8 +643,6 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
                         isfinite(d0[c]) && (T[1, c] = d0[c])
                     end
                 end
-            elseif route[k] == :arc && hassky[k]
-                xres_chip[:, k] .= Float32.([theta[1, c, k] - thA[1, c] for c in 1:3])
             end
             applied[:, :, k] .= T
             refit_apply_sky_terms!(G, T)
@@ -852,30 +699,25 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         "linelist_fingerprint" => ll.fingerprint, "linelist_selection" => ll.selection,
         "chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "neon_offset_fingerprint" => refit_fingerprint(cfg.neon_offset_file),
-        "arc_reference_cluster" => refcl, "reg_weight" => wreg,
-        "sky_anchor_night" => anchor_night, "arc_sky_tie_replaced" => tie_replaced, "bit_names" => join(WAVE_BIT_NAMES, ","),
+        "arc_route" => "arc fit (fixed state) shifted to each exposure's pooled sky lines minus the global arc-sky offset",
+        "mode_offset_file" => _refit_default_path(cfg.mode_offset_file, MODE_OFFSETS_DEFAULT),
+        "mode_offset_fingerprint" => refit_fingerprint(_refit_default_path(cfg.mode_offset_file, MODE_OFFSETS_DEFAULT)),
+        "mode_offset_missing" => omiss, "bit_names" => join(WAVE_BIT_NAMES, ","),
         "inorder" => inorder, "fiber_fill" => String(fiber_fill), "n_arc_fibers_filled" => nfill,
         # where each scale enters (ARCFPI_VALIDATION scales list)
         "scale_arc_chip" => A === nothing ? "none" : A.chip_scale_source,
         "scale_comb" => "comb chip transform (cporder 1) and quartic fitted per night; cavity (L, eps) per night",
         "scale_exposure_fpifib" => cfg.exp_terms * " (per-chip zero point and stretch from the two FPI fibers)",
-        "scale_exposure_sky" => cfg.sky_exp_terms * " (per chip, pooled sky; step between positions from the sky)",
+        "scale_exposure_sky" => cfg.sky_exp_terms * " (per chip, pooled sky minus the global arc-sky offset, applied directly)",
         "scale_night_average" => "none built: exposures without a new solution keep the pass-1 solution (WAVE_PASS1_COPY)")
     for (kx, v) in refit_config_dict(cfg)
         meta["cfg_" * kx] = v
-    end
-    stepmat = fill(NaN, 3, 3, max(1, length(steps)))
-    stepcl = zeros(Int, max(1, length(steps)))
-    for (i, (cl, S)) in enumerate(sort(collect(steps), by = first))
-        stepmat[:, :, i] .= S
-        stepcl[i] = cl
     end
     safe_jldsave(tmp, meta; exp_expnum = [x[1] for x in exps], exp_kind = [x[2] for x in exps],
         exp_mjd_mid = tmid, wavecal_type = wtype, bitmsk_wavecal = Int64.(bits),
         pass1_wavecal_type = p1type, wave_coeffs = coeffs, coeff_max_resid_A = cmax,
         xcheck_resid_ms = xres, xcheck_resid_chip_ms = xres_chip, sky_minus_model_ms = vraw,
-        sky_terms_ms = theta, sky_terms_applied_ms = applied, sky_anchor_terms_ms = thA,
-        sky_cluster_steps_ms = stepmat, sky_cluster_step_ids = stepcl,
+        sky_terms_ms = theta, sky_terms_applied_ms = applied, arc_sky_offset_ms = Osky,
         sky_nlines = nlines, sky_anchor_fpi_ms = fpianchor,
         fiber_sky_zp_ms = fz, fiber_sky_stretch_ms = fs, pos_cluster = clus, pos_offset_px = pos_off_px,
         fpifib_tilt_px = tilt, fpifib_n_used = nfpi_used, dv_pass1_ms = dvp1, pass1_zp_ms = p1zp,

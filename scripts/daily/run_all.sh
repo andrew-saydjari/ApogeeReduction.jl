@@ -107,15 +107,6 @@ if [ "${AR_WAVECAL_ORDER+set}" = "set" ] && [ -n "$AR_WAVECAL_ORDER" ]; then
 else
     wavecal_order_opt=()
 fi
-# Earlier runs' arc-first roots for the arc_first cross-night comb step
-# (pipeline_2d_1d.jl --arcfirst_history_roots, comma-separated), same mechanism:
-#   unset or ""    -> no flag: no history, the daily's cross-night step reports "unchecked"
-#   set to roots   -> the wavecal_arcfirst directories of earlier daily outdirs
-if [ "${AR_ARCFIRST_HISTORY_ROOTS+set}" = "set" ] && [ -n "$AR_ARCFIRST_HISTORY_ROOTS" ]; then
-    arcfirst_hist_opt=(--arcfirst_history_roots "$AR_ARCFIRST_HISTORY_ROOTS")
-else
-    arcfirst_hist_opt=()
-fi
 
 runname="allobs_${tele}_${mjd}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -217,7 +208,7 @@ if [ "$run_2d_only" != "true" ]; then
 
     ## 2D->1D
     print_elapsed_time "Running 2D->1D Pipeline for $tele"
-    julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname "${chip_cal_opt[@]}" "${wavecal_order_opt[@]}" "${arcfirst_hist_opt[@]}"
+    julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname "${chip_cal_opt[@]}" "${wavecal_order_opt[@]}"
     
     ## Plots
     print_elapsed_time "Making Plots"

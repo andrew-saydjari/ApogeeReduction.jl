@@ -26,7 +26,11 @@ using HDF5
             @test !(r in ("wavecalNightAve", "waveCalNightfpiDither", "waveCalNightskyDither", "waveCalFPI",
                           "ar1Duni", "ar1Dunical"))
         end
-        @test [s.stage for s in S] == ["peaks", "arc", "comb", "anchorcheck", "fpifib", "assemble", "crossnight", "resample"]
+        @test [s.stage for s in S] == ["peaks", "arc", "comb", "fpifib", "assemble", "resample"]
+        # no stage reads another night's product (no cross-night step, AKS 2026-11-18)
+        @test !any(st -> any(r -> r in ("anchorCheck", "crossnight_flags"), st.reads), S)
+        @test !isdefined(AR, :refit_night_anchorcheck) && !isdefined(AR, :arcfirst_crossnight)
+        @test !(:history_roots in Base.kwarg_decl(first(methods(AR.arcfirst_night))))
     end
 
     @testset "night route and comb decision" begin
@@ -42,7 +46,7 @@ using HDF5
     end
 
     @testset "bits" begin
-        @test length(AR.WAVE_BIT_NAMES) == 36
+        @test length(AR.WAVE_BIT_NAMES) == 38
         for (i, n) in enumerate(AR.WAVE_BIT_NAMES)
             @test getfield(AR, Symbol(n)) == 1 << (i - 1)
         end
@@ -132,17 +136,20 @@ using HDF5
     end
 end
 
-@testset "cross-night comb kernel (trailing only)" begin
-    AR = ApogeeReduction
+module CrossnightQA
+include(joinpath(@__DIR__, "..", "scripts", "arcfirst", "crossnight_comb_qa.jl"))
+end
+
+@testset "post-hoc cross-night comb QA kernel (standalone script, trailing only)" begin
+    K = CrossnightQA
     mj = collect(60000:60010)
     L = fill(3.7363e7, 11); lam = fill(16000.0, 11)
-    @test isempty(AR.crossnight_comb_flags(mj, lam, L))
+    @test isempty(K.crossnight_comb_flags(mj, lam, L))
     lam2 = copy(lam); lam2[8:end] .+= lam[8]^2 / (2 * L[8])          # one FSR from night 60007 on
-    f = AR.crossnight_comb_flags(mj, lam2, L)
+    f = K.crossnight_comb_flags(mj, lam2, L)
     @test length(f) == 1 && f[1][1] == 60007 && f[1][2] == "fsr_continuity"
     L2 = copy(L); L2[11] += 100.0                                     # cavity jump on the last night
-    f = AR.crossnight_comb_flags(mj, lam, L2)
+    f = K.crossnight_comb_flags(mj, lam, L2)
     @test length(f) == 1 && f[1][1] == 60010 && f[1][2] == "cavity_jump_8sigma"
-    # trailing only: the flag of 60010 does not depend on later nights, and order of input is irrelevant
-    @test AR.crossnight_comb_flags(reverse(mj), reverse(lam), reverse(L2)) == f
+    @test K.crossnight_comb_flags(reverse(mj), reverse(lam), reverse(L2)) == f
 end

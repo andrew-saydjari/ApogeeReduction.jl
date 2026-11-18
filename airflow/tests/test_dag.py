@@ -155,13 +155,13 @@ class DagImport(unittest.TestCase):
         self.assertEqual(D.compute_date_mjd(**ctx), "2026-11-15")
         D.stale_run_guard(**{**ctx, "params": {"stale_run_max_age_h": 36}})
 
-    def test_p2d1d_passes_wavecal_order_and_history_roots(self):
-        """The inline p2d1d_full step passes --wavecal_order and
-        --arcfirst_history_roots (default "": no history, the arc_first
-        cross-night step reports "unchecked"), like run_all.sh's env route."""
+    def test_p2d1d_passes_wavecal_order_no_history(self):
+        """The inline p2d1d_full step passes --wavecal_order, like run_all.sh's
+        env route, and no cross-night input (--arcfirst_history_roots was
+        removed: every night is processed independently)."""
         sys.path.insert(0, HERE)
         import _render_task as R
-        self.assertEqual(self.C.ARCFIRST_HISTORY_ROOTS, "")
+        self.assertFalse(hasattr(self.C, "ARCFIRST_HISTORY_ROOTS"))
         tasks = [t for t in self.dag.tasks if t.task_id.endswith("p2d1d_full")]
         self.assertEqual(len(tasks), 2)
         with tempfile.TemporaryDirectory() as d:
@@ -169,11 +169,11 @@ class DagImport(unittest.TestCase):
                 with self.subTest(task=t.task_id):
                     text = R.render(t, d + "/", 61360)
                     self.assertIn(f"--wavecal_order {self.C.WAVECAL_ORDER} ", text)
-                    self.assertIn("--arcfirst_history_roots '' ", text)
+                    self.assertNotIn("--arcfirst_history_roots", text)
 
     def test_slurm_submit_exports_wavecal_env(self):
-        """slurm_submit_and_wait exports AR_WAVECAL_ORDER and
-        AR_ARCFIRST_HISTORY_ROOTS into the sbatch'd run_all.sh (subprocess
+        """slurm_submit_and_wait exports AR_WAVECAL_ORDER (and no
+        AR_ARCFIRST_HISTORY_ROOTS) into the sbatch'd run_all.sh (subprocess
         is stubbed: no Slurm command runs)."""
         from unittest import mock
         import apogee_daily as D
@@ -199,14 +199,11 @@ class DagImport(unittest.TestCase):
                 return {"outdir": self.outdir, "mjd": 61360}
 
         with tempfile.TemporaryDirectory() as d:
-            for roots in ("", "/a/wavecal_arcfirst,/b/wavecal_arcfirst"):
-                with self.subTest(roots=roots), \
-                        mock.patch.object(D.C, "ARCFIRST_HISTORY_ROOTS", roots), \
-                        mock.patch.object(D.subprocess, "run", fake_run):
-                    seen.clear()
-                    D.slurm_submit_and_wait("apo", params={}, ti=TI(d))
-                    self.assertEqual(seen["env"]["AR_WAVECAL_ORDER"], self.C.WAVECAL_ORDER)
-                    self.assertEqual(seen["env"]["AR_ARCFIRST_HISTORY_ROOTS"], roots)
+            with mock.patch.object(D.subprocess, "run", fake_run):
+                seen.clear()
+                D.slurm_submit_and_wait("apo", params={}, ti=TI(d))
+                self.assertEqual(seen["env"]["AR_WAVECAL_ORDER"], self.C.WAVECAL_ORDER)
+                self.assertNotIn("AR_ARCFIRST_HISTORY_ROOTS", seen["env"])
 
     def test_every_bash_command_renders_and_parses(self):
         """Render each BashOperator template with stand-in context and run
@@ -226,7 +223,7 @@ class DagImport(unittest.TestCase):
 
 
 class RunAllWavecalOptions(unittest.TestCase):
-    """scripts/daily/run_all.sh turns AR_WAVECAL_ORDER / AR_ARCFIRST_HISTORY_ROOTS
+    """scripts/daily/run_all.sh turns AR_WAVECAL_ORDER
     into pipeline_2d_1d.jl flags (unset or "" -> no flag). Runs only the
     option blocks of the script, extracted from it (no Airflow needed)."""
     SCRIPT = os.path.join(REPO, "scripts", "daily", "run_all.sh")
@@ -248,13 +245,9 @@ class RunAllWavecalOptions(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return [l for l in r.stdout.splitlines() if l]
 
-    def test_history_roots(self):
-        v, a = "AR_ARCFIRST_HISTORY_ROOTS", "arcfirst_hist_opt"
-        self.assertEqual(self._opts(v, a, None), [])
-        self.assertEqual(self._opts(v, a, ""), [])
-        self.assertEqual(self._opts(v, a, "/x/wavecal_arcfirst,/y/wavecal_arcfirst"),
-                         ["--arcfirst_history_roots",
-                          "/x/wavecal_arcfirst,/y/wavecal_arcfirst"])
+    def test_no_history_roots(self):
+        # no cross-night input: the history-roots option block is gone
+        self.assertNotIn("ARCFIRST_HISTORY_ROOTS", open(self.SCRIPT).read())
 
     def test_wavecal_order(self):
         v, a = "AR_WAVECAL_ORDER", "wavecal_order_opt"
@@ -269,7 +262,7 @@ class RunAllWavecalOptions(unittest.TestCase):
                 and "--waveSoln false" not in l]
         self.assertEqual(len(call), 1)
         self.assertIn('"${wavecal_order_opt[@]}"', call[0])
-        self.assertIn('"${arcfirst_hist_opt[@]}"', call[0])
+        self.assertNotIn("arcfirst_hist_opt", call[0])
 
 
 FAKE_ALMANAC = textwrap.dedent("""\

@@ -119,16 +119,11 @@ function parse_commandline()
         help = "arc_first only: comb anchor rule (RefitConfig.anchor_block): verified_pair (default: an arc sequence and a full-frame FPI exposure adjacent in the exposure sequence with no commanded move between, checked by lamp offset and chip residual pattern; anchor-verified branch), nearest_science, morning or any"
         arg_type = String
         default = "verified_pair"
-        "--arcfirst_anchor_trend"
+        "--arcfirst_cavity_ref_check"
         required = false
-        help = "arc_first only, verified_pair: cross-night anchor continuity (RefitConfig.anchor_trend): both (neighbouring nights on both sides among this run's nights and --arcfirst_history_roots; in a daily run only earlier nights exist), trailing (earlier nights only), off"
+        help = "arc_first only, verified_pair: per-night check of the anchored comb's fixed-mode velocity against the GLOBAL stored per-epoch reference (RefitConfig.cavity_ref_check; data/comb_mode_velocity_ref_v1.csv): on (a pair more than 30 m/s off is replaced by a same-night candidate within it, else flagged WAVE_ANCHOR_CAVITY_OUTLIER) or off. No other night is read."
         arg_type = String
-        default = "both"
-        "--arcfirst_history_roots"
-        required = false
-        help = "arc_first only: comma-separated wavecal_arcfirst roots of earlier runs (e.g. previous daily outdirs) whose comb products serve as trailing nights for the cross-night comb step (FSR continuity, cavity vs the trailing 15 nights). Empty: only this run's nights (a bulk run's own pass)."
-        arg_type = String
-        default = ""
+        default = "on"
         "--arcfirst_max_reanchor"
         required = false
         help = "arc_first only: cap on conditional re-anchors per night when the end-of-night check (median sky-line offset of the FPI-fiber exposures against the final solution, per chip, and comb mode slips) fails; each re-anchor takes the anchor rule's next candidate and reruns comb -> exposures for that night (WAVE_REANCHORED; cap reached: WAVE_ANCHOR_CHECK_FAILED, best candidate kept)"
@@ -539,58 +534,33 @@ if parg["relFlux"]
             shape_template_file = $(parg["arcfirst_shape_template"]),
             fps_shape_apo = $(parg["arcfirst_fps_shape"]), fps_shape_lco = $(parg["arcfirst_fps_shape"]),
             anchor_samepos = "none", anchor_block = $(parg["arcfirst_anchor_block"]),
-            anchor_trend = $(parg["arcfirst_anchor_trend"]))
+            cavity_ref_check = $(parg["arcfirst_cavity_ref_check"]))
         almanac_file_af = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
         sendto(workers(), almanac_file_af = almanac_file_af)
         af_mjd(f) = parse(Int, split(basename(f), "_")[3])
         all1DcalFirst = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")
         af_jobs = [(mjd, ApogeeReduction.arcfirst_exps_from_names(all1DcalFirst, parg["tele"], mjd),
                     filter(f -> af_mjd(f) == mjd, all1DfpiPeaks_a)) for mjd in unique_mjds]
-        af_hist = String.(filter(!isempty, strip.(split(parg["arcfirst_history_roots"], ","))))
-        sendto(workers(), af_hist = af_hist)
-        # phase 1 for EVERY night (arc fit, arc-anchored comb), then phase 2 (cross-night anchor
-        # continuity against the neighbours' combs, FPI fibers, assembly, end-of-night check)
-        @everywhere arcfirst_p1(job) = try
-            ApogeeReduction.arcfirst_night_phase1(parg["tele"], job[1]; outdir = parg["outdir"],
+        # every night independently (no cross-night step, AKS 2026-11-18): one parallel map over nights
+        @everywhere arcfirst_one(job) = try
+            ApogeeReduction.arcfirst_night(parg["tele"], job[1]; outdir = parg["outdir"],
                 almanac_file = almanac_file_af, exps = job[2], fpi_fnames = job[3], cfg = ARCFIRST_CFG,
-                checkpoint_mode = parg["checkpoint_mode"], noarc_fallback = parg["arcfirst_noarc_fallback"])
-        catch e
-            @warn "ARC-FIRST CHAIN FAILED (phase 1) for $(parg["tele"]) $(job[1]): the night falls back to the legacy chain (WAVE_NOT_ARCFIRST)" exception = (e, catch_backtrace())
-            (; route = :legacy, arc = "error", comb = "", done = false)
-        end
-        desc = "Arc-first phase 1 (arcs -> arc-anchored comb): "
-        af_p1 = @showprogress desc=desc pmap(arcfirst_p1, af_jobs)
-        @everywhere arcfirst_p2(job) = try
-            ApogeeReduction.arcfirst_night_phase2(parg["tele"], job[1]; outdir = parg["outdir"],
-                almanac_file = almanac_file_af, exps = job[2], fpi_fnames = job[3], cfg = ARCFIRST_CFG,
+                checkpoint_mode = parg["checkpoint_mode"], noarc_fallback = parg["arcfirst_noarc_fallback"],
                 fiber_fill = parg["arcfirst_fiber_fill"], max_reanchor = parg["arcfirst_max_reanchor"],
-                sky_check_ms = parg["arcfirst_sky_check_ms"], history_roots = af_hist)
+                sky_check_ms = parg["arcfirst_sky_check_ms"])
         catch e
-            @warn "ARC-FIRST CHAIN FAILED (phase 2) for $(parg["tele"]) $(job[1]): the night falls back to the legacy chain (WAVE_NOT_ARCFIRST)" exception = (e, catch_backtrace())
+            @warn "ARC-FIRST CHAIN FAILED for $(parg["tele"]) $(job[1]): the night falls back to the legacy chain (WAVE_NOT_ARCFIRST)" exception = (e, catch_backtrace())
             # no partial waveCalExp may survive: resampling must use the legacy chain for the whole night
             ApogeeReduction.arcfirst_clear_night(ApogeeReduction.arcfirst_root(parg["outdir"]),
                 joinpath(parg["outdir"], "apred"), parg["tele"], job[1], job[2])
-            (; route = :legacy, comb = "error", anchorcheck = "", fpifib = "", assemble = "", n_exp_written = 0, n_attempts = 0)
+            (; route = :legacy, arc = "error", comb = "", fpifib = "", assemble = "", n_exp_written = 0, n_attempts = 0)
         end
-        p2_jobs = [job for (job, r) in zip(af_jobs, af_p1) if r.route == :arcfirst && !r.done]
-        desc = "Arc-first phase 2 (anchor continuity -> FPI fibers -> assembly): "
-        af_p2 = @showprogress desc=desc pmap(arcfirst_p2, p2_jobs)
-        p2_by = Dict(job[1] => r for (job, r) in zip(p2_jobs, af_p2))
-        af_res = [haskey(p2_by, job[1]) ? merge((; arc = r1.arc), p2_by[job[1]]) :
-                  (; route = r1.route, arc = r1.arc, comb = r1.comb, anchorcheck = "", fpifib = "",
-                     assemble = r1.done ? "done" : "", n_exp_written = 0, n_attempts = 0)
-                  for (job, r1) in zip(af_jobs, af_p1)]
+        desc = "Arc-first nights (arcs -> comb -> FPI fibers -> assembly): "
+        af_res = @showprogress desc=desc pmap(arcfirst_one, af_jobs)
         for (job, r) in zip(af_jobs, af_res)
             println("arc_first $(parg["tele"]) $(job[1]): route=$(r.route) arc=$(r.arc) comb=$(r.comb) ",
-                "anchorcheck=$(r.anchorcheck) fpifib=$(r.fpifib) assemble=$(r.assemble) ",
+                "fpifib=$(r.fpifib) assemble=$(r.assemble) ",
                 "waveCalExp=$(r.n_exp_written)/$(length(job[2])) anchor_attempts=$(r.n_attempts)")
-        end
-        # cross-night comb step: bulk = a pass over this run's comb products; daily = the same
-        # kernel with trailing nights from --arcfirst_history_roots (each night vs earlier nights only)
-        af_cross = ApogeeReduction.arcfirst_crossnight(ApogeeReduction.arcfirst_root(parg["outdir"]), parg["tele"],
-            [job[1] for job in af_jobs]; history_roots = af_hist)
-        for x in af_cross
-            @warn "arc_first cross-night comb flag $(parg["tele"]) $(x[1]): $(x[2]) = $(round(x[3], digits = 2))"
         end
         legacy_mjds = [job[1] for (job, r) in zip(af_jobs, af_res) if r.route == :legacy]
         println("arc_first: $(length(unique_mjds) - length(legacy_mjds)) of $(length(unique_mjds)) nights in order; ",

@@ -32,12 +32,16 @@ end
     @testset "config" begin
         cfg = RefitConfig()
         @test refit_check_config(cfg)
-        @test cfg.exp_terms == "chipzp_stretch_tilt" && cfg.prefps_time == "regularised" && cfg.neon == "none"
-        @test cfg.sky_exp_terms == "chipzp_stretch_tilt" && cfg.reg_weight_apo == 0.825 && cfg.reg_weight_lco == 0.65
+        @test cfg.exp_terms == "chipzp_stretch_tilt" && cfg.prefps_time == "skyshift" && cfg.neon == "none"
+        @test cfg.sky_exp_terms == "chipzp_stretch_tilt" && cfg.mode_offset_file == "default"
+        # no per-telescope weights, no per-night tie, no cross-night switches
+        @test !any(n -> occursin("reg_weight", String(n)) || occursin("plate_tie", String(n)) ||
+            occursin("anchor_trend", String(n)) || n == :sky_anchor_window_h, fieldnames(RefitConfig))
+        @test cfg.arcwin_nights == 0 && cfg.cavity_ref_check == "on" && cfg.noadjacent_route == "stored_cavity"
         @test_throws ArgumentError refit_check_config(RefitConfig(exp_terms = "bogus"))
-        @test_throws ArgumentError refit_check_config(RefitConfig(prefps_time = "both"))
+        @test_throws ArgumentError refit_check_config(RefitConfig(prefps_time = "regularised"))
         d = refit_config_dict(cfg)
-        @test d["sky_fiber_term"] == "full" && haskey(d, "chip_transform_file")
+        @test d["sky_fiber_term"] == "static" && haskey(d, "chip_transform_file")
     end
 
     @testset "bits and naming" begin
@@ -330,7 +334,7 @@ using ApogeeReduction: refit_pair_adjacency, refit_chip_pattern_px
     @test refit_check_config(RefitConfig(anchor_block = "verified_pair", anchor_adjacency = "strict"))
 end
 
-using ApogeeReduction: refit_comb_mode_velocity, refit_strict_vmodes, REFIT_MODE_REF, REFIT_MODE_M0
+using ApogeeReduction: refit_comb_mode_velocity, REFIT_MODE_REF, REFIT_MODE_M0
 @testset "arclamp_refit fixed-mode comb velocity" begin
     L0, e0 = REFIT_MODE_REF["apo"]
     @test abs(refit_comb_mode_velocity(L0, e0, "apo")) < 1e-6
@@ -341,9 +345,50 @@ using ApogeeReduction: refit_comb_mode_velocity, refit_strict_vmodes, REFIT_MODE
     @test abs(refit_comb_mode_velocity(L0 + dL, e0 + dL / L0 * (REFIT_MODE_M0 + e0), "apo")) < 1e-3
     # one whole order is wrapped away
     @test abs(refit_comb_mode_velocity(L0, e0 + 1.0, "apo") - refit_comb_mode_velocity(L0, e0, "apo")) < 1.0
-    @test isempty(refit_strict_vmodes("/nonexistent/waveCalFPIArc_apo_1.h5"))
-    @test ApogeeReduction.WAVE_ANCHOR_TREND_OUTLIER == 1 << 30
-    @test refit_check_config(RefitConfig(anchor_trend = "trailing")) && RefitConfig().anchor_trend == "both"
+    # bit 30 retired (cross-night continuity removed), never renumbered; new cavity-check bit at 2^36
+    @test ApogeeReduction.WAVE_RESERVED_30 == 1 << 30 && ApogeeReduction.WAVE_ANCHOR_CAVITY_OUTLIER == 1 << 36
+    @test !isdefined(ApogeeReduction, :WAVE_ANCHOR_TREND_OUTLIER)
+    # eps for a target fixed-mode velocity inverts refit_comb_mode_velocity
+    for v in (-500.0, 0.0, 287.0, 707.9)
+        e = ApogeeReduction.refit_eps_for_vmode(L0 + 40.0, v, "apo")
+        @test abs(refit_comb_mode_velocity(L0 + 40.0, e, "apo") - v) < 1e-6 && abs(e - e0) <= 0.5
+    end
+end
+
+@testset "arclamp_refit global stored calibration tables (per-night inputs)" begin
+    AR = ApogeeReduction
+    # cavity check decision: same night only
+    @test AR.refit_cavity_ref_choice([700.0, 712.0], [1, 2], NaN, 30.0) == (1, "nocheck")
+    @test AR.refit_cavity_ref_choice([700.0, 712.0], [1, 2], 710.0, 30.0) == (1, "ok")
+    @test AR.refit_cavity_ref_choice([800.0, 712.0, 705.0], [1, 2, 3], 710.0, 30.0) == (2, "swap")
+    @test AR.refit_cavity_ref_choice([800.0, 900.0], [1, 2], 710.0, 30.0) == (1, "outlier")
+    mktempdir() do d
+        f = joinpath(d, "ref.csv")
+        write(f, "# provenance line\ntele,mjd_lo,mjd_hi,vmode_ms,L_A,eps,n_nights,robsig_ms\n" *
+                 "apo,59500,59599,710.0,37363000.0,0.21,10,4.0\napo,59600,59699,705.0,37363010.0,0.22,12,4.0\n")
+        @test AR.comb_mode_reference(f, "apo", 59550) == 710.0
+        @test AR.comb_mode_reference(f, "apo", 59650) == 705.0
+        @test AR.comb_mode_reference(f, "apo", 61000) == 705.0          # past the end: last epoch
+        @test isnan(AR.comb_mode_reference(f, "lco", 59550))             # no row: check skipped
+        @test isnan(AR.comb_mode_reference(joinpath(d, "missing.csv"), "apo", 59550))
+        @test AR.comb_cavity_reference(f, "apo", 59550) == (37363000.0, 0.21)
+        @test AR.comb_cavity_reference(f, "lco", 59550) === nothing
+        g = joinpath(d, "off.csv")
+        write(g, "tele,mode,chip,term,value_ms,robsig_ms,n_nights,era\n" *
+                 join(["apo,arc_sky,$(c),zp,$(10.0 * i),30,100,all" for (i, c) in enumerate(("R", "G", "B"))], "\n") *
+                 "\napo,arc_sky,G,stretch,-5,10,100,all\n")
+        O, miss = AR.refit_mode_offsets(g, "apo")
+        @test !miss && O[1, :] == [10.0, 20.0, 30.0] && O[2, 2] == -5.0 && O[3, 1] == 0.0
+        O, miss = AR.refit_mode_offsets(g, "lco")
+        @test miss && all(iszero, O)                                      # runs without the file / row
+        h = joinpath(d, "off_era.csv")
+        write(h, "tele,era,mode,chip,term,value_ms\n" * join(["apo,$(e),arc_sky,$(c),zp,$(v)" for (e, v) in
+            (("plate", 1.0), ("fps", 2.0)) for c in ("R", "G", "B")], "\n") * "\n")
+        @test AR.refit_mode_offsets(h, "apo"; era = "plate")[1][1, :] == [1.0, 1.0, 1.0]
+        @test AR.refit_mode_offsets(h, "apo"; era = "fps")[1][1, :] == [2.0, 2.0, 2.0]
+        O, miss = AR.refit_mode_offsets("", "apo")
+        @test miss && all(iszero, O)
+    end
 end
 
 @testset "arclamp_refit wavecal bit constants" begin
@@ -356,8 +401,9 @@ end
     @test all(v -> v > 0 && ispow2(v), vals)
     @test allunique(vals)
     @test Set(String.(bitnames)) == Set(AR.WAVE_BIT_NAMES)
-    # pinned positions: the plate-era tie bit is referenced by a completed run's plan and write-ups
-    @test AR.WAVE_ARC_SKY_TIE_REPLACED == 1 << 31
+    # pinned positions: retired bits stay reserved (a completed run's plan and write-ups reference them)
+    @test AR.WAVE_RESERVED_31 == 1 << 31 && AR.WAVE_RESERVED_20 == 1 << 20
+    @test AR.WAVE_MODE_OFFSET_MISSING == 1 << 37
     @test (AR.WAVE_FIBER_FILLED, AR.WAVE_NOT_ARCFIRST, AR.WAVE_REANCHORED, AR.WAVE_ANCHOR_CHECK_FAILED) ==
           (1 << 32, 1 << 33, 1 << 34, 1 << 35)
 end
