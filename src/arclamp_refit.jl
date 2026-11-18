@@ -77,6 +77,13 @@ const WAVE_ANCHOR_UNVERIFIED = 1 << 28     # anchoring arc sequence not verified
 const WAVE_FPS_NO_COMB = 1 << 29           # FPS era (plate/FPS MJD boundary) but no night comb: arc-route fallback
 const WAVE_ANCHOR_TREND_OUTLIER = 1 << 30  # verified_pair: the kept anchor's fixed-mode comb velocity is more than
                                            # anchor_trend_ms from the neighbouring nights' strict-pair trend
+const WAVE_ARC_SKY_TIE_REPLACED = 1 << 31  # plate era: the night's arc-sky tie was > plate_tie_ms from the telescope's
+                                           # arc-sky ensemble offset (arcs not at the science position); replaced by it
+
+"""Plate-era arc - sky tie reference (pooled sky - arc model zero point, R/G/B m/s) per telescope: the median
+over run1's plate nights (2026-11-18, `anchor_verified/thA_dist.jl`, robust sigma 29-39 m/s per chip).
+Rebuild from any run with that script."""
+const REFIT_PLATE_TIE_REF = Dict("apo" => [-6.0, 156.0, -10.0], "lco" => [10.0, 58.0, 77.0])
 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
@@ -86,7 +93,7 @@ const WAVE_BIT_NAMES = [
     "WAVE_FPIFIB_ROTATION", "WAVE_PASS1_COPY", "WAVE_SHAPE_ARC", "WAVE_SKY_ANCHOR_NIGHT",
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
     "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_FALLBACK", "WAVE_ANCHOR_NOT_SAME_BLOCK",
-    "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_ANCHOR_TREND_OUTLIER"]
+    "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_ANCHOR_TREND_OUTLIER", "WAVE_ARC_SKY_TIE_REPLACED"]
 
 """Era of a telescope-night, keyed ONLY on the canonical plate/FPS MJD boundary
 (`get_fps_plate_divide`: FPS is mjd > divide), never on whether FPI light exists that night."""
@@ -178,6 +185,13 @@ Switches of the refit (defaults = the design's recommendation where it has one):
   * `fps_route` ("fpifib"): per-exposure position of FPS exposures with FPI fibers: "fpifib" = the night comb
     transported by the exposure's two FPI fibers; "sky" (experiment switch) = ignore the FPI fibers and use the
     arc route (arc time model + pooled-sky per-exposure terms per `prefps_time`), i.e. position from the sky.
+  * `plate_tie_check` ("replace"), `plate_tie_ms` (300): plate era. The arc - sky tie (pooled sky - arc model
+    at the reference exposures near the arcs; chip G) is the arc-sky line-ensemble offset when arcs and science
+    sit at the same position: run1 APO median +156 m/s, robust sigma 34. A tie more than `plate_tie_ms` from the
+    telescope's reference (`REFIT_PLATE_TIE_REF`) means the arcs were not where the science was (dither mechanism
+    landed differently); the reference replaces it (WAVE_ARC_SKY_TIE_REPLACED, 2^31). run1: |tie - median| > 300
+    on 49 APO plate nights, 48 of the 51 tail nights (|night shift| > 250 m/s) and none of the normal ones;
+    removing the tie term takes the APO plate night-shift rms from 134 to 33 m/s. "off" = run1 behaviour.
   * `anchor_samepos` ("pass1"): source of the "same measured position as the science" input:
     "pass1" = the science exposures' pass-1 per-exposure solutions (`refit_anchor_samepos`; a
     later-stage product, fine for a refit of an existing run, NOT available in an in-order
@@ -254,6 +268,8 @@ Base.@kwdef struct RefitConfig
     anchor_trend_ms::Float64 = 20.0
     anchor_trend_min_nights::Int = 4
     fps_route::String = "fpifib"
+    plate_tie_check::String = "replace"
+    plate_tie_ms::Float64 = 300.0
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 15
@@ -271,7 +287,7 @@ const REFIT_SWITCH_VALUES = Dict(
     :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
     :anchor_block => ("nearest_science", "morning", "any", "verified_pair"),
     :anchor_adjacency => ("strict_then_nomove", "strict"), :anchor_trend => ("both", "trailing", "off"),
-    :fps_route => ("fpifib", "sky"), :anchor_prefer => ("strict", "none"),
+    :fps_route => ("fpifib", "sky"), :plate_tie_check => ("replace", "off"), :anchor_prefer => ("strict", "none"),
     :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
@@ -303,7 +319,7 @@ const REFIT_SWITCH_STAGES = Dict(
     "anchor_pattern_tol_px" => "comb,fpifib,assemble", "anchor_lamp_tol_px" => "comb,fpifib,assemble",
     "anchor_trend" => "anchorcheck,fpifib,assemble", "anchor_trend_nights" => "anchorcheck,fpifib,assemble",
     "anchor_trend_ms" => "anchorcheck,fpifib,assemble", "anchor_trend_min_nights" => "anchorcheck,fpifib,assemble",
-    "fps_route" => "assemble",
+    "fps_route" => "assemble", "plate_tie_check" => "assemble", "plate_tie_ms" => "assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
@@ -313,6 +329,14 @@ const REFIT_SWITCH_STAGES = Dict(
     "shape_template_file" => "assemble", "shape_template_block" => "assemble",
     "sky_anchor_window_h" => "assemble", "xcheck_threshold_ms" => "assemble",
     "coeff_degree" => "assemble")
+
+"""Value of each switch added after the first archive run that reproduces the behaviour before it existed
+(used by `--reuse_from` when the base run's config.txt lacks the switch; a switch not listed here, or set to
+another value, invalidates its stages)."""
+const REFIT_SWITCH_LEGACY = Dict("anchor_prefer" => "strict", "anchor_samepos" => "pass1",
+    "anchor_adjacency" => "strict_then_nomove", "anchor_max_candidates" => "3", "anchor_pattern_tol_px" => "0.02",
+    "anchor_lamp_tol_px" => "0.1", "anchor_trend" => "both", "anchor_trend_nights" => "10", "anchor_trend_ms" => "20.0",
+    "anchor_trend_min_nights" => "4", "fps_route" => "fpifib", "plate_tie_check" => "off", "plate_tie_ms" => "300.0")
 
 "FNV-1a fingerprint of a file, or \"none\" for an empty path / missing file."
 refit_fingerprint(path::AbstractString) =

@@ -594,6 +594,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
     end
     # ---------------- anchors (arc-anchored; never an absolute sky level) and cluster steps
     anchor_night = false
+    tie_replaced = false
     thA = fill(NaN, 3, 3)                 # arc route anchor: reference-cluster exposures near arcs
     steps = Dict{Int, Matrix{Float64}}()  # cluster -> step (3 x 3) from the sky
     arck = [k for k in 1:nE if route[k] == :arc && hassky[k] && any(isfinite, view(theta, :, :, k))]
@@ -606,6 +607,16 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         end
         for c in 1:3, q in 1:3
             thA[q, c] = _arc_nanmedian([theta[q, c, k] for k in near])
+        end
+        # plate-era arc-sky tie check: the zero point of the tie (sky - arc model at the reference
+        # exposures) is the arc-sky line-ensemble offset, stable to ~30-40 m/s per chip; a tie far from it
+        # means the arcs and the science exposures they are tied to were not at the same position
+        if era == "plate" && cfg.plate_tie_check == "replace" && haskey(REFIT_PLATE_TIE_REF, String(tele))
+            ref = REFIT_PLATE_TIE_REF[String(tele)]
+            if isfinite(thA[1, 2]) && abs(thA[1, 2] - ref[2]) > cfg.plate_tie_ms
+                thA[1, :] .= ref
+                tie_replaced = true
+            end
         end
         for cl in unique(clus[arck])
             S = zeros(3, 3)
@@ -670,6 +681,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
                               cfg.prefps_time == "sky" ? dep : S[q, c] + wreg * (dep - S[q, c])
                 end
                 anchor_night && (bits[k] |= WAVE_SKY_ANCHOR_NIGHT)
+                tie_replaced && (bits[k] |= WAVE_ARC_SKY_TIE_REPLACED)
                 d0 = [theta[1, c, k] - thA[1, c] - S[1, c] for c in 1:3]
                 xres_chip[:, k] .= Float32.(d0)
             elseif route[k] == :fpifib
@@ -731,7 +743,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         "chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "neon_offset_fingerprint" => refit_fingerprint(cfg.neon_offset_file),
         "arc_reference_cluster" => refcl, "reg_weight" => wreg,
-        "sky_anchor_night" => anchor_night, "bit_names" => join(WAVE_BIT_NAMES, ","),
+        "sky_anchor_night" => anchor_night, "arc_sky_tie_replaced" => tie_replaced, "bit_names" => join(WAVE_BIT_NAMES, ","),
         # where each scale enters (ARCFPI_VALIDATION scales list)
         "scale_arc_chip" => A === nothing ? "none" : A.chip_scale_source,
         "scale_comb" => "comb chip transform (cporder 1) and quartic fitted per night; cavity (L, eps) per night",
