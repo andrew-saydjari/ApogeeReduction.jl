@@ -1,8 +1,11 @@
 using ApogeeReduction: load_arclamp_linelist, ARCLAMP_LINELIST_DEFAULT, get_arclamp_peaks_local,
                        arclamp_associate, arclamp_rough_lambda, arclamp_seed_dispersion,
                        ArcGlobalLayout, ArcJointData, arcfit_joint, arcfit_eval, arcfit_seq_state,
-                       arclamp_position_clusters, arclamp_gate, ArcObjRef, fit_arclamp_night,
-                       arclamp_night_grid, ARCSEQ_GATE_FAIL, ARCSEQ_UNGATED, ARCNIGHT_CHIPSCALE_FREE,
+                       arclamp_position_clusters, fit_arclamp_night, arclamp_night_grid,
+                       arclamp_sequence_reject, ARCSEQ_REJECTED, ARCSEQ_QUALITY, ARCSEQ_SHAPE,
+                       ARCSEQ_NOT_COMPARED, ARCNIGHT_CHIPSCALE_FREE, ARCNIGHT_SEQ_REJECTED,
+                       ARCNIGHT_FEW_SEQ, ARCLAMP_SEQFLAG_BITS, ARCLAMP_NIGHTFLAG_BITS,
+                       ARCREJ_DEFAULTS, ARCSEQ_CHIPOFF, ARCNIGHT_ABS_FAIL,
                        bad_fully_saturated
 
 # --- a synthetic instrument built from the frozen line list's own seed --------------------
@@ -133,44 +136,64 @@ end
         @test count((a .!= 0) .& (a .!= sel)) == 0
     end
 
-    @testset "positions and gate" begin
+    @testset "positions and arc-only rejection rule" begin
         posout, cl, ncl = arclamp_position_clusters([0.0, 0.51, 0.02, 0.50, 29.5])
         @test posout == [false, false, false, false, true]
         @test ncl == 2
         @test cl[1] == cl[3] && cl[2] == cl[4] && cl[1] != cl[2]
-        dev, gated, flagged = arclamp_gate([0.001, -0.002, NaN, 0.045]; gate_px = 0.02)
-        @test gated == [true, true, false, true]
-        @test flagged == [false, false, false, true]
+        st(r, k, sh, co = 0.0; n = 20000) = (n_rows = n, n_keep = round(Int, k * n), keep_frac = k,
+            rsig_px = r, shape_px = sh, chipoff_px = co, chip_zp_px = zeros(3),
+            chip_stretch_px = zeros(3))
+        good = [st(0.050, 0.997, 0.002), st(0.051, 0.996, 0.003), st(0.052, 0.997, 0.002)]
+        q, sh, co, ab, sc, cmp = arclamp_sequence_reject(good)
+        @test cmp && !any(q) && !any(sh) && !any(co) && !any(ab) && all(sc .< 1)
+        # a sequence with a much larger line scatter, one with most lines clipped, one whose
+        # residual pattern differs from the night's, one with a chip-differential offset, one
+        # with no kept rows
+        bad = vcat(good, [st(0.090, 0.997, 0.002), st(0.050, 0.60, 0.002), st(0.050, 0.997, 0.060),
+            st(0.050, 0.997, 0.002, 0.08), st(NaN, NaN, NaN; n = 0)])
+        q, sh, co, ab, sc, cmp = arclamp_sequence_reject(bad)
+        @test q == [false, false, false, true, true, false, false, true]
+        @test sh == [false, false, false, false, false, true, false, false]
+        @test co == [false, false, false, false, false, false, true, false]
+        @test ab[5] && ab[8] && !any(ab[[1, 2, 3, 6, 7]])
+        @test all(sc[4:8] .> 1) && all(sc[1:3] .< 1)
+        # differences below the absolute excess floors are never rejected, however tight the night
+        tight = [st(0.0500, 0.997, 0.002), st(0.0500, 0.997, 0.002),
+            st(0.0500 + 0.5 * ARCREJ_DEFAULTS.rsig_floor_px, 0.997, 0.002 + 0.5 * ARCREJ_DEFAULTS.shape_floor_px)]
+        q, sh, co, _, _, _ = arclamp_sequence_reject(tight)
+        @test !any(q) && !any(sh) && !any(co)
+        # nights with fewer than min_seq_compare sequences: no relative test, absolute test only
+        q, sh, co, ab, sc, cmp = arclamp_sequence_reject(bad[[1, 5]])
+        @test !cmp && !any(q) && !any(sh) && !any(co) && ab == [false, true]
+        @test length(ARCLAMP_SEQFLAG_BITS) == 10 && length(ARCLAMP_NIGHTFLAG_BITS) == 10
+        @test ARCSEQ_REJECTED == ARCSEQ_QUALITY | ARCSEQ_SHAPE | ARCSEQ_CHIPOFF
+        # retired gate-B bit positions are not reused
+        @test ARCSEQ_REJECTED & 0x0006 == 0 && ARCNIGHT_SEQ_REJECTED & 0x0018 == 0
     end
 
-    @testset "joint night fit: synthetic recovery, gate and fixed chip scales" begin
+    @testset "joint night fit: synthetic recovery, rejection and fixed chip scales" begin
         ll = load_arclamp_linelist()
         p = _aw_truth_poly(ll)
         fibs = 120:149
         # sequences: s1 position 1 (evening), s2 position 2 (+0.5 px), s3 position 1 but
         # displaced by 0.05 px (an unrecorded settling error, like the LCO evening block),
-        # s4 position 1 (morning)
+        # s4 position 1 (morning). Every sequence has its own measured shift, so the displaced
+        # sequence is absorbed: it is NOT rejected and does not bias the solution.
         shifts_px = [0.0, 0.5, 0.05, 0.0]
         lines = [_aw_lines(ll, p, fibs, s / 2048) for s in shifts_px]
         tseq = [60000.10, 60000.11, 60000.12, 60000.40]
-        # object references: the true solution at position 1 and position 2
-        function ref_at(sh_px, t, e)
-            W = zeros(291, 101)
-            for (jf, f) in enumerate(100:200), (i, pix) in enumerate(880:1170)
-                W[i, jf] = _aw_poly(p, _aw_xt(_AW_CT, 2, (pix - 1024) / 2048) + sh_px / 2048)
-            end
-            ArcObjRef(e, t, "fpi", 880, 100:200, W)
-        end
-        refs = [ref_at(0.0, 60000.13, 21), ref_at(0.5, 60000.14, 22), ref_at(0.0, 60000.39, 40)]
-        R = fit_arclamp_night(lines, tseq, "apo", ll; objrefs = refs)
+        R = fit_arclamp_night(lines, tseq, "apo", ll)
         @test R.n_clusters == 2
         @test R.dpx1[2] ≈ 0.5 atol = 1e-4
         @test R.dpx1[3] ≈ 0.05 atol = 1e-4
-        @test (R.seqflags[3] & ARCSEQ_GATE_FAIL) != 0
-        @test all((R.seqflags[[1, 2, 4]] .& ARCSEQ_GATE_FAIL) .== 0)
-        @test all((R.seqflags .& ARCSEQ_UNGATED) .== 0)
-        @test R.used_seq == [1, 2, 4]
+        @test R.compared
+        @test all((R.seqflags .& ARCSEQ_REJECTED) .== 0)
+        @test all((R.seqflags .& ARCSEQ_NOT_COMPARED) .== 0)
+        @test R.used_seq == [1, 2, 3, 4]
+        @test eltype(R.seqflags) == UInt16 && R.night_flags isa UInt16
         @test (R.night_flags & ARCNIGHT_CHIPSCALE_FREE) != 0
+        @test (R.night_flags & ARCNIGHT_SEQ_REJECTED) == 0
         @test count(R.okf) == length(fibs)
         # the fitted model reproduces the truth at the reference state
         G = arclamp_night_grid(R)
@@ -182,6 +205,21 @@ end
         end
         @test maximum(err) < 1e-4                 # Å (≈ 2 m/s)
 
+        # a sequence whose lines carry a shape the others do not (a curvature of 0.1 px across
+        # each chip) is rejected and refitted out; the solution still reproduces the truth
+        linesb = deepcopy(lines)
+        linesb[3] = merge(linesb[3], (pix = Float32[q + 0.1 * (6 * ((q - 1024) / 2048)^2 - 0.5)
+                                                    for q in linesb[3].pix],))
+        Rb = fit_arclamp_night(linesb, tseq, "apo", ll)
+        @test (Rb.seqflags[3] & ARCSEQ_REJECTED) != 0
+        @test all((Rb.seqflags[[1, 2, 4]] .& ARCSEQ_REJECTED) .== 0)
+        @test Rb.used_seq == [1, 2, 4]
+        @test (Rb.night_flags & ARCNIGHT_SEQ_REJECTED) != 0
+        Gb = arclamp_night_grid(Rb)
+        errb = [abs(Gb[Int(q), f, c] - _aw_poly(p, _aw_xt(_AW_CT, c, (q - 1024) / 2048)))
+                for f in fibs, c in 1:3, q in px]
+        @test maximum(errb) < 1e-4
+
         # fixed chip scales (the comb-measured b_R, b_B) are held exactly
         ct2 = [-1.07, 1.0 - 2.6e-4, 1.0755, 1.0 + 1.1e-4]
         lines2 = [_aw_lines(ll, p, fibs, s / 2048; ct = ct2) for s in (0.0, 0.5)]
@@ -189,7 +227,11 @@ end
         R2 = fit_arclamp_night(lines2, [60000.1, 60000.11], "apo", ll; chip_scales = scales)
         @test all(R2.TH[fibs, 2] .== ct2[2]) && all(R2.TH[fibs, 4] .== ct2[4])
         @test (R2.night_flags & ARCNIGHT_CHIPSCALE_FREE) == 0
-        @test all((R2.seqflags .& ARCSEQ_UNGATED) .!= 0)    # no object references given
+        # two sequences: nothing to compare against, flagged and never rejected
+        @test !R2.compared
+        @test all((R2.seqflags .& ARCSEQ_NOT_COMPARED) .!= 0)
+        @test all((R2.seqflags .& ARCSEQ_REJECTED) .== 0)
+        @test (R2.night_flags & ARCNIGHT_FEW_SEQ) != 0
         G2 = arclamp_night_grid(R2)
         err2 = [abs(G2[Int(q), f, 1] - _aw_poly(p, _aw_xt(ct2, 1, (q - 1024) / 2048)))
                 for f in fibs, q in px]
