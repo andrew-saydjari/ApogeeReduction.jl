@@ -16,6 +16,7 @@ using FITSIO: FITS
     include("fpi_homogeneity.jl")
     include("trace_qa.jl")
     include("slit_model.jl")
+    include("trace_register.jl")
     include("safe_jldsave.jl")
     include("lsf.jl")
     include("readonly_opens.jl")

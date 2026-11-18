@@ -258,8 +258,8 @@ end
         # storage type: the smallest that holds every defined bit (UInt16, 10 of 16 bits used)
         @test TraceBits == UInt16
         @test all(k -> k isa TraceBits, keys(TRACE_BIT_NAMES))
-        @test length(TRACE_BIT_NAMES) == 10 && maximum(keys(TRACE_BIT_NAMES)) == 2^9
-        @test reduce(|, keys(TRACE_BIT_NAMES)) == 2^10 - 1      # contiguous, no collisions
+        @test length(TRACE_BIT_NAMES) == 12 && maximum(keys(TRACE_BIT_NAMES)) == 2^11
+        @test reduce(|, keys(TRACE_BIT_NAMES)) == 2^12 - 1      # contiguous, no collisions
         @test to_trace_bits(Int64[3, 512]) == UInt16[3, 512] && eltype(to_trace_bits([1])) == UInt16
         tp = synth_trace(R)
         tp[:, [24, 151, 152], 1] .= 0.0
