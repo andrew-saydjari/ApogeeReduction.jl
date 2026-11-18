@@ -131,3 +131,18 @@ using HDF5
         @test n0 == 0
     end
 end
+
+@testset "cross-night comb kernel (trailing only)" begin
+    AR = ApogeeReduction
+    mj = collect(60000:60010)
+    L = fill(3.7363e7, 11); lam = fill(16000.0, 11)
+    @test isempty(AR.crossnight_comb_flags(mj, lam, L))
+    lam2 = copy(lam); lam2[8:end] .+= lam[8]^2 / (2 * L[8])          # one FSR from night 60007 on
+    f = AR.crossnight_comb_flags(mj, lam2, L)
+    @test length(f) == 1 && f[1][1] == 60007 && f[1][2] == "fsr_continuity"
+    L2 = copy(L); L2[11] += 100.0                                     # cavity jump on the last night
+    f = AR.crossnight_comb_flags(mj, lam, L2)
+    @test length(f) == 1 && f[1][1] == 60010 && f[1][2] == "cavity_jump_8sigma"
+    # trailing only: the flag of 60010 does not depend on later nights, and order of input is irrelevant
+    @test AR.crossnight_comb_flags(reverse(mj), reverse(lam), reverse(L2)) == f
+end

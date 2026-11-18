@@ -365,3 +365,84 @@ function arcfirst_exps_from_names(fnames, tele, mjd)
     end
     return sort(unique(out))
 end
+
+# ------------------------------------------------------------------------------------------
+# cross-night comb step (after stage (c) of every night): bulk = a pass over the run's comb
+# products; daily = the same kernel over trailing nights only (history root)
+# ------------------------------------------------------------------------------------------
+"""
+    crossnight_comb_flags(mjds, lam, L; window = 15, min_prev = 5, fsr_tol = 0.2, nsig = 8.0)
+        -> Vector{(mjd, check, value)}
+
+Pure kernel of the cross-night comb checks (#420 phase 3; shared with the refit driver): per comb
+night in MJD order, (i) FSR continuity: λ at a fixed fiber/pixel (`lam`) jumping by ~ a nonzero
+integer FSR (λ²/2L) from the previous comb night; (ii) cavity L against the TRAILING `window`
+nights (>= `min_prev` of them): |L - median| > `nsig` x max(1.4826 MAD, 1 Å). Uses only earlier
+nights for each night, so the daily (trailing history) and a bulk run give the same flags.
+A cross-night verification rule for the anchor (e.g. comb continuity at a fixed mode, branch
+anchor-verified) drops in next to these checks.
+"""
+function crossnight_comb_flags(mjds::AbstractVector{<:Integer}, lam::AbstractVector{<:Real},
+        L::AbstractVector{<:Real}; window = 15, min_prev = 5, fsr_tol = 0.2, nsig = 8.0)
+    o = sortperm(mjds)
+    M, Λ, LL = mjds[o], lam[o], L[o]
+    flags = Tuple{Int, String, Float64}[]
+    for i in 2:length(M)
+        fsr = Λ[i]^2 / (2 * LL[i])
+        d = (Λ[i] - Λ[i - 1]) / fsr
+        k = round(d)
+        (k != 0 && abs(d - k) < fsr_tol) && push!(flags, (M[i], "fsr_continuity", d))
+        lo = max(1, i - window)
+        if i - lo >= min_prev
+            prev = LL[lo:(i - 1)]
+            m = median(prev)
+            s = max(1.4826 * median(abs.(prev .- m)), 1.0)
+            abs(LL[i] - m) > nsig * s && push!(flags, (M[i], "cavity_jump_8sigma", (LL[i] - m) / s))
+        end
+    end
+    return flags
+end
+
+"""
+    arcfirst_crossnight(outroot, tele, target_mjds; history_roots = String[]) -> Vector
+
+The cross-night step of the in-order chain for `target_mjds`: reads the arc-anchored comb products
+(`<root>/comb/waveCalFPIArc_<tele>_<mjd>.h5`) of this run and of `history_roots` (e.g. the
+previous nights' daily output roots), runs `crossnight_comb_flags` over all of them (each night is
+judged against EARLIER nights only) and writes the flags of the target nights to
+`<outroot>/status/crossnight_<tele>.csv`. Bulk: called once after every night's chain; daily: the
+history supplies the trailing nights. Flags only (QA); a flagged night is not re-anchored here.
+"""
+function arcfirst_crossnight(outroot, tele, target_mjds; history_roots = String[])
+    rx = Regex("^waveCalFPIArc_$(tele)_(\\d+)\\.h5\$")
+    seen = Dict{Int, Tuple{Float64, Float64}}()
+    for root in vcat(String[outroot], collect(String, history_roots))
+        d = joinpath(root, "comb")
+        isdir(d) || continue
+        for fn in readdir(d)
+            m = match(rx, fn)
+            m === nothing && continue
+            mj = parse(Int, m.captures[1])
+            haskey(seen, mj) && continue
+            v = try
+                h5open(joinpath(d, fn), "r") do f
+                    lin = read(f["linParams"]); nl = read(f["nlParams"])
+                    (refit_prod_wave(lin, nl, 150, 2, [1024.0])[1], Float64(read(f["fpi_cavity_size"])))
+                end
+            catch
+                continue
+            end
+            all(isfinite, v) && (seen[mj] = v)
+        end
+    end
+    mj = sort(collect(keys(seen)))
+    fl = crossnight_comb_flags(mj, [seen[m][1] for m in mj], [seen[m][2] for m in mj])
+    fl = filter(x -> x[1] in target_mjds, fl)
+    fn = joinpath(outroot, "status", "crossnight_$(tele).csv")
+    mkpath(dirname(fn))
+    open(fn, "w") do io
+        println(io, "tele,mjd,check,value,n_comb_nights_seen")
+        foreach(x -> println(io, "$(tele),$(x[1]),$(x[2]),$(x[3]),$(length(mj))"), fl)
+    end
+    return fl
+end

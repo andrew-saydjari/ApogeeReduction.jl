@@ -338,17 +338,9 @@ function phase3()
     for tele in ("apo", "lco")
         C = sort(combrows[combrows.tele .== tele, :], :mjd)
         nrow(C) < 2 && continue
-        for i in 2:nrow(C)
-            fsr = C.lam_G_f150_p1024[i]^2 / (2 * C.L[i])
-            d = (C.lam_G_f150_p1024[i] - C.lam_G_f150_p1024[i - 1]) / fsr
-            k = round(d)
-            (k != 0 && abs(d - k) < 0.2) && push!(flags, (tele, C.mjd[i], "fsr_continuity", d))
-            lo = max(1, i - 15)
-            if i - lo >= 5
-                prev = C.L[lo:(i - 1)]
-                m = median(prev); s = max(1.4826 * median(abs.(prev .- m)), 1.0)
-                abs(C.L[i] - m) > 8s && push!(flags, (tele, C.mjd[i], "cavity_jump_8sigma", (C.L[i] - m) / s))
-            end
+        # shared kernel (also the in-order pipeline's cross-night step): each night vs earlier nights only
+        for (m, chk, v) in AR.crossnight_comb_flags(C.mjd, C.lam_G_f150_p1024, C.L)
+            push!(flags, (tele, m, chk, v))
         end
     end
     CSV.write(joinpath(OUT, "run_table.csv"), rows)

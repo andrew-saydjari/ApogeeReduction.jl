@@ -119,6 +119,11 @@ function parse_commandline()
         help = "arc_first only: comb anchor rule (RefitConfig.anchor_block): verified_pair (default: an arc sequence and a full-frame FPI exposure adjacent in the exposure sequence with no commanded move between, checked by lamp offset and chip residual pattern; anchor-verified branch), nearest_science, morning or any"
         arg_type = String
         default = "verified_pair"
+        "--arcfirst_history_roots"
+        required = false
+        help = "arc_first only: comma-separated wavecal_arcfirst roots of earlier runs (e.g. previous daily outdirs) whose comb products serve as trailing nights for the cross-night comb step (FSR continuity, cavity vs the trailing 15 nights). Empty: only this run's nights (a bulk run's own pass)."
+        arg_type = String
+        default = ""
         "--arcfirst_max_reanchor"
         required = false
         help = "arc_first only: cap on conditional re-anchors per night when the end-of-night check (median sky-line offset of the FPI-fiber exposures against the final solution, per chip, and comb mode slips) fails; each re-anchor takes the anchor rule's next candidate and reruns comb -> exposures for that night (WAVE_REANCHORED; cap reached: WAVE_ANCHOR_CHECK_FAILED, best candidate kept)"
@@ -551,6 +556,14 @@ if parg["relFlux"]
             println("arc_first $(parg["tele"]) $(job[1]): route=$(r.route) arc=$(r.arc) comb=$(r.comb) ",
                 "fpifib=$(r.fpifib) assemble=$(r.assemble) waveCalExp=$(r.n_exp_written)/$(length(job[2])) ",
                 "anchor_attempts=$(get(r, :n_attempts, 0))")
+        end
+        # cross-night comb step: bulk = a pass over this run's comb products; daily = the same
+        # kernel with trailing nights from --arcfirst_history_roots (each night vs earlier nights only)
+        af_hist = filter(!isempty, strip.(split(parg["arcfirst_history_roots"], ",")))
+        af_cross = ApogeeReduction.arcfirst_crossnight(ApogeeReduction.arcfirst_root(parg["outdir"]), parg["tele"],
+            [job[1] for job in af_jobs]; history_roots = String.(af_hist))
+        for x in af_cross
+            @warn "arc_first cross-night comb flag $(parg["tele"]) $(x[1]): $(x[2]) = $(round(x[3], digits = 2))"
         end
         legacy_mjds = [job[1] for (job, r) in zip(af_jobs, af_res) if r.route == :legacy]
         println("arc_first: $(length(unique_mjds) - length(legacy_mjds)) of $(length(unique_mjds)) nights in order; ",
