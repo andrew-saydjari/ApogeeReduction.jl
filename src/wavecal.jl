@@ -1,4 +1,20 @@
 using HDF5
+using Optim: Optim, optimize, LBFGS
+
+"""
+Stopping settings for every LBFGS fit in the wavelength solution (per-fiber sky fit, per-fiber dither
+fits, FPI comb fits and exposure terms), written out once instead of relying on Optim's defaults, so a
+future change of Optim's defaults cannot silently move them. The values are Optim's defaults on 1.10 and
+2.x (gradient tolerance 1e-8, 1000 iterations, no x/f tolerance). Gradients are central finite
+differences on both versions. Tighter settings (g 1e-12, x 1e-14, f 1e-15, 20000 iterations) were tried
+on 16 sample nights: they do not make Optim 1.10 and 2.3.2 agree better and do not lower the sky-line
+residuals (as many fits get worse as better, relative changes ~1e-5), so they are not used.
+"""
+const WAVECAL_LBFGS_OPTIONS = Ref(Optim.Options(show_trace = false, g_abstol = 1e-8, x_abstol = 0.0,
+    f_reltol = 0.0, iterations = 1_000))
+
+"""LBFGS minimisation used by the wavelength fits, with `WAVECAL_LBFGS_OPTIONS[]`."""
+wavecal_lbfgs(f, x0) = optimize(f, x0, LBFGS(), WAVECAL_LBFGS_OPTIONS[])
 using Polynomials: Polynomial, fit
 
 function linear_loss_fit(x, y; wporder = 2, returnL2only = false, linparam = nothing)
@@ -1074,8 +1090,8 @@ function get_sky_dither_per_fiber(
             dither_nonlinear_loss_fit(inparams, xt[sky_msk], yv[sky_msk], linParams[fibIndx, :];
                 wporder = wporder, returnL2only = true)
         end
-        res = optimize(
-            dither_nonlinear_loss_fit_partial, ditherPolyParams[fibIndx, :], LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            dither_nonlinear_loss_fit_partial, ditherPolyParams[fibIndx, :])
         ditherParamsOpt = Optim.minimizer(res)
         ditherPolyParams[fibIndx, :] .= ditherParamsOpt
         resid_vec[fibIndx, sky_msk] .= dither_nonlinear_loss_fit(
@@ -1144,8 +1160,8 @@ function get_sky_wavecal(
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
                 wporder = wporder, cporder = cporder, returnL2only = true)
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            nonlinear_loss_fit_partial, inparams)
         nlParamsOpt = Optim.minimizer(res)
         linResid,
         linParamsOpt = nonlinear_loss_fit!(
@@ -1640,8 +1656,8 @@ function comb_exp_get_and_save_fpi_wavecal(
                         inparams, curr_xt[curr_msk], curr_y[curr_msk], linParams[i, :];
                         wporder = wporder, returnL2only = true)
                 end
-                res = optimize(
-                    dither_nonlinear_loss_fit_partial, curr_ditherPolyParams[e_ind, :], LBFGS(), Optim.Options(show_trace = false))
+                res = wavecal_lbfgs(
+                    dither_nonlinear_loss_fit_partial, curr_ditherPolyParams[e_ind, :])
                 curr_ditherParamsOpt = Optim.minimizer(res)
                 curr_ditherPolyParams[e_ind, :] .= curr_ditherParamsOpt
                 if e_ind == 1
@@ -1692,8 +1708,8 @@ function comb_exp_get_and_save_fpi_wavecal(
                 #		outparamsOpt = vcat(ditherParamsOpt, nlParamsOpt)
                 outparamsOpt = nlParamsOpt
             else
-                res = optimize(
-                    comb_exp_nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+                res = wavecal_lbfgs(
+                    comb_exp_nonlinear_loss_fit_partial, inparams)
                 outparamsOpt = Optim.minimizer(res)
                 #		ditherParamsOpt = outparamsOpt[begin:begin+n_dither_coeffs-1]
                 #		nlParamsOpt = outparamsOpt[begin+n_dither_coeffs:end] 
@@ -1731,8 +1747,8 @@ function comb_exp_get_and_save_fpi_wavecal(
                            (2.0 * (cavity_size + expparams[1] * mults[1])) ./
                            (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
         end
-        res = optimize(
-            nonlinear_expparams_fit, expparams0, LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            nonlinear_expparams_fit, expparams0)
         expparamsOpt = Optim.minimizer(res) .* mults
         cavity_size += expparamsOpt[1]
         m_offset = expparamsOpt[2]
@@ -1866,8 +1882,8 @@ function get_fpi_wavecal(
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
                 wporder = wporder, cporder = cporder, returnL2only = true)
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            nonlinear_loss_fit_partial, inparams)
         nlParamsOpt = Optim.minimizer(res)
         linResid,
         linParamsOpt = nonlinear_loss_fit!(
@@ -1892,8 +1908,8 @@ function get_fpi_wavecal(
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
                 wporder = wporder, cporder = cporder, returnL2only = true)
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            nonlinear_loss_fit_partial, inparams)
         nlParamsOpt = Optim.minimizer(res)
         linResid,
         linParamsOpt = nonlinear_loss_fit!(
