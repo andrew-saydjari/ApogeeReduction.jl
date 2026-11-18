@@ -1,5 +1,6 @@
 # Oneshot Slack alert fired by airflow-standalone.service's OnFailure=.
-# PREPARED, NOT INSTALLED — see airflow/INSTALL.md.
+# TEMPLATE: the @-delimited placeholders are filled in by
+# airflow/scripts/render_systemd_units.sh — see airflow/INSTALL.md step 4.
 #
 # CHANNEL POLICY (this is an OUTAGE alert, not routine chatter):
 #   * The channel is AR_SLACK_ALERT_CHANNEL, which defaults to PROD
@@ -18,7 +19,7 @@ Description=Slack alert: airflow-standalone entered failed state
 
 [Service]
 Type=oneshot
-EnvironmentFile=%h/airflow/airflow_env.sh
+EnvironmentFile=@AIRFLOW_ENV_FILE@
 ExecStart=/bin/bash -c 'curl -sS -X POST https://slack.com/api/chat.postMessage \
   -H "Authorization: Bearer ${SLACK_TOKEN}" \
   -H "Content-Type: application/json; charset=utf-8" \

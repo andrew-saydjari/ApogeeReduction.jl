@@ -126,37 +126,87 @@ chmod 600 /mnt/home/sdssv/airflow/airflow_env.sh
 
 The almanac DB identity is NOT in this file: it comes from
 `~/.almanac/config.yaml` + `~/.pgpass` of the account running Airflow, and
-the DB is reached through localhost:63333 forwarded over the persistent
-`mwm` ssh ControlMaster. The `tunnel_check` task verifies the master
-(`ssh -O check mwm`) and (re)adds the port-forward, but **only AKS can
-reopen the master itself** (`sshpass -f ~/pass_file ssh -fN mwm`) — the task
-fails with exactly that message when the master is down. The account running
-Airflow therefore needs the `mwm` ssh alias + ControlMaster config, and
-`~/.almanac/config.yaml` + `~/.pgpass` (currently on asaydjari, not sdssv —
-decide which account hosts the service, step 7).
+the DB is reached through localhost:63333, forwarded by the
+`mwm-tunnel.service` systemd user unit (step 4), which owns the `mwm` ssh
+ControlMaster in the foreground and establishes the forward itself. The
+`tunnel_check` task checks the master (`ssh -O check mwm`) and runs a real
+`select 1` through the forward; when either fails, it names the unit to
+check (`systemctl --user status mwm-tunnel.service`, `journalctl --user -u
+mwm-tunnel.service`). The account running Airflow therefore needs the `mwm`
+ssh alias (with a `ControlPath`), `~/.almanac/config.yaml` + `~/.pgpass`,
+and `psql` on the PATH of airflow_env.sh (currently on asaydjari, not sdssv —
+step 7). `tunnel_check`'s DB user/name default to `sdss`/`sdss5db` (the
+current `~/.almanac/config.yaml`); override with `AR_DB_USER`/`AR_DB_NAME`
+if that file changes.
 
-## 4. systemd user service (**AKS**; replaces `startAirflow()`/tmux)
+## 4. systemd user units (**AKS**; replaces `startAirflow()`/tmux)
 
-On ccalin051, as the account chosen in step 7:
+Three user units, kept in the repo as templates (`airflow/systemd/*.service.in`)
+whose paths are parameters, not `%h` (the account running the units is not
+the one whose home holds AIRFLOW_HOME — `%h` made the unit loop 7,760 times
+on a missing EnvironmentFile on 2026-11-17):
+
+| unit | role |
+|---|---|
+| `mwm-tunnel.service` | the `mwm` ssh ControlMaster **and** the DB forward `localhost:63333 → operations.sdss.org:5432`, one foreground ssh (`ControlMaster=yes`, `ControlPersist=no`, keep-alives 30 s × 3, `ExitOnForwardFailure=yes`). Pre-start asks any existing master to exit and removes a stale socket. Restart cap 3 starts/h, so a changed password cannot lock the Utah account; after that it stays failed until reset by hand |
+| `airflow-standalone.service` | `airflow standalone`; ordered `After=`/`Wants=` the tunnel; restart cap 5 starts/30 min, then `OnFailure=` → Slack |
+| `airflow-failure-notify.service` | the Slack outage alert |
+
+On ccalin051, as the account chosen in step 7 (today: asaydjari). Render
+into a scratch directory, compare with what is installed, then copy:
 
 ```bash
 loginctl enable-linger $USER        # keeps user services alive w/o login
+REPO=/mnt/home/sdssv/gitcode/ApogeeReduction.jl
+OUT=$(mktemp -d)
+$REPO/airflow/scripts/render_systemd_units.sh \
+    --sshpass /mnt/home/asaydjari/local/bin/sshpass \
+    --pass-file /mnt/home/asaydjari/pass_file \
+    "$OUT"
+# defaults: --airflow-home /mnt/home/sdssv/airflow,
+#   --env-file <airflow-home>/airflow_env.sh,
+#   --airflow-bin /mnt/home/sdssv/uv_env/airflow_env/bin/airflow,
+#   --tunnel-host mwm, --db-forward 63333:operations.sdss.org:5432
+for u in mwm-tunnel airflow-standalone airflow-failure-notify; do
+  diff -u ~/.config/systemd/user/$u.service "$OUT/$u.service"
+done
+systemd-analyze --user verify "$OUT"/*.service
 mkdir -p ~/.config/systemd/user
-cp $REPO/airflow/systemd/airflow-standalone.service \
-   $REPO/airflow/systemd/airflow-failure-notify.service \
-   ~/.config/systemd/user/
+for u in mwm-tunnel airflow-standalone airflow-failure-notify; do
+  cp ~/.config/systemd/user/$u.service ~/.config/systemd/user/$u.service.bak-$(date +%Y%m%d) 2>/dev/null
+  cp "$OUT/$u.service" ~/.config/systemd/user/
+done
 systemctl --user daemon-reload
-systemctl --user enable --now airflow-standalone.service
-systemctl --user status airflow-standalone.service
+systemctl --user enable mwm-tunnel.service airflow-standalone.service
 ```
 
-`Restart=on-failure` (60 s backoff, 5 tries/30 min) restarts crashes; when
-the restart budget is exhausted the `OnFailure=` unit curls a Slack alert.
-The interim `startAirflow()` tmux helper keeps working for manual runs — do
-not run both at once (sqlite + two schedulers).
+Against the units installed on 2026-11-17 the rendered `airflow-*` units
+differ only in comments; `mwm-tunnel.service` gains the DB forward
+(`-L 63333:operations.sdss.org:5432`, `ExitOnForwardFailure=yes`), keep-alive
+30 s instead of 60 s, and an explicit password-file path. **The new tunnel
+unit takes effect only when it restarts** — pick a moment when no daily is
+in the almanac/tunnel stage:
+
+```bash
+systemctl --user restart mwm-tunnel.service   # drops + rebuilds the master
+systemctl --user status mwm-tunnel.service
+ssh -O check mwm
+PGCONNECT_TIMEOUT=10 psql -X -w -h localhost -p 63333 -U sdss -d sdss5db -Atc 'select 1'
+```
+
+Restarting `airflow-standalone.service` is not needed for these changes
+(its unit file changes are comments only; DAG changes are picked up by the
+DAG processor after promotion).
+
+If the tunnel unit hit its start limit (journal shows "Start request
+repeated too quickly"), fix the cause (e.g. the password file after a
+password change), then
+`systemctl --user reset-failed mwm-tunnel.service && systemctl --user start mwm-tunnel.service`.
 
 If `loginctl enable-linger` is refused on the node, ask SCC to enable
 lingering for the service account (this is the one hard admin dependency).
+Do not run the interim `startAirflow()` tmux helper alongside the unit
+(sqlite + two schedulers).
 
 ## 5. Unpause + first supervised run
 
@@ -226,3 +276,48 @@ see airflow_env.sh, so no channel needs to be passed here.
    `AR_SLACK_ALERT_CHANNEL` explicitly only to test the alerting path.
 4. **sqlite + LocalExecutor**: fine at this scale (2 DAG runs/day + a
    heartbeat); if concurrency is ever raised, move to postgres.
+
+## 8. Re-running a failed night
+
+Use a **fresh trigger** of the night with `almanac_clobber`:
+
+```bash
+airflow dags list-runs apogee_daily --state failed     # find the night
+airflow dags trigger apogee_daily \
+    --conf '{"mjd": 61360, "almanac_clobber": true}'
+# optional: name it, e.g. -r manual__rerun_61360_20261118
+```
+
+(Checked against `--help` of the deployed Airflow 3.3.1: `dags trigger`
+takes `-c/--conf`, `-r/--run-id`, `-l/--logical-date`; `dags list-runs`
+takes `--state`.) Notes:
+
+- A manual run is never "stale"; it waits while another run is active
+  (`max_active_runs=1`), and stays queued while the DAG is paused.
+- It repeats the cheap update/setup/resolve/wait/tunnel tasks and runs
+  both observatories; for the one that already succeeded, almanac is
+  rebuilt (clobber) and run_all.sh's `checkpoint_mode=commit_exists` skips
+  existing products.
+- `almanac_clobber` is no longer needed to get past a stub left by a killed
+  run (an existing file is reused only if it holds the night), but it
+  forces a fresh almanac, which is what a re-run after a DB/tunnel problem
+  should have.
+
+**Why not clear the failed run's tasks.** On 2026-11-17 clearing tasks of a
+failed run did not restart it (the exact cause could not be established
+afterwards), and even when clearing does re-queue a run it is the wrong
+tool here:
+
+- A cleared run keeps its **original conf**: you cannot add
+  `almanac_clobber` (or change `mjd`, `mode`, ...) to it. Before this
+  change that meant almanac skipped on the 96-byte stub and runlist read an
+  empty file.
+- `airflow tasks clear` selects by **DAG, task regex and date window, not
+  by run**: without `-s/-e` it clears the matching tasks in *every* run of
+  the DAG, including old failed ones (which would then be failed by
+  `stale_run_guard` at best).
+- Clearing only the failed task (`-f`, or the UI default) without
+  downstream (`-d`) leaves the rest of the chain `upstream_failed`; and the
+  `all_done` tail tasks (metrics, summary) that already ran are not redone,
+  so the metrics/Slack record of the night is incomplete.
+- A cleared run competes for the single active-run slot like any other.

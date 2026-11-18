@@ -1,0 +1,42 @@
+# systemd USER unit for the ApogeeReduction Airflow instance (card O3).
+#
+# TEMPLATE: the @-delimited placeholders are filled in by
+# airflow/scripts/render_systemd_units.sh. Paths are parameters, not %h: the
+# unit runs under the account that owns the mwm ControlMaster and the DB
+# identity, while AIRFLOW_HOME and its env file live under the sdssv service
+# account. (%h pointed at the wrong home on 2026-11-17 and the unit looped
+# 7,760 times on a missing EnvironmentFile.) Install: airflow/INSTALL.md
+# step 4.
+
+[Unit]
+Description=Airflow standalone (APOGEE daily reduction orchestrator)
+# Fires the Slack alert unit if this service enters a failed state
+# (i.e. Restart= gave up or the service failed permanently).
+OnFailure=airflow-failure-notify.service
+# The DB tunnel first: almanac reaches the database through the forward that
+# mwm-tunnel.service owns. Wants=, not Requires=: a tunnel restart must not
+# restart Airflow (tunnel_check reports a dead tunnel per run instead).
+After=network-online.target mwm-tunnel.service
+Wants=mwm-tunnel.service
+# Start-rate limits belong in [Unit] (systemd ignores them in [Service]):
+# 5 tries per 30 min, then fail, which triggers OnFailure= -> Slack.
+StartLimitIntervalSec=1800
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# All environment (AIRFLOW_HOME, PATH incl. juliaup+uv, SLACK_TOKEN,
+# PUBLIC_URL_SLUG, AR_* overrides) comes from this file — create it from
+# airflow/scripts/airflow_env.sh.example; it holds secrets, chmod 600,
+# NEVER commit it.
+EnvironmentFile=@AIRFLOW_ENV_FILE@
+WorkingDirectory=@AIRFLOW_HOME@
+ExecStart=@AIRFLOW_BIN@ standalone
+Restart=on-failure
+RestartSec=60
+# airflow standalone spawns scheduler+api-server+triggerer; kill the tree
+KillMode=mixed
+TimeoutStopSec=120
+
+[Install]
+WantedBy=default.target
