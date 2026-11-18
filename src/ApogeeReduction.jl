@@ -29,6 +29,8 @@ include("fpi_gate.jl")
 # (uses get_fps_plate_divide from fileNameHandling.jl and
 #  read_almanac_exp_df from utils.jl, included above)
 include("fpi_homogeneity.jl")
+# comb-measured inter-chip transform calibration (read by the sky wavelength fit)
+include("chip_transform.jl")
 include("wavecal.jl")
 include("skyline_peaks.jl")
 include("arclamp_peaks.jl")

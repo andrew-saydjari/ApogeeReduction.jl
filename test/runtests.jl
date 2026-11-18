@@ -6,7 +6,10 @@ using FITSIO: FITS
     include("ar3D.jl")
     include("exposureClassifier.jl")
     include("ar1D.jl")
+    include("fiber_types.jl")
     include("wavecal.jl")
+    include("chip_transform.jl")
+    include("chip_transform_bootstrap.jl")
     include("fpi_gate.jl")
     include("fpi_homogeneity.jl")
     include("safe_jldsave.jl")
@@ -14,4 +17,5 @@ using FITSIO: FITS
     include("readonly_opens.jl")
     include("arclamp_wavecal.jl")
     include("arclamp_refit.jl")
+    include("scripts_parse.jl")
 end
