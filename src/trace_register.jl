@@ -19,6 +19,9 @@
 # back to the night trace and sets TRACE_EXPOSURE_REG_FAILED; an applied one sets
 # TRACE_EXPOSURE_REGISTERED. Both are exposure-level bits replicated into every fiber of
 # `bitmsk_trace`, and the parameters are written into the 1D metadata (`trace_expreg_*`).
+# Gate (`fit_exposure_registration`): enough fiber-bands and fibers; |shift| <= 0.5 px;
+# |rotation| and |scale| <= 0.3 px; the robust rms about the rigid model <= 0.08 px (the light moves
+# as one slit); even/odd-fiber halves agree to 0.02 px.
 # ---------------------------------------------------------------------------------------------
 using LinearAlgebra: det, inv, diag
 
@@ -40,6 +43,15 @@ const TRACE_EXPREG_BMAX = 0.3
 "Largest accepted half-split disagreement |a_even - a_odd| / 2 (px): an empirical noise check.
 Same study: median 0.0006-0.0026 px, p99 0.010 px; 9 of 4,496 chip-frames above 0.02 px."
 const TRACE_EXPREG_HALF_MAX = 0.02
+"""
+Largest accepted robust rms (px) of the fiber-band offsets about the rigid model. Above it the
+light does not move as one slit, and moving the trace rigidly can make the extraction worse.
+In the end-to-end test (8 nights, 677 accepted chip-frames), 25 frames had a fiber-core chi2 more
+than 15 % worse with the registration. 21 of them had rms > 0.08 px; at that cut 14 of the 374
+frames that the registration improved by more than 5 % were also refused. In the 52-night
+sample, 10 % of science chip-frames had rms > 0.08 px.
+"""
+const TRACE_EXPREG_RMS_MAX = 0.08
 "Weight floor (px) for a fiber-band: fibers do not move together at the 0.01 px level, so no single bright fiber dominates."
 const TRACE_EXPREG_SIG_FLOOR = 0.01
 
@@ -112,14 +124,15 @@ end
         nmin, nfib_min, amax, bmax, half_max) -> NamedTuple
 
 Fit the rigid model to the offsets `m` of `exposure_trace_offsets`. Returns `outcome` ("ok" or
-the refusal: "too_few", "too_large", "inconsistent_halves", "nonfinite"), `a`, `b`, `c` (absent
+the refusal: "too_few", "nonfinite", "too_large", "not_rigid" (rms > `rms_max`),
+"inconsistent_halves"), `a`, `b`, `c` (absent
 terms are 0), their formal errors, `n` fiber-bands and `nfib` fibers used, `rms` (robust rms of
 the residuals, px), `half_a` (|a_even - a_odd| / 2 over even/odd fibers) and `model`.
 """
 function fit_exposure_registration(m; model::Symbol = :shift_rot, snr_min = TRACE_EXPREG_SNR_MIN,
         sig_floor = TRACE_EXPREG_SIG_FLOOR, maxabs = 0.6, nmin = TRACE_EXPREG_NMIN,
         nfib_min = TRACE_EXPREG_NFIB_MIN, amax = TRACE_EXPREG_AMAX, bmax = TRACE_EXPREG_BMAX,
-        half_max = TRACE_EXPREG_HALF_MAX)
+        half_max = TRACE_EXPREG_HALF_MAX, rms_max = TRACE_EXPREG_RMS_MAX)
     sel = findall((m.snr .>= snr_min) .& (abs.(m.r) .< maxabs))
     nfib = length(unique(m.f[sel]))
     res(outcome; a = 0.0, b = 0.0, c = 0.0, ea = NaN, eb = NaN, ec = NaN, rms = NaN, half_a = NaN) =
@@ -145,6 +158,7 @@ function fit_exposure_registration(m; model::Symbol = :shift_rot, snr_min = TRAC
     kw = (a = a, b = b, c = c, ea = ea, eb = eb, ec = ec, rms = rms, half_a = half_a)
     all(isfinite, (a, b, c)) || return res("nonfinite"; kw...)
     (abs(a) <= amax && abs(b) <= bmax && abs(c) <= bmax) || return res("too_large"; kw...)
+    rms <= rms_max || return res("not_rigid"; kw...)
     (isfinite(half_a) && half_a <= half_max) || return res("inconsistent_halves"; kw...)
     return res("ok"; kw...)
 end

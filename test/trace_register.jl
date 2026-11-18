@@ -83,6 +83,13 @@ using ApogeeReduction: TemplateRegistration, slit_profile, trace_reference_posit
         reg = fit_exposure_registration(mfake)
         @test reg.outcome == "inconsistent_halves" && reg.half_a > 0.04
         @test_throws ErrorException fit_exposure_registration(mfake; model = :bow)
+        # fibers that do not move together (per-fiber scatter 0.15 px): not a rigid motion, refused
+        off = 0.15 .* randn(MersenneTwister(8), 300)
+        mscat = (b = mfake.b, f = f, u = mfake.u, v = mfake.v, r = 0.05 .+ off[f] .+ 0.002 .* randn(rng2, n),
+            sig = fill(0.003, n), snr = fill(100.0, n))
+        reg = fit_exposure_registration(mscat)
+        @test reg.outcome == "not_rigid" && reg.rms > 0.08
+        @test fit_exposure_registration(mscat; rms_max = 1.0, half_max = 1.0).outcome == "ok"
     end
 
     @testset "trace bits" begin
