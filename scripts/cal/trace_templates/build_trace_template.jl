@@ -73,6 +73,10 @@ function parse_commandline()
         help = "pattern drift (px rms, last third - first third of the epoch) above which the unit is flagged (my choice from the design's ~0.01 px; needs AKS)"
         arg_type = Float64
         default = 0.01
+        "--fit_rms_max"
+        help = "after the first build, input flats whose template fit has fit_rms above this (px) are dropped and the template is rebuilt without them (in-focus flats only). Default = the trace gate's TRACE_GATE_FIT_RMS_MAX (src/trace_qa.jl). Inf = keep all (the first packed calibration was built that way). (my choice; needs AKS)"
+        arg_type = Float64
+        default = 0.02
         "--validate"
         help = "run the leave-nights-out and no-template validation"
         arg_type = Bool
@@ -217,6 +221,7 @@ T, _ = smooth_rows(T0, A[b0].xc); W, _ = smooth_rows(W0, A[b0].xc; deg = 2)
 Href = vec(median(H0, dims = 1)); Href ./= median(Href[Href .> 0])
 lit_epoch = trues(300); lit_epoch[collect(modal)] .= false
 println("bootstrap from mjd $(A[b0].mjd) exp $(A[b0].exp)"); flush(stdout)
+b0flat = "$(A[b0].mjd)_$(A[b0].exp)"; xc0 = A[b0].xc
 
 u = (A[1].xc .- 1024) ./ 1024
 function stack_fit(Fl, T, W, Href)
@@ -269,6 +274,20 @@ function build(Fl, T, W, Href; maxit = 4, tag = "")
     T, W, Href, hist
 end
 T, W, Href, hist = build(A, T, W, Href; maxit = parg["maxit"], tag = "all")
+# in-focus flats only: drop inputs whose fit to the template is poor, rebuild without them
+_, _, _, st0 = stack_fit(A, T, W, Href)
+gated = [s[1] > parg["fit_rms_max"] for s in st0]
+if any(gated)
+    for (f, s) in zip(A[gated], st0[gated])
+        push!(logrows, (stage = "gated_out", mjd = f.mjd, exp = f.exp, nslots = 300, nmissing = length(modal), alllit = true,
+            fit_rms = s[1], d_center = s[2], s_center = s[3], k = s[4], resid_rms = NaN, note = "fit_rms > $(parg["fit_rms_max"])"))
+    end
+    println("dropping $(count(gated)) flat(s) with fit_rms > $(parg["fit_rms_max"]) px: ", join(["$(f.mjd)" for f in A[gated]], ", "))
+    A = A[.!gated]
+    length(A) >= 3 || error("fewer than 3 in-focus all-lit flats; cannot build template")
+    T, W, Href, hist2 = build(A, T, W, Href; maxit = parg["maxit"], tag = "all(gated)")
+    append!(hist, hist2)
+end
 
 # ------------------------------------------------------------------ drift and final residuals
 Ts, Ws, Hs, st = stack_fit(A, T, W, Href)
@@ -289,7 +308,7 @@ loo = DataFrame(); nt = DataFrame()
 if parg["validate"]
     ev = A[1:2:end]; od = A[2:2:end]
     for (trn, tst, nm_) in ((ev, od, "even->odd"), (od, ev, "odd->even"))
-        Tt, Wt, Ht, _ = build(trn, smooth_rows(T0, A[b0].xc)[1], smooth_rows(W0, A[b0].xc; deg = 2)[1],
+        Tt, Wt, Ht, _ = build(trn, smooth_rows(T0, xc0)[1], smooth_rows(W0, xc0; deg = 2)[1],
             (h = vec(median(H0, dims = 1)); h ./ median(h[h .> 0])); maxit = min(3, parg["maxit"]), tag = nm_)
         for f in tst
             res_h = fit_night(P, f.xc, f.prof, f.perr, Tt, Wt; Href = Ht)
@@ -332,7 +351,8 @@ h5open(tmp, "w") do f
     a = HDF5.attributes(f)
     a["tele"] = tele; a["chip"] = chip; a["epoch"] = ename; a["mjd_start"] = m0; a["mjd_end"] = m1
     a["n_candidates"] = length(flats); a["n_alllit"] = length(A); a["modal_missing_slots"] = join(modal, ";")
-    a["bootstrap_flat"] = "$(A[b0].mjd)_$(A[b0].exp)"; a["iterations"] = length(hist); a["last_change_px"] = hist[end]
+    a["bootstrap_flat"] = b0flat; a["iterations"] = length(hist); a["last_change_px"] = hist[end]
+    a["fit_rms_max"] = parg["fit_rms_max"]; a["n_gated_out"] = count(gated)
     a["drift_pattern_rms_px"] = drift_rms; a["drift_flag"] = Int(drift_flag); a["drift_warn_px"] = parg["drift_warn"]
     a["code_sha256"] = codesha; a["candidate_source"] = cand_source; a["nmax"] = NMAX
     a["created"] = string(now()); a["u_definition"] = "u = (x - 1024)/1024; poly coeffs low->high"

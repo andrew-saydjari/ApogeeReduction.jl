@@ -11,6 +11,7 @@ using FITSIO: FITS
     include("chip_transform.jl")
     include("chip_transform_bootstrap.jl")
     include("trace_template_cal.jl")
+    include("trace_templates_bootstrap.jl")
     include("fpi_gate.jl")
     include("fpi_homogeneity.jl")
     include("trace_qa.jl")
