@@ -95,6 +95,19 @@ trace_identify_opt=(); trace_main_opt=()
 if [ -n "${AR_TRACE_IDENTIFY:-}" ]; then trace_identify_opt=(--trace_identify "$AR_TRACE_IDENTIFY"); fi
 if [ -n "${AR_TRACE_SELECT:-}" ]; then trace_main_opt+=(--trace_select "$AR_TRACE_SELECT"); fi
 if [ -n "${AR_TRACE_FALLBACK:-}" ]; then trace_main_opt+=(--trace_fallback "$AR_TRACE_FALLBACK"); fi
+# Comb-measured chip-transform calibration (scripts/cal/chip_transform): ON BY DEFAULT,
+# same mechanism as AR_EXP_CLASS_MODEL above:
+#   unset         -> no flag: pipeline_2d_1d.jl uses its pinned cal_ref file
+#   set to none   -> OFF, deliberately (sky fit keeps chip scale 1; also the bootstrap mode
+#                    for rebuilding the file from scratch, see scripts/cal/chip_transform/README.md)
+#   set to ""     -> OFF as well
+#   set to a path -> that file
+# A missing or unreadable file is a hard error in pipeline_2d_1d.jl.
+if [ "${AR_CHIP_TRANSFORM_CAL+set}" = "set" ]; then
+    chip_cal_opt=(--chip_transform_cal "$AR_CHIP_TRANSFORM_CAL")
+else
+    chip_cal_opt=()
+fi
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -206,7 +219,7 @@ if [ "$run_2d_only" != "true" ]; then
     do
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
         mkdir -p ${outdir}/wavecal
-        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode "${trace_main_opt[@]}"
+        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode "${trace_main_opt[@]}" "${chip_cal_opt[@]}"
     done
     # ## Plots
     #     print_elapsed_time "Making Plots"
