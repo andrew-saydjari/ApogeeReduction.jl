@@ -449,8 +449,13 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     # wavecal class per line (aligned with the sky_line_mat rows), recorded in the
     # product so wavelength-solution ingest can mask class-A guards (code 1)
     # without re-reading the line list
+    # n.b. the line indices come back from the Float64 sky_line_mat (last row),
+    # so they are Float64 and must be converted before indexing; they are
+    # `linindx` values (equal to the row number in the pipeline's list)
+    line_row = isempty(unique_skyline_inds) ? Dict{Int, Int}() :
+               Dict(Int(l) => r for (r, l) in enumerate(df_sky_lines.linindx))
     line_class = Int[get(WAVECAL_CLASS_CODES,
-                         String(coalesce(df_sky_lines.wavecal_class[i], "")), 0)
+                         String(coalesce(df_sky_lines.wavecal_class[line_row[Int(i)]], "")), 0)
                      for i in unique_skyline_inds]
     # println("$(tele) $(chip): $(length(unique_skyline_inds)) unique sky lines")
     # println(unique_skyline_inds)

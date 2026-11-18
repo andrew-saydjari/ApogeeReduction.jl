@@ -1,4 +1,4 @@
-using CSV, DataFrames, JLD2
+using CSV, DataFrames, JLD2, HDF5
 
 @testset "skyline_peaks / sky line list" begin
     AR = ApogeeReduction
@@ -285,6 +285,35 @@ using CSV, DataFrames, JLD2
         pmat, _, _, _ = AR.get_sky_peaks(flux, "apo", "R", rwd_q, sc_df)
         @test size(amat, 1) == 3 && cnt == size(pmat, 2)
         @test sort(Int.(amat[3, :])) == sort(Int.(pmat[end, :]))
+    end
+
+    # synthetic ar1Dcal product, one flux vector per fiber
+    function write_sky_ar1d(path, fluxes)
+        AR.safe_jldsave(path;
+            flux_1d = hcat(fluxes...),
+            extract_trace_centers = repeat(collect(1.0:AR.N_FIBERS)', AR.N_XPIX),
+            no_metadata = true)
+        return path
+    end
+
+    @testset "get_and_save_sky_peaks on a full exposure (Float64 line index)" begin
+        # sky_line_mat is a Float64 matrix, so the line index read back from its
+        # last row is a Float64; indexing the line list's wavecal_class column
+        # with it threw `ArgumentError: invalid index: 1.0 of type Float64` on
+        # every real call (found on pass-1 data, 2026-11-17)
+        mktempdir() do dir
+            flux = synth_flux(all_comps(sc_df))
+            fn = write_sky_ar1d(joinpath(dir, "ar1Dcal_apo_60000_0001_R_object.h5"),
+                fill(flux, AR.N_FIBERS))
+            @test isnothing(AR.get_and_save_sky_peaks(fn, rwd_q, sc_df;
+                checkpoint_mode = "clobber"))
+            out = joinpath(dir, "skyLinePeaks_apo_60000_0001_R_object.h5")
+            @test isfile(out)
+            cls, mat = h5open(f -> (read(f["line_class"]), read(f["sky_line_mat"])), out, "r")
+            @test cls == fill(2, length(sc_waves))         # all class B
+            @test size(mat) == (length(sc_waves), 9, AR.N_FIBERS)
+            @test Int.(mat[:, 9, 1]) == collect(1:length(sc_waves))
+        end
     end
 
     @testset "ingest_skyLines_file masks non-class-B lines" begin
