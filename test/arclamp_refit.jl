@@ -301,3 +301,7 @@ using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
         pos_match_px = 0.1)
     @test P.ok && P.j_seq == 2 && (P.bits & WAVE_ANCHOR_NOT_PREFERRED) != 0
 end
+
+@testset "arclamp_refit anchor samepos switch" begin
+    @test refit_check_config(RefitConfig(anchor_samepos = "none")) && RefitConfig().anchor_samepos == "pass1"
+end

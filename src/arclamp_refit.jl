@@ -150,6 +150,11 @@ Switches of the refit (defaults = the design's recommendation where it has one):
   * `anchor_prefer` ("strict"): "strict" = preferred kinds (same measured position, or closing an
     object sequence) rank before all others of the same quality; "none" = time to the nearest
     science exposure only (quality tiers kept).
+  * `anchor_samepos` ("pass1"): source of the "same measured position as the science" input:
+    "pass1" = the science exposures' pass-1 per-exposure solutions (`refit_anchor_samepos`; a
+    later-stage product, fine for a refit of an existing run, NOT available in an in-order
+    pipeline); "none" = not used. The quality tiers (`refit_anchor_quality`) read the stage-1
+    gate flags; both are the single swap points if gate B is replaced.
   * `anchor_pairing` ("block"): how the anchoring arc sequence is paired with a comb exposure:
     "block" = the time-adjacent comb exposure of the same calibration block (|dt| <
     `anchor_block_h`) whose MEASURED position matches the arc sequence's cluster, the arc
@@ -211,6 +216,7 @@ Base.@kwdef struct RefitConfig
     fps_shape_lco::String = "template"
     anchor_block::String = "nearest_science"
     anchor_prefer::String = "strict"
+    anchor_samepos::String = "pass1"
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 15
@@ -227,6 +233,7 @@ const REFIT_SWITCH_VALUES = Dict(
     :plate_shape => ("arc", "template"),
     :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
     :anchor_block => ("nearest_science", "morning", "any"), :anchor_prefer => ("strict", "none"),
+    :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
     :sky_fiber_term => ("none", "pooled", "static", "full"),
@@ -252,7 +259,7 @@ const REFIT_SWITCH_STAGES = Dict(
     "neon" => "arc,comb,fpifib,assemble", "neon_offset_file" => "arc,comb,fpifib,assemble",
     "neon_offset_set" => "arc,comb,fpifib,assemble", "chip_transform_file" => "arc,comb,fpifib,assemble",
     "neon_line_offset_file" => "arc,comb,fpifib,assemble", "anchor_block" => "comb,fpifib,assemble",
-    "anchor_prefer" => "comb,fpifib,assemble",
+    "anchor_prefer" => "comb,fpifib,assemble", "anchor_samepos" => "comb,fpifib,assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
@@ -270,21 +277,13 @@ refit_fingerprint(path::AbstractString) =
 # ------------------------------------------------------------------------------------------
 # calibration inputs (all optional; the code runs without them and records/flags that)
 # ------------------------------------------------------------------------------------------
-"""Comb chip scales (N_FIBERS x 2: b_R, b_B) for (tele, mjd) from a PR #415 chip-transform file,
-or `nothing` (no file / no block). Minimal reader of the #415 format (`/<tele>/mjd_start`,
-`mjd_end`, `scale`); to be replaced by #415's `chip_scales` once it is merged."""
-function refit_chip_scales(path::AbstractString, tele::AbstractString, mjd::Integer)
-    (isempty(path) || !isfile(path)) && return nothing
-    h5open(path, "r") do f
-        haskey(f, tele) || return nothing
-        ms = read(f["$(tele)/mjd_start"])
-        me = read(f["$(tele)/mjd_end"])
-        S = read(f["$(tele)/scale"])
-        k = findfirst(i -> ms[i] <= mjd <= me[i], eachindex(ms))
-        k === nothing && return nothing
-        return Matrix{Float64}(S[:, :, k])
-    end
-end
+"""Comb chip scales (N_FIBERS x 2: b_R, b_B) for (tele, mjd) from the PR #415 chip-transform
+calibration (`load_chip_transform_cal` + `chip_scales`), used in BOTH eras (PI 2026-11-18: the plate
+era keeps the comb chip scale; only the higher-order shape template is not used there). `""` =
+free chip scale (`nothing`, flagged downstream); a configured file that is missing or unreadable is
+an error (as in #415), and an MJD without a block gives `nothing`."""
+refit_chip_scales(path::AbstractString, tele::AbstractString, mjd::Integer) =
+    isempty(path) ? nothing : chip_scales(load_chip_transform_cal(path), String(tele), Int(mjd))
 
 """Per-lamp neon offsets (Dict "ThAr"/"UNe" => Å) for a telescope from the neon calibration file
 (`learned/<tele>/<set>/lamp_offset_A`, ARCFPI_VALIDATION build_neon_offsets.jl format), or `nothing`."""
@@ -661,6 +660,34 @@ function refit_anchor_select(anchor_block::AbstractString, tseq::AbstractVector{
 end
 
 """
+    refit_anchor_samepos(A, scis, pos_match_px) -> Vector{Bool}
+
+"Same dither as the science" input of the nearest_science rule, isolated here so it can be swapped:
+per used arc sequence, whether its own measured state matches the MEASURED position of the
+nearest-in-time science exposure (`scis[i].ref`, a slice of that exposure's pass-1 per-exposure
+solution) within `pos_match_px`. This reads a LATER-stage product (per-exposure sky/FPI solutions),
+available to a refit of an existing run but not to an in-order pipeline (arcs -> comb -> per
+exposure); `anchor_samepos = "none"` switches it off (then only "closes an object sequence"
+counts as preferred). An in-order replacement would measure positions from raw sky-line / FPI peak
+positions.
+"""
+function refit_anchor_samepos(A::RefitArc, scis, pos_match_px::Real)
+    nU = length(A.used)
+    samepos = falses(nU)
+    st_sci = Float64[s.t for s in scis]
+    any(isfinite, st_sci) || return samepos
+    for j in 1:nU
+        isfinite(A.tseq_u[j]) || continue
+        i = argmin([isfinite(t) ? abs(t - A.tseq_u[j]) : Inf for t in st_sci])
+        scis[i].ref === nothing && continue
+        d, t = arcfit_seq_state(A.g, A.lay, j)
+        o = arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], scis[i].ref)
+        samepos[j] = isfinite(o) && abs(o) < pos_match_px
+    end
+    return samepos
+end
+
+"""
     refit_choose_anchor(A, seq_flags, combs, tele; scis, anchor_block, anchor_prefer, anchor_pairing,
         anchor_block_h, pos_match_px)
 
@@ -687,7 +714,7 @@ exposure) pair (QA); `kind` names the anchor kind, `rank` the chosen sequence's 
 """
 function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, combs, tele;
         scis = NamedTuple[], anchor_block = "nearest_science", anchor_prefer = "strict",
-        anchor_pairing = "block", anchor_block_h = 1.5, pos_match_px = 0.25)
+        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, pos_match_px = 0.25)
     nU = length(A.used)
     nC = length(combs)
     offs = fill(NaN, nU, nC)
@@ -729,17 +756,7 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
     # science exposures: times and, for the nearest one, the measured arc - science offset
     st_sci = Float64[s.t for s in scis]
     dts = fill(Inf, nU)
-    samepos = falses(nU)
-    if any(isfinite, st_sci)
-        for j in 1:nU
-            isfinite(A.tseq_u[j]) || continue
-            i = argmin([isfinite(t) ? abs(t - A.tseq_u[j]) : Inf for t in st_sci])
-            scis[i].ref === nothing && continue
-            d, t = arcfit_seq_state(A.g, A.lay, j)
-            o = arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], scis[i].ref)
-            samepos[j] = isfinite(o) && abs(o) < pos_match_px
-        end
-    end
+    samepos = anchor_samepos == "pass1" ? refit_anchor_samepos(A, scis, pos_match_px) : falses(nU)
     S = refit_anchor_select(anchor_block, A.tseq_u, q, [x[1] for x in bc], [x[2] for x in bc], st_sci,
         Vector{Bool}(samepos), [(seq_flags[A.used[j]] & ARCSEQ_UNGATED) == 0 for j in 1:nU],
         [refit_is_morning(tele, t) for t in A.tseq_u]; prefer = anchor_prefer, anchor_block_h)
@@ -781,8 +798,8 @@ then the production comb loop (L, eps refit per night). Returns a NamedTuple (`o
 function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A::RefitArc,
         combs, tele; seq_flags, pass1_comb = nothing, pos_match_px = 0.25, comb_arc_qa_ms = 150.0,
         scis = NamedTuple[], anchor_block = "nearest_science", anchor_prefer = "strict",
-        anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2)
-    P = refit_choose_anchor(A, seq_flags, combs, tele; scis, anchor_block, anchor_prefer, anchor_pairing,
+        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2)
+    P = refit_choose_anchor(A, seq_flags, combs, tele; scis, anchor_block, anchor_prefer, anchor_samepos, anchor_pairing,
         anchor_block_h, pos_match_px)
     P.ok || return (; ok = false, reason = P.reason, cluster_offsets_px = vec(P.offsets))
     st = P.state

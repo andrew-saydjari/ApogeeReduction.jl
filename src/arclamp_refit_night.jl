@@ -190,7 +190,9 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
         (; ref, t)
     end
     # science exposures (object exposures with a pass-1 per-exposure solution = measured position)
-    scis = [(; ref = r, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
+    # science exposures: object-exposure times; their pass-1 per-exposure solutions (a later-stage
+    # product) only feed the optional same-position input (cfg.anchor_samepos)
+    scis = [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
     arcf = refit_path(outroot, "arc", tele, mjd)
     reason = ""
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
@@ -201,7 +203,7 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
         sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
         Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = p1,
             pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
-            anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer,
+            anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer, anchor_samepos = cfg.anchor_samepos,
             anchor_pairing = cfg.anchor_pairing,
             anchor_block_h = cfg.anchor_block_h)
         if Q.ok
