@@ -51,7 +51,7 @@ function parse_cli()
         "--sky_exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
         "--reg_weight_apo"; arg_type = Float64; default = 0.825
         "--reg_weight_lco"; arg_type = Float64; default = 0.65
-        "--shape_template_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/arcfpi_validation/tables/template_shape_v1.h5"
+        "--shape_template_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/template_shape_v1.h5"
         "--shape_template_block"; arg_type = String; default = "all"
         "--arcwin_nights"; arg_type = Int; default = 15
         "--nsig"; arg_type = Float64; default = 8.0
