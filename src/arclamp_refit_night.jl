@@ -180,13 +180,14 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     catch
         nothing
     end
-    e1 = parse(Int, split(basename(fnames[1]), "_")[4])
-    t1 = arclamp_mjd_mid(ar1dcal_name(mdir, tele, mjd, e1, "R", "arclamp"))
-    ref = nothing
-    rf = joinpath(mdir, "waveCalNightfpiDither_$(tele)_$(mjd)_$(_arc_expstr(e1))_arclamp.h5")
-    if isfile(rf)
-        W = h5open(f -> Float64.(f["chipWaveSoln"][880:1170, ARCGATE_FIBERS, 2]), rf, "r")
-        ref = ArcObjRef(e1, t1, "fpi", 880, ARCGATE_FIBERS, W)
+    # per comb exposure: a slice of its pass-1 per-exposure comb solution (measured position) and its time
+    combs = map(fnames) do fn
+        e = parse(Int, split(basename(fn), "_")[4])
+        t = arclamp_mjd_mid(ar1dcal_name(mdir, tele, mjd, e, "R", "arclamp"))
+        rf = joinpath(mdir, "waveCalNightfpiDither_$(tele)_$(mjd)_$(_arc_expstr(e))_arclamp.h5")
+        ref = isfile(rf) ? ArcObjRef(e, t, "fpi", 880, ARCGATE_FIBERS,
+            h5open(f -> Float64.(f["chipWaveSoln"][880:1170, ARCGATE_FIBERS, 2]), rf, "r")) : nothing
+        (; ref, t)
     end
     arcf = refit_path(outroot, "arc", tele, mjd)
     reason = ""
@@ -194,8 +195,11 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     A = isfile(arcf) ? load_refit_arc(arcf) : nothing
     (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
     if A !== nothing
-        Q = refit_arc_anchored_comb(fnames, A, ref, t1; pass1_comb = p1, pos_match_px = cfg.pos_match_px,
-            comb_arc_qa_ms = cfg.comb_arc_qa_ms)
+        sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
+        Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = p1,
+            pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms,
+            anchor_block = cfg.anchor_block, anchor_pairing = cfg.anchor_pairing,
+            anchor_block_h = cfg.anchor_block_h)
         if Q.ok
             write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = prov)
             return refit_write_status(outroot, "comb", tele, mjd, "ok_arc")
@@ -325,7 +329,10 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         (qp isa Integer && qp > 0) && (arcbits |= WAVE_ARC_QUARTZ_PATTERN)
     end
     fpi_gated_off = C === nothing && NA !== nothing && NA.nfpi > 0
-    Tp = (C === nothing && A !== nothing) ?
+    isplate = mjd < (tele == "apo" ? 59558 : 59809)
+    shape_choice = isplate ? (tele == "apo" ? cfg.plate_shape_apo : cfg.plate_shape_lco) :
+                   (tele == "apo" ? cfg.fps_shape_apo : cfg.fps_shape_lco)
+    Tp = (A !== nothing && shape_choice == "template") ?
          load_refit_template(cfg.shape_template_file, tele, cfg.shape_template_block) : nothing
     TP = Tp === nothing ? nothing : refit_fit_template(Tp, A, ll)
     (TP !== nothing && count(TP[2]) < 200) && (Tp = nothing; TP = nothing)
@@ -334,6 +341,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         C.anchor == COMB_ANCHOR_ARCWIN && (combbits |= WAVE_ABS_ARC_WINDOW)
         C.n_slip > 0 && (combbits |= WAVE_COMB_MODE_SLIP)
         C.inconsistent && (combbits |= WAVE_COMB_ARC_INCONSISTENT)
+        combbits |= C.anchor_bits
         C.anchor == COMB_ANCHOR_ARC && (combbits |= arcbits)   # an arcwin comb carries no arc flags
     end
     # reference position cluster of the arcs (most used sequences; ties -> the reference sequence's)
@@ -441,7 +449,8 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
             Tp === nothing && (bits[k] |= WAVE_SHAPE_ARC)
             route[k] = :arc
             absname[k] = "arc"
-            relname[k] = (usesky && cfg.prefps_time == "sky") ? "skypool" : "arctime"
+            # relative name says which shape: arc shape ("arc...") or the comb template ("comb...")
+            relname[k] = (Tp === nothing ? "arc" : "comb") * ((usesky && cfg.prefps_time == "sky") ? "skypool" : "time")
             bits[k] |= arcbits | WAVE_REL_ARC_TIME
             (C !== nothing || (FP !== nothing && kind == "object")) && (bits[k] |= WAVE_FPIFIB_UNAVAILABLE)
         end
@@ -582,6 +591,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         "arc_product" => isfile(arcf) ? arcf : "", "comb_product" => isfile(combf) ? combf : "",
         "fpifib_product" => isfile(fpif) ? fpif : "", "comb_anchor" => C === nothing ? "none" : C.anchor,
         "template" => Tp === nothing ? "none" : "$(cfg.shape_template_file)#$(cfg.shape_template_block)",
+        "shape_choice" => shape_choice,
         "template_fingerprint" => Tp === nothing ? "none" : Tp.fingerprint,
         "linelist_fingerprint" => ll.fingerprint, "linelist_selection" => ll.selection,
         "chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),

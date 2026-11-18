@@ -44,6 +44,7 @@ function parse_cli()
         "--neon"; arg_type = String; default = "none"
         "--neon_offset_file"; arg_type = String; default = ""
         "--neon_offset_set"; arg_type = String; default = "all"
+        "--neon_line_offset_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/neon_line_offsets_v1.csv"
         "--chip_transform_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
         "--exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
         "--sky_fiber_term"; arg_type = String; default = "full"
@@ -53,6 +54,13 @@ function parse_cli()
         "--reg_weight_lco"; arg_type = Float64; default = 0.65
         "--shape_template_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/template_shape_v1.h5"
         "--shape_template_block"; arg_type = String; default = "all"
+        "--plate_shape_apo"; arg_type = String; default = "template"
+        "--plate_shape_lco"; arg_type = String; default = "arc"
+        "--fps_shape_apo"; arg_type = String; default = "template"
+        "--fps_shape_lco"; arg_type = String; default = "template"
+        "--anchor_block"; arg_type = String; default = "morning"
+        "--anchor_pairing"; arg_type = String; default = "block"
+        "--anchor_block_h"; arg_type = Float64; default = 1.5
         "--arcwin_nights"; arg_type = Int; default = 15
         "--nsig"; arg_type = Float64; default = 8.0
         "--sky_anchor_window_h"; arg_type = Float64; default = 1.5
@@ -71,7 +79,11 @@ const APRED = joinpath(PASS1, "apred")
 const WAVECAL = joinpath(PASS1, "wavecal")
 const ALMANAC = isempty(A_["almanac"]) ? joinpath(PASS1, "almanac", "allobs_57618_61230.h5") : A_["almanac"]
 const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset_file"],
-    neon_offset_set = A_["neon_offset_set"], chip_transform_file = A_["chip_transform_file"],
+    neon_offset_set = A_["neon_offset_set"], neon_line_offset_file = A_["neon_line_offset_file"],
+    plate_shape_apo = A_["plate_shape_apo"], plate_shape_lco = A_["plate_shape_lco"],
+    fps_shape_apo = A_["fps_shape_apo"], fps_shape_lco = A_["fps_shape_lco"],
+    anchor_block = A_["anchor_block"], anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
+    chip_transform_file = A_["chip_transform_file"],
     exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], prefps_time = A_["prefps_time"],
     sky_exp_terms = A_["sky_exp_terms"], reg_weight_apo = A_["reg_weight_apo"], reg_weight_lco = A_["reg_weight_lco"],
     shape_template_file = A_["shape_template_file"], shape_template_block = A_["shape_template_block"],
@@ -91,6 +103,7 @@ function config_lines()
     L = ["$(k)=$(d[k])" for k in sort(collect(keys(d)))]
     push!(L, "fingerprint_chip_transform_file=$(AR.refit_fingerprint(CFG.chip_transform_file))")
     push!(L, "fingerprint_neon_offset_file=$(AR.refit_fingerprint(CFG.neon_offset_file))")
+    push!(L, "fingerprint_neon_line_offset_file=$(AR.refit_fingerprint(CFG.neon_line_offset_file))")
     push!(L, "fingerprint_shape_template_file=$(AR.refit_fingerprint(CFG.shape_template_file))")
     ll = AR.load_arclamp_linelist()
     push!(L, "linelist_file=$(ll.path)")

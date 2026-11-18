@@ -197,3 +197,30 @@ end
         @test maximum(abs.(dfsr)) < 1e-9 && maximum(abs.(dv)) < 1e-6
     end
 end
+
+using ApogeeReduction: refit_is_morning, refit_order_change_lambda, WAVE_ANCHOR_EVENING, WAVE_ANCHOR_NOT_SAME_BLOCK
+@testset "arclamp_refit anchors" begin
+    @test refit_is_morning("apo", 60000.40) && !refit_is_morning("apo", 60000.08)
+    @test refit_is_morning("lco", 60000.30) && !refit_is_morning("lco", 60000.05)
+    lin = repeat([16200.0 1300.0 -40.0 3.0 -0.5], N_FIBERS)
+    nl = repeat([-1.07 1.0 1.0755 1.0], N_FIBERS)
+    L = 3.7363e7
+    oc = refit_order_change_lambda(lin, nl, lin, nl, L)
+    @test all(oc .== 0)
+    # shift the pass-1 solution by one FSR on fiber 9, chip R; plus a half-pixel dither everywhere
+    p1 = copy(lin)
+    nl2 = copy(nl); nl2[:, 1] .+= 0.5 / 2048; nl2[:, 3] .+= 0.5 / 2048
+    lam = refit_prod_wave(lin, nl, 9, 1, [1024.0])[1]
+    p1lin = copy(lin)
+    oc2 = refit_order_change_lambda(lin, nl, p1lin, nl2, L)
+    @test all(oc2 .== 0)                         # a dither step is not an order change
+    fsr = lam^2 / (2L)
+    p1lin[9, 1] -= fsr
+    oc3 = refit_order_change_lambda(lin, nl, p1lin, nl, L)
+    @test oc3[9, 1] == 1 && oc3[9, 2] == 1 && count(!=(0), oc3) == 3   # fiber 9 shifted on all chips
+    @test cfg_ok = refit_check_config(RefitConfig(neon = "lab_line_offset", plate_shape_lco = "template",
+        anchor_block = "any", anchor_pairing = "position"))
+    c = RefitConfig()
+    @test c.plate_shape_apo == "template" && c.plate_shape_lco == "arc" && c.anchor_block == "morning" &&
+          c.anchor_pairing == "block"
+end

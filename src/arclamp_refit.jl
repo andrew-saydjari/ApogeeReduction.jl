@@ -60,6 +60,8 @@ const WAVE_FPIFIB_ONE_FIBER = 1 << 22      # only one FPI fiber usable (no acros
 const WAVE_COMB_ARC_INCONSISTENT = 1 << 23 # |arc - comb| per chip above the QA limit (no slip)
 const WAVE_ARC_QUARTZ_PATTERN = 1 << 24    # an arc sequence right after a same-dither quartz flat (no
                                            # commanded move) failed the 0.02 px gate (Q7 pattern)
+const WAVE_ANCHOR_EVENING = 1 << 25        # comb anchored on an evening arc block (no gated morning block)
+const WAVE_ANCHOR_NOT_SAME_BLOCK = 1 << 26 # no comb exposure of the anchoring arc block at its measured position
 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
@@ -68,7 +70,7 @@ const WAVE_BIT_NAMES = [
     "WAVE_COMB_MODE_SLIP", "WAVE_LEVEL_INCONSISTENT", "WAVE_HIGHORDER_EVENT", "WAVE_CHIPSCALE_FREE",
     "WAVE_FPIFIB_ROTATION", "WAVE_PASS1_COPY", "WAVE_SHAPE_ARC", "WAVE_SKY_ANCHOR_NIGHT",
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
-    "WAVE_ARC_QUARTZ_PATTERN"]
+    "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_EVENING", "WAVE_ANCHOR_NOT_SAME_BLOCK"]
 
 "Night-level arc flags of the stage-1 product mapped onto the per-exposure bits 2^9-2^12, 2^16."
 function refit_arc_night_bits(night_flags::Integer, seq_flags::AbstractVector{<:Integer})
@@ -99,10 +101,26 @@ end
 
 Switches of the refit (defaults = the design's recommendation where it has one):
 
-  * `neon` ("none"): arc line list neon handling, design L4 (OPEN-UNDER-TEST). "none" = shape-clean
-    Th/U/Ar (`use_default`, the stage-1 default); "lab" = plus lab neon (`use_with_neon`);
-    "lab_offset" = lab neon plus a measured per-lamp offset from `neon_offset_file` (learned set
-    `neon_offset_set`); without the file "lab_offset" reduces to "lab" (recorded).
+  * `neon` ("none"): arc line list neon handling, design L4 (PI decision pending). "none" (N0) =
+    shape-clean Th/U/Ar (`use_default`, the stage-1 default); "lab" (N1) = plus lab neon
+    (`use_with_neon`); "lab_offset" (N3) = lab neon plus a measured per-lamp, per-telescope offset
+    from `neon_offset_file` (learned set `neon_offset_set`); "lab_line_offset" (N3L) = lab neon
+    plus a learned per-line, per-telescope offset from `neon_line_offset_file` (CSV: tele, set,
+    lamp, lab_wave_A, offset_A); a missing file reduces to "lab" (recorded).
+  * `plate_shape_apo` ("template"), `plate_shape_lco` ("arc"), `fps_shape_apo` ("template"),
+    `fps_shape_lco` ("template"): relative shape on nights without a comb, per telescope and era
+    (ARCFPI_VALIDATION Q6: the comb template helps APO plate, chip R held-out -23 m/s on all 12
+    cartridges, and LCO FPS, but does not transfer across the LCO plate->FPS hardware change:
+    LCO plate R +61 m/s, OH shape +171, G +17). "template" needs `shape_template_file`.
+  * `anchor_block` ("morning"): which arc block anchors the comb cavity (Q7): "morning" = the
+    latest gated arc block of the night when it has a gated sequence, else the earliest (flagged
+    WAVE_ANCHOR_EVENING); "any" = every block.
+  * `anchor_pairing` ("block"): how the anchoring arc sequence is paired with a comb exposure:
+    "block" = the time-adjacent comb exposure of the same calibration block (|dt| <
+    `anchor_block_h`) whose MEASURED position matches the arc sequence's cluster, the arc
+    sequence's own measured state seeding the comb; without one, the nearest-in-time matching comb
+    exposure (flagged WAVE_ANCHOR_NOT_SAME_BLOCK); "position" = the first comb exposure and the arc
+    time model of the cluster that matches it by measured position (the earlier behaviour).
   * `chip_transform_file`: comb chip-scale calibration (PR #415 format); "" = free chip scale (flagged).
   * `exp_terms` ("chipzp_stretch_tilt"): per-exposure position transform from the FPI fibers, design
     D2/D3 (OPEN-UNDER-TEST): "shift" (one pixel shift, all chips), "chipzp" (per-chip zero point),
@@ -143,6 +161,7 @@ Base.@kwdef struct RefitConfig
     neon::String = "none"
     neon_offset_file::String = ""
     neon_offset_set::String = "all"
+    neon_line_offset_file::String = ""
     chip_transform_file::String = ""
     exp_terms::String = "chipzp_stretch_tilt"
     sky_fiber_term::String = "full"
@@ -152,6 +171,13 @@ Base.@kwdef struct RefitConfig
     reg_weight_lco::Float64 = 0.65
     shape_template_file::String = ""
     shape_template_block::String = "all"
+    plate_shape_apo::String = "template"
+    plate_shape_lco::String = "arc"
+    fps_shape_apo::String = "template"
+    fps_shape_lco::String = "template"
+    anchor_block::String = "morning"
+    anchor_pairing::String = "block"
+    anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 15
     nsig::Float64 = 8.0
     sky_anchor_window_h::Float64 = 1.5
@@ -162,7 +188,10 @@ Base.@kwdef struct RefitConfig
 end
 
 const REFIT_SWITCH_VALUES = Dict(
-    :neon => ("none", "lab", "lab_offset"),
+    :neon => ("none", "lab", "lab_offset", "lab_line_offset"),
+    :plate_shape_apo => ("template", "arc"), :plate_shape_lco => ("template", "arc"),
+    :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
+    :anchor_block => ("morning", "any"), :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
     :sky_fiber_term => ("none", "pooled", "static", "full"),
     :prefps_time => ("regularised", "sky", "arc"),
@@ -186,6 +215,10 @@ refit_config_dict(cfg::RefitConfig) =
 const REFIT_SWITCH_STAGES = Dict(
     "neon" => "arc,comb,fpifib,assemble", "neon_offset_file" => "arc,comb,fpifib,assemble",
     "neon_offset_set" => "arc,comb,fpifib,assemble", "chip_transform_file" => "arc,comb,fpifib,assemble",
+    "neon_line_offset_file" => "arc,comb,fpifib,assemble", "anchor_block" => "comb,fpifib,assemble",
+    "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
+    "plate_shape_apo" => "assemble", "plate_shape_lco" => "assemble", "fps_shape_apo" => "assemble",
+    "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
     "pos_match_px" => "comb,fpifib,assemble", "comb_arc_qa_ms" => "comb,fpifib,assemble",
     "exp_terms" => "assemble", "sky_fiber_term" => "assemble", "prefps_time" => "assemble",
@@ -229,6 +262,16 @@ function refit_neon_offsets(path::AbstractString, tele::AbstractString, set::Abs
     end
 end
 
+"""Per-line neon offsets (Dict (lamp, lab_wave) => Å) for a telescope and learned set from the
+N3L table (`neon_line_offsets_v1.csv`), or `nothing`."""
+function refit_neon_line_offsets(path::AbstractString, tele::AbstractString, set::AbstractString)
+    (isempty(path) || !isfile(path)) && return nothing
+    T = CSV.read(path, DataFrame)
+    T = T[(T.tele .== tele) .& (T.set .== set) .& isfinite.(T.offset_A), :]
+    nrow(T) == 0 && return nothing
+    return Dict((String(r.lamp), Float64(r.lab_wave_A)) => Float64(r.offset_A) for r in eachrow(T))
+end
+
 "The arc line list for a configuration and telescope; returns (list, neon_mode_used)."
 function refit_linelist(cfg::RefitConfig, tele::AbstractString)
     cfg.neon == "none" && return load_arclamp_linelist(selection = "use_default"), "none"
@@ -237,7 +280,26 @@ function refit_linelist(cfg::RefitConfig, tele::AbstractString)
         off === nothing && return load_arclamp_linelist(selection = "use_with_neon"), "lab(no offset file)"
         return load_arclamp_linelist(selection = "use_with_neon", neon_offset_A = off), "lab_offset"
     end
-    return load_arclamp_linelist(selection = "use_with_neon"), "lab"
+    ll = load_arclamp_linelist(selection = "use_with_neon")
+    if cfg.neon == "lab_line_offset"
+        off = refit_neon_line_offsets(cfg.neon_line_offset_file, tele, cfg.neon_offset_set)
+        off === nothing && return ll, "lab(no line offset file)"
+        lw = copy(ll.labwave)
+        nmatch = 0
+        df = ll.df
+        for i in 1:nrow(df)
+            (Bool(df.neon[i]) && df.lab_id[i] > 0) || continue
+            lam = Float64(df.lab_wave[i])
+            k = findfirst(key -> key[1] == String(df.lamp[i]) && abs(key[2] - lam) < 0.005, collect(keys(off)))
+            k === nothing && continue
+            lw[df.lab_id[i]] = lam + off[collect(keys(off))[k]]
+            nmatch += 1
+        end
+        sel = ll.selection * "+neon_line_offset($(tele),$(cfg.neon_offset_set),n=$(nmatch))"
+        return ArcLineList(ll.path, ll.version, ll.fingerprint, sel, ll.df, ll.slices, ll.seed, lw,
+            ll.lamp_of_id, ll.fit_ids), "lab_line_offset(n=$(nmatch))"
+    end
+    return ll, "lab"
 end
 
 # ------------------------------------------------------------------------------------------
@@ -465,50 +527,132 @@ function refit_order_change(pk_new::AbstractMatrix, pk_old::AbstractMatrix, chip
     return out
 end
 
+"Local midnight as a fraction of the UT day (APO UT-7, LCO about UT-4): splits evening from morning arcs."
+const REFIT_LOCAL_MIDNIGHT_FRAC = Dict("apo" => 0.29, "lco" => 0.18)
+refit_is_morning(tele, t) = isfinite(t) && mod(t, 1.0) > REFIT_LOCAL_MIDNIGHT_FRAC[String(tele)]
+
 """
-    refit_arc_anchored_comb(fpi_fnames, A, frame_ref, t_frame; pass1_comb = nothing, ...)
+    refit_choose_anchor(A, seq_flags, combs, tele; anchor_block, anchor_pairing, anchor_block_h, pos_match_px)
+
+Pick the arc sequence that anchors the comb and the comb exposure it is paired with.
+`combs`: per comb exposure (order of the FPI file list) a NamedTuple (ref::ArcObjRef or nothing,
+t). Positions are always MEASURED: a pair is allowed only if the arc sequence's own state matches
+the comb exposure's measured solution within `pos_match_px` (never the recorded dither).
+  * `anchor_block = "morning"`: candidates are the gated morning sequences (after local
+    midnight) if any, else every used sequence (WAVE_ANCHOR_EVENING); "any": every used sequence.
+  * `anchor_pairing = "block"`: the matching pair with the smallest |dt|; it must be within
+    `anchor_block_h` (same calibration block), else WAVE_ANCHOR_NOT_SAME_BLOCK.
+    "position": the first comb exposure and the arc TIME MODEL of the cluster that matches it.
+Returns (ok, state, k_comb, j_seq, bits, dt_h, offset_px, reason, offsets); `offsets` holds the
+measured arc - comb offset (px) of every (used sequence, comb exposure) pair (QA).
+"""
+function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, combs, tele;
+        anchor_block = "morning", anchor_pairing = "block", anchor_block_h = 1.5, pos_match_px = 0.25)
+    nU = length(A.used)
+    nC = length(combs)
+    offs = fill(NaN, nU, nC)
+    for j in 1:nU, k in 1:nC
+        combs[k].ref === nothing && continue
+        d, t = arcfit_seq_state(A.g, A.lay, j)
+        offs[j, k] = arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], combs[k].ref)
+    end
+    if anchor_pairing == "position"
+        cls = refit_arc_clusters(A)
+        best = (Inf, 0, nothing)
+        for cl in cls
+            st = refit_arc_state(A, combs[1].t, cl; mode = :time)
+            st === nothing && continue
+            o = combs[1].ref === nothing ? (length(cls) == 1 ? 0.0 : NaN) :
+                arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, st[1], st[2], st[3], st[4], combs[1].ref)
+            (isfinite(o) && abs(o) < abs(best[1])) && (best = (o, cl, st))
+        end
+        (best[3] === nothing || abs(best[1]) >= pos_match_px) &&
+            return (; ok = false, reason = "no arc position cluster at the frame exposure", offsets = offs)
+        return (; ok = true, state = best[3], k_comb = 1, j_seq = 0, bits = 0, dt_h = NaN,
+            offset_px = best[1], reason = "", offsets = offs)
+    end
+    gated(j) = (seq_flags[A.used[j]] & ARCSEQ_UNGATED) == 0
+    morning = [j for j in 1:nU if refit_is_morning(tele, A.tseq_u[j]) && gated(j)]
+    bits = 0
+    cand = collect(1:nU)
+    if anchor_block == "morning"
+        if isempty(morning)
+            bits |= WAVE_ANCHOR_EVENING
+        else
+            cand = morning
+        end
+    end
+    function bestpair(js)
+        b = (Inf, 0, 0)
+        for j in js, k in 1:nC
+            o = offs[j, k]
+            (isfinite(o) && abs(o) < pos_match_px) || continue
+            dt = abs(combs[k].t - A.tseq_u[j]) * 24
+            isfinite(dt) || (dt = 1e3)
+            dt < b[1] && (b = (dt, j, k))
+        end
+        return b
+    end
+    b = bestpair(cand)
+    if b[2] == 0 && length(cand) < nU
+        bits |= WAVE_ANCHOR_EVENING
+        b = bestpair(1:nU)
+    end
+    b[2] == 0 && return (; ok = false,
+        reason = "no arc sequence matches any comb exposure by measured position", offsets = offs)
+    b[1] > anchor_block_h && (bits |= WAVE_ANCHOR_NOT_SAME_BLOCK)
+    j, k = b[2], b[3]
+    d, t = arcfit_seq_state(A.g, A.lay, j)
+    return (; ok = true, state = (A.grp_u[j], d, t, A.tau_u[j]), k_comb = k, j_seq = j, bits,
+        dt_h = b[1], offset_px = offs[j, k], reason = "", offsets = offs)
+end
+
+"""Integer-order change per fiber-chip between the new comb and the pass-1 comb solution (both in
+production form), from their wavelength difference in units of the local FSR at the same pixels
+(robust to a different frame exposure: a dither step is a small fraction of an FSR)."""
+function refit_order_change_lambda(lin, nl, p1lin, p1nl, L; px = REFIT_PXG)
+    out = zeros(Int16, N_FIBERS, N_CHIPS)
+    pxv = collect(Float64, px)
+    for f in 1:N_FIBERS, c in 1:N_CHIPS
+        a = refit_prod_wave(lin, nl, f, c, pxv)
+        b = refit_prod_wave(p1lin, p1nl, f, c, pxv)
+        (all(isfinite, a) && all(isfinite, b)) || continue
+        out[f, c] = Int16(round(median((a .- b) ./ (a .^ 2 ./ (2L)))))
+    end
+    return out
+end
+
+"""
+    refit_arc_anchored_comb(fpi_fnames, A, combs, tele; seq_flags, pass1_comb = nothing, ...)
 
 Stage 3 for a night with an arc anchor. `fpi_fnames`: the night's FPI peak files (R chip names,
-read-only), first = the frame exposure. `frame_ref`: an `ArcObjRef` slice of a MEASURED solution
-at the frame exposure (pass-1 per-exposure comb solution), used only to pick the arc position
-cluster at the frame exposure (|offset| < `pos_match_px`); `t_frame`: its mid-exposure MJD.
-The arc time model of that cluster at `t_frame` seeds the comb: integer orders from the arc,
-(L, eps) by least squares to the arc, then the production comb loop (L, eps refit per night).
-Returns a NamedTuple (`ok = false` with a `reason` if it cannot anchor).
+read-only); `combs`: per file (ref, t) for the measured-position match (`refit_choose_anchor`).
+The paired comb exposure becomes the comb's frame (first file); the anchoring arc sequence's own
+measured state seeds the comb: integer orders from the arc, (L, eps) by least squares to the arc,
+then the production comb loop (L, eps refit per night). Returns a NamedTuple (`ok = false` with a
+`reason` if it cannot anchor).
 """
 function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A::RefitArc,
-        frame_ref, t_frame::Real; pass1_comb = nothing, pos_match_px = 0.25, comb_arc_qa_ms = 150.0,
-        n_sigma = 4, max_iter = 2)
-    cls = refit_arc_clusters(A)
-    offs = fill(NaN, length(cls))
-    sts = Any[nothing for _ in cls]
-    for (k, cl) in enumerate(cls)
-        st = refit_arc_state(A, t_frame, cl; mode = :time)
-        st === nothing && continue
-        sts[k] = st
-        frame_ref === nothing && continue
-        offs[k] = arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, st[1], st[2], st[3], st[4], frame_ref)
-    end
-    kbest = 0
-    if frame_ref === nothing
-        length(cls) == 1 && (kbest = 1)       # one cluster: unverified, recorded
-    elseif any(isfinite, offs)
-        kb = argmin([isfinite(o) ? abs(o) : Inf for o in offs])
-        abs(offs[kb]) < pos_match_px && (kbest = kb)
-    end
-    kbest == 0 && return (; ok = false, reason = "no arc position cluster at the frame exposure",
-        cluster_offsets_px = offs)
-    st = sts[kbest]
+        combs, tele; seq_flags, pass1_comb = nothing, pos_match_px = 0.25, comb_arc_qa_ms = 150.0,
+        anchor_block = "morning", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2)
+    P = refit_choose_anchor(A, seq_flags, combs, tele; anchor_block, anchor_pairing, anchor_block_h, pos_match_px)
+    P.ok || return (; ok = false, reason = P.reason, cluster_offsets_px = vec(P.offsets))
+    st = P.state
+    order = vcat(P.k_comb, setdiff(1:length(fpi_fnames), P.k_comb))
+    fn = fpi_fnames[order]
     lin0, nl0, nfill = refit_arc_lin_nl(A, st)
-    R = comb_fpi_fit_core(fpi_fnames, lin0, nl0; cporder = 1, wporder = 4, dporder = 2,
+    R = comb_fpi_fit_core(fn, lin0, nl0; cporder = 1, wporder = 4, dporder = 2,
         n_sigma = n_sigma, max_ang_sigma = 0.2, max_iter = max_iter, verbose = false,
         seed_LE_from_initial = true)
-    R === nothing && return (; ok = false, reason = "comb fit returned nothing", cluster_offsets_px = offs)
+    R === nothing && return (; ok = false, reason = "comb fit returned nothing", cluster_offsets_px = vec(P.offsets))
     arcG = refit_arc_grid(A, st, REFIT_PXG)
     return refit_comb_qa(R, arcG; anchor = COMB_ANCHOR_ARC, pass1_comb = pass1_comb,
-        comb_arc_qa_ms = comb_arc_qa_ms, extra = (; arc_cluster = cls[kbest],
-            arc_cluster_offset_px = offs[kbest], cluster_offsets_px = offs, arc_state = collect(Float64, st),
-            n_seed_fibers_filled = nfill, frame_offset_verified = frame_ref !== nothing))
+        comb_arc_qa_ms = comb_arc_qa_ms, extra = (; arc_cluster = P.j_seq == 0 ? 0 : A.clus_u[P.j_seq],
+            arc_cluster_offset_px = P.offset_px, cluster_offsets_px = vec(P.offsets),
+            arc_state = collect(Float64, st), n_seed_fibers_filled = nfill,
+            frame_offset_verified = combs[P.k_comb].ref !== nothing, anchor_bits = P.bits,
+            anchor_seq = P.j_seq == 0 ? 0 : A.used[P.j_seq], anchor_dt_h = P.dt_h, fnames_ordered = fn,
+            anchor_morning = P.j_seq == 0 ? false : refit_is_morning(tele, A.tseq_u[P.j_seq])))
 end
 
 """Stage 3 for a night WITHOUT an arc anchor: integer orders from the pass-1 seed (`lin0`, `nl0`,
@@ -523,7 +667,8 @@ function refit_arcwin_comb(fpi_fnames, lin0, nl0, L::Real, eps::Real; pass1_comb
     return refit_comb_qa(R, nothing; anchor = COMB_ANCHOR_ARCWIN, pass1_comb = pass1_comb,
         comb_arc_qa_ms = comb_arc_qa_ms, extra = (; arc_cluster = 0, arc_cluster_offset_px = NaN,
             cluster_offsets_px = Float64[], arc_state = Float64[], n_seed_fibers_filled = 0,
-            frame_offset_verified = false, neighbour_mjd = neighbour_mjd))
+            frame_offset_verified = false, neighbour_mjd = neighbour_mjd, anchor_bits = 0,
+            anchor_seq = 0, anchor_dt_h = NaN, fnames_ordered = fpi_fnames, anchor_morning = false))
 end
 
 "QA of a comb fit result (C3 (i), arc - comb per chip, order changes vs pass 1)."
@@ -549,8 +694,8 @@ function refit_comb_qa(R, arcG; anchor, pass1_comb, comb_arc_qa_ms, extra)
     p1_L = NaN
     p1_eps = NaN
     if pass1_comb !== nothing
-        ordch = refit_order_change(R.peak_ints, pass1_comb.peak_ints, R.fpi_line_chipInt,
-            gp .& pass1_comb.used)
+        ordch = refit_order_change_lambda(R.linParams, R.nlParams, pass1_comb.lin, pass1_comb.nl,
+            R.cavity_size)
         p1_L = pass1_comb.L
         p1_eps = pass1_comb.eps
     end
@@ -589,7 +734,9 @@ function write_refit_comb(outname::AbstractString, Q, fpi_fnames; tele, mjd, cfg
     tmp = outname * ".tmp$(getpid())"
     safe_jldsave(tmp, meta; linParams = R.linParams, nlParams = R.nlParams,
         ditherParams = R.ditherParams, ditherPolyParams = R.ditherPolyParams,
-        exposure_names = [basename(x) for x in fpi_fnames], fpi_cavity_size = R.cavity_size,
+        exposure_names = [basename(x) for x in Q.fnames_ordered], fpi_cavity_size = R.cavity_size,
+        anchor_bits = Q.anchor_bits, anchor_seq = Q.anchor_seq, anchor_dt_h = Q.anchor_dt_h,
+        anchor_morning = Q.anchor_morning,
         fpi_m0_offset = R.m_offset, fpi_m0 = R.med_m0, seed_cavity_size = R.seed_cavity_size,
         seed_m0_offset = R.seed_m_offset, init_cavity_size = R.init_cavity_size,
         init_m0_offset = R.init_m_offset, first_dither_offset = R.first_dither_offset,
@@ -616,6 +763,7 @@ function load_refit_comb(fname::AbstractString)
         (; lin = read(f["linParams"]), nl = read(f["nlParams"]), L = Float64(read(f["fpi_cavity_size"])),
             eps = Float64(read(f["fpi_m0_offset"])), anchor = String(read(f["metadata/anchor"])),
             n_slip = Int(read(f["n_mode_slip"])), inconsistent = Bool(read(f["comb_arc_inconsistent"])),
+            anchor_bits = haskey(f, "anchor_bits") ? Int(read(f["anchor_bits"])) : 0,
             chip_arc_minus_comb_ms = Float64.(read(f["chip_arc_minus_comb_ms"])),
             exposure_names = String.(read(f["exposure_names"])))
     end
