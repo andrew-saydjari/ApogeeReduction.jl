@@ -128,6 +128,7 @@ function config_lines()
     push!(L, "fingerprint_shape_template_file=$(AR.refit_fingerprint(CFG.shape_template_file))")
     push!(L, "fingerprint_cavity_ref_file=$(AR.refit_fingerprint(AR._refit_default_path(CFG.cavity_ref_file, AR.COMB_MODE_REF_DEFAULT)))")
     push!(L, "fingerprint_mode_offset_file=$(AR.refit_fingerprint(AR._refit_default_path(CFG.mode_offset_file, AR.MODE_OFFSETS_DEFAULT)))")
+    push!(L, "fingerprint_fiber_term_file=$(AR.refit_fingerprint(CFG.fiber_term_file))")
     ll = AR.load_arclamp_linelist()
     push!(L, "linelist_file=$(ll.path)")
     push!(L, "fingerprint_linelist=$(ll.fingerprint)")
@@ -204,6 +205,17 @@ function invalidated_stages(base)
         # a switch the base run did not have yet: unchanged behaviour only at its legacy value
         (!haskey(theirs, k) && get(AR.REFIT_SWITCH_LEGACY, k, nothing) == v) && continue
         foreach(s -> push!(inv, s), split(get(AR.REFIT_SWITCH_STAGES, k, "arc,comb,fpifib,assemble"), ","))
+    end
+    # a calibration FILE whose content changed under the same switch value (e.g. "default" -> a rebuilt
+    # data/ table) invalidates the stages that read it (fingerprints recorded in config.txt)
+    FPSTAGES = Dict("fingerprint_chip_transform_file" => "arc,comb,fpifib,assemble",
+        "fingerprint_cavity_ref_file" => "comb,fpifib,assemble", "fingerprint_mode_offset_file" => "assemble",
+        "fingerprint_shape_template_file" => "assemble", "fingerprint_fiber_term_file" => "assemble")
+    for l in config_lines()
+        occursin("=", l) || continue
+        k, v = split(l, "=", limit = 2)
+        (haskey(FPSTAGES, k) && haskey(theirs, k) && theirs[k] != v) || continue
+        foreach(s -> push!(inv, s), split(FPSTAGES[k], ","))
     end
     # downstream closure
     order = ["arc", "comb", "fpifib", "assemble"]
