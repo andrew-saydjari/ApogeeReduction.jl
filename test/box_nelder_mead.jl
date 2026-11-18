@@ -1,5 +1,6 @@
 using ApogeeReduction: BoxAffineSimplexer, box_nelder_mead_fit, normal_cdf
-using Optim
+# Optim is not in the test environment; use the package's own binding
+const Optim = ApogeeReduction.Optim
 
 # Regression for the Optim pin: the sky-line profile fits use Fminbox(NelderMead()). With
 # Optim's default simplex the centroid vertex starts ~500 px outside its +-10 px box, and
