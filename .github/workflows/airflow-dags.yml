@@ -1,0 +1,48 @@
+name: airflow-dags
+# Parse/structure tests for the daily Airflow DAG and its helpers
+# (airflow/tests), against the Airflow version deployed on ccalin051.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'airflow/**'
+      - '.github/workflows/airflow-dags.yml'
+  pull_request:
+    paths:
+      - 'airflow/**'
+      - '.github/workflows/airflow-dags.yml'
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+jobs:
+  test:
+    name: Airflow 3.3.1 / Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      AIRFLOW_VERSION: '3.3.1'
+      PYTHON_VERSION: '3.12'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Airflow (pinned with the official constraints) + h5py
+        run: |
+          python -m pip install --upgrade pip
+          pip install "apache-airflow==${AIRFLOW_VERSION}" \
+            apache-airflow-providers-standard \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+          pip install h5py
+      - name: Run airflow/tests
+        run: |
+          export AIRFLOW_HOME="$RUNNER_TEMP/airflow_home"
+          export AIRFLOW__CORE__LOAD_EXAMPLES=False
+          # the almanac end-to-end test needs a python with h5py for its
+          # stand-in almanac; here that is the same interpreter
+          export AR_TEST_H5_PYTHON="$(command -v python)"
+          python -m unittest discover -s airflow/tests -v
