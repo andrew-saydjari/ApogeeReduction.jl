@@ -85,6 +85,19 @@ else
     exp_class_opt=()
     exp_class_on=true
 fi
+# Comb-measured chip-transform calibration (scripts/cal/chip_transform): ON BY DEFAULT,
+# same mechanism as AR_EXP_CLASS_MODEL above:
+#   unset         -> no flag: pipeline_2d_1d.jl uses its pinned cal_ref file
+#   set to none   -> OFF, deliberately (sky fit keeps chip scale 1; also the bootstrap mode
+#                    for rebuilding the file from scratch, see scripts/cal/chip_transform/README.md)
+#   set to ""     -> OFF as well
+#   set to a path -> that file
+# A missing or unreadable file is a hard error in pipeline_2d_1d.jl.
+if [ "${AR_CHIP_TRANSFORM_CAL+set}" = "set" ]; then
+    chip_cal_opt=(--chip_transform_cal "$AR_CHIP_TRANSFORM_CAL")
+else
+    chip_cal_opt=()
+fi
 
 runname="allobs_${tele}_${mjd}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -186,7 +199,7 @@ if [ "$run_2d_only" != "true" ]; then
 
     ## 2D->1D
     print_elapsed_time "Running 2D->1D Pipeline for $tele"
-    julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname
+    julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname "${chip_cal_opt[@]}"
     
     ## Plots
     print_elapsed_time "Making Plots"

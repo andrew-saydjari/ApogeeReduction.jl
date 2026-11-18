@@ -338,11 +338,55 @@ function sky_wavecal_chipPolyParams0(fname; cporder = 0, fibInds = 1:N_FIBERS)
     return chipPolyParams0
 end
 
-#function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
-function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same")
+"""
+    get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same",
+        chip_transform_cal = nothing)
+
+Per-exposure sky-line wavelength solution: per fiber, one `wporder` polynomial in the
+green-chip coordinate shared by the three chips, chips R and B mapped onto it by
+x' = a_c + b_c * x. With `cporder = 0` only the offsets a_c are fitted and b_c = 1.
+
+`chip_transform_cal` (a `ChipTransformCal`, see chip_transform.jl): if given and it has a
+block for this exposure's telescope and MJD, the chip scales b_c are FIXED to the file's
+comb-measured values instead of 1 (the offsets a_c stay free, the number of fitted
+parameters is unchanged). The scales are not fitted and therefore not smoothed across
+fibers; the stored `nlParams` then have the cporder-1 layout (a_R, b_R, a_B, b_B), which
+every downstream consumer already handles. With `chip_transform_cal = nothing` the result is
+identical to before. A calibration without a block for the exposure's telescope and MJD is an
+error, never a silent b = 1.
+
+Checkpointing: the product's metadata records `chip_transform_id` ("none", or
+"<calibration version>:<file fingerprint>"). An existing product is reused only if
+`check_file` accepts it AND it was made with the same chip-transform input (a product without
+the key was made with b = 1, i.e. "none"); otherwise it is recomputed.
+"""
+function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same",
+        chip_transform_cal = nothing)
     outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
-    if check_file(outname, mode = checkpoint_mode)
+    ct_id = chip_transform_id(chip_transform_cal)
+    if check_file(outname, mode = checkpoint_mode) &&
+       string(get(read_metadata(outname), "chip_transform_id", "none")) == ct_id
         return outname
+    end
+
+    # comb-measured chip scales from the calibration file (nothing = b fixed to 1)
+    fixed_chip_scales = nothing
+    metadata = Dict{String, Any}("chip_transform_cal" => "none", "chip_transform_id" => ct_id)
+    if !isnothing(chip_transform_cal)
+        cporder == 0 || throw(ArgumentError(
+            "a fixed chip scale replaces b = 1 of the cporder-0 sky fit; got cporder = $(cporder)"))
+        tele_str, mjd_str = split(basename(fname), "_")[2:3]
+        fixed_chip_scales = chip_scales(chip_transform_cal, tele_str, parse(Int, mjd_str))
+        if isnothing(fixed_chip_scales)
+            throw(ArgumentError("chip-transform calibration $(chip_transform_cal.path) " *
+                "($(chip_transform_cal.calibration_version)) has no block for $(tele_str) MJD $(mjd_str) " *
+                "($(basename(fname))). Rebuild it with a coverage that includes this MJD " *
+                "(build_chip_transform.jl --cover_from/--cover_to) or run with --chip_transform_cal \"\" " *
+                "to fit with chip scale 1 deliberately."))
+        end
+        metadata["chip_transform_cal"] = chip_transform_cal.path
+        metadata["chip_transform_version"] = chip_transform_cal.calibration_version
+        metadata["chip_transform_fingerprint"] = chip_transform_cal.fingerprint
     end
 
     fibInds = 1:N_FIBERS
@@ -352,9 +396,19 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
     if size(sky_line_uxlst, 1) < 1
         return nothing
     end
+    # with a fixed chip scale, fit the cporder-0 model on scaled coordinates b_c * x:
+    # x' = a_c + (b_c * x) is the cporder-1 transform with b_c held fixed
+    fit_uxlst = sky_line_uxlst
+    if !isnothing(fixed_chip_scales)
+        fit_uxlst = similar(sky_line_uxlst)
+        for fibIndx in 1:N_FIBERS
+            fit_uxlst[:, fibIndx] .= scale_chip_x(sky_line_uxlst[:, fibIndx],
+                sky_line_chipInt[:, fibIndx], fixed_chip_scales[fibIndx, :])
+        end
+    end
     linParams, nlParams, resid_vec,
     loo_resid, loo_dropped, loo_status = get_sky_wavecal(
-        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
+        fit_uxlst, sky_line_fwlst, sky_line_chipInt,
         chipPolyParams0; cporder = cporder, wporder = wporder)
     # remove LOO-rejected assignments from the ingest arrays so the
     # interpolated-parameter constant-offset refit below cannot see them
@@ -373,12 +427,25 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
 
     # iterpolate between fibers to
     # regularize the nlParams and linParams
+    # sky lines per fiber: fibers with too few lines for a well-determined per-fiber
+    # fit are not used to estimate the per-MTP-block steps
+    n_lines_per_fiber = vec(sum(.!isnan.(sky_line_uxlst), dims = 1))
     interp_nlParams, interp_linParams = interpolate_wave_params(
-        fibInds, nlParams, linParams)
+        fibInds, nlParams, linParams; n_lines = n_lines_per_fiber)
 
     # do final pass with interp params to
     # get a new constant-term for wave soln
     # (which we do not think should be interpolated)
+
+    # fixed chip scales: only the offsets were fitted (and smoothed above); store the
+    # cporder-1 layout (a_R, b_R, a_B, b_B) so everything below and downstream applies b_c
+    if !isnothing(fixed_chip_scales)
+        nlParams = expand_nlParams_fixed_scale(nlParams, fixed_chip_scales)
+        interp_nlParams = expand_nlParams_fixed_scale(interp_nlParams, fixed_chip_scales)
+        cporder = 1
+        chipPolyParams0 = zeros(Float64, (size(fibInds, 1), N_CHIPS, cporder + 1))
+        chipPolyParams0[:, :, 2] .= 1.0
+    end
 
     interp_resid_vec = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(interp_resid_vec, NaN)
@@ -450,23 +517,337 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
 
     # the best parameters are likely the interpolated ones
     # but return the raw measurements as well
-    safe_jldsave(outname; linParams = interp_linParams, nlParams = interp_nlParams,
+    # (metadata records which chip-transform calibration, if any, fixed the chip scales)
+    safe_jldsave(outname, metadata; linParams = interp_linParams, nlParams = interp_nlParams,
         resid_vec = interp_resid_vec, chipWaveSoln = interp_chipWaveSoln,
         resid_xt = interp_resid_xt,
         raw_linParams = linParams, raw_nlParams = nlParams,
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln,
         raw_resid_xt = resid_xt,
         loo_resid = loo_resid, loo_dropped = collect(loo_dropped),
-        loo_status = collect(loo_status), no_metadata = true) # KEVIN FIX THIS!!!!
+        loo_status = collect(loo_status))
     return outname
 end
 
-#read in a list of fnames, then take the 
+#############################################################################
+# Deterministic night-frame convention ("Method A'")
+#
+# `get_ave_night_wave_soln` historically snapped the night reference frame to
+# the single exposure nearest the per-coefficient median solution (the argmin
+# below, kept as an initializer). On dither-alternating nights (ABBA) with an
+# even split, that median sits at the midpoint of two dither groups ~0.5 px
+# apart and every exposure is (to within measurement noise) equidistant from
+# it, so ~0.001 px run-to-run noise in the per-exposure sky solutions decides
+# the argmin and the whole night frame moves by +-~0.5 px between runs.
+# Per-exposure composed solutions (night frame + refit ditherParams) are
+# invariant; only the internal frame convention was nondeterministic.
+#
+# Method A' (applied after the dither refinement rounds):
+#   1. GROUP on MEASURED offsets, never on labels: cluster the per-exposure
+#      fitted dither offsets (1-D single-link, gap threshold
+#      NIGHT_FRAME_CLUSTER_GAP_PIX). Commanded-vs-measured differences and
+#      header label faults cannot corrupt the grouping.
+#   2. SELECT the canonical cluster from MEASURED POSITIONS ONLY:
+#      canonical = the candidate cluster (>= 2 members) at the extreme
+#      measured position that corresponds to the smallest DITHPIX under the
+#      telescope's DITHPIX-axis direction (NIGHT_FRAME_DITHPIX_DIRECTION:
+#      lowest position at LCO, highest at APO). The recorded almanac DITHPIX
+#      (`dithered_pixels`) never chooses the cluster and never shifts
+#      anything: it is only a cross-check that names the selected cluster
+#      and raises the QA flags below when it disagrees with the
+#      measurement (recorded dither positions are not trusted -- wrong or
+#      missing labels change a QA flag, not the frame).
+#      Cluster ORDERING by position is frame-shift invariant: a
+#      convention flip shifts every exposure's offset by the same amount, so
+#      the differences between cluster medians (~0.5 px separation vs
+#      ~0.001 px cross-run noise) survive -- only ABSOLUTE offsets are
+#      circular, not their ordering. DITHPIX is the commanded position along
+#      the same physical axis, so with the direction folded in,
+#      the measured ordering coincides with smallest-DITHPIX whenever the
+#      labels are honest (verified corpus-wide against saved products: APO
+#      direction -1 on 133/133 label-discriminating nights 57643-61227, LCO
+#      +1 on 113/113 nights 57851-61230, era-stable, no exceptions) -- the
+#      label is a redundant cross-check rather than a selection rule. Every
+#      cluster is an equally correct frame; the ordering is a
+#      run-independent sorting convention, not a correctness judgment.
+#   3. APPLY one global linear map xt -> shift + scale * xt to the night
+#      frame (polynomial composition, `pin_night_frame!`) so it coincides
+#      with the canonical cluster: the cluster's median dither OFFSET and its
+#      median dither SCALE. Pinning only the offset left the argmin
+#      reference exposure's own dither scale (~1.5e-5, i.e. ~0.015 px at the
+#      chip edges) in the night frame, so two runs whose reference fell in
+#      different clusters still differed by ~+-200 m/s on chips R and B. The
+#      subsequent per-exposure dither refits against the pinned frame absorb
+#      the map exactly (the dither model is itself linear in xt), so
+#      per-exposure composed solutions are unchanged (up to float roundoff).
+#
+# Three QA conditions are flagged (warning + metadata in the night wavecal
+# product, `sky/frame_anchor/`):
+#   - "DITHPIX frozen but dither motion detected": labels identical across
+#     exposures while the measured offsets form separated clusters
+#     (57800-family ICS/header fault).
+#   - "DITHPIX changed but no dither motion detected": labels form >= 2
+#     groups while the measured offsets form one cluster (stuck dither
+#     mechanism -- ops-relevant).
+#   - "DITHPIX ordering inconsistent with measured dither direction": the
+#     labels discriminate but rank the clusters opposite to their measured
+#     positions. Measurement beats label: the measured ordering is used and
+#     the inconsistency is flagged.
+#############################################################################
+
+"""
+Gap (pixels) above which two sorted per-exposure dither offsets belong to
+different clusters. Dither groups are ~0.5 px apart with ~0.02 px
+within-group scatter, so 0.15 px is comfortably between the two scales.
+"""
+const NIGHT_FRAME_CLUSTER_GAP_PIX = 0.15
+
+"""Two DITHPIX labels within this (pixels) count as the same commanded position."""
+const NIGHT_FRAME_DITHPIX_TOL = 0.1
+
+"""
+DITHPIX at or below this is treated as a header sentinel (0.0 observed on
+apo 58819/59300/59310 and lco 59166), not a real commanded position.
+"""
+const NIGHT_FRAME_DITHPIX_MIN_VALID = 1.0
+
+"""
+Direction of the DITHPIX label axis relative to the measured dither/pixel
+axis, per telescope: +1 where DITHPIX increases with measured pixel position,
+-1 where it decreases. MEASURED corpus-wide from saved products
+(sign_convention_check.jl, PR #406): every label-discriminating APO night
+sampled across MJD 57643-61227 (133 nights) has the larger DITHPIX on the
+SMALLER measured position (direction -1); every LCO night sampled across
+57851-61230 (113 nights) has it on the larger position (direction +1). Both
+are era-stable with zero exceptions. This makes the measured-position
+tie-break coincide with the smallest-DITHPIX label rule by construction at
+both telescopes. An unknown telescope defaults to +1.
+"""
+const NIGHT_FRAME_DITHPIX_DIRECTION = Dict("apo" => -1, "lco" => 1)
+
+"""
+    cluster_offsets_1d(offsets_pix; gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX)
+
+Single-link 1-D clustering of per-exposure dither offsets (pixels): sort and
+split at gaps larger than `gap_pix`. Returns a vector of clusters, each a
+vector of indices into `offsets_pix`, ordered by increasing offset.
+Non-finite offsets (failed dither fits) are excluded from every cluster.
+"""
+function cluster_offsets_1d(offsets_pix; gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX)
+    good = findall(isfinite, view(offsets_pix, :))
+    isempty(good) && return Vector{Int}[]
+    perm = sort(good, by = i -> offsets_pix[i])
+    clusters = [[perm[1]]]
+    for i in perm[2:end]
+        if offsets_pix[i] - offsets_pix[clusters[end][end]] > gap_pix
+            push!(clusters, Int[])
+        end
+        push!(clusters[end], i)
+    end
+    return clusters
+end
+
+"""
+    count_dithpix_groups(labels; tol = NIGHT_FRAME_DITHPIX_TOL)
+
+Number of distinct commanded dither positions among the valid DITHPIX labels
+(finite and > NIGHT_FRAME_DITHPIX_MIN_VALID). Returns 0 when no valid labels
+exist.
+"""
+function count_dithpix_groups(labels; tol = NIGHT_FRAME_DITHPIX_TOL)
+    v = sort(filter(l -> isfinite(l) && l > NIGHT_FRAME_DITHPIX_MIN_VALID,
+        collect(Float64, labels)))
+    isempty(v) && return 0
+    return 1 + count(>(tol), diff(v))
+end
+
+"""
+    night_frame_anchor(exp_offset_pix, exp_dithpix;
+        gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX, label_tol = NIGHT_FRAME_DITHPIX_TOL,
+        dithpix_direction = 1)
+
+Method A' canonical-frame selection (see the block comment above).
+
+Inputs (aligned vectors, one entry per exposure):
+- `exp_offset_pix`: fitted global dither offset of each exposure relative to
+  the current night frame, in pixels (NaN where the dither fit failed).
+- `exp_dithpix`: almanac `dithered_pixels` label per exposure (NaN where
+  missing). A cross-check only: it sets `mode` and the QA flags but never
+  chooses the canonical cluster and never shifts anything.
+- `dithpix_direction`: the telescope's verified DITHPIX-axis direction
+  (`NIGHT_FRAME_DITHPIX_DIRECTION`); +1 means DITHPIX increases with measured
+  pixel position (LCO), -1 means it decreases (APO).
+
+Returns a NamedTuple with the shift to fold into the night frame
+(`shift_pix`, NaN when no exposure has a finite offset), the scale to fold in
+(`scale_pin`: the median of `exp_scale` over the canonical cluster's members;
+1.0 when `exp_scale` is not given or has no finite canonical entry), the
+selection `mode`
+("dithpix_group", "measured_position", "measured_position_override",
+"single_cluster", "single_valid_cluster" or "none"), the per-exposure cluster
+assignment (`exp_cluster`, 0 = unclustered), per-cluster summaries, and the
+three QA flags.
+
+Selection details: clusters with >= 2 members are preferred as canonical
+candidates (guards against a stray single-exposure cluster from one bad fit);
+when only singleton clusters exist they all remain candidates. The canonical
+cluster is ALWAYS the measured-position pick: the candidate at the extreme
+median position that maps to the smallest DITHPIX under `dithpix_direction`
+(frame-shift-invariant). The labels then only classify the outcome:
+"dithpix_group" when the pick is the unique smallest-label candidate (by more
+than `label_tol`), "measured_position" when the pick is among tied smallest
+labels or no candidate has a valid label, and "measured_position_override"
+(with `qa_dithpix_order_inconsistent`) when the smallest valid label sits on
+a different candidate than the measured pick.
+"""
+function night_frame_anchor(exp_offset_pix, exp_dithpix;
+        gap_pix = NIGHT_FRAME_CLUSTER_GAP_PIX, label_tol = NIGHT_FRAME_DITHPIX_TOL,
+        dithpix_direction = 1, exp_scale = nothing)
+    n_exp = length(exp_offset_pix)
+    clusters = cluster_offsets_1d(exp_offset_pix; gap_pix = gap_pix)
+
+    exp_cluster = zeros(Int, n_exp)
+    for (c, members) in enumerate(clusters), i in members
+        exp_cluster[i] = c
+    end
+
+    n_label_groups = count_dithpix_groups(exp_dithpix; tol = label_tol)
+    qa_frozen = (length(clusters) >= 2) && (n_label_groups == 1)
+    qa_stuck = (length(clusters) == 1) && (n_label_groups >= 2)
+
+    cluster_n = length.(clusters)
+    cluster_offset_pix = [median(filter(isfinite, exp_offset_pix[m])) for m in clusters]
+    valid_label(l) = isfinite(l) && l > NIGHT_FRAME_DITHPIX_MIN_VALID
+    cluster_dithpix = map(clusters) do m
+        v = filter(valid_label, collect(Float64, exp_dithpix[m]))
+        isempty(v) ? NaN : median(v)
+    end
+
+    if isempty(clusters)
+        return (shift_pix = NaN, scale_pin = 1.0, mode = "none", canonical_cluster = 0,
+            canonical_dithpix = NaN, exp_cluster = exp_cluster,
+            cluster_n = cluster_n, cluster_offset_pix = cluster_offset_pix,
+            cluster_dithpix = cluster_dithpix,
+            dithpix_direction = Int(dithpix_direction),
+            qa_dithpix_frozen_but_motion = false,
+            qa_dithpix_changed_but_no_motion = false,
+            qa_dithpix_order_inconsistent = false)
+    end
+
+    # canonical candidates: prefer clusters with >= 2 exposures
+    cand = findall(cluster_n .>= 2)
+    isempty(cand) && (cand = collect(eachindex(clusters)))
+
+    # clusters are sorted by increasing median offset (cluster_offsets_1d).
+    # The measured-position pick within a candidate pool is the extreme that
+    # maps to the smallest DITHPIX under the telescope's verified axis
+    # direction: the first (lowest position) for direction +1 (LCO), the
+    # last (highest position) for direction -1 (APO).
+    measured_pick(pool) = dithpix_direction >= 0 ? pool[1] : pool[end]
+    qa_order = false
+    # The canonical cluster depends on MEASURED positions only; the
+    # recorded DITHPIX labels never choose it (they are not trusted), they
+    # only classify the outcome and raise the order-inconsistency flag.
+    canonical = measured_pick(cand)
+    mode = if length(cand) == 1
+        length(clusters) == 1 ? "single_cluster" : "single_valid_cluster"
+    else
+        labs = cluster_dithpix[cand]
+        finite_labs = filter(isfinite, labs)
+        min_lab = isempty(finite_labs) ? NaN : minimum(finite_labs)
+        at_min = [c for (c, l) in zip(cand, labs) if isfinite(l) && l <= min_lab + label_tol]
+        if isempty(at_min)
+            "measured_position"                 # no valid labels at all
+        elseif !(canonical in at_min)
+            qa_order = true                     # smallest label elsewhere
+            "measured_position_override"
+        elseif length(at_min) == 1
+            "dithpix_group"                     # labels agree and discriminate
+        else
+            "measured_position"                 # labels tied / frozen
+        end
+    end
+
+    # dither scale of the canonical cluster (median over its members)
+    canon_scales = isnothing(exp_scale) ? Float64[] :
+                   filter(isfinite, collect(Float64, exp_scale[clusters[canonical]]))
+    scale_pin = isempty(canon_scales) ? 1.0 : median(canon_scales)
+
+    return (shift_pix = cluster_offset_pix[canonical], scale_pin = scale_pin, mode = mode,
+        canonical_cluster = canonical,
+        canonical_dithpix = cluster_dithpix[canonical], exp_cluster = exp_cluster,
+        cluster_n = cluster_n, cluster_offset_pix = cluster_offset_pix,
+        cluster_dithpix = cluster_dithpix,
+        dithpix_direction = Int(dithpix_direction),
+        qa_dithpix_frozen_but_motion = qa_frozen,
+        qa_dithpix_changed_but_no_motion = qa_stuck,
+        qa_dithpix_order_inconsistent = qa_order)
+end
+
+"""
+    pin_night_frame!(med_linParams, shift_pix, scale = 1.0)
+
+Fold one global linear map into the night-average solution by substituting
+`xt -> shift_pix / N_XPIX + scale * xt` in every fiber's wavelength
+polynomial (exactly the composition machinery used by the dither refinement
+rounds). With the canonical cluster's median dither offset and scale, the
+exposures of that cluster refit to dither (offset, scale) ~ (0, 1). The
+per-exposure dither transforms are refit downstream against the pinned frame
+(`get_and_save_sky_dither_per_fiber`); a refit dither (b, a) becomes
+((b - shift) / scale, a / scale), so per-exposure composed wavelength
+solutions are unchanged up to float roundoff. A non-finite `scale` is
+treated as 1.0 (offset-only pin); a non-finite `shift_pix` is a no-op.
+"""
+function pin_night_frame!(med_linParams, shift_pix, scale = 1.0)
+    isfinite(shift_pix) || return med_linParams
+    isfinite(scale) || (scale = 1.0)
+    n_lin_coeffs = size(med_linParams, 2)
+    shift_poly = Polynomial([shift_pix / N_XPIX, scale])
+    for fibIndx in 1:size(med_linParams, 1)
+        curr_coeffs = Polynomial(med_linParams[fibIndx, :])(shift_poly).coeffs
+        n_curr_use_coeffs = min(size(curr_coeffs, 1), n_lin_coeffs)
+        med_linParams[fibIndx, :] .= 0
+        med_linParams[fibIndx, 1:n_curr_use_coeffs] .= curr_coeffs[1:n_curr_use_coeffs]
+    end
+    return med_linParams
+end
+
+"""
+    get_exp_dithpix_dict(almanac_file, tele, mjd)
+
+Commanded dither positions for the night: a Dict mapping the almanac
+`exposure` number to its `dithered_pixels` value (the DITHPIX header label).
+Returns `nothing` when the almanac (or the column) is unavailable; the
+night-frame anchor then runs without the label cross-check (same frame).
+Never throws: label plumbing must not be able to fail a night.
+"""
+function get_exp_dithpix_dict(almanac_file, tele, mjd)
+    (almanac_file == "" || !isfile(almanac_file)) && return nothing
+    try
+        df = read_almanac_exp_df(almanac_file, tele, mjd)
+        if !("dithered_pixels" in names(df)) || !("exposure" in names(df))
+            return nothing
+        end
+        to_f(x) = x isa AbstractString ? something(tryparse(Float64, x), NaN) : Float64(x)
+        to_i(x) = x isa AbstractString ? parse(Int, x) : Int(x)
+        return Dict(to_i(e) => to_f(d) for (e, d) in zip(df.exposure, df.dithered_pixels))
+    catch e
+        @warn "Night-frame anchor: could not read DITHPIX labels from $(almanac_file) for $(tele) $(mjd); running without the label cross-check (the frame is chosen from measured positions either way)." exception=e
+        return nothing
+    end
+end
+
+#read in a list of fnames, then take the
 #average/median of the wavelength solution
 #parameters (removing dither differences)
 #to have a stable average for the night
+#exp_dithpix: optional Dict (almanac exposure number => dithered_pixels
+#label) used by the deterministic night-frame anchor (Method A', above);
+#dithpix_direction: the telescope's verified DITHPIX-axis direction
+#(NIGHT_FRAME_DITHPIX_DIRECTION)
 function get_ave_night_wave_soln(
-        fname_list; fit_dither = false, wavetype = "sky", dporder = 1, dither_fname_list = nothing)
+        fname_list; fit_dither = false, wavetype = "sky", dporder = 1,
+        dither_fname_list = nothing, exp_dithpix = nothing, dithpix_direction = 1)
     #open first to get order of linear and non-linear parameters
 
     #guard against repetition
@@ -475,15 +856,14 @@ function get_ave_night_wave_soln(
     end
     unique_fname_list = unique(fname_list)
 
-    f = h5open(unique_fname_list[1], "r+")
-
-    linParams, nlParams = try
-        read(f["linParams"]), read(f["nlParams"])
-    catch
-        println(unique_fname_list[1])
-        read(f["linParams"]), read(f["nlParams"])
+    linParams, nlParams = h5open(unique_fname_list[1], "r") do f
+        try
+            read(f["linParams"]), read(f["nlParams"])
+        catch
+            println(unique_fname_list[1])
+            read(f["linParams"]), read(f["nlParams"])
+        end
     end
-    close(f)
 
     n_fnames = size(unique_fname_list, 1)
     n_lin_coeffs = size(linParams, 2)
@@ -500,17 +880,16 @@ function get_ave_night_wave_soln(
     fill!(all_nlParams, NaN)
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        linParams, nlParams = try
-            read(f["linParams"]), read(f["nlParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["linParams"]), read(f["nlParams"])
+        linParams, nlParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["linParams"]), read(f["nlParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["linParams"]), read(f["nlParams"])
+            end
         end
         all_linParams[:, :, fname_ind] .= linParams[:, :]
         all_nlParams[:, :, fname_ind] .= nlParams[:, :]
-        close(f)
     end
 
     med_linParams = nanmedian(all_linParams, 3)
@@ -577,9 +956,39 @@ function get_ave_night_wave_soln(
             med_linParams .= nanmedian(updated_linParams, 3)[:, :, 1]
         end
 
+        # ---- Method A': deterministic night-frame convention (see above) ----
+        # per-exposure global dither offset (pixels) relative to the current,
+        # argmin-initialized frame; the dither transform is
+        # xt_new = ditherParams[1] + ditherParams[2] * xt with xt in units of
+        # (x - N_XPIX/2) / N_XPIX
+        exp_offset_pix = [nanmedian(all_ditherParams[:, 1, k]) * N_XPIX
+                          for k in 1:n_fnames]
+        # almanac exposure number parsed from each fname (same convention as
+        # the peak-fname construction in the refinement loop above)
+        exp_expid = map(unique_fname_list) do fname
+            parse(Int, split(split(split(fname, "/")[end], ".h5")[1], "_")[end - 1])
+        end
+        exp_labels = if isnothing(exp_dithpix)
+            fill(NaN, n_fnames)
+        else
+            Float64[get(exp_dithpix, e, NaN) for e in exp_expid]
+        end
+        # per-exposure global dither scale (median over fibers); folded into
+        # the frame together with the offset so the night frame does not
+        # inherit the argmin reference exposure's own scale
+        exp_scale = dporder > 0 ?
+                    [nanmedian(all_ditherParams[:, 2, k]) for k in 1:n_fnames] : nothing
+        anchor = night_frame_anchor(exp_offset_pix, exp_labels;
+            dithpix_direction = dithpix_direction, exp_scale = exp_scale)
+        pin_night_frame!(med_linParams, anchor.shift_pix, anchor.scale_pin)
+        frame_anchor = merge(anchor,
+            (exp_expid = exp_expid, exp_dithpix = exp_labels,
+                exp_offset_pix = exp_offset_pix))
+
     else
         med_nlParams = nanmedian((all_nlParams .- nlParam_offsets), 3)[:, :, 1]
         med_linParams = nanmedian((all_linParams .- linParam_offsets), 3)[:, :, 1]
+        frame_anchor = nothing
     end
 
     wporder = n_lin_coeffs - 1
@@ -602,7 +1011,7 @@ function get_ave_night_wave_soln(
         end
     end
 
-    return med_linParams, med_nlParams, chipWaveSoln
+    return med_linParams, med_nlParams, chipWaveSoln, frame_anchor
 end
 
 function get_and_save_sky_dither_per_fiber(
@@ -1873,7 +2282,13 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
     end
 
-    #loop over the exposures and make the expected waveCalNightfpiDither output
+    #loop over the exposures and make the expected waveCalNightfpiDither output.
+    #Each exposure's dithered grid goes into its own buffer: chipWaveSoln above is
+    #the night solution at the reference (first-exposure) dither, and it is what
+    #gets saved to waveCalFPI, returned, and stored as nightAve_wave_soln. Writing
+    #the per-exposure grids into chipWaveSoln made all three the LAST exposure's
+    #dithered grid instead.
+    expChipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
     for fname_ind in 1:n_fnames
         curr_outname = replace(replace(
             replace(fname_list[fname_ind], "fpiPeaks" => "waveCalNightfpiDither"),
@@ -1888,7 +2303,7 @@ function comb_exp_get_and_save_fpi_wavecal(
                 xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
                 Ax = positional_poly_mat(xt, porder = wporder)
                 yt = Ax * linParams[fibIndx, :]
-                chipWaveSoln[:, fibIndx, chipIndx] .= yt
+                expChipWaveSoln[:, fibIndx, chipIndx] .= yt
             end
         end
 
@@ -1897,7 +2312,7 @@ function comb_exp_get_and_save_fpi_wavecal(
             linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
                 fname_ind, :, :],
             resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
-            chipWaveSoln = chipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
+            chipWaveSoln = expChipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
     end
     safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
         exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
@@ -2032,7 +2447,39 @@ function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5
     return func, keep
 end
 
-function interpolate_wave_params(fibInds, nlParams, linParams)
+"""
+    interpolate_wave_params(fibInds, nlParams, linParams;
+        block_steps = true, block_min_fibers = 10, block_nsigma = 4.0,
+        n_lines = nothing, block_min_lines = 12)
+        -> (interp_nlParams, interp_linParams)
+
+Regularise per-fiber wavelength-solution parameters across the slit by fitting each
+parameter as a smooth, outlier-clipped polynomial in fiber index
+(`fit_poly_without_outliers`, 3 sigma, iterated), so bad or missing (NaN) fibers are
+replaced by the smooth value.
+
+- `linParams[:, 1]` (constant term): quadratic in fiber, fitted separately within
+  each 30-fiber MTP block. Callers refit this term per fiber afterwards.
+- every other column of `linParams` and every column of `nlParams` (the chip
+  offsets and, for cporder > 0, the chip scales): quadratic in fiber over the whole
+  slit, plus (`block_steps = true`) one constant step per 30-fiber MTP block, see
+  [`mtp_block_steps`](@ref). If `n_lines` (sky lines per fiber) is given, fibers
+  with fewer than `block_min_lines` lines (an under- or barely-determined per-fiber
+  fit; 7 parameters for cporder 0, wporder 4) do not contribute to the steps. A block
+  with fewer than `block_min_fibers` usable fibers keeps the smooth solution.
+
+The higher-order terms and the chip parameters used to be fitted LINEARLY in fiber,
+which bowed the slit edges by up to ~0.5 km/s per chip (fixed by fitting them
+quadratically). A smooth curve over the whole slit still misses that every MTP block
+sits slightly off the curve in ALL these parameters together: with the smooth-only regulariser the sky-line residuals step by
+up to ~+-100 m/s per chip from block to block (LCO chips R and B worst), while the
+unregularised per-fiber fits are flat. Because the parameters are strongly correlated
+within a fiber, the steps have to be applied to all of them jointly: a step in the
+chip offsets alone makes the block-to-block residuals worse, not better.
+"""
+function interpolate_wave_params(fibInds, nlParams, linParams;
+        block_steps = true, block_min_fibers = 10, block_nsigma = 4.0,
+        n_lines = nothing, block_min_lines = 12)
     mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
     unique_mtp = 1:10
 
@@ -2049,39 +2496,87 @@ function interpolate_wave_params(fibInds, nlParams, linParams)
                                          nanmedian((linParams[keep_mtp, 1] .- func_eval)[keep])
     end
 
-    #need a second order poly for first order term
-    j = 2
-    func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
-    func_eval = func.(fibInds)
-    interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
-
-    #need a first order poly for higher order terms
-    for j in 3:size(linParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 1)
+    #second order poly in fiber for the first and all higher order terms
+    #(a first order poly for the higher order terms bowed the slit edges)
+    for j in 2:size(linParams, 2)
+        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
         func_eval = func.(fibInds)
         interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
     end
 
-    #use a first order poly for the chip offset,scale parameters
+    #second order poly in fiber for the chip offset,scale parameters
+    #(a first order poly bowed the slit edges, with opposite signs on chips R and G)
     for j in 1:size(nlParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 1)
+        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2)
         func_eval = func.(fibInds)
         interp_nlParams[:, j] .= func_eval .+ nanmedian((nlParams[:, j] .- func_eval)[keep])
+    end
+
+    #per-MTP-block steps, applied to all smoothed parameters jointly
+    if block_steps
+        n_nl = size(nlParams, 2)
+        lin_cols = 2:size(linParams, 2)
+        for mtp_ind in unique_mtp
+            in_mtp = findall(mtp_inds .== mtp_ind)
+            isempty(in_mtp) && continue
+            resids = hcat(nlParams[in_mtp, :] .- interp_nlParams[in_mtp, :],
+                linParams[in_mtp, lin_cols] .- interp_linParams[in_mtp, lin_cols])
+            if !isnothing(n_lines)
+                resids[n_lines[in_mtp] .< block_min_lines, :] .= NaN
+            end
+            steps = mtp_block_steps(resids; min_fibers = block_min_fibers, nsigma = block_nsigma)
+            isnothing(steps) && continue #too few good fibers: keep the smooth solution
+            interp_nlParams[in_mtp, :] .+= steps[1:n_nl]'
+            interp_linParams[in_mtp, lin_cols] .+= steps[(n_nl + 1):end]'
+        end
     end
 
     return interp_nlParams, interp_linParams
 end
 
+"""
+    mtp_block_steps(resids; min_fibers = 10, nsigma = 4.0, max_iter = 5) -> steps or nothing
+
+Step of one MTP block off the smooth across-slit solution, for all parameters jointly.
+`resids` is (fibers in the block) x (parameters): per-fiber fitted value minus the
+smooth value. The parameters of one fiber are strongly correlated, so ONE set of fibers
+is used for every parameter: a fiber is kept only if all its parameters are finite and
+each lies within `nsigma` robust sigma (1.4826 MAD over the kept fibers) of the block
+median, iterated. The step is the MEAN over the kept fibers (a mean over a common
+fiber set is a consistent wavelength solution; per-parameter medians mix fibers and
+are not). Returns `nothing` if fewer than `min_fibers` fibers survive, in which case
+the caller keeps the smooth solution for the block.
+"""
+function mtp_block_steps(resids::AbstractMatrix; min_fibers = 10, nsigma = 4.0, max_iter = 5)
+    finite = vec(all(isfinite, resids, dims = 2))
+    good = copy(finite)
+    for _ in 1:max_iter
+        sum(good) < min_fibers && return nothing
+        new_good = copy(finite)
+        for j in axes(resids, 2)
+            med = median(resids[good, j])
+            sig = 1.4826 * median(abs.(resids[good, j] .- med))
+            if sig > 0
+                new_good .&= abs.(resids[:, j] .- med) .<= nsigma * sig
+            end
+        end
+        new_good == good && break
+        good = new_good
+    end
+    sum(good) < min_fibers && return nothing
+    return vec(mean(resids[good, :], dims = 1))
+end
+
 function ingest_fpiLines_file(fileName)
     # Read in fpi line peaks data
-    f = h5open(fileName, "r+")
-    fpi_line_mat, fpi_line_cov_mat = try
-        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
-    catch
-        println(fileName)
-        read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+    fpi_line_mat, fpi_line_cov_mat = h5open(fileName, "r") do f
+        try
+            read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+        catch
+            println(fileName)
+            read(f["fpi_line_mat"]), read(f["fpi_line_cov_mat"])
+        end
     end
-    close(f)
 
     fpi_line_xlst = fpi_line_mat[:, 2, :]
     fpi_line_xlst_errs = zeros(Float64, size(fpi_line_xlst))
@@ -2094,25 +2589,22 @@ end
 
 function ingest_skyLines_file(fileName)
     # Read in sky line peaks data
-    f = h5open(fileName, "r+")
-    sky_line_mat_clean = try
-        read(f["sky_line_mat_clean"])
-    catch
-        println(fileName)
-        read(f["sky_line_mat_clean"])
-    end
     # wavecal class per line (see WAVECAL_CLASS_CODES): only class B (code 2)
     # enters the wavelength solution; class-A guards are fit for association
     # protection and QA but NaN-masked here, which removes them from every
     # downstream fit (per-exposure, nightAve, dither) via the existing NaN
     # handling. Files written before the class column existed carry no
     # line_class dataset and are ingested unmasked (all lines were class B).
-    line_class = if haskey(f, "line_class")
-        read(f["line_class"])
-    else
-        fill(2, size(sky_line_mat_clean, 1))
+    sky_line_mat_clean, line_class = h5open(fileName, "r") do f
+        mat = try
+            read(f["sky_line_mat_clean"])
+        catch
+            println(fileName)
+            read(f["sky_line_mat_clean"])
+        end
+        cls = haskey(f, "line_class") ? read(f["line_class"]) : fill(2, size(mat, 1))
+        mat, cls
     end
-    close(f)
     sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
     not_for_solution = line_class .!= 2
@@ -2210,7 +2702,11 @@ function ingest_fpiLines(fname_list)
 end
 
 ## TODO local parallelization mode (which would also need to pamp inside of sky_wave_plots)
-function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir")
+# `almanac_file` provides the recorded dither positions (DITHPIX labels) that
+# the deterministic night-frame anchor (Method A') uses as a QA cross-check;
+# the canonical cluster itself is chosen from measured positions only, so an
+# empty or unreadable almanac changes the QA flags, never the frame.
+function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObjectWavecal, all1DObjectSkyPeaks, checkpoint_mode; outdir = "../outdir", almanac_file = "")
 
     outname = joinpath(
         outdir, "wavecal", "wavecalNightAve_$(tele)_$(mjd).h5")
@@ -2225,8 +2721,34 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
     if size(all1DObjectWavecal[mskMJD], 1) > 0
         all1DObjectWavecal_mjd = all1DObjectWavecal[mskMJD]
         # using all skyline wavelength solutions to determine median solution for SJD
-        night_linParams, night_nlParams, night_wave_soln = get_ave_night_wave_soln(
-            all1DObjectWavecal_mjd, fit_dither = true)
+        exp_dithpix = get_exp_dithpix_dict(almanac_file, tele, mjd)
+        night_linParams, night_nlParams, night_wave_soln, frame_anchor = get_ave_night_wave_soln(
+            all1DObjectWavecal_mjd, fit_dither = true, exp_dithpix = exp_dithpix,
+            dithpix_direction = get(NIGHT_FRAME_DITHPIX_DIRECTION, tele, 1))
+
+        if !isnothing(frame_anchor)
+            if frame_anchor.qa_dithpix_frozen_but_motion
+                @warn "NIGHT FRAME QA for $(tele) MJD $(mjd): DITHPIX frozen but dither motion detected. " *
+                      "The header labels are identical across exposures while the measured per-exposure " *
+                      "offsets form $(length(frame_anchor.cluster_n)) separated clusters " *
+                      "(cluster offsets $(round.(frame_anchor.cluster_offset_pix, digits = 3)) px) -- " *
+                      "57800-family ICS/header fault. Canonical cluster chosen by measured-position " *
+                      "ordering; see sky/frame_anchor in the wavecalNightAve file."
+            end
+            if frame_anchor.qa_dithpix_changed_but_no_motion
+                @warn "NIGHT FRAME QA for $(tele) MJD $(mjd): DITHPIX changed but no dither motion detected. " *
+                      "The header labels form >= 2 groups while the measured per-exposure offsets form a " *
+                      "single cluster -- possible stuck dither mechanism (ops-relevant); see " *
+                      "sky/frame_anchor in the wavecalNightAve file."
+            end
+            if frame_anchor.qa_dithpix_order_inconsistent
+                @warn "NIGHT FRAME QA for $(tele) MJD $(mjd): DITHPIX ordering inconsistent with measured " *
+                      "dither direction. The labels rank the clusters opposite to their measured pixel " *
+                      "positions (cluster offsets $(round.(frame_anchor.cluster_offset_pix, digits = 3)) px, " *
+                      "labels $(frame_anchor.cluster_dithpix)); measurement beats label -- canonical cluster " *
+                      "chosen by measured-position ordering. See sky/frame_anchor in the wavecalNightAve file."
+            end
+        end
 
         # using skylines to measure dither offsets from nightly skyline wavelength solution for SJD
         get_and_save_sky_dither_per_fiber_partial(fname) = get_and_save_sky_dither_per_fiber(
@@ -2252,13 +2774,43 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
             f["$(curr_wave_type)/nightAve_wave_soln"] = night_wave_soln
             f["$(curr_wave_type)/nightAve_nlParams"] = night_nlParams
             f["$(curr_wave_type)/nightAve_linParams"] = night_linParams
-        end	
+            if !isnothing(frame_anchor)
+                # audit block for the deterministic night-frame anchor
+                # (Method A'): which cluster is canonical, why, and the
+                # per-exposure evidence. exp_offset_pix are relative to the
+                # PRE-pin frame; post-pin offsets are
+                # (exp_offset_pix - shift_pix) / scale_pin.
+                g = create_group(f, "$(curr_wave_type)/frame_anchor")
+                g["mode"] = frame_anchor.mode
+                g["shift_pix"] = frame_anchor.shift_pix
+                g["scale_pin"] = frame_anchor.scale_pin
+                g["canonical_cluster"] = frame_anchor.canonical_cluster
+                g["canonical_dithpix"] = frame_anchor.canonical_dithpix
+                g["cluster_n"] = collect(Int, frame_anchor.cluster_n)
+                g["cluster_offset_pix"] = collect(Float64, frame_anchor.cluster_offset_pix)
+                g["cluster_dithpix"] = collect(Float64, frame_anchor.cluster_dithpix)
+                g["dithpix_direction"] = frame_anchor.dithpix_direction
+                g["exp_expid"] = collect(Int, frame_anchor.exp_expid)
+                g["exp_cluster"] = collect(Int, frame_anchor.exp_cluster)
+                g["exp_dithpix"] = collect(Float64, frame_anchor.exp_dithpix)
+                g["exp_offset_pix"] = collect(Float64, frame_anchor.exp_offset_pix)
+                g["qa_dithpix_frozen_but_motion"] = Int(frame_anchor.qa_dithpix_frozen_but_motion)
+                g["qa_dithpix_changed_but_no_motion"] = Int(frame_anchor.qa_dithpix_changed_but_no_motion)
+                g["qa_dithpix_order_inconsistent"] = Int(frame_anchor.qa_dithpix_order_inconsistent)
+            end
+        end
 
         return outname
     else
         return nothing
     end    
 end
+
+# Settings of the production nightly FPI comb fit. One definition, shared with the
+# chip-transform calibration rebuild (scripts/cal/chip_transform), which re-runs this fit for
+# nights whose comb file is missing.
+const FPI_COMB_FIT_KWARGS = (cporder = 1, wporder = 4, dporder = 2, n_sigma = 4,
+    max_ang_sigma = 0.2, max_iter = 2)
 
 """
     fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
@@ -2354,7 +2906,8 @@ function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
 
         # using FPI exposures to measure high-precision nightly wavelength solution
         fpi_out = comb_exp_get_and_save_fpi_wavecal(
-            fpi_fnames, curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, verbose = verbose, checkpoint_mode = checkpoint_mode)
+            fpi_fnames, curr_linParams, curr_nlParams; FPI_COMB_FIT_KWARGS...,
+            verbose = verbose, checkpoint_mode = checkpoint_mode)
 
         if isnothing(fpi_out)
             @warn "FPI WAVECAL GATE FAILED for $(tele) MJD $(mjd): guard fpi_solution. " *
@@ -2458,16 +3011,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        linParams = try
-            read(f["linParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["linParams"])
+        linParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["linParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["linParams"])
+            end
         end
-
-        close(f)
 
         for pind in 1:n_lin_coeffs
             scatter!(axis_dict["$(pind)"], 301 .- fiber_inds, linParams[:, pind],
@@ -2498,16 +3049,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        nlParams = try
-            read(f["nlParams"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["nlParams"])
+        nlParams = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["nlParams"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["nlParams"])
+            end
         end
-
-        close(f)
 
         for pind in 1:n_nl_coeffs
             scatter!(axis_dict["$(pind)"], 301 .- fiber_inds, nlParams[:, pind],
@@ -2557,16 +3106,14 @@ function sky_wave_plots(
     dlam_dx[(begin + 1):end, :, :] .= diff(night_wave_soln, dims = 1)
     dlam_dx[begin, :, :] .= dlam_dx[begin + 1, :, :]
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        chipWaveSoln = try
-            read(f["chipWaveSoln"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["chipWaveSoln"])
+        chipWaveSoln = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["chipWaveSoln"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["chipWaveSoln"])
+            end
         end
-
-        close(f)
 
         dx = nanmedian(nanmedian((night_wave_soln .- chipWaveSoln) ./ dlam_dx, 1), 3)[1, :, 1]
 
@@ -2630,16 +3177,14 @@ function sky_wave_plots(
     end
 
     for fname_ind in 1:n_fnames
-        f = h5open(unique_fname_list[fname_ind], "r+")
-
-        chipWaveSoln = try
-            read(f["chipWaveSoln"])
-        catch
-            println(unique_fname_list[fname_ind])
-            read(f["chipWaveSoln"])
+        chipWaveSoln = h5open(unique_fname_list[fname_ind], "r") do f
+            try
+                read(f["chipWaveSoln"])
+            catch
+                println(unique_fname_list[fname_ind])
+                read(f["chipWaveSoln"])
+            end
         end
-
-        close(f)
 
         dx = nanmedian(nanmedian((night_wave_soln .- chipWaveSoln) ./ dlam_dx, 1), 3)[1, :, 1]
 
