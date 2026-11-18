@@ -1204,6 +1204,50 @@ function each_combination(f, n, k)
     return nothing
 end
 
+# Exhaustive LMS core search is used while C(n, k) <= LMS_MAX_SUBSETS (n <= 16
+# lines per chip for the quadratic screen; every production line list has <= 8
+# class-B lines per chip, so production is always exhaustive and unchanged).
+# Above that the cost grows as n^4 (a 40-line chip is 91,390 fits per call);
+# instead LMS_MAX_SUBSETS distinct random k-subsets are drawn from a fixed-seed
+# generator, so the result stays deterministic.
+const LMS_MAX_SUBSETS = 2000
+
+"""
+    each_lms_subset(f, n, k; max_subsets = LMS_MAX_SUBSETS)
+
+Call `f(idx)` for every k-subset of `1:n` when there are at most
+`max_subsets` of them (`each_combination`), otherwise for `max_subsets`
+random sorted k-subsets from a fixed-seed xorshift generator (deterministic;
+no Random dependency). `idx` is reused in place.
+"""
+function each_lms_subset(f, n, k; max_subsets = LMS_MAX_SUBSETS)
+    k <= n || return nothing
+    if binomial(BigInt(n), BigInt(k)) <= max_subsets
+        return each_combination(f, n, k)
+    end
+    state = UInt64(0x9e3779b97f4a7c15)
+    function next_rand(m)
+        state ⊻= state << 13
+        state ⊻= state >> 7
+        state ⊻= state << 17
+        return Int(state % UInt64(m)) + 1
+    end
+    idx = zeros(Int, k)
+    for _ in 1:max_subsets
+        nfill = 0
+        while nfill < k
+            v = next_rand(n)
+            if !(v in view(idx, 1:nfill))
+                nfill += 1
+                idx[nfill] = v
+            end
+        end
+        sort!(idx)
+        f(idx)
+    end
+    return nothing
+end
+
 """
     lms_poly_classify(x, y; porder = 2, nsigma = 7.0, scatter_floor = 0.0)
 
@@ -1235,7 +1279,7 @@ function lms_poly_classify(x, y; porder = 2, nsigma = 7.0, scatter_floor = 0.0)
     best_idx = collect(1:k)
     resid = zeros(n)
     Afull = positional_poly_mat(x, porder = porder)
-    each_combination(n, k) do idx
+    each_lms_subset(n, k) do idx
         A = positional_poly_mat(x[idx], porder = porder)
         c = try
             A \ y[idx]

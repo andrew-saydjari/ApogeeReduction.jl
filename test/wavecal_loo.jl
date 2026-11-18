@@ -143,4 +143,31 @@ using Random
         a, b, c = AR.get_sky_wavecal(ux, fw, cI, cpp0all; cporder = 0, wporder = 4)
         @test size(a) == size(linP)
     end
+
+    @testset "LMS subset search is bounded (long line lists)" begin
+        # small n: exhaustive, every k-subset exactly once
+        seen = Set{Vector{Int}}()
+        AR.each_lms_subset(idx -> push!(seen, copy(idx)), 8, 4)
+        @test length(seen) == binomial(8, 4)
+        # large n: capped, distinct sorted indices, deterministic
+        cnt = Ref(0); ok = Ref(true); first_run = Vector{Vector{Int}}()
+        AR.each_lms_subset(40, 4) do idx
+            cnt[] += 1
+            ok[] &= issorted(idx) && allunique(idx) && all(1 .<= idx .<= 40)
+            push!(first_run, copy(idx))
+        end
+        @test cnt[] == AR.LMS_MAX_SUBSETS && ok[]
+        second_run = Vector{Vector{Int}}()
+        AR.each_lms_subset(idx -> push!(second_run, copy(idx)), 40, 4)
+        @test first_run == second_run
+        # a 40-point chip with 30 % gross outliers is still classified, quickly
+        rng = MersenneTwister(5)
+        x = sort(rand(rng, 40) .- 0.5)
+        y = 16000.0 .- 500.0 .* x .+ 20.0 .* x .^ 2 .+ 1e-3 .* randn(rng, 40)
+        bad = 1:3:40
+        y[bad] .+= 5.0 .+ rand(rng, length(bad))
+        t = @elapsed keep, _, _ = AR.lms_poly_classify(x, y; porder = 2, nsigma = 7.0)
+        @test all(.!keep[bad]) && all(keep[setdiff(1:40, bad)])
+        @test t < 5.0
+    end
 end
