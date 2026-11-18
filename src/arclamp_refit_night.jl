@@ -9,12 +9,13 @@
 # waiting for neighbour nights) and `fail` are not terminal for the stage that wrote them when the
 # driver is asked to retry.
 
-const REFIT_STAGES = ("arc", "comb", "fpifib", "assemble")
+const REFIT_STAGES = ("arc", "comb", "anchorcheck", "fpifib", "assemble")
 
 refit_path(outroot, stage, tele, mjd) = joinpath(outroot,
-    stage == "arc" ? "arc" : stage == "comb" ? "comb" : stage == "fpifib" ? "fpifib" : "exp",
+    stage == "arc" ? "arc" : stage == "comb" ? "comb" : stage == "anchorcheck" ? "anchorcheck" :
+    stage == "fpifib" ? "fpifib" : "exp",
     (stage == "arc" ? "arclampWaveCalNight" : stage == "comb" ? "waveCalFPIArc" :
-     stage == "fpifib" ? "fpiGuidePos" : "waveCalRefit") * "_$(tele)_$(mjd).h5")
+     stage == "anchorcheck" ? "anchorCheck" : stage == "fpifib" ? "fpiGuidePos" : "waveCalRefit") * "_$(tele)_$(mjd).h5")
 refit_status_path(outroot, stage, tele, mjd) = joinpath(outroot, "status", "$(stage)_$(tele)_$(mjd).txt")
 
 function refit_write_status(outroot, stage, tele, mjd, status::AbstractString, reason = "")
@@ -164,9 +165,9 @@ function refit_neighbour_cavity(outroot, tele, mjd, window)
 end
 
 function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::RefitConfig,
-        allow_arcwin::Bool = false, almanac_file::AbstractString = "")
+        allow_arcwin::Bool = false, almanac_file::AbstractString = "", force_pair = nothing, keep = nothing)
     out = refit_path(outroot, "comb", tele, mjd)
-    isfile(out) && return "done"
+    (isfile(out) && force_pair === nothing) && return "done"
     mkpath(dirname(out))
     mdir = joinpath(apred_dir, string(mjd))
     NA = refit_night_ave(wavecal_dir, tele, mjd)
@@ -192,7 +193,8 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     # science exposures (object exposures with a pass-1 per-exposure solution = measured position)
     # science exposures: object-exposure times; their pass-1 per-exposure solutions (a later-stage
     # product) only feed the optional same-position input (cfg.anchor_samepos)
-    scis = [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
+    scis = cfg.anchor_block == "verified_pair" ? NamedTuple[] :
+           [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
     arcf = refit_path(outroot, "arc", tele, mjd)
     reason = ""
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
@@ -218,8 +220,10 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
             anchor_pairing = cfg.anchor_pairing, adjacency, lamp_off_px = lampoff,
             anchor_max_candidates = cfg.anchor_max_candidates, anchor_pattern_tol_px = cfg.anchor_pattern_tol_px,
             anchor_lamp_tol_px = cfg.anchor_lamp_tol_px, anchor_adjacency = cfg.anchor_adjacency,
-            anchor_block_h = cfg.anchor_block_h)
+            anchor_block_h = cfg.anchor_block_h, force = force_pair)
         if Q.ok
+            keep === nothing || (Q = merge(Q, keep))
+            ispath(out) && rm(out)        # a forced refit replaces the product (or a symlink to a reused one)
             write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = prov)
             return refit_write_status(outroot, "comb", tele, mjd, "ok_arc")
         end
@@ -241,6 +245,97 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     prov["arcwin_reason"] = reason
     write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = isfile(arcf) ? arcf : "", provenance = prov)
     return refit_write_status(outroot, "comb", tele, mjd, "ok_arcwin", reason)
+end
+
+# ------------------------------------------------------------------------------------------
+# stage B2 (phase 2): cross-night continuity of a verified_pair anchor
+# ------------------------------------------------------------------------------------------
+"""Fixed-mode velocities of the strict candidates of a stored verified_pair comb (empty otherwise)."""
+function refit_strict_vmodes(fn)
+    C = try
+        load_refit_comb(fn)
+    catch
+        return Float64[]
+    end
+    startswith(C.anchor_kind, "verified_pair") || return Float64[]
+    return [v for (v, c) in zip(C.vp_vmode_ms, C.vp_class) if c == "strict" && isfinite(v)]
+end
+
+"""
+    refit_night_anchorcheck(tele, mjd; apred_dir, wavecal_dir, outroot, cfg, almanac_file)
+
+Phase-2 continuity step of `anchor_block = "verified_pair"`: the fixed-mode comb velocity of the
+night's chosen pair against the median over neighbouring nights (same telescope, within
+`anchor_trend_nights`; both sides, or earlier nights only for `anchor_trend = "trailing"`) of each
+night's median strict-candidate velocity (needs `anchor_trend_min_nights`). Off by more than
+`anchor_trend_ms`: the night's other candidate closest to the trend replaces the anchor if it is
+within `anchor_trend_ms` (forced comb refit), else the anchor is kept and flagged. Writes
+`anchorcheck/anchorCheck_<tele>_<mjd>.h5` (trend, delta, decision, outlier flag) and a status.
+Neighbour values come from the phase-1 candidate table (`vp_vmode_ms`), which a swap does not change,
+so the result does not depend on the order in which workers process nights.
+"""
+function refit_night_anchorcheck(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::RefitConfig, almanac_file = "")
+    out = refit_path(outroot, "anchorcheck", tele, mjd)
+    isfile(out) && return "done"
+    combf = refit_path(outroot, "comb", tele, mjd)
+    (cfg.anchor_block == "verified_pair" && cfg.anchor_trend != "off") ||
+        return refit_write_status(outroot, "anchorcheck", tele, mjd, "off")
+    isfile(combf) || return refit_write_status(outroot, "anchorcheck", tele, mjd, "nocomb")
+    C = load_refit_comb(combf)
+    (startswith(C.anchor_kind, "verified_pair") && !isempty(C.vp_vmode_ms) && C.anchor_rank >= 1) ||
+        return refit_write_status(outroot, "anchorcheck", tele, mjd, "notapplicable", C.anchor_kind)
+    d = joinpath(outroot, "comb")
+    rx = Regex("^waveCalFPIArc_$(tele)_(\\d+)\\.h5\$")
+    W = cfg.anchor_trend_nights
+    vals = Float64[]
+    for fn in readdir(d)
+        m = match(rx, fn); m === nothing && continue
+        mj = parse(Int, m.captures[1])
+        (mj == mjd || abs(mj - mjd) > W) && continue
+        (cfg.anchor_trend == "trailing" && mj > mjd) && continue
+        v = refit_strict_vmodes(joinpath(d, fn))
+        isempty(v) || push!(vals, median(v))
+    end
+    v0 = C.vp_vmode_ms[C.anchor_rank]
+    trend = length(vals) >= cfg.anchor_trend_min_nights ? median(vals) : NaN
+    delta = v0 - trend
+    decision = "ok"
+    newrank = C.anchor_rank
+    if !isfinite(trend)
+        decision = "unchecked"
+    elseif abs(delta) > cfg.anchor_trend_ms
+        alt = [i for i in eachindex(C.vp_vmode_ms) if i != C.anchor_rank && isfinite(C.vp_vmode_ms[i]) &&
+               abs(C.vp_vmode_ms[i] - trend) <= cfg.anchor_trend_ms]
+        if isempty(alt)
+            decision = "outlier"
+        else
+            i = alt[argmin(abs.(C.vp_vmode_ms[alt] .- trend))]
+            keep = h5open(combf, "r") do f
+                (; vp_seq = Int.(read(f["vp_seq"])), vp_fpi = String.(read(f["vp_fpi"])),
+                    vp_class = String.(read(f["vp_class"])), vp_b_px = Float64.(read(f["vp_b_px"])),
+                    vp_a_ms = Float64.(read(f["vp_a_ms"])), vp_lamp_px = Float64.(read(f["vp_lamp_px"])),
+                    vp_verified = Bool.(read(f["vp_verified"])), vp_L = Float64.(read(f["vp_L"])),
+                    vp_eps = Float64.(read(f["vp_eps"])), vp_vmode_ms = Float64.(read(f["vp_vmode_ms"])),
+                    anchor_rank = i, anchor_kind = "verified_pair:" * C.vp_class[i] * ":trend_swap",
+                    anchor_bits = WAVE_ANCHOR_FALLBACK | (C.vp_class[i] == "strict" ? 0 : WAVE_ANCHOR_NOT_PREFERRED) |
+                                  (Bool(read(f["vp_verified"])[i]) ? 0 : WAVE_ANCHOR_UNVERIFIED))
+            end
+            st = refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg, allow_arcwin = false, almanac_file,
+                force_pair = (C.vp_seq[i], C.vp_fpi[i]), keep)
+            decision = st == "ok_arc" ? "swap" : "outlier"
+            st == "ok_arc" && (newrank = i)
+        end
+    end
+    mkpath(dirname(out))
+    tmp = out * ".tmp$(getpid())"
+    safe_jldsave(tmp, Dict{String, Any}("product" => "anchorCheck", "tele" => String(tele), "mjd" => Int(mjd),
+            "mode" => cfg.anchor_trend, "window_nights" => W, "threshold_ms" => cfg.anchor_trend_ms);
+        trend_ms = trend, n_trend_nights = length(vals), vmode_ms = v0, delta_ms = delta, decision = decision,
+        rank_before = C.anchor_rank, rank_after = newrank,
+        vmode_after_ms = C.vp_vmode_ms[newrank], delta_after_ms = C.vp_vmode_ms[newrank] - trend,
+        outlier = decision == "outlier")
+    mv(tmp, out; force = true)
+    return refit_write_status(outroot, "anchorcheck", tele, mjd, decision, "delta $(round(delta, digits = 1)) m/s")
 end
 
 # ------------------------------------------------------------------------------------------
@@ -364,6 +459,8 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         C.n_slip > 0 && (combbits |= WAVE_COMB_MODE_SLIP)
         C.inconsistent && (combbits |= WAVE_COMB_ARC_INCONSISTENT)
         combbits |= C.anchor_bits
+        acf = refit_path(outroot, "anchorcheck", tele, mjd)
+        isfile(acf) && h5open(f -> Bool(read(f["outlier"])), acf, "r") && (combbits |= WAVE_ANCHOR_TREND_OUTLIER)
         C.anchor == COMB_ANCHOR_ARC && (combbits |= arcbits)   # an arcwin comb carries no arc flags
     end
     # reference position cluster of the arcs (most used sequences; ties -> the reference sequence's)
