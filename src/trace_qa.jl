@@ -119,8 +119,11 @@ whole-slit identification of the light (`trace_identify_slit`). A labelling erro
 whole blocks of fibers by a spacing.
 """
 const TRACE_GATE_ID_MATCH_MIN = 0.98
-"Soft criterion: fraction of chip pixels flagged fully saturated."
-const TRACE_GATE_SAT_FRAC_MAX = 0.01
+"""
+Soft criterion: fraction of chip pixels flagged fully saturated. LCO R carries ~0.018 on every
+flat (chronic defects); the saturated APO 57969 exposure 9 has 0.23-0.24 on G/B.
+"""
+const TRACE_GATE_SAT_FRAC_MAX = 0.05
 
 "Minimum alias margin (cost of the best alias over the best solution) to accept a labelling."
 const TRACE_ID_MARGIN_MIN = 1.5

@@ -9,6 +9,7 @@ using FITSIO: FITS
     include("wavecal.jl")
     include("fpi_gate.jl")
     include("fpi_homogeneity.jl")
+    include("trace_qa.jl")
     include("safe_jldsave.jl")
     include("lsf.jl")
     include("readonly_opens.jl")
