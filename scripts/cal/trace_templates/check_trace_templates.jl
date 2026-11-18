@@ -120,7 +120,7 @@ println("flagged held-out flats (> $(parg["max_dc_flag"]) px) and residual outli
 
 if parg["reference"] != ""
     ref = load_trace_template_cal(parg["reference"])
-    cmp = DataFrame()
+    cmptab = DataFrame()
     for (key, t) in cal.templates
         r0 = get(ref.templates, key, nothing)
         isnothing(r0) && continue
@@ -128,9 +128,9 @@ if parg["reference"] != ""
         l = t.lit .& r0.lit
         d = t.center[:, l] .- r0.center[:, l]
         d = d .- median(d, dims = 2)
-        push!(cmp, (tele = key[1], chip = key[2], epoch = key[3], same_fingerprint = t.fingerprint == r0.fingerprint,
+        push!(cmptab, (tele = key[1], chip = key[2], epoch = key[3], same_fingerprint = t.fingerprint == r0.fingerprint,
             rms_px = sqrt(mean(d .^ 2)), max_px = maximum(abs.(d))))
     end
-    CSV.write(joinpath(parg["outdir"], "qa_vs_reference.csv"), cmp)
-    println("vs reference $(ref.calibration_version): $(nrow(cmp)) common units; max rms $(round(maximum(cmp.rms_px; init = 0.0), digits = 4)) px")
+    CSV.write(joinpath(parg["outdir"], "qa_vs_reference.csv"), cmptab)
+    println("vs reference $(ref.calibration_version): $(nrow(cmptab)) common units; max rms $(round(maximum(cmptab.rms_px; init = 0.0), digits = 4)) px")
 end
