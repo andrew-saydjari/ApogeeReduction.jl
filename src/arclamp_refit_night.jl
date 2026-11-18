@@ -494,6 +494,16 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
                     S[q, c] = _arc_nanmedian([theta[q, c, k] - thA[q, c] for k in kk])
                 end
             end
+            # a chip whose step is unmeasured takes the other chips' step in pixels (a dither step is a
+            # detector-wide shift); stretch / tilt steps default to 0
+            vpx = tele == "apo" ? (4231.0, 5253.0, 6328.0) : (4256.0, 5281.0, 6359.0)
+            pxs = [S[1, c] / vpx[c] for c in 1:3 if isfinite(S[1, c])]
+            for c in 1:3
+                isfinite(S[1, c]) || (S[1, c] = isempty(pxs) ? 0.0 : median(pxs) * vpx[c])
+                for q in 2:3
+                    isfinite(S[q, c]) || (S[q, c] = 0.0)
+                end
+            end
             steps[cl] = S
         end
     end
@@ -534,8 +544,9 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
                 S = steps[clus[k]]
                 for c in 1:3, q in 1:3
                     dep = theta[q, c, k] - thA[q, c]
-                    isfinite(dep) || continue
-                    T[q, c] = cfg.prefps_time == "sky" ? dep : S[q, c] + wreg * (dep - S[q, c])
+                    # a chip without a usable sky term (< 3 lines) still gets its cluster's step
+                    T[q, c] = !isfinite(dep) ? S[q, c] :
+                              cfg.prefps_time == "sky" ? dep : S[q, c] + wreg * (dep - S[q, c])
                 end
                 anchor_night && (bits[k] |= WAVE_SKY_ANCHOR_NIGHT)
                 d0 = [theta[1, c, k] - thA[1, c] - S[1, c] for c in 1:3]
