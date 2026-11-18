@@ -641,7 +641,9 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             (isfinite(xres[k]) && abs(xres[k]) > cfg.xcheck_threshold_ms) && (bits[k] |= WAVE_LEVEL_INCONSISTENT)
         end
         G === nothing && continue
-        if route[k] != :pass1 && (nfill > 0 || (route[k] == :arc && tp_missing > 0))
+        # filled arc fibers matter only where the arc model is evaluated (arc route); on the FPI route
+        # the arc only seeds the comb (seed fibers are filled anyway, refit_arc_lin_nl)
+        if route[k] == :arc && (nfill > 0 || tp_missing > 0)
             bits[k] |= WAVE_FIBER_FILLED
         end
         # the in-order caller writes the per-exposure product here and may add bits (e.g. a final

@@ -313,7 +313,20 @@ function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::
         s_asm = refit_night_assemble(tele, mjd; apred_dir, outroot, cfg, ll, exps, inorder = true,
             on_grid = writer, fiber_fill, fpi_gated_off_in = gated, extra_bits = extra)
         combf = refit_path(outroot, "comb", tele, mjd)
-        isfile(combf) || break                     # no comb: nothing to re-anchor
+        if !isfile(combf)
+            # no comb on the first attempt: nothing to re-anchor. On a re-anchor: the candidates ran out
+            # before the cap -> back to the best tried candidate, flagged WAVE_ANCHOR_CHECK_FAILED
+            (attempt == 0 || final_fail || isempty(tried)) && break
+            push!(checklog, "attempt=$(attempt)\tno further anchor candidate ($(cst)); back to the best tried one")
+            best_j = tried[argmin(last.(tried))][1]
+            exclude = [jj for (jj, _) in tried if jj != best_j]
+            attempt = max_reanchor + 1
+            for st in ("comb", "fpifib", "assemble")
+                rm(refit_path(outroot, st, tele, mjd); force = true)
+                rm(refit_status_path(outroot, st, tele, mjd); force = true)
+            end
+            continue
+        end
         aseq = h5open(f -> Int(read(f["anchor_seq"])), combf, "r")
         j = something(findfirst(==(aseq), A.used), 0)
         chk = arcfirst_check_night(outroot, tele, mjd; sky_check_ms)

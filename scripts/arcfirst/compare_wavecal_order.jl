@@ -21,7 +21,7 @@ const AR = ApogeeReduction
 s = ArgParseSettings()
 @add_arg_table! s begin
     "--mode"; arg_type = String; required = true
-    "--inputs"; arg_type = String; required = true
+    "--inputs"; arg_type = String; default = ""
     "--outroot"; arg_type = String; required = true
     "--nights"; arg_type = String; required = true
     "--refit_root"; arg_type = String; default = ""
