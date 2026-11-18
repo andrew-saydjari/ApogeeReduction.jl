@@ -141,7 +141,7 @@ end
         @test posout == [false, false, false, false, true]
         @test ncl == 2
         @test cl[1] == cl[3] && cl[2] == cl[4] && cl[1] != cl[2]
-        st(r, k, sh, co = 0.0; n = 20000) = (n_rows = n, n_keep = round(Int, k * n), keep_frac = k,
+        st(r, k, sh, co = 0.0; n = 20000) = (n_rows = n, n_keep = isfinite(k) ? round(Int, k * n) : 0, keep_frac = k,
             rsig_px = r, shape_px = sh, chipoff_px = co, chip_zp_px = zeros(3),
             chip_stretch_px = zeros(3))
         good = [st(0.050, 0.997, 0.002), st(0.051, 0.996, 0.003), st(0.052, 0.997, 0.002)]
