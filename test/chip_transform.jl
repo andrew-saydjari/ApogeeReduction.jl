@@ -30,6 +30,9 @@ end
             cal = ApogeeReduction.load_chip_transform_cal(p)
             @test cal.calibration_version == "test_v1"
             @test cal.path == p
+            cal2 = ApogeeReduction.ChipTransformCal(cal.path, cal.calibration_version, cal.fingerprint, cal.provenance,
+                Dict("apo" => cal.blocks["apo"], "lco" => cal.blocks["apo"][2:2]))   # two telescopes: show sorts the blocks
+            @test occursin("apo: 2 block(s), lco: 1 block(s)", string(cal2))
             @test cal.provenance["code_commit"] == "abc123"
             @test cal.provenance["input_root"] == "/some/root"
             @test length(cal.blocks["apo"]) == 2
