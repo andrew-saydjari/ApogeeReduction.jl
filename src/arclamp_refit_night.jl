@@ -209,7 +209,8 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
         anchor_pairing = cfg.anchor_pairing, adjacency, lamp_off_px = lampoff,
         anchor_max_candidates = cfg.anchor_max_candidates, anchor_pattern_tol_px = cfg.anchor_pattern_tol_px,
         anchor_lamp_tol_px = cfg.anchor_lamp_tol_px, anchor_adjacency = cfg.anchor_adjacency,
-        anchor_block_h = cfg.anchor_block_h, exclude_seqs, force = force_pair)
+        anchor_block_h = cfg.anchor_block_h, exclude_seqs, force = force_pair,
+        seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"])) : nothing, arcf, "r"))
     Q.ok || return nothing, "arc_unmatched: " * Q.reason
     keep === nothing || (Q = merge(Q, keep))
     ispath(out) && rm(out)        # a forced refit replaces the product (or a symlink to a reused one)
@@ -607,7 +608,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         (sky !== nothing && isempty(sky.pix)) && (sky = nothing)
         hassky[k] = sky !== nothing
         # (1) FPI fibers on a comb night
-        if C !== nothing && FP !== nothing
+        if C !== nothing && FP !== nothing && cfg.fps_route == "fpifib"
             kk = findfirst(==(e), FP.exp)
             if kk !== nothing
                 P = (; a = FP.a[:, :, kk], b = FP.b[:, :, kk], ea = FP.ea[:, :, kk], eb = FP.eb[:, :, kk],
@@ -693,6 +694,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
     end
     # ---------------- anchors (arc-anchored; never an absolute sky level) and cluster steps
     anchor_night = false
+    tie_replaced = false
     thA = fill(NaN, 3, 3)                 # arc route anchor: reference-cluster exposures near arcs
     steps = Dict{Int, Matrix{Float64}}()  # cluster -> step (3 x 3) from the sky
     arck = [k for k in 1:nE if route[k] == :arc && hassky[k] && any(isfinite, view(theta, :, :, k))]
@@ -705,6 +707,16 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         end
         for c in 1:3, q in 1:3
             thA[q, c] = _arc_nanmedian([theta[q, c, k] for k in near])
+        end
+        # plate-era arc-sky tie check: the zero point of the tie (sky - arc model at the reference
+        # exposures) is the arc-sky line-ensemble offset, stable to ~30-40 m/s per chip; a tie far from it
+        # means the arcs and the science exposures they are tied to were not at the same position
+        if era == "plate" && cfg.plate_tie_check == "replace" && haskey(REFIT_PLATE_TIE_REF, String(tele))
+            ref = REFIT_PLATE_TIE_REF[String(tele)]
+            if isfinite(thA[1, 2]) && abs(thA[1, 2] - ref[2]) > cfg.plate_tie_ms
+                thA[1, :] .= ref
+                tie_replaced = true
+            end
         end
         for cl in unique(clus[arck])
             S = zeros(3, 3)
@@ -771,6 +783,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
                               cfg.prefps_time == "sky" ? dep : S[q, c] + wreg * (dep - S[q, c])
                 end
                 anchor_night && (bits[k] |= WAVE_SKY_ANCHOR_NIGHT)
+                tie_replaced && (bits[k] |= WAVE_ARC_SKY_TIE_REPLACED)
                 d0 = [theta[1, c, k] - thA[1, c] - S[1, c] for c in 1:3]
                 xres_chip[:, k] .= Float32.(d0)
             elseif route[k] == :fpifib
@@ -840,7 +853,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         "chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "neon_offset_fingerprint" => refit_fingerprint(cfg.neon_offset_file),
         "arc_reference_cluster" => refcl, "reg_weight" => wreg,
-        "sky_anchor_night" => anchor_night, "bit_names" => join(WAVE_BIT_NAMES, ","),
+        "sky_anchor_night" => anchor_night, "arc_sky_tie_replaced" => tie_replaced, "bit_names" => join(WAVE_BIT_NAMES, ","),
         "inorder" => inorder, "fiber_fill" => String(fiber_fill), "n_arc_fibers_filled" => nfill,
         # where each scale enters (ARCFPI_VALIDATION scales list)
         "scale_arc_chip" => A === nothing ? "none" : A.chip_scale_source,

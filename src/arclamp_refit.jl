@@ -48,9 +48,9 @@ const WAVE_ABS_ARC_WINDOW = 1 << 5
 const WAVE_REL_ARC_TIME = 1 << 6
 const WAVE_REL_ARC_NEAREST = 1 << 7
 const WAVE_FPIFIB_UNAVAILABLE = 1 << 8
-const WAVE_ARC_SEQ_GATED = 1 << 9
-const WAVE_ARC_ALL_GATED = 1 << 10
-const WAVE_ARC_UNGATED = 1 << 11
+const WAVE_ARC_SEQ_GATED = 1 << 9       # an arc sequence was rejected (#417 arc-only rejection)
+const WAVE_ARC_ALL_GATED = 1 << 10      # final-fit sequences fail the absolute ceilings (ARCNIGHT_ABS_FAIL)
+const WAVE_ARC_UNGATED = 1 << 11        # too few sequences to compare: rejection not possible (ARCNIGHT_FEW_SEQ)
 const WAVE_ARC_MULTIPOS = 1 << 12
 const WAVE_COMB_MODE_SLIP = 1 << 13
 const WAVE_LEVEL_INCONSISTENT = 1 << 14
@@ -88,6 +88,13 @@ const WAVE_REANCHORED = 1 << 33            # arc_first: the end-of-night check r
                                            # the comb was re-anchored on the next candidate (conditional 2nd pass)
 const WAVE_ANCHOR_CHECK_FAILED = 1 << 34   # arc_first: no candidate passed the end-of-night check (cap reached);
                                            # the candidate with the smallest check metric is kept
+const WAVE_ARC_SKY_TIE_REPLACED = 1 << 31  # plate era: the night's arc-sky tie was > plate_tie_ms from the telescope's
+                                           # arc-sky ensemble offset (arcs not at the science position); replaced by it
+
+"""Plate-era arc - sky tie reference (pooled sky - arc model zero point, R/G/B m/s) per telescope: the median
+over run1's plate nights (2026-11-18, `anchor_verified/thA_dist.jl`, robust sigma 29-39 m/s per chip).
+Rebuild from any run with that script."""
+const REFIT_PLATE_TIE_REF = Dict("apo" => [-6.0, 156.0, -10.0], "lco" => [10.0, 58.0, 77.0])
 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
@@ -98,7 +105,7 @@ const WAVE_BIT_NAMES = [
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
     "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_FALLBACK", "WAVE_ANCHOR_NOT_SAME_BLOCK",
     "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_ANCHOR_TREND_OUTLIER",
-    "WAVE_FIBER_FILLED", "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED"]
+    "WAVE_FIBER_FILLED", "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED", "WAVE_ARC_SKY_TIE_REPLACED"]
 
 """Era of a telescope-night, keyed ONLY on the canonical plate/FPS MJD boundary
 (`get_fps_plate_divide`: FPS is mjd > divide), never on whether FPI light exists that night."""
@@ -107,9 +114,9 @@ refit_era(tele::AbstractString, mjd::Integer) = mjd > get_fps_plate_divide(Strin
 "Night-level arc flags of the stage-1 product mapped onto the per-exposure bits 2^9-2^12, 2^16."
 function refit_arc_night_bits(night_flags::Integer, seq_flags::AbstractVector{<:Integer})
     b = 0
-    # #417 arc-only rejection (gate B removed; bit meanings per #417's mapping): a rejected
-    # sequence -> 2^9; ARCNIGHT_ABS_FAIL (final-fit sequences fail the ceilings, the old ALL_GATED
-    # screen) -> 2^10; ARCNIGHT_FEW_SEQ (< 3 sequences, rejection not possible) -> 2^11
+    # #417 arc-only rejection (gate B removed): a rejected sequence -> 2^9; ARCNIGHT_ABS_FAIL (final-fit
+    # sequences fail the absolute ceilings, the former all-gated screen) -> 2^10; ARCNIGHT_FEW_SEQ
+    # (< min_seq_compare sequences, rejection not possible) -> 2^11
     any(s -> (s & ARCSEQ_REJECTED) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_GATED)
     (night_flags & ARCNIGHT_ABS_FAIL) != 0 && (b |= WAVE_ARC_ALL_GATED)
     (night_flags & ARCNIGHT_FEW_SEQ) != 0 && (b |= WAVE_ARC_UNGATED)
@@ -189,6 +196,16 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     (about 5 robust sigma of strict pairs, 4.1-4.2 m/s): the night's other candidate closest to the
     trend is used if it is within `anchor_trend_ms` (comb refit, kind "...:trend_swap",
     WAVE_ANCHOR_FALLBACK), else the anchor is kept and flagged WAVE_ANCHOR_TREND_OUTLIER.
+  * `fps_route` ("fpifib"): per-exposure position of FPS exposures with FPI fibers: "fpifib" = the night comb
+    transported by the exposure's two FPI fibers; "sky" (experiment switch) = ignore the FPI fibers and use the
+    arc route (arc time model + pooled-sky per-exposure terms per `prefps_time`), i.e. position from the sky.
+  * `plate_tie_check` ("replace"), `plate_tie_ms` (300): plate era. The arc - sky tie (pooled sky - arc model
+    at the reference exposures near the arcs; chip G) is the arc-sky line-ensemble offset when arcs and science
+    sit at the same position: run1 APO median +156 m/s, robust sigma 34. A tie more than `plate_tie_ms` from the
+    telescope's reference (`REFIT_PLATE_TIE_REF`) means the arcs were not where the science was (dither mechanism
+    landed differently); the reference replaces it (WAVE_ARC_SKY_TIE_REPLACED, 2^31). run1: |tie - median| > 300
+    on 49 APO plate nights, 48 of the 51 tail nights (|night shift| > 250 m/s) and none of the normal ones;
+    removing the tie term takes the APO plate night-shift rms from 134 to 33 m/s. "off" = run1 behaviour.
   * `anchor_samepos` ("pass1"): source of the "same measured position as the science" input:
     "pass1" = the science exposures' pass-1 per-exposure solutions (`refit_anchor_samepos`; a
     later-stage product, fine for a refit of an existing run, NOT available in an in-order
@@ -264,6 +281,9 @@ Base.@kwdef struct RefitConfig
     anchor_trend_nights::Int = 10
     anchor_trend_ms::Float64 = 20.0
     anchor_trend_min_nights::Int = 4
+    fps_route::String = "fpifib"
+    plate_tie_check::String = "replace"
+    plate_tie_ms::Float64 = 300.0
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 15
@@ -280,7 +300,8 @@ const REFIT_SWITCH_VALUES = Dict(
     :plate_shape => ("arc", "template"),
     :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
     :anchor_block => ("nearest_science", "morning", "any", "verified_pair"),
-    :anchor_adjacency => ("strict_then_nomove", "strict"), :anchor_trend => ("both", "trailing", "off"), :anchor_prefer => ("strict", "none"),
+    :anchor_adjacency => ("strict_then_nomove", "strict"), :anchor_trend => ("both", "trailing", "off"),
+    :fps_route => ("fpifib", "sky"), :plate_tie_check => ("replace", "off"), :anchor_prefer => ("strict", "none"),
     :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
@@ -312,6 +333,7 @@ const REFIT_SWITCH_STAGES = Dict(
     "anchor_pattern_tol_px" => "comb,fpifib,assemble", "anchor_lamp_tol_px" => "comb,fpifib,assemble",
     "anchor_trend" => "anchorcheck,fpifib,assemble", "anchor_trend_nights" => "anchorcheck,fpifib,assemble",
     "anchor_trend_ms" => "anchorcheck,fpifib,assemble", "anchor_trend_min_nights" => "anchorcheck,fpifib,assemble",
+    "fps_route" => "assemble", "plate_tie_check" => "assemble", "plate_tie_ms" => "assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
@@ -321,6 +343,14 @@ const REFIT_SWITCH_STAGES = Dict(
     "shape_template_file" => "assemble", "shape_template_block" => "assemble",
     "sky_anchor_window_h" => "assemble", "xcheck_threshold_ms" => "assemble",
     "coeff_degree" => "assemble")
+
+"""Value of each switch added after the first archive run that reproduces the behaviour before it existed
+(used by `--reuse_from` when the base run's config.txt lacks the switch; a switch not listed here, or set to
+another value, invalidates its stages)."""
+const REFIT_SWITCH_LEGACY = Dict("anchor_prefer" => "strict", "anchor_samepos" => "pass1",
+    "anchor_adjacency" => "strict_then_nomove", "anchor_max_candidates" => "3", "anchor_pattern_tol_px" => "0.02",
+    "anchor_lamp_tol_px" => "0.1", "anchor_trend" => "both", "anchor_trend_nights" => "10", "anchor_trend_ms" => "20.0",
+    "anchor_trend_min_nights" => "4", "fps_route" => "fpifib", "plate_tie_check" => "off", "plate_tie_ms" => "300.0")
 
 "FNV-1a fingerprint of a file, or \"none\" for an empty path / missing file."
 refit_fingerprint(path::AbstractString) =
@@ -689,16 +719,18 @@ end
 # ---- SEQUENCE-QUALITY ADAPTER ---------------------------------------------------------------
 # The only places that interpret the stage-1 per-sequence / per-night arc flags (ARCSEQ_*,
 # ARCNIGHT_*): `refit_anchor_quality`, `refit_seq_gated` (here) and `refit_arc_night_bits` (top of
-# the file). When #417 replaces gate B (new flag meanings / bit positions) only these change.
-"Sequence verified by the stage-1 sequence check (used by the \"morning\" anchor rule)."
-refit_seq_gated(sf::Integer) = (sf & ARCSEQ_NOT_COMPARED) == 0
+# the file).
+"""Sequence verified by the stage-1 arc-only check (#417) for the legacy anchor rules' "verified"
+input: clean, i.e. anchor quality tier 0 (not rejected, not a position outlier, compared, enough
+lines, lamps agree, within the absolute ceilings)."""
+refit_seq_gated(sf::Integer) = refit_anchor_quality(sf) == 0
 
-"""Quality tier of an arc sequence for anchoring, from its stage-1 flags: 0 = verified by the 0.02 px
-gate and clean; 1 = not gate-verified (ungated) or few lines / lamp mismatch; 2 = gate failure or
-position outlier (only in the final fit when every gated sequence failed)."""
+"""Quality tier of an arc sequence for anchoring, from its stage-1 flags (#417 arc-only rejection):
+0 = clean; 1 = few lines / lamp mismatch / not compared (night too small to judge) / absolute ceiling;
+2 = rejected (ARCSEQ_REJECTED) or position outlier (never an anchor candidate of verified_pair)."""
 function refit_anchor_quality(sf::Integer)
     (sf & (ARCSEQ_REJECTED | ARCSEQ_POS_OUTLIER)) != 0 && return 2
-    (sf & (ARCSEQ_NOT_COMPARED | ARCSEQ_ABS_FAIL | ARCSEQ_FEW_LINES | ARCSEQ_LAMP_MISMATCH)) != 0 && return 1
+    (sf & (ARCSEQ_FEW_LINES | ARCSEQ_LAMP_MISMATCH | ARCSEQ_NOT_COMPARED | ARCSEQ_ABS_FAIL)) != 0 && return 1
     return 0
 end
 
@@ -820,7 +852,7 @@ end
 Pick the arc sequence that anchors the comb and the comb exposure it is paired with.
 `combs`: per comb exposure (order of the FPI file list) a NamedTuple (ref::ArcObjRef or nothing,
 t); `scis`: the same for the night's science (object) exposures with a pass-1 per-exposure
-solution (`arclamp_object_refs`). Positions are always MEASURED: a pair is allowed only if the arc
+solution (`refit_object_refs_pass1`). Positions are always MEASURED: a pair is allowed only if the arc
 sequence's own state matches the comb exposure's measured solution within `pos_match_px`, and
 "same position as the science" compares the arc state with the science exposure's measured
 solution (never the recorded dither).
@@ -1002,11 +1034,12 @@ function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A
         anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2,
         exclude_seqs = Int[],
         adjacency = nothing, lamp_off_px = nothing, anchor_max_candidates = 3, anchor_pattern_tol_px = 0.02,
-        anchor_lamp_tol_px = 0.1, anchor_adjacency = "strict_then_nomove", force = nothing)
+        anchor_lamp_tol_px = 0.1, anchor_adjacency = "strict_then_nomove", force = nothing, seq_score = nothing)
     if anchor_block == "verified_pair" && adjacency !== nothing
         Q = refit_verified_pair_comb(fpi_fnames, A, tele; adjacency, lamp_off_px, pass1_comb, comb_arc_qa_ms,
             anchor_max_candidates, anchor_pattern_tol_px, anchor_lamp_tol_px, anchor_adjacency, n_sigma, max_iter,
-            exclude_seqs, force)
+            exclude_seqs, force, seq_flags = [seq_flags[s] for s in A.used],
+            seq_score = seq_score === nothing ? nothing : seq_score[A.used])
         Q === nothing || return Q
         force === nothing || return (; ok = false, reason = "forced pair $(force) not refittable")
         # no sequence-adjacent pair at all: the "any" rule, flagged
@@ -1070,12 +1103,17 @@ no adjacent pair. The chosen fit carries `anchor_kind` ("verified_pair:strict|no
 """
 function refit_verified_pair_comb(fpi_fnames, A::RefitArc, tele; adjacency, lamp_off_px, pass1_comb = nothing,
         comb_arc_qa_ms = 150.0, anchor_max_candidates = 3, anchor_pattern_tol_px = 0.02, anchor_lamp_tol_px = 0.1,
-        anchor_adjacency = "strict_then_nomove", n_sigma = 4, max_iter = 2, exclude_seqs = Int[], force = nothing)
+        anchor_adjacency = "strict_then_nomove", n_sigma = 4, max_iter = 2, exclude_seqs = Int[], force = nothing,
+        seq_flags = nothing, seq_score = nothing)
     nU, nC = size(adjacency)
     cls_ok = anchor_adjacency == "strict" ? ("strict",) : ("strict", "nomove")
-    # `exclude_seqs`: arc sequences rejected by the in-order chain's end-of-night check (re-anchoring)
-    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in 1:nU for k in 1:nC
-            if adjacency[j, k] == c && !(j in exclude_seqs)]
+    # candidates: never a rejected sequence or a position outlier, nor one rejected by the in-order chain's
+    # end-of-night check (`exclude_seqs`, re-anchoring); within a class, cleaner sequences first
+    # (#417 seq_reject_score, < 1 passes, lower is cleaner)
+    sf = seq_flags === nothing ? zeros(Int, nU) : seq_flags
+    sc = seq_score === nothing ? zeros(nU) : [isfinite(x) ? x : Inf for x in seq_score]
+    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in sortperm(sc) for k in 1:nC
+            if adjacency[j, k] == c && refit_anchor_quality(sf[j]) < 2 && !(j in exclude_seqs)]
     isempty(cand) && return nothing
     cand = cand[1:min(end, anchor_max_candidates)]
     # force = (stage-1 sequence index, FPI file basename): refit only that pair (continuity swap)
