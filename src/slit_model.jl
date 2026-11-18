@@ -248,18 +248,31 @@ end
         srange = 0.004, alias_sep = 4.0)
 
 Register template centers `T` (one band, all fibers) to profile `p`: coarse grid in the shift
-`d` over `dcenter ± dmax` at scale `scenter`, then three local grids in (d, s). Returns
+`d` over `dcenter ± dmax` at the scales `scenter .+ scoarse`, then three local grids in (d, s). Returns
 `(d, s, chi2, margin)`, where `margin` is the lowest chi^2 of the coarse grid at least
 `alias_sep` px from the solution, over the best chi^2.
 """
 function slit_register_band(P::SlitProfile, p, e, T, W; dmax = TRACE_TEMPLATE_DMAX, dstep = 0.25,
-        dcenter = 0.0, scenter = 0.0, srange = 0.004, alias_sep = 4.0, fibs = 1:length(T))
+        dcenter = 0.0, scenter = 0.0, srange = 0.004, alias_sep = 4.0, fibs = 1:length(T),
+        scoarse = (0.0,))
     wt = _band_weights(e)
     cost(d, s) = first(slit_heights_chi2(P, p, wt, T .+ d .+ s .* (T .- 1024), W; fibs = fibs))
     ds = collect((dcenter - dmax):dstep:(dcenter + dmax))
-    chis = [cost(d, scenter) for d in ds]
+    # coarse grid over d at each scale of `scoarse` (offsets from scenter): a slit whose scale
+    # differs from the template's by a few 1e-3 is off by px at the slit ends, which can make a
+    # wrong alias win a grid run at a single scale (LCO 57802, commissioning)
+    sgrid = [scenter + o for o in scoarse if abs(o) <= srange + 1e-12]
+    chis = fill(Inf, length(ds))
+    sbest = fill(scenter, length(ds))
+    for sv in sgrid, (i, d) in enumerate(ds)
+        c = cost(d, sv)
+        if c < chis[i]
+            chis[i] = c
+            sbest[i] = sv
+        end
+    end
     k = argmin(chis)
-    c0, d0, s0 = chis[k], ds[k], scenter
+    c0, d0, s0 = chis[k], ds[k], sbest[k]
     for (dd, ss, ns) in ((0.1, 0.001, 4), (0.02, 0.0002, 5), (0.005, 0.00005, 4))
         for s in (s0 - ns * ss):ss:(s0 + ns * ss), d in (d0 - 5dd):dd:(d0 + 5dd)
             abs(s - scenter) <= srange + 1e-12 || continue
@@ -401,7 +414,8 @@ function register_frame(P::SlitProfile, tmpl, xc, prof, err; mode = :full,
     uc = mean(u[cb])
     dcen = _polyval(r0.d, uc)
     scen = _polyval(r0.s, uc)
-    rc = slit_register_band(P, pc, ec, Tc, Wc; dmax = dmax, dcenter = dcen, scenter = scen)
+    rc = slit_register_band(P, pc, ec, Tc, Wc; dmax = dmax, dcenter = dcen, scenter = scen,
+        scoarse = mode == :full ? (-0.004:0.001:0.004) : (0.0,))
     # 2) labels
     lt = slit_label_test(P, pc, ec, Tc, Wc, tmpl.height_rel; d = rc.d, s = rc.s, kmax = kmax,
         tp_margin = tp_margin)
