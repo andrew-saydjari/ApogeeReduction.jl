@@ -155,6 +155,12 @@ end
         # the same fit seeded at the bare template agrees on a flat this clean
         tpy, _, _ = trace_extract_template(img, iv, t, P; seed = :template)
         @test median(abs.(tpy[:, lit, 2] .- tpx[:, lit, 2])) < 0.01
+        xq = ApogeeReduction.template_free_crosscheck(img, iv, tpx, P, R; lit = info.lit)
+        @test xq["tmpl_xcheck_id_reason"] == "ok" && xq["tmpl_xcheck_label_agree"] == 1.0
+        @test xq["tmpl_xcheck_med_abs_px"] < 0.01 && !xq["tmpl_xcheck_flag"]
+        # a trace one fiber off in labels is flagged
+        bad = copy(tpx); bad[:, 1:299, 2] .= tpx[:, 2:300, 2]
+        @test ApogeeReduction.template_free_crosscheck(img, iv, bad, P, R; lit = info.lit)["tmpl_xcheck_flag"]
         q = template_qa_fields(info; tmpl = t)
         @test q["tmpl_n_fiber_delta"] == 1 && q["tmpl_outcome"] == "ok" && length(q["tmpl_reg"]) == 5
         bits = trace_fiber_bits(tpx, TRACE_LEVEL_OWN_FLAT; fiber_delta = info.delta, provisional = true)

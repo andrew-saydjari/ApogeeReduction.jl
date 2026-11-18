@@ -83,7 +83,7 @@ end
                            trace_lamp_metrics, flat_trace_qa, write_trace_qa, read_trace_qa, trace_qa_path,
                            trace_reference_positions, load_trace_template_cal, trace_template_metadata,
                            template_needs_recompute, trace_template, trace_extract_template,
-                           SlitProfile, template_qa_fields
+                           SlitProfile, template_qa_fields, template_free_crosscheck
 end
 @everywhere TRACE_TEMPLATE_CAL = $(TRACE_TEMPLATE_OFF) ? nothing :
                                  load_trace_template_cal($(parg["trace_template_cal"]))
@@ -244,6 +244,13 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
                     min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv));
                 good_pixels = copy(good_pixels))
             merge!(tqa, template_qa_fields(info; tmpl = tmpl))
+            if !isempty(tp)
+                # template-free cross-check (QA flag only): PR A identification + center-band fit
+                merge!(tqa, template_free_crosscheck(image_data, ivar_image, tp, SlitProfile((med_center_to_fiber_func,
+                        x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)),
+                    trace_reference_positions(teleloc, chiploc; data_path = joinpath(proj_path, "data"));
+                    good_pixels = copy(good_pixels), lit = info.lit))
+            end
             tqa["outcome"] = String(info.outcome)
             tqa["n_unlit"] = count(.!info.lit)
             fiber_delta = info.delta

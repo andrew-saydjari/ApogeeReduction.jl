@@ -714,3 +714,55 @@ function template_qa_fields(info; tmpl = nothing)
     end
     return q
 end
+
+"""
+    template_free_crosscheck(image_data, ivar_image, trace_params, P, refpos; good_pixels,
+        lit, mid, n_center_cols, tol_px = 0.01)
+
+Cross-check of a template-seeded flat fit against the template-free path (TRACE_ROBUST_V2 §7.1):
+PR A's whole-slit identification of the light in the center band (`trace_peak_census` +
+`trace_identify_slit`) and a Gauss-Hermite fit of that band started at the identified positions,
+compared with the template-seeded trace averaged over the same columns. Returns a Dict of QA
+fields: `tmpl_xcheck_id_reason`, `tmpl_xcheck_label_agree` (fraction of lit, identified fibers
+within 0.35 spacings: a label disagreement moves whole fibers by a spacing),
+`tmpl_xcheck_med_abs_px` / `tmpl_xcheck_p90_abs_px` (|template-free - template| over those
+fibers) and `tmpl_xcheck_flag` = labels disagree, or identification refused, or median > `tol_px`
+(0.01 px, the design's tolerance). A QA flag only; it does not gate.
+"""
+function template_free_crosscheck(image_data, ivar_image, trace_params, P::SlitProfile, refpos;
+        good_pixels = trues(size(image_data)), lit = trues(size(trace_params, 2)),
+        mid = min(1025, size(image_data, 1) ÷ 2 + 1), n_center_cols = min(100, size(image_data, 1) ÷ 2 - 1),
+        tol_px = 0.01)
+    q = Dict{String, Any}()
+    good = good_pixels .& (ivar_image .> 0) .& isfinite.(image_data)
+    cf, ce, _ = trace_center_band(image_data, 1 ./ sqrt.(ivar_image), good; mid = mid, n_center_cols = n_center_cols)
+    cf = vec(cf); ce = vec(ce)
+    cen = trace_peak_census(cf, ce)
+    nf = size(trace_params, 2)
+    id = trace_identify_slit(cen.y, refpos; nfib = nf, census_nslots = cen.nslots, census_slots = cen.slots)
+    q["tmpl_xcheck_id_reason"] = id.reason
+    cols = max(1, mid - n_center_cols):min(size(trace_params, 1), mid + n_center_cols)
+    tc = [_medornan(filter(isfinite, view(trace_params, cols, f, 2))) for f in 1:nf]
+    tw = [_medornan(filter(isfinite, view(trace_params, cols, f, 3))) for f in 1:nf]
+    if !id.ok
+        q["tmpl_xcheck_label_agree"] = NaN
+        q["tmpl_xcheck_med_abs_px"] = NaN
+        q["tmpl_xcheck_p90_abs_px"] = NaN
+        q["tmpl_xcheck_flag"] = true
+        return q
+    end
+    start = clamp.(id.positions, 11, length(cf) - 11)
+    _, h, _, _, _ = slit_heights_chi2(P, cf, _band_weights(ce), start, ifelse.(isfinite.(tw), tw, 1.0))
+    np, cv = slit_gh_refine(P, cf, ce, start, ifelse.(isfinite.(tw), tw, 1.0), h; max_center_move = 2,
+        minw = 0.6, maxw = 1.6, n_iter = 10, return_cov = true)
+    use = [lit[f] && id.matched[f] && isfinite(cv[f, 2, 2]) && isfinite(tc[f]) for f in 1:nf]
+    d = np[use, 2] .- tc[use]
+    agree = isempty(d) ? NaN : mean(abs.(d) .< 0.35 * id.spacing)
+    ok = abs.(d) .< 0.35 * id.spacing
+    da = abs.(d[ok])
+    q["tmpl_xcheck_label_agree"] = agree
+    q["tmpl_xcheck_med_abs_px"] = isempty(da) ? NaN : median(da)
+    q["tmpl_xcheck_p90_abs_px"] = isempty(da) ? NaN : quantile(da, 0.9)
+    q["tmpl_xcheck_flag"] = !(agree == 1.0) || !(q["tmpl_xcheck_med_abs_px"] <= tol_px)
+    return q
+end
