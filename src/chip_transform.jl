@@ -77,7 +77,7 @@ chip_transform_id(::Nothing) = "none"
 chip_transform_id(cal::ChipTransformCal) = "$(cal.calibration_version):$(cal.fingerprint)"
 
 function Base.show(io::IO, cal::ChipTransformCal)
-    nb = join(["$(t): $(length(b)) block(s)" for (t, b) in sort(collect(cal.blocks))], ", ")
+    nb = join(["$(t): $(length(b)) block(s)" for (t, b) in sort(collect(cal.blocks); by = first)], ", ")
     print(io, "ChipTransformCal($(cal.calibration_version); $(nb); $(cal.path))")
 end
 
