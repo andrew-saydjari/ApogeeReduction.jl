@@ -277,11 +277,55 @@ function ChipPolyParams2Params(chipPolyParams)
 end
 
 # Sky line wavecal
-#function get_and_save_sky_wavecal(fname; cporder = 1, wporder = 2)
-function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same")
+"""
+    get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same",
+        chip_transform_cal = nothing)
+
+Per-exposure sky-line wavelength solution: per fiber, one `wporder` polynomial in the
+green-chip coordinate shared by the three chips, chips R and B mapped onto it by
+x' = a_c + b_c * x. With `cporder = 0` only the offsets a_c are fitted and b_c = 1.
+
+`chip_transform_cal` (a `ChipTransformCal`, see chip_transform.jl): if given and it has a
+block for this exposure's telescope and MJD, the chip scales b_c are FIXED to the file's
+comb-measured values instead of 1 (the offsets a_c stay free, the number of fitted
+parameters is unchanged). The scales are not fitted and therefore not smoothed across
+fibers; the stored `nlParams` then have the cporder-1 layout (a_R, b_R, a_B, b_B), which
+every downstream consumer already handles. With `chip_transform_cal = nothing` the result is
+identical to before. A calibration without a block for the exposure's telescope and MJD is an
+error, never a silent b = 1.
+
+Checkpointing: the product's metadata records `chip_transform_id` ("none", or
+"<calibration version>:<file fingerprint>"). An existing product is reused only if
+`check_file` accepts it AND it was made with the same chip-transform input (a product without
+the key was made with b = 1, i.e. "none"); otherwise it is recomputed.
+"""
+function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mode = "commit_same",
+        chip_transform_cal = nothing)
     outname = replace(replace(fname, "skyLinePeaks" => "waveCalSkyLine"), "_$(FIRST_CHIP)_" => "_")
-    if check_file(outname, mode = checkpoint_mode)
+    ct_id = chip_transform_id(chip_transform_cal)
+    if check_file(outname, mode = checkpoint_mode) &&
+       string(get(read_metadata(outname), "chip_transform_id", "none")) == ct_id
         return outname
+    end
+
+    # comb-measured chip scales from the calibration file (nothing = b fixed to 1)
+    fixed_chip_scales = nothing
+    metadata = Dict{String, Any}("chip_transform_cal" => "none", "chip_transform_id" => ct_id)
+    if !isnothing(chip_transform_cal)
+        cporder == 0 || throw(ArgumentError(
+            "a fixed chip scale replaces b = 1 of the cporder-0 sky fit; got cporder = $(cporder)"))
+        tele_str, mjd_str = split(basename(fname), "_")[2:3]
+        fixed_chip_scales = chip_scales(chip_transform_cal, tele_str, parse(Int, mjd_str))
+        if isnothing(fixed_chip_scales)
+            throw(ArgumentError("chip-transform calibration $(chip_transform_cal.path) " *
+                "($(chip_transform_cal.calibration_version)) has no block for $(tele_str) MJD $(mjd_str) " *
+                "($(basename(fname))). Rebuild it with a coverage that includes this MJD " *
+                "(build_chip_transform.jl --cover_from/--cover_to) or run with --chip_transform_cal \"\" " *
+                "to fit with chip scale 1 deliberately."))
+        end
+        metadata["chip_transform_cal"] = chip_transform_cal.path
+        metadata["chip_transform_version"] = chip_transform_cal.calibration_version
+        metadata["chip_transform_fingerprint"] = chip_transform_cal.fingerprint
     end
 
     # initial guess for the (low-order)chip polynomial parameters
@@ -338,9 +382,19 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
     if size(sky_line_uxlst, 1) < 1
         return nothing
     end
+    # with a fixed chip scale, fit the cporder-0 model on scaled coordinates b_c * x:
+    # x' = a_c + (b_c * x) is the cporder-1 transform with b_c held fixed
+    fit_uxlst = sky_line_uxlst
+    if !isnothing(fixed_chip_scales)
+        fit_uxlst = similar(sky_line_uxlst)
+        for fibIndx in 1:N_FIBERS
+            fit_uxlst[:, fibIndx] .= scale_chip_x(sky_line_uxlst[:, fibIndx],
+                sky_line_chipInt[:, fibIndx], fixed_chip_scales[fibIndx, :])
+        end
+    end
     linParams, nlParams,
     resid_vec = get_sky_wavecal(
-        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt,
+        fit_uxlst, sky_line_fwlst, sky_line_chipInt,
         chipPolyParams0; cporder = cporder, wporder = wporder)
     resid_xt = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(resid_xt, NaN)
@@ -356,6 +410,16 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
     # do final pass with interp params to
     # get a new constant-term for wave soln
     # (which we do not think should be interpolated)
+
+    # fixed chip scales: only the offsets were fitted (and smoothed above); store the
+    # cporder-1 layout (a_R, b_R, a_B, b_B) so everything below and downstream applies b_c
+    if !isnothing(fixed_chip_scales)
+        nlParams = expand_nlParams_fixed_scale(nlParams, fixed_chip_scales)
+        interp_nlParams = expand_nlParams_fixed_scale(interp_nlParams, fixed_chip_scales)
+        cporder = 1
+        chipPolyParams0 = zeros(Float64, (size(fibInds, 1), N_CHIPS, cporder + 1))
+        chipPolyParams0[:, :, 2] .= 1.0
+    end
 
     interp_resid_vec = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(interp_resid_vec, NaN)
@@ -427,12 +491,13 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
 
     # the best parameters are likely the interpolated ones
     # but return the raw measurements as well
-    safe_jldsave(outname; linParams = interp_linParams, nlParams = interp_nlParams,
+    # (metadata records which chip-transform calibration, if any, fixed the chip scales)
+    safe_jldsave(outname, metadata; linParams = interp_linParams, nlParams = interp_nlParams,
         resid_vec = interp_resid_vec, chipWaveSoln = interp_chipWaveSoln,
         resid_xt = interp_resid_xt,
         raw_linParams = linParams, raw_nlParams = nlParams,
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln,
-        raw_resid_xt = resid_xt, no_metadata = true) # KEVIN FIX THIS!!!!
+        raw_resid_xt = resid_xt)
     return outname
 end
 
@@ -2224,6 +2289,12 @@ function skyline_medwavecal_skyline_dither(tele, mjd, mjd_list_wavecal, all1DObj
     end    
 end
 
+# Settings of the production nightly FPI comb fit. One definition, shared with the
+# chip-transform calibration rebuild (scripts/cal/chip_transform), which re-runs this fit for
+# nights whose comb file is missing.
+const FPI_COMB_FIT_KWARGS = (cporder = 1, wporder = 4, dporder = 2, n_sigma = 4,
+    max_ang_sigma = 0.2, max_iter = 2)
+
 """
     fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
         all1DfpiPeaks_a, all1DObjectSkyPeaks, wavecalNightAve_fname;
@@ -2318,7 +2389,8 @@ function fpi_medwavecal_skyline_dither(mjd, mjd_list_fpi, mjd_list_wavecal,
 
         # using FPI exposures to measure high-precision nightly wavelength solution
         fpi_out = comb_exp_get_and_save_fpi_wavecal(
-            fpi_fnames, curr_linParams, curr_nlParams, cporder = 1, wporder = 4, dporder = 2, n_sigma = 4, max_ang_sigma = 0.2, max_iter = 2, verbose = verbose, checkpoint_mode = checkpoint_mode)
+            fpi_fnames, curr_linParams, curr_nlParams; FPI_COMB_FIT_KWARGS...,
+            verbose = verbose, checkpoint_mode = checkpoint_mode)
 
         if isnothing(fpi_out)
             @warn "FPI WAVECAL GATE FAILED for $(tele) MJD $(mjd): guard fpi_solution. " *
