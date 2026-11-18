@@ -230,6 +230,7 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
         extra["identify"] = isnothing(tmpl) ? String(identify) : "template"
         tqa = Dict{String, Any}()
         fiber_delta = nothing
+        masked_cells = nothing
         function fit_flat()
             if isnothing(tmpl)
                 return trace_extract(
@@ -254,6 +255,7 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
             tqa["outcome"] = String(info.outcome)
             tqa["n_unlit"] = count(.!info.lit)
             fiber_delta = info.delta
+            masked_cells = info.masked
             return tp, cv
         end
         trace_params, trace_param_covs = try
@@ -290,7 +292,8 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
         else
             # per-fiber departure from the registered template (px; TRACE_FIBER_DELTA in traceMain)
             safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params,
-                template_fiber_delta_px = fiber_delta, no_metadata = true)
+                template_fiber_delta_px = fiber_delta, template_masked_cells = UInt8.(masked_cells),
+                no_metadata = true)
         end
         extra["trace_file"] = savename
         write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,

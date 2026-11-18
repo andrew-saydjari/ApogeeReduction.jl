@@ -588,6 +588,11 @@ template by a large fraction of a pixel (LCO 60702 R: median 0.6 px) gets column
 template, i.e. jumps; with the smooth departure in the seed those resets are harmless. Neither
 seed uses a neighbouring column's fit (no walk).
 
+Masked cells (fewer than `masked_min_good` good pixels within ±2 px of the seed, e.g. masked
+detector area at APO R fiber 1, x < 224): the center follows the seed (registered template plus
+the fiber's smooth departure), the width the template, the covariance is NaN, and
+`info.masked` (n_x, n_fibers) flags the cell; neither fitter has data there.
+
 Returns `(trace_params, trace_param_covs, info)`; on a refusal the arrays are empty and
 `info.outcome` names the reason. `info` also holds the registration and label statistics.
 """
@@ -595,7 +600,7 @@ function trace_extract_template(image_data, ivar_image, tmpl, P::SlitProfile;
         good_pixels = trues(size(image_data)), lit_frac = TRACE_LIT_FRAC, nband = 32,
         band_half = 8, dmax = TRACE_TEMPLATE_DMAX, kmax = TRACE_TEMPLATE_KMAX,
         max_center_move = 2, tp_margin = TRACE_TEMPLATE_TP_MARGIN, seed = :template_delta,
-        seed_step = 8, verbose = false)
+        seed_step = 8, masked_min_good = 3, verbose = false)
     good = good_pixels .& (ivar_image .> 0) .& isfinite.(image_data)
     noise = 1 ./ sqrt.(ivar_image)
     xc, prof, err = slit_bands(image_data, noise, good; nb = nband, half = band_half)
@@ -603,7 +608,7 @@ function trace_extract_template(image_data, ivar_image, tmpl, P::SlitProfile;
         lit_frac = lit_frac, refine = false, tp_margin = tp_margin)
     nf = nfibers(tmpl)
     if rf.outcome != "ok"
-        return [], [], merge(rf, (delta = fill(NaN, nf),))
+        return [], [], merge(rf, (delta = fill(NaN, nf), masked = falses(0, nf)))
     end
     nx = size(image_data, 1)
     lit = rf.lit
@@ -673,13 +678,31 @@ function trace_extract_template(image_data, ivar_image, tmpl, P::SlitProfile;
     params = zeros(nx, nf, 3)
     covs = zeros(nx, nf, 3, 3)
     fit_columns!(params, covs, 1:nx, START)
+    # Masked cells: a lit fiber-column whose core (seed center +-2 px) has fewer than `masked_min_good`
+    # good pixels has no data; neither fitter can measure it (both extrapolate). There the trace
+    # follows the seed (registered template + the fiber's smooth departure), the width the template,
+    # the covariance is NaN, and the cell is flagged in `masked` (n_x, n_fibers).
+    masked = falses(nx, nf)
+    for f in fl, x in 1:nx
+        yc = round(Int, START[x, f])
+        ng = 0
+        for y in max(1, yc - 2):min(size(good, 2), yc + 2)
+            good[x, y] && (ng += 1)
+        end
+        if ng < masked_min_good
+            masked[x, f] = true
+            params[x, f, 2] = START[x, f]
+            params[x, f, 3] = W0[x, f]
+            covs[x, f, :, :] .= NaN
+        end
+    end
     ul = findall(.!lit)
     params[:, ul, 1] .= 0
     params[:, ul, 2] .= MU0[:, ul]
     params[:, ul, 3] .= W0[:, ul]
     delta = template_fiber_delta(params, tmpl, rf.reg, lit)
     verbose && @info "trace_extract_template: d=$(round(rf.d, digits = 3)) s=$(round(rf.s, digits = 5)) nlit=$(rf.nlit) max delta $(round(maximum(filter(isfinite, delta); init = 0.0), digits = 3))"
-    return params, covs, merge(rf, (delta = delta,))
+    return params, covs, merge(rf, (delta = delta, masked = masked))
 end
 
 """
@@ -708,6 +731,10 @@ function template_qa_fields(info; tmpl = nothing)
         q["tmpl_delta_max"] = isempty(dv) ? NaN : maximum(dv)
         q["tmpl_delta_med"] = isempty(dv) ? NaN : median(dv)
         q["tmpl_n_fiber_delta"] = count(v -> isfinite(v) && v > TRACE_FIBER_DELTA_PX, info.delta)
+    end
+    if hasproperty(info, :masked)
+        q["tmpl_n_masked_cells"] = count(info.masked)
+        q["tmpl_n_masked_fibers"] = size(info.masked, 1) == 0 ? 0 : count(vec(any(info.masked, dims = 1)))
     end
     if !isnothing(tmpl)
         q["tmpl_id"] = template_id(tmpl)

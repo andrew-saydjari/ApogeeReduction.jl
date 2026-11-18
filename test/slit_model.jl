@@ -136,13 +136,20 @@ end
         h[151:180] .= 0                             # a dark bundle on this flat
         tp = sm_truth(t, reg; nx = nx, heights = h, fiber_offset = off)
         img, iv, m = sm_image(tp)
-        tpx, cv, info = trace_extract_template(img, iv, t, P)
+        good = trues(size(img))
+        good[1:40, 1:400] .= false               # masked detector area (corner)
+        tpx, cv, info = trace_extract_template(img, iv, t, P; good_pixels = good)
         @test info.outcome == "ok"
+        mk = info.masked
+        @test size(mk) == (nx, 300) && any(mk[1:40, :]) && !any(mk[41:end, :])
+        Rs = registered_centers(t, info.reg, 1:nx)
+        f1 = findfirst(f -> mk[10, f], 1:300)
+        @test abs(tpx[10, f1, 2] - Rs[10, f1]) < 0.05 && all(isnan, cv[10, f1, :, :])
         @test size(tpx) == (nx, 300, 3) && size(cv) == (nx, 300, 3, 3)
         lit = trues(300)
         lit[151:180] .= false
         @test info.lit == lit
-        D = tpx[:, lit, 2] .- tp[:, lit, 2]
+        D = tpx[41:end, lit, 2] .- tp[41:end, lit, 2]
         @test median(abs.(D)) < 0.02
         @test quantile(vec(abs.(D)), 0.99) < 0.1
         # unlit fibers sit exactly at the registered template, height 0
