@@ -1,0 +1,41 @@
+# wavecal mode offsets (m/s), built 2026-11-18T15:41:44.970 by scripts/cal/build_mode_offsets.jl
+# code wavecal-no-crossnight ab5634fef9527772ce54f80619481edc4254c1aa clean=true; run root /mnt/ceph/users/sdssv/work/asaydjari/2026_11_18/wavecal_refit/exp2_skyshift_O0; FPI-route root /mnt/ceph/users/sdssv/work/asaydjari/2026_11_18/wavecal_refit/run1; clean FPS nights from /mnt/ceph/users/sdssv/work/asaydjari/2026_11_18/nocross/lists/fps_clean.csv
+# value = survey median of per-night medians; robsig = night-to-night robust sigma (monitored)
+# (the 6 monitor_arcroute rows of this build were dropped by hand when the script stopped writing them; values otherwise unchanged)
+tele,era,mode,chip,term,value_ms,robsig_ms,n_nights,n_exp,source
+apo,plate,arc_sky,R,zp,15.4,46.3,994,37719,arcroute_zp_R
+apo,plate,arc_sky,R,stretch,-22.4,28.2,994,37719,arcroute_stretch_R
+apo,plate,arc_sky,R,tilt,-69.6,16.3,994,37719,arcroute_tilt_R
+apo,fps,arc_sky,R,zp,31.4,24.0,542,15891,fpifib_zp_R
+apo,fps,arc_sky,R,stretch,83.9,227.0,19,366,arcroute_stretch_R
+apo,fps,arc_sky,R,tilt,-37.4,67.3,19,366,arcroute_tilt_R
+apo,plate,arc_sky,G,zp,89.6,47.0,994,38587,arcroute_zp_G
+apo,plate,arc_sky,G,stretch,-154.0,23.3,994,38587,arcroute_stretch_G
+apo,plate,arc_sky,G,tilt,1.9,38.7,994,38587,arcroute_tilt_G
+apo,fps,arc_sky,G,zp,244.0,20.3,543,21308,fpifib_zp_G
+apo,fps,arc_sky,G,stretch,-141.0,45.5,21,387,arcroute_stretch_G
+apo,fps,arc_sky,G,tilt,19.9,58.2,21,387,arcroute_tilt_G
+apo,plate,arc_sky,B,zp,-59.4,42.8,994,38580,arcroute_zp_B
+apo,plate,arc_sky,B,stretch,36.6,23.9,994,38580,arcroute_stretch_B
+apo,plate,arc_sky,B,tilt,67.1,20.5,994,38580,arcroute_tilt_B
+apo,fps,arc_sky,B,zp,29.8,31.2,543,21307,fpifib_zp_B
+apo,fps,arc_sky,B,stretch,56.8,83.9,18,383,arcroute_stretch_B
+apo,fps,arc_sky,B,tilt,87.4,26.8,18,383,arcroute_tilt_B
+lco,plate,arc_sky,R,zp,-11.4,40.5,423,15190,arcroute_zp_R
+lco,plate,arc_sky,R,stretch,2.8,21.7,423,15190,arcroute_stretch_R
+lco,plate,arc_sky,R,tilt,169.9,23.3,423,15190,arcroute_tilt_R
+lco,fps,arc_sky,R,zp,-109.2,24.4,416,15240,fpifib_zp_R
+lco,fps,arc_sky,R,stretch,-65.4,32.1,19,567,arcroute_stretch_R
+lco,fps,arc_sky,R,tilt,87.1,6.3,19,567,arcroute_tilt_R
+lco,plate,arc_sky,G,zp,51.6,37.9,423,15703,arcroute_zp_G
+lco,plate,arc_sky,G,stretch,-184.3,61.4,423,15703,arcroute_stretch_G
+lco,plate,arc_sky,G,tilt,178.0,25.2,423,15703,arcroute_tilt_G
+lco,fps,arc_sky,G,zp,-40.3,13.9,416,15275,fpifib_zp_G
+lco,fps,arc_sky,G,stretch,-222.1,11.0,19,568,arcroute_stretch_G
+lco,fps,arc_sky,G,tilt,167.8,3.6,19,568,arcroute_tilt_G
+lco,plate,arc_sky,B,zp,57.8,58.2,423,15704,arcroute_zp_B
+lco,plate,arc_sky,B,stretch,46.3,23.4,423,15704,arcroute_stretch_B
+lco,plate,arc_sky,B,tilt,55.0,14.8,423,15704,arcroute_tilt_B
+lco,fps,arc_sky,B,zp,29.4,17.0,416,15275,fpifib_zp_B
+lco,fps,arc_sky,B,stretch,20.1,27.1,19,568,arcroute_stretch_B
+lco,fps,arc_sky,B,tilt,54.6,7.6,19,568,arcroute_tilt_B

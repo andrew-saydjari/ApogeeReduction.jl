@@ -10,9 +10,11 @@
 #                                       pair, or the --nights_csv subset): FPS arc-route exposures then land on the
 #                                       level of the FPI-fiber route (the arc-anchored comb), so both FPS modes agree
 #                             stretch, tilt = as for plate, from FPS arc-route object exposures
-# Monitored only (not applied; tracked when the line fits move from Gaussians to the true LSF):
-#   mode monitor_arcroute, era fps : zp of the FPS arc-route exposures themselves (arc fit vs sky directly)
-#   per row: robust sigma over nights (night-to-night scatter) and the counts.
+# Every row also carries its night-to-night robust sigma and counts: the offsets are a MONITORED output (track them
+# when the line fits move from Gaussians to the true LSF). The FPS zp is NOT taken from FPS arc-route exposures:
+# FPS science sits at dither positions 0.1-0.3 px from the arcs, so their sky - arc zero point carries km/s of
+# position (measured on run1's strict nights with fps_route=sky: chip medians -1.1..+1.6 km/s, robust sigma 0.3-1 km/s).
+# The FPS stretch / tilt rows come from the few FPS arc-route nights and carry that contamination at a smaller level.
 # The cause of the per-chip / per-telescope differences is AKS's hypothesis (LSF: Gaussian line fits), not tested.
 #
 # usage: julia --project=. scripts/cal/build_mode_offsets.jl --root RUNROOT [--fpi_root RUNROOT2]
@@ -93,7 +95,6 @@ function main(args)
         for qn in ("stretch", "tilt")
             row(tele, "fps", "arc_sky", cn, qn, "arcroute_$(qn)_$(cn)")
         end
-        row(tele, "fps", "monitor_arcroute", cn, "zp", "arcroute_zp_$(cn)")
     end
     open(out, "w") do io
         println(io, "# wavecal mode offsets (m/s), built $(now()) by scripts/cal/build_mode_offsets.jl")
