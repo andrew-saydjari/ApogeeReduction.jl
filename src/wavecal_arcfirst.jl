@@ -37,6 +37,7 @@ const ARCFIRST_STAGES = [
     (stage = "fpifib", reads = ["ar1Dcal", "waveCalFPIArc"], writes = ["fpiGuidePos"]),
     (stage = "assemble", reads = ["ar1Dcal", "skyLinePeaks", "arclampWaveCalNight", "waveCalFPIArc",
         "fpiGuidePos", "shape_template", "arc_linelist"], writes = ["waveCalRefit", "waveCalExp"]),
+    (stage = "crossnight", reads = ["waveCalFPIArc"], writes = ["crossnight_flags"]),   # this + EARLIER nights
     (stage = "resample", reads = ["ar1Dcal", "waveCalExp"], writes = ["ar1Duni"]),
 ]
 

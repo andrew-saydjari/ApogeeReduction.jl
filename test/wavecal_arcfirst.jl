@@ -26,7 +26,7 @@ using HDF5
             @test !(r in ("wavecalNightAve", "waveCalNightfpiDither", "waveCalNightskyDither", "waveCalFPI",
                           "ar1Duni", "ar1Dunical"))
         end
-        @test [s.stage for s in S] == ["peaks", "arc", "comb", "fpifib", "assemble", "resample"]
+        @test [s.stage for s in S] == ["peaks", "arc", "comb", "fpifib", "assemble", "crossnight", "resample"]
     end
 
     @testset "night route and comb decision" begin
