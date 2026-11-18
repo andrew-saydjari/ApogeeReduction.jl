@@ -92,7 +92,7 @@ vendored as `TemplateFit.jl`:
    registration is kept (`input_d_center`, `input_s_center`) for a later time-dependent T3 level.
 5. **In-focus flats only** (`--fit_rms_max`, default 0.02 px = the trace gate's threshold): flats
    whose template fit is worse are dropped and the template rebuilt. In the first full build this
-   would have removed 6 of ~6,600 inputs, all on known problem nights (LCO 57803, 57813, 60702).
+   would have removed 6 of 13,685 inputs, all on known problem nights (LCO 57803, 57813, 60702).
 6. Validation: leave-nights-out and no-template mode (`--validate`).
 
 Packing (`pack_trace_templates.jl`): the fibers dark in an epoch are never fitted by the builder;
@@ -118,9 +118,9 @@ description for the numbers.
 ## Cost
 
 First full build (pass-1 DR21, 14 epochs x 3 chips = 42 units, every night, one exclusive genoa
-node, one unit per core): the largest units (APO 57969-59442, LCO 59152-60248, ~500-1,300
-nights) dominate the walltime; see the PR description for the measured node-hours. Packing and
-QA take ~1 min each.
+node, one unit per core, with validation): 3.95 h wall time = ~4 node-hours, set by the largest
+unit (APO 57969-59442, 1,146 candidate / 1,052 all-lit flats). Units of 150-600 flats take 15-130
+min (~11 s per input flat including validation). Packing and QA take a few minutes each.
 
 ## Open items
 
