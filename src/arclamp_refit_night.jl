@@ -111,8 +111,8 @@ end
 """ARCFPI_VALIDATION Q7 pattern: arc sequences whose first exposure directly follows a quartz flat
 with the same commanded dither (no commanded move). Such evening blocks sit > 0.02 px off in 78 %
 of cases at LCO from MJD 60470 (23 % APO FPS). The commanded label is used here ONLY to name the
-pattern; positions stay measured, and the 0.02 px gate decides exclusion. Returns
-(after::Vector{Bool}, n_gated = number of such sequences that failed the gate)."""
+pattern; positions stay measured, and the #417 arc-only rejection decides exclusion. Returns
+(after::Vector{Bool}, n_gated = number of such sequences that were rejected (ARCSEQ_REJECTED))."""
 function refit_quartz_pattern(arc_fname, almanac_file, tele, mjd)
     the, une, sfl = h5open(arc_fname, "r") do f
         Int.(read(f["seq_thar_exp"])), Int.(read(f["seq_une_exp"])), Int.(read(f["seq_flags"]))

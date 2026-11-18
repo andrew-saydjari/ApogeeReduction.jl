@@ -48,9 +48,10 @@ const WAVE_ABS_ARC_WINDOW = 1 << 5
 const WAVE_REL_ARC_TIME = 1 << 6
 const WAVE_REL_ARC_NEAREST = 1 << 7
 const WAVE_FPIFIB_UNAVAILABLE = 1 << 8
-const WAVE_ARC_SEQ_GATED = 1 << 9       # an arc sequence was rejected (#417 arc-only rejection)
-const WAVE_ARC_ALL_GATED = 1 << 10      # final-fit sequences fail the absolute ceilings (ARCNIGHT_ABS_FAIL)
-const WAVE_ARC_UNGATED = 1 << 11        # too few sequences to compare: rejection not possible (ARCNIGHT_FEW_SEQ)
+# 2^9-2^11: the #417 arc-only sequence rejection (formerly gate B's WAVE_ARC_SEQ_GATED / _ALL_GATED / _UNGATED)
+const WAVE_ARC_SEQ_REJECTED = 1 << 9    # an arc sequence of the night was rejected (ARCSEQ_REJECTED)
+const WAVE_ARC_ABS_FAIL = 1 << 10       # final-fit sequences fail the absolute ceilings (ARCNIGHT_ABS_FAIL)
+const WAVE_ARC_FEW_SEQ = 1 << 11        # too few sequences to compare: rejection not possible (ARCNIGHT_FEW_SEQ)
 const WAVE_ARC_MULTIPOS = 1 << 12
 const WAVE_COMB_MODE_SLIP = 1 << 13
 const WAVE_LEVEL_INCONSISTENT = 1 << 14
@@ -65,15 +66,15 @@ const WAVE_POS_UNMATCHED = 1 << 21         # measured position matched no arc po
 const WAVE_FPIFIB_ONE_FIBER = 1 << 22      # only one FPI fiber usable (no across-slit term)
 const WAVE_COMB_ARC_INCONSISTENT = 1 << 23 # |arc - comb| per chip above the QA limit (no slip)
 const WAVE_ARC_QUARTZ_PATTERN = 1 << 24    # an arc sequence right after a same-dither quartz flat (no
-                                           # commanded move) failed the 0.02 px gate (Q7 pattern)
+                                           # commanded move) was rejected by the arc-only rejection (Q7 pattern)
 const WAVE_ANCHOR_FALLBACK = 1 << 25       # comb anchor is not the anchor rule's first-ranked arc block (it was bad,
-                                           # unverified or had no matching comb exposure); "morning": no gated morning block
+                                           # unverified or had no matching comb exposure); "morning": no verified morning block
 const WAVE_ANCHOR_NOT_SAME_BLOCK = 1 << 26 # no comb exposure of the anchoring arc block at its measured position
 const WAVE_ANCHOR_NOT_PREFERRED = 1 << 27  # anchor block of a non-preferred kind: "nearest_science": neither at the nearest
                                            # science exposure's measured position nor closing an object sequence (or no
                                            # science exposures); "morning": an evening block
-const WAVE_ANCHOR_UNVERIFIED = 1 << 28     # anchoring arc sequence not verified by the 0.02 px gate (ungated, few lines,
-                                           # lamp mismatch, or only gate-failed sequences left)
+const WAVE_ANCHOR_UNVERIFIED = 1 << 28     # anchoring arc sequence not clean (refit_anchor_quality > 0: not compared, few
+                                           # lines, lamp mismatch, absolute ceiling, or only rejected sequences left)
 const WAVE_FPS_NO_COMB = 1 << 29           # FPS era (plate/FPS MJD boundary) but no night comb: arc-route fallback
 const WAVE_ANCHOR_TREND_OUTLIER = 1 << 30  # verified_pair: the kept anchor's fixed-mode comb velocity is more than
                                            # anchor_trend_ms from the neighbouring nights' strict-pair trend
@@ -100,7 +101,7 @@ const REFIT_PLATE_TIE_REF = Dict("apo" => [-6.0, 156.0, -10.0], "lco" => [10.0, 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
     "WAVE_ABS_ARC_WINDOW", "WAVE_REL_ARC_TIME", "WAVE_REL_ARC_NEAREST", "WAVE_FPIFIB_UNAVAILABLE",
-    "WAVE_ARC_SEQ_GATED", "WAVE_ARC_ALL_GATED", "WAVE_ARC_UNGATED", "WAVE_ARC_MULTIPOS",
+    "WAVE_ARC_SEQ_REJECTED", "WAVE_ARC_ABS_FAIL", "WAVE_ARC_FEW_SEQ", "WAVE_ARC_MULTIPOS",
     "WAVE_COMB_MODE_SLIP", "WAVE_LEVEL_INCONSISTENT", "WAVE_HIGHORDER_EVENT", "WAVE_CHIPSCALE_FREE",
     "WAVE_FPIFIB_ROTATION", "WAVE_PASS1_COPY", "WAVE_SHAPE_ARC", "WAVE_SKY_ANCHOR_NIGHT",
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
@@ -118,9 +119,9 @@ function refit_arc_night_bits(night_flags::Integer, seq_flags::AbstractVector{<:
     # #417 arc-only rejection (gate B removed): a rejected sequence -> 2^9; ARCNIGHT_ABS_FAIL (final-fit
     # sequences fail the absolute ceilings, the former all-gated screen) -> 2^10; ARCNIGHT_FEW_SEQ
     # (< min_seq_compare sequences, rejection not possible) -> 2^11
-    any(s -> (s & ARCSEQ_REJECTED) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_GATED)
-    (night_flags & ARCNIGHT_ABS_FAIL) != 0 && (b |= WAVE_ARC_ALL_GATED)
-    (night_flags & ARCNIGHT_FEW_SEQ) != 0 && (b |= WAVE_ARC_UNGATED)
+    any(s -> (s & ARCSEQ_REJECTED) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_REJECTED)
+    (night_flags & ARCNIGHT_ABS_FAIL) != 0 && (b |= WAVE_ARC_ABS_FAIL)
+    (night_flags & ARCNIGHT_FEW_SEQ) != 0 && (b |= WAVE_ARC_FEW_SEQ)
     (night_flags & ARCNIGHT_MULTIPOS) != 0 && (b |= WAVE_ARC_MULTIPOS)
     (night_flags & ARCNIGHT_CHIPSCALE_FREE) != 0 && (b |= WAVE_CHIPSCALE_FREE)
     return b
@@ -160,9 +161,9 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     light); FPS nights without a comb are flagged WAVE_FPS_NO_COMB (ARCFPI_VALIDATION Q6: the comb
     template helps LCO FPS, -26 m/s held-out on R).
   * `anchor_block` ("verified_pair", see below): which arc block anchors the comb cavity. Never
-    clock-based (PI 2026-11-18). "nearest_science" (switch): the used arc sequences are ranked by (1) quality: gated
-    and clean, then unverified (ungated / few lines / lamp mismatch), then gate-failed (present
-    only when every gated sequence failed); (2) preference (`anchor_prefer`): sequences whose
+    clock-based (PI 2026-11-18). "nearest_science" (switch): the used arc sequences are ranked by (1) quality
+    (`refit_anchor_quality`): clean, then unverified (not compared / few lines / lamp mismatch /
+    absolute ceiling), then rejected or position outlier; (2) preference (`anchor_prefer`): sequences whose
     MEASURED state matches the nearest science exposure's measured position (pass-1 per-exposure
     solution, < `pos_match_px`) or that close an object sequence (the nearest science exposure
     precedes them); (3) time to the nearest science exposure. The first-ranked sequence with a
@@ -170,7 +171,7 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     sequence with any matching comb exposure. Anything but the first-ranked sequence is flagged
     WAVE_ANCHOR_FALLBACK, a non-preferred kind WAVE_ANCHOR_NOT_PREFERRED, an unverified sequence
     WAVE_ANCHOR_UNVERIFIED; a night without science exposures falls back to "any" (FALLBACK +
-    NOT_PREFERRED). "morning" (switch): gated sequences after local midnight, nearest comb first
+    NOT_PREFERRED). "morning" (switch): verified (clean) sequences after local midnight, nearest comb first
     (WAVE_ANCHOR_FALLBACK + NOT_PREFERRED when there is none); "any" (switch): every used sequence.
   * `anchor_prefer` ("strict"): "strict" = preferred kinds (same measured position, or closing an
     object sequence) rank before all others of the same quality; "none" = time to the nearest
@@ -770,7 +771,7 @@ end
 Pure selection kernel of `refit_choose_anchor` (also used by the rule comparison scripts). Per
 used arc sequence j: `quality[j]` (`refit_anchor_quality`), its nearest comb exposure at a matching
 MEASURED position (`comb_dt_h[j]` h, `comb_k[j]`, 0 = none), whether it matches the nearest science
-exposure's measured position (`samepos[j]`), gate-verified (`gated[j]`) and after local midnight
+exposure's measured position (`samepos[j]`), verified (`gated[j]`, `refit_seq_gated`: clean) and after local midnight
 (`morning[j]`, used by the "morning" switch only). Returns (ok, j, bits, kind, rank, dt_sci_h)
 with all anchor bits (FALLBACK, NOT_SAME_BLOCK, NOT_PREFERRED, UNVERIFIED).
 """

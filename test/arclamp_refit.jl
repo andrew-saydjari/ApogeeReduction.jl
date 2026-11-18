@@ -5,7 +5,7 @@ using ApogeeReduction: RefitConfig, refit_check_config, refit_config_dict, Refit
                        refit_coeff_basis, refit_grid_to_coeffs, refit_coeffs_to_grid, refit_pass1_type,
                        refit_arc_night_bits, refit_interp_dt, RefitTemplate, refit_template_lambda,
                        refit_ref_wave_disp, refit_ref_invert, refit_vs_pass1, refit_comb_vs_arc,
-                       refit_fiber_sky_terms, WAVE_SKY, WAVE_ROUGH, WAVE_NIGHT_AVE, WAVE_ARC_SEQ_GATED,
+                       refit_fiber_sky_terms, WAVE_SKY, WAVE_ROUGH, WAVE_NIGHT_AVE, WAVE_ARC_SEQ_REJECTED,
                        WAVE_ARC_MULTIPOS, WAVE_CHIPSCALE_FREE, WAVE_FPIFIB_ROTATION, WAVE_FPIFIB_UNAVAILABLE,
                        WAVE_FPIFIB_ONE_FIBER, ARCSEQ_QUALITY, ARCNIGHT_MULTIPOS, ARCNIGHT_CHIPSCALE_FREE,
                        N_FIBERS, N_XPIX
@@ -46,7 +46,7 @@ end
         @test nm == "sky_nightpos" && (b & WAVE_NIGHT_AVE) != 0
         @test refit_pass1_type("error_fixed_fallback")[2] == WAVE_ROUGH
         b = refit_arc_night_bits(ARCNIGHT_MULTIPOS | ARCNIGHT_CHIPSCALE_FREE, [0, ARCSEQ_QUALITY])
-        @test (b & WAVE_ARC_SEQ_GATED) != 0 && (b & WAVE_ARC_MULTIPOS) != 0 && (b & WAVE_CHIPSCALE_FREE) != 0
+        @test (b & WAVE_ARC_SEQ_REJECTED) != 0 && (b & WAVE_ARC_MULTIPOS) != 0 && (b & WAVE_CHIPSCALE_FREE) != 0
     end
 
     @testset "arc state -> production comb form is exact" begin
