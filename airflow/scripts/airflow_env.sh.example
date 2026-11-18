@@ -45,3 +45,19 @@ AR_SLACK_CHANNEL=C08B7FKMP16
 # that says the pipeline is down. Defaults to prod C08B7FKMP16 in both
 # consumers; uncomment only to test the alerting path itself.
 # AR_SLACK_ALERT_CHANNEL=C07KQ7BJY5P
+
+# --- robustness knobs (defaults shown; README "Robustness" says why) ---
+# Durations need a unit: ms, s, min, h, d (bare numbers are rejected).
+# AR_ALMANAC_STATEMENT_TIMEOUT=5h     # PGOPTIONS statement_timeout for almanac
+# AR_ALMANAC_EXECUTION_TIMEOUT=6h     # must exceed the statement timeout
+# AR_ALMANAC_RETRIES=1
+# AR_ALMANAC_RETRY_DELAY=10min
+# AR_STARTUP_RETRIES=3                # stale_run_guard, update.*, setup.*
+# AR_STARTUP_RETRY_DELAY=60s
+# AR_STALE_RUN_MAX_AGE_H=36           # scheduled runs older than this fail fast; 0 = off
+# DB tunnel check (must match ~/.almanac/config.yaml; password via ~/.pgpass):
+# AR_TUNNEL_UNIT=mwm-tunnel.service
+# AR_TUNNEL_HOST=mwm
+# AR_DB_FORWARD_PORT=63333
+# AR_DB_USER=sdss
+# AR_DB_NAME=sdss5db

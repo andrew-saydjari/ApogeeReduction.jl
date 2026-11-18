@@ -11,10 +11,13 @@ airflow/
 │   ├── ar_common.py          shared config/helpers (Slack, paths, metrics)
 │   ├── apogee_daily.py       apogee_daily (ONE DAG, lco→apo serial)
 │   └── apogee_heartbeat.py   10-min liveness beacon
-├── systemd/                  user units (prepared, NOT installed)
+├── systemd/                  user unit TEMPLATES (*.service.in)
 ├── scripts/
 │   ├── check_airflow_heartbeat.sh   cross-machine watchdog (scrontab)
+│   ├── check_almanac_output.py      does an almanac file hold a night?
+│   ├── render_systemd_units.sh      fill the unit templates (never installs)
 │   └── airflow_env.sh.example       env template (secrets NOT committed)
+├── tests/                    unittest suite (see "Tests" below)
 ├── INSTALL.md                deploy checklist (AKS actions)
 └── README.md                 this file
 ```
@@ -29,9 +32,10 @@ contend. A skipped observatory (no data) does not block the other
 (ar_main.py's serial semantics).
 
 ```
-# Regenerated from the DAG's actual edge wiring (62 tasks, 72 edges;
-# edge-set sha256[:16] bd4f725f8cbb5108 after the 2026-09-04 single-workup
-# change; sha = sha256 of sorted "up>down" lines):
+# Regenerated from the DAG's actual edge wiring (65 tasks, 75 edges;
+# edge-set sha256[:16] b6d9abefd75ee370 after the 2026-11-17 stale-run
+# guard; sha = sha256 of sorted "up>down" lines):
+stale_run_guard >> update.repo
 update.repo >> update.sdsscore >> update.sync_logs >> setup.{mjd, date_mjd}
 setup.{mjd, date_mjd} >> lco.resolve_night
 
@@ -97,8 +101,18 @@ lco.join >> lco.metrics_append >> lco.daily_summary
   any gap dies on missing confSummary otherwise), with new-submodule
   bootstrap (--init + SSH→HTTPS rewrite).
 - **tunnel_check** verifies the `mwm` ControlMaster (`ssh -O check`) and
-  (re)adds the 63333→operations.sdss.org:5432 forward; if the master is down
-  it fails with a notification saying only AKS can reopen it.
+  runs a real `select 1` through the localhost:63333 forward (psql, 10 s
+  connect timeout, 15 s statement timeout, 30 s wall clock). The master and
+  the forward belong to the `mwm-tunnel.service` systemd unit; on failure
+  the task (and its Slack hint) names that unit and the `systemctl`/
+  `journalctl` commands to check it. Stopgap: if the master is up but the
+  port is not forwarded (a tunnel unit installed before it carried `-L`),
+  it adds the forward over the master once and logs a warning to reinstall
+  the unit.
+- **almanac** (see "Robustness" below): reuses an existing output only if
+  it really holds the night, writes to a `.partial` file moved into place
+  on success, and runs under a statement timeout, an execution timeout and
+  one retry.
 - **runlist** maps `make_runlist_all.jl` exit 16 ("no exposures") to a clean
   Airflow skip.
 - **Execution modes**: `slurm` (DEFAULT — production dailies as run
@@ -155,7 +169,7 @@ astropy/pytz/the slack provider are in the shared env). It is retired to
 
 | ar_main.py | apogee_daily |
 |---|---|
-| one DAG, lco→apo serial, `0 7 * * *` ET, max_active_runs=2 | SAME: one DAG, lco→apo serial, same schedule, max_active_runs=2 (SQLite single-writer) |
+| one DAG, lco→apo serial, `0 7 * * *` ET, max_active_runs=2 | one DAG, lco→apo serial, same schedule, **max_active_runs=1** since 2026-11-17 (see "Robustness") |
 | `update.repo` (git status/log/remote report; status-only) | `update.repo` (same report + `git pull --ff-only` — deliberate NEW behavior, AKS 2026-09-03) |
 | `update.sdsscore` (`update.sh`) | `update.sdsscore` (param-gated, default ON; + new-submodule bootstrap) |
 | `update.sync_logs` (rsync both observatories' `.log.html`) | `update.sync_logs` (same, both observatories) |
@@ -173,6 +187,89 @@ New relative to ar_main.py: tunnel_check, split almanac/runlist with
 exit-16 skip, the whole local mode, spectra_workup, N1 metrics,
 heartbeat/watchdog/systemd, checkpoint-aware reruns, skipped-observatory
 pass-through (no-data LCO no longer blocks APO).
+
+## Robustness (2026-11-17 restart)
+
+The dailies were down 2026-09-26 → 2026-11-17. The restart surfaced the
+failure modes below; each now has a guard. All knobs are env variables
+(set them in `airflow_env.sh`); a value that does not parse falls back to
+the default with a warning in the DAG-processor log rather than breaking
+the DAG import.
+
+| guard | default | env knob | why this value |
+|---|---|---|---|
+| almanac `statement_timeout` (PGOPTIONS) | 5 h | `AR_ALMANAC_STATEMENT_TIMEOUT` | the slow step is one statement, the APOGEE-ID lookup: ~40 s warm, 11–40 min on September nights, ~3.5–4 h fully cold (after the 2026-11-16 DB restart). 5 h = worst cold case + 25 %, so a legitimate cold run finishes and only a truly stuck statement errors (with a PostgreSQL message in `almanac.log`) |
+| almanac `execution_timeout` | 6 h | `AR_ALMANAC_EXECUTION_TIMEOUT` | statement budget + 1 h for the rest of almanac. Must exceed the statement timeout (enforced). Lower both (e.g. 45 min / 1 h) once the DB-side covering index or precomputed lookup lands |
+| almanac retries | 1, after 10 min | `AR_ALMANAC_RETRIES`, `AR_ALMANAC_RETRY_DELAY` | covers a transient tunnel drop; the first attempt has partly warmed the DB cache |
+| startup retries (`stale_run_guard`, `update.*`, `setup.*`) | 3, 60 s apart | `AR_STARTUP_RETRIES`, `AR_STARTUP_RETRY_DELAY` | runs launched ~20 s after service start failed after "Pre Execute", before any command ran (most likely before the API server was up). These tasks are idempotent |
+| stale scheduled runs | 36 h | `AR_STALE_RUN_MAX_AGE_H` (conf `stale_run_max_age_h`; 0 disables) | the 2026-09-27 scheduled run resumed 51 days later next to the day's run. 36 h still lets a run delayed by up to a day go |
+| `max_active_runs` | 1 (was 2) | — | serial chain + SQLite; two active runs doubled the slow DB lookup load. A run still going at the next 7 am makes the new run queue (and the stale guard fails it if it waits > 36 h) |
+
+Durations take a unit (`ms`, `s`, `min`, `h`, `d`); bare numbers are
+rejected because PostgreSQL reads them as ms and Airflow as s.
+
+- **almanac output handling.** Skip only if the existing file holds
+  `raw/<obs>/<mjd>/exposures` and `.../fibers`
+  (`scripts/check_almanac_output.py`, run with the almanac env's python,
+  which has h5py) — not merely because the file exists: the killed
+  2026-11-17 run left a 96-byte stub that made every retry skip. almanac
+  writes to `<file>.partial`, moved into place only on exit 0, so a killed
+  or failed run never leaves a stub at the real path, and a failed
+  `almanac_clobber` re-run keeps the previous good file. almanac is never
+  pointed at an existing output: it opens its output in append mode and
+  fails on a truncated stub, so on the old DAG even `almanac_clobber` could
+  not recover a killed night. Old-layout files
+  (pre-`raw/`, before 2026-09) count as absent and are rebuilt, which is
+  what the current pipeline needs anyway.
+- **"0 % CPU is not a hang".** Before almanac starts, the task log says
+  that the APOGEE-ID lookup can take hours at 0 % CPU on a cold DB cache,
+  with the active limits and the path of the full step log (step output
+  only reaches the Airflow log as a tail at the end). Check
+  `pg_stat_activity` for `DataFileRead` before killing anything. A line
+  from *inside* almanac right before the lookup (worker side,
+  `apogee.py`, before `create_apogee_id_lookup()`) belongs to almanac
+  itself and is left to the almanac PR.
+- **Manual runs without a data interval.** A trigger without
+  `--logical-date` has no `data_interval_start` in Airflow 3;
+  `setup.mjd`/`setup.date_mjd` fall back to `logical_date`, then
+  `run_after`, then now, and with conf `mjd` the date label is derived
+  from the MJD (`ar_common.date_label_from_mjd`, the same convention as the
+  scheduled arithmetic, checked for every day of a year in the tests).
+- **stale_run_guard** is the DAG's first task. Limitation: a run that had
+  already passed it before an outage resumes where it stopped.
+- **Re-running a failed night**: a fresh trigger, not clearing tasks —
+  INSTALL.md, "Re-running a failed night".
+
+## Tests
+
+`airflow/tests/` (stdlib `unittest`; no pytest needed):
+
+- `test_robustness_helpers.py` — duration parsing, timeout consistency,
+  stale-run check, step announce, failure hints (any python3).
+- `test_render_units.py` — unit templates + `render_systemd_units.sh`
+  (any python3; uses `systemd-analyze verify` if present).
+- `test_check_almanac_output.py` — the almanac output check, including
+  the 96-byte stub (needs h5py: run with the almanac env's python).
+- `test_dag.py` — DagBag import with the deployed Airflow, structure
+  (guard is the only root, retries, timeouts, max_active_runs), every
+  BashOperator template rendered and `bash -n`-checked, and the almanac
+  step run end to end against a stand-in almanac (stub → rebuild, failure
+  → no stub, good file reused) — needs Airflow, and h5py for the e2e part.
+
+```bash
+cd <repo>
+# DAG + helper tests with the deployed Airflow, on a throw-away AIRFLOW_HOME
+# (nothing touches the production metadata DB):
+AIRFLOW_HOME=$(mktemp -d) AIRFLOW__CORE__LOAD_EXAMPLES=False \
+PYTHONDONTWRITEBYTECODE=1 \
+  /mnt/home/sdssv/uv_env/airflow_env/bin/python -m unittest discover -s airflow/tests -v
+# almanac output check (h5py lives in the almanac env):
+PYTHONDONTWRITEBYTECODE=1 /mnt/home/sdssv/uv_env/almanac_env/bin/python \
+  -m unittest discover -s airflow/tests -p 'test_check_almanac_output.py' -v
+```
+
+CI runs the same suite (`.github/workflows/airflow-dags.yml`) with
+apache-airflow 3.3.1 on Python 3.12 plus h5py.
 
 ## Notifications (N3)
 

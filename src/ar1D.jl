@@ -850,7 +850,8 @@ function normalize_reinterp_spectra!(outflux, outvar, cntvec)
     return outivar, outmsk
 end
 
-function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same", outdir = "../outdir")
+function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same", outdir = "../outdir",
+        wavecal_order = "legacy")
     # might need to add in telluric div functionality here?
     outname = replace(replace(fname, "ar1D" => "ar1Duni"), "_$(FIRST_CHIP)_" => "_")
     if check_file(outname, mode = checkpoint_mode)
@@ -915,8 +916,25 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     else
         ["fpi", "sky"]
     end
+    # arc_first (src/wavecal_arcfirst.jl): the in-order per-exposure solution waveCalExp comes
+    # first; without it (no usable arcs on the night) the legacy order below applies and the
+    # exposure is flagged WAVE_NOT_ARCFIRST. With "legacy" this block is skipped entirely.
+    arcfirst_hit = false
+    arcfirst_bits = 0
+    if wavecal_order == "arc_first"
+        expfname = joinpath(dirname(fname), "waveCalExp_$(tele)_$(mjd)_$(expnum)_$(image_type).h5")
+        if isfile(expfname)
+            chipWaveSoln, arcfirst_type, arcfirst_bits = h5open(expfname, "r") do f
+                read(f["chipWaveSoln"]), String(read(f["wavecal_type"])), Int(read(f["bitmsk_wavecal"]))
+            end
+            arcfirst_hit = all(isfinite.(chipWaveSoln))
+        end
+    elseif wavecal_order != "legacy"
+        error("reinterp_spectra: unknown wavecal_order $(wavecal_order)")
+    end
     found_soln = false
     wavecal_type = ""
+    if !arcfirst_hit # legacy solution choice (unchanged)
     for wavetype in wavetype_order
         wavecal_type = "waveCalNight$(wavetype)Dither"
         wavefname = replace(replace(fname, fnameType => wavecal_type), "_$(FIRST_CHIP)_" => "_")
@@ -964,6 +982,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
 	        wavecal_type = "error_night_ave_$(curr_best_wave_type)"
         end
     end
+    end # !arcfirst_hit
 
     metadata_lst = []
     trace_lst = []
@@ -1002,6 +1021,17 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     # should add a check all entries of metadata_lst to be equal
     metadata = metadata_lst[1]
     metadata["wavecal_type"] = wavecal_type # add wavecal type to metadata
+    if wavecal_order == "arc_first"
+        if arcfirst_hit
+            metadata["wavecal_type"] = arcfirst_type
+        else
+            nm, arcfirst_bits = arcfirst_legacy_type(wavecal_type)
+            metadata["wavecal_type"] = nm
+            metadata["wavecal_type_legacy"] = wavecal_type
+        end
+        metadata["bitmsk_wavecal"] = arcfirst_bits
+        metadata["wavecal_order"] = "arc_first"
+    end
 
     noBadBits = (mask_stack .& bad_pix_bits .== 0)
     chipBit_stack[.!(noBadBits)] .+= 2^4 # call pixels with bad bits thrown bad

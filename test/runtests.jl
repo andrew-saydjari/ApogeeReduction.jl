@@ -13,9 +13,11 @@ using FITSIO: FITS
     include("fpi_gate.jl")
     include("fpi_homogeneity.jl")
     include("safe_jldsave.jl")
+    include("git_provenance.jl")
     include("lsf.jl")
     include("readonly_opens.jl")
     include("arclamp_wavecal.jl")
     include("arclamp_refit.jl")
+    include("wavecal_arcfirst.jl")
     include("scripts_parse.jl")
 end

@@ -94,6 +94,56 @@ function parse_commandline()
         help = "comb-measured chip-transform calibration file (HDF5, built by scripts/cal/chip_transform/build_chip_transform.jl). A calibration input configured by path like --exp_class_model; ON BY DEFAULT with the pinned file below (airflow/dags/ar_common.py sets it for production). The sky-line wavelength fit then fixes the R/B chip scales to the file's values instead of 1. Pass the word none (or an empty string) to turn it off deliberately: chip scale 1, the pre-calibration behaviour, and the bootstrap mode used to rebuild the file from scratch (scripts/cal/chip_transform/README.md, Bootstrap). A path that does not exist or cannot be read is a hard error, never a silent fallback to scale 1."
         arg_type = String
         default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
+        "--wavecal_order"
+        required = false
+        help = "order of the wavelength chain: legacy (sky -> FPI comb -> night average -> per-exposure sky/FPI dither; the default, unchanged) or arc_first (arcs -> arc-seeded comb -> night assembly -> per-exposure FPI-fiber/sky terms, each stage once and in order; src/wavecal_arcfirst.jl). Nights without a usable arc fit run the legacy chain and are flagged WAVE_NOT_ARCFIRST."
+        arg_type = String
+        default = "legacy"
+        "--arcfirst_shape_template"
+        required = false
+        help = "arc_first only: comb shape template (HDF5, scripts/refit/build_comb_shape_template.jl) for FPS-era exposures on the arc route (no night comb, or no usable FPI fibers), as in the archive refit. none (or empty) = arc shape (WAVE_SHAPE_ARC). A path that does not exist is a hard error."
+        arg_type = String
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/template_shape_v1.h5"
+        "--arcfirst_fps_shape"
+        required = false
+        help = "arc_first only: shape of FPS-era arc-route exposures, both telescopes: template (the refit default) or arc. The plate era always uses the arc shape (PI 2026-11-18)."
+        arg_type = String
+        default = "template"
+        "--arcfirst_fiber_fill"
+        required = false
+        help = "arc_first only: fill_only (fibers without an arc fit get the across-slit interpolate_wave_params value; fitted fibers unchanged; WAVE_FIBER_FILLED) or none (such fibers have no solution and the exposure falls back at resampling)"
+        arg_type = String
+        default = "fill_only"
+        "--arcfirst_anchor_block"
+        required = false
+        help = "arc_first only: comb anchor rule (RefitConfig.anchor_block): verified_pair (default: an arc sequence and a full-frame FPI exposure adjacent in the exposure sequence with no commanded move between, checked by lamp offset and chip residual pattern; anchor-verified branch), nearest_science, morning or any"
+        arg_type = String
+        default = "verified_pair"
+        "--arcfirst_anchor_trend"
+        required = false
+        help = "arc_first only, verified_pair: cross-night anchor continuity (RefitConfig.anchor_trend): both (neighbouring nights on both sides among this run's nights and --arcfirst_history_roots; in a daily run only earlier nights exist), trailing (earlier nights only), off"
+        arg_type = String
+        default = "both"
+        "--arcfirst_history_roots"
+        required = false
+        help = "arc_first only: comma-separated wavecal_arcfirst roots of earlier runs (e.g. previous daily outdirs) whose comb products serve as trailing nights for the cross-night comb step (FSR continuity, cavity vs the trailing 15 nights). Empty: only this run's nights (a bulk run's own pass)."
+        arg_type = String
+        default = ""
+        "--arcfirst_max_reanchor"
+        required = false
+        help = "arc_first only: cap on conditional re-anchors per night when the end-of-night check (median sky-line offset of the FPI-fiber exposures against the final solution, per chip, and comb mode slips) fails; each re-anchor takes the anchor rule's next candidate and reruns comb -> exposures for that night (WAVE_REANCHORED; cap reached: WAVE_ANCHOR_CHECK_FAILED, best candidate kept)"
+        arg_type = Int
+        default = 2
+        "--arcfirst_sky_check_ms"
+        required = false
+        help = "arc_first only: end-of-night check threshold on |per-chip median sky offset| (m/s); a wrong anchor block is a dither step (2-3 km/s), the arc-vs-sky ensemble offset 40-140 m/s"
+        arg_type = Float64
+        default = 1000.0
+        "--arcfirst_noarc_fallback"
+        required = false
+        help = "arc_first only: what a night without a usable arc fit runs. Only legacy (the legacy sky/FPI chain for that night, WAVE_NOT_ARCFIRST) is implemented."
+        arg_type = String
+        default = "legacy"
     end
     return parse_args(s)
 end
@@ -118,6 +168,18 @@ if !CHIP_TRANSFORM_OFF && !isfile(parg["chip_transform_cal"])
           "      AR_CHIP_TRANSFORM_CAL for the SLURM scripts at an existing file), or\n" *
           "  (2) run with --chip_transform_cal none (chip scale 1; bootstrap mode) -- this is how the file is rebuilt\n" *
           "      from scratch: see the \"Bootstrap\" section of scripts/cal/chip_transform/README.md.")
+end
+
+# wavelength-chain order (legacy = unchanged default; arc_first = src/wavecal_arcfirst.jl)
+parg["wavecal_order"] in ("legacy", "arc_first") ||
+    error("--wavecal_order must be legacy or arc_first, got $(parg["wavecal_order"])")
+if parg["wavecal_order"] == "arc_first"
+    strip(parg["arcfirst_shape_template"]) in ("", "none") && (parg["arcfirst_shape_template"] = "")
+    (isempty(parg["arcfirst_shape_template"]) || isfile(parg["arcfirst_shape_template"])) ||
+        error("--arcfirst_shape_template $(parg["arcfirst_shape_template"]) does not exist (pass none for the arc shape)")
+    parg["arcfirst_fps_shape"] in ("template", "arc") || error("--arcfirst_fps_shape must be template or arc")
+    parg["arcfirst_fiber_fill"] in ("fill_only", "none") || error("--arcfirst_fiber_fill must be fill_only or none")
+    parg["arcfirst_noarc_fallback"] == "legacy" || error("--arcfirst_noarc_fallback: only legacy is implemented")
 end
 
 workers_per_node = parg["workers_per_node"]
@@ -396,6 +458,38 @@ if parg["relFlux"]
     all1DArclamp = vcat(all1DArclampperchip...)
     all1DFPI = vcat(all1DFPIperchip...)
 
+    ## comb-measured chip transform (calibration input; nothing = chip scale fixed to 1)
+    @everywhere CHIP_TRANSFORM_CAL = $(CHIP_TRANSFORM_OFF) ? nothing :
+                                     load_chip_transform_cal($(parg["chip_transform_cal"]))
+    println(CHIP_TRANSFORM_OFF ? "Chip scales: OFF (sky wavecal: chip scale 1; arc stage: fitted freely; --chip_transform_cal none)" :
+            "Chip scales (sky wavecal and arc stage) from $(CHIP_TRANSFORM_CAL) [$(ApogeeReduction.chip_transform_id(CHIP_TRANSFORM_CAL))]")
+
+    ## stage-1 arc-lamp night product (off by default; nothing downstream reads it yet).
+    ## Arcs come first in the wavelength chain (absolute reference -> FPI comb -> per-exposure
+    ## position), so this stage uses only the night's arc ar1Dcal files and static calibration
+    ## inputs (line list, the --chip_transform_cal chip scales; free scales when that is none);
+    ## it runs before, and reads nothing from, the sky/FPI wavelength stages.
+    # (with --wavecal_order arc_first the arc stage runs inside the arc-first chain below, with the
+    # refit's settings, writing wavecal_arcfirst/arc/; this standalone product is then skipped)
+    if parg["arclamp_wavecal"] && parg["wavecal_order"] == "legacy" && size(all1DArclamp, 1) > 0
+        almanac_file_arc = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
+        sendto(workers(), almanac_file_arc = almanac_file_arc)
+        @everywhere arclamp_linelist = load_arclamp_linelist(
+            parg["arclamp_linelist"] == "" ? ApogeeReduction.ARCLAMP_LINELIST_DEFAULT :
+            parg["arclamp_linelist"]; selection = parg["arclamp_linelist_selection"])
+        @everywhere arclamp_night_partial(mjd) = try
+            get_and_save_arclamp_night_wavecal(parg["tele"], mjd;
+                apred_dir = joinpath(parg["outdir"], "apred"), almanac_file = almanac_file_arc,
+                linelist = arclamp_linelist, checkpoint_mode = parg["checkpoint_mode"],
+                chip_transform_cal = CHIP_TRANSFORM_CAL)
+        catch e
+            @warn "arc-lamp night product failed for $(parg["tele"]) $(mjd)" exception = e
+            nothing
+        end
+        desc = "Arc-lamp night products (stage 1): "
+        @showprogress desc=desc pmap(arclamp_night_partial, unique_mjds)
+    end
+
     ## load rough wave dict and sky lines list
     @everywhere begin
         roughwave_dict = load(joinpath(proj_path, "data", "roughwave_dict.jld2"), "roughwave_dict")
@@ -434,11 +528,81 @@ if parg["relFlux"]
     mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
     println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
 
-    ## comb-measured chip transform (calibration input; nothing = chip scale fixed to 1)
-    @everywhere CHIP_TRANSFORM_CAL = $(CHIP_TRANSFORM_OFF) ? nothing :
-                                     load_chip_transform_cal($(parg["chip_transform_cal"]))
-    println(CHIP_TRANSFORM_OFF ? "Sky wavecal chip scales: OFF (chip scale 1, --chip_transform_cal none)" :
-            "Sky wavecal chip scales from $(CHIP_TRANSFORM_CAL) [$(ApogeeReduction.chip_transform_id(CHIP_TRANSFORM_CAL))]")
+    ## ---- arc-first order (--wavecal_order arc_first; skipped entirely with legacy) ----------
+    ## Each stage once, in order, reading only earlier stages (src/wavecal_arcfirst.jl):
+    ## arcs -> arc-seeded comb -> FPI fibers -> night assembly + per-exposure terms -> waveCalExp.
+    ## Nights without a usable arc fit continue below through the legacy chain, restricted to
+    ## those nights; their exposures are flagged WAVE_NOT_ARCFIRST at resampling.
+    if parg["wavecal_order"] == "arc_first"
+        @everywhere ARCFIRST_CFG = ApogeeReduction.RefitConfig(
+            chip_transform_file = $(CHIP_TRANSFORM_OFF) ? "" : $(parg["chip_transform_cal"]),
+            shape_template_file = $(parg["arcfirst_shape_template"]),
+            fps_shape_apo = $(parg["arcfirst_fps_shape"]), fps_shape_lco = $(parg["arcfirst_fps_shape"]),
+            anchor_samepos = "none", anchor_block = $(parg["arcfirst_anchor_block"]),
+            anchor_trend = $(parg["arcfirst_anchor_trend"]))
+        almanac_file_af = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
+        sendto(workers(), almanac_file_af = almanac_file_af)
+        af_mjd(f) = parse(Int, split(basename(f), "_")[3])
+        all1DcalFirst = replace.(all2Dperchip[1], "ar2D" => "ar1Dcal")
+        af_jobs = [(mjd, ApogeeReduction.arcfirst_exps_from_names(all1DcalFirst, parg["tele"], mjd),
+                    filter(f -> af_mjd(f) == mjd, all1DfpiPeaks_a)) for mjd in unique_mjds]
+        af_hist = String.(filter(!isempty, strip.(split(parg["arcfirst_history_roots"], ","))))
+        sendto(workers(), af_hist = af_hist)
+        # phase 1 for EVERY night (arc fit, arc-anchored comb), then phase 2 (cross-night anchor
+        # continuity against the neighbours' combs, FPI fibers, assembly, end-of-night check)
+        @everywhere arcfirst_p1(job) = try
+            ApogeeReduction.arcfirst_night_phase1(parg["tele"], job[1]; outdir = parg["outdir"],
+                almanac_file = almanac_file_af, exps = job[2], fpi_fnames = job[3], cfg = ARCFIRST_CFG,
+                checkpoint_mode = parg["checkpoint_mode"], noarc_fallback = parg["arcfirst_noarc_fallback"])
+        catch e
+            @warn "ARC-FIRST CHAIN FAILED (phase 1) for $(parg["tele"]) $(job[1]): the night falls back to the legacy chain (WAVE_NOT_ARCFIRST)" exception = (e, catch_backtrace())
+            (; route = :legacy, arc = "error", comb = "", done = false)
+        end
+        desc = "Arc-first phase 1 (arcs -> arc-anchored comb): "
+        af_p1 = @showprogress desc=desc pmap(arcfirst_p1, af_jobs)
+        @everywhere arcfirst_p2(job) = try
+            ApogeeReduction.arcfirst_night_phase2(parg["tele"], job[1]; outdir = parg["outdir"],
+                almanac_file = almanac_file_af, exps = job[2], fpi_fnames = job[3], cfg = ARCFIRST_CFG,
+                fiber_fill = parg["arcfirst_fiber_fill"], max_reanchor = parg["arcfirst_max_reanchor"],
+                sky_check_ms = parg["arcfirst_sky_check_ms"], history_roots = af_hist)
+        catch e
+            @warn "ARC-FIRST CHAIN FAILED (phase 2) for $(parg["tele"]) $(job[1]): the night falls back to the legacy chain (WAVE_NOT_ARCFIRST)" exception = (e, catch_backtrace())
+            # no partial waveCalExp may survive: resampling must use the legacy chain for the whole night
+            ApogeeReduction.arcfirst_clear_night(ApogeeReduction.arcfirst_root(parg["outdir"]),
+                joinpath(parg["outdir"], "apred"), parg["tele"], job[1], job[2])
+            (; route = :legacy, comb = "error", anchorcheck = "", fpifib = "", assemble = "", n_exp_written = 0, n_attempts = 0)
+        end
+        p2_jobs = [job for (job, r) in zip(af_jobs, af_p1) if r.route == :arcfirst && !r.done]
+        desc = "Arc-first phase 2 (anchor continuity -> FPI fibers -> assembly): "
+        af_p2 = @showprogress desc=desc pmap(arcfirst_p2, p2_jobs)
+        p2_by = Dict(job[1] => r for (job, r) in zip(p2_jobs, af_p2))
+        af_res = [haskey(p2_by, job[1]) ? merge((; arc = r1.arc), p2_by[job[1]]) :
+                  (; route = r1.route, arc = r1.arc, comb = r1.comb, anchorcheck = "", fpifib = "",
+                     assemble = r1.done ? "done" : "", n_exp_written = 0, n_attempts = 0)
+                  for (job, r1) in zip(af_jobs, af_p1)]
+        for (job, r) in zip(af_jobs, af_res)
+            println("arc_first $(parg["tele"]) $(job[1]): route=$(r.route) arc=$(r.arc) comb=$(r.comb) ",
+                "anchorcheck=$(r.anchorcheck) fpifib=$(r.fpifib) assemble=$(r.assemble) ",
+                "waveCalExp=$(r.n_exp_written)/$(length(job[2])) anchor_attempts=$(r.n_attempts)")
+        end
+        # cross-night comb step: bulk = a pass over this run's comb products; daily = the same
+        # kernel with trailing nights from --arcfirst_history_roots (each night vs earlier nights only)
+        af_cross = ApogeeReduction.arcfirst_crossnight(ApogeeReduction.arcfirst_root(parg["outdir"]), parg["tele"],
+            [job[1] for job in af_jobs]; history_roots = af_hist)
+        for x in af_cross
+            @warn "arc_first cross-night comb flag $(parg["tele"]) $(x[1]): $(x[2]) = $(round(x[3], digits = 2))"
+        end
+        legacy_mjds = [job[1] for (job, r) in zip(af_jobs, af_res) if r.route == :legacy]
+        println("arc_first: $(length(unique_mjds) - length(legacy_mjds)) of $(length(unique_mjds)) nights in order; ",
+            "legacy chain for $(length(legacy_mjds)) nights without a usable arc fit: $(legacy_mjds)")
+        af_keep(f) = af_mjd(f) in legacy_mjds
+        all1DObjecta = filter(af_keep, all1DObjecta)
+        all1DFPIa = filter(af_keep, all1DFPIa)
+        all1DfpiPeaks_a = filter(af_keep, all1DfpiPeaks_a)
+        all1DFPI = filter(af_keep, all1DFPI)
+        all1DArclamp = filter(af_keep, all1DArclamp)
+        unique_mjds = legacy_mjds
+    end
 
     ## get wavecal from sky line peaks
     #only need to give one chip's list because internal
@@ -495,34 +659,14 @@ if parg["relFlux"]
         @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
     end
 
-    ## stage-1 arc-lamp night product (off by default; nothing downstream reads it yet).
-    ## It needs the arc ar1Dcal files and, for the sequence gate, the per-exposure sky/FPI
-    ## wavelength solutions written above.
-    if parg["arclamp_wavecal"] && size(all1DArclamp, 1) > 0
-        almanac_file_arc = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
-        sendto(workers(), almanac_file_arc = almanac_file_arc)
-        @everywhere arclamp_linelist = load_arclamp_linelist(
-            parg["arclamp_linelist"] == "" ? ApogeeReduction.ARCLAMP_LINELIST_DEFAULT :
-            parg["arclamp_linelist"]; selection = parg["arclamp_linelist_selection"])
-        @everywhere arclamp_night_partial(mjd) = try
-            get_and_save_arclamp_night_wavecal(parg["tele"], mjd;
-                apred_dir = joinpath(parg["outdir"], "apred"), almanac_file = almanac_file_arc,
-                linelist = arclamp_linelist, checkpoint_mode = parg["checkpoint_mode"])
-        catch e
-            @warn "arc-lamp night product failed for $(parg["tele"]) $(mjd)" exception = e
-            nothing
-        end
-        desc = "Arc-lamp night products (stage 1): "
-        @showprogress desc=desc pmap(arclamp_night_partial, unique_mjds)
-    end
-
     # ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name
 
     ## combine chips for single exposure onto loguniform wavelength grid
     ## pushing off the question of dither combinations for now (to apMADGICS stage)
     @everywhere reinterp_spectra_partial(fname) = reinterp_spectra(
         fname, roughwave_dict, 
-        checkpoint_mode = parg["checkpoint_mode"], outdir = parg["outdir"])
+        checkpoint_mode = parg["checkpoint_mode"], outdir = parg["outdir"],
+        wavecal_order = parg["wavecal_order"])
     if parg["doUncals"]
         all1Da = replace.(all2Dperchip[1], "ar2D" => "ar1D")
         desc = "Reinterp exposure spectra (uncals):"
