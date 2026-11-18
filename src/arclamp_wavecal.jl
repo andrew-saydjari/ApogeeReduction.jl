@@ -1,6 +1,6 @@
 # Arc-lamp (ThAr + UNe) wavelength calibration, stage 1: frozen line list, local-noise peak
-# finder, association, joint night fit with measured per-sequence positions, and the 0.02 px
-# sequence-position gate. Writes one per-night product (`arclampWaveCalNight_<tele>_<mjd>.h5`)
+# finder, association, joint night fit with measured per-sequence positions, and arc-only
+# outlier rejection of sequences. Writes one per-night product (`arclampWaveCalNight_<tele>_<mjd>.h5`)
 # that NOTHING in the pipeline reads yet. It runs only when `pipeline_2d_1d.jl --arclamp_wavecal
 # true` is given (default false), so production results are unchanged.
 #
@@ -8,11 +8,13 @@
 #   * finder: the "N=8" local-noise matched-filter finder (`get_arclamp_peaks_local`). It works in
 #     detector pixels only and uses the production `fit_gauss_and_bias` for the centroids.
 #   * association: catalog scan + quadratic self-calibration (the `associate` of the studies).
-#   * joint night fit (Gauss-Newton with a Schur complement), position clustering and gate B:
-#     the best arc fit of the ARC_VERDICT2 study, validated there on 1,563 nights.
+#   * joint night fit (Gauss-Newton with a Schur complement) and position clustering: the best
+#     arc fit of the ARC_VERDICT2 study, validated there on 1,563 nights.
+#   * sequence rejection: arc data only (arcs come first in the wavelength chain; nothing from
+#     the sky or FPI stages is read). Study 2026_11_18/arc_gate replaced the earlier gate against
+#     the night's object-exposure solutions.
 #
-# Positions are MEASURED from each sequence's own lines (and, for the gate, from the object
-# exposures' own solutions). The recorded dither (DITHPIX) is used for one thing only: to pair the
+# Positions are MEASURED from each sequence's own lines. The recorded dither (DITHPIX) is used for one thing only: to pair the
 # ThAr and UNe exposures of an almanac arc sequence that sit at the same commanded position.
 # A wrong label there is caught by the measured ThAr-vs-UNe position check (`ARCSEQ_LAMP_MISMATCH`).
 #
@@ -998,7 +1000,7 @@ function arcfit_eval(th, g, lay::ArcGlobalLayout, f, c, px; grpv = 1, d = 0.0, t
 end
 
 # ------------------------------------------------------------------------------------------
-# positions and the gate
+# measured positions
 # ------------------------------------------------------------------------------------------
 """
     arclamp_position_clusters(shift_px; outlier_px = 3.0, group_px = 0.25)
@@ -1023,90 +1025,246 @@ function arclamp_position_clusters(shift_px::AbstractVector; outlier_px = 3.0, g
     return posout, cl, ncl
 end
 
+# ------------------------------------------------------------------------------------------
+# arc-only sequence rejection
+# ------------------------------------------------------------------------------------------
+# Arcs come first in the wavelength chain, so a sequence may be judged only against the night's
+# other arc sequences. Every sequence keeps its own measured shift and tilt in the joint model,
+# so a pure displacement is absorbed and is NOT a reason to reject (study 2026_11_18/arc_gate:
+# a 0.1 px displacement of one sequence moves the night solution at the other sequences' states
+# by < 0.03 m/s). What is rejected is a sequence whose lines do not fit the shared night model
+# as the others do:
+#   * quality: larger line-residual scatter, or fewer lines surviving the clipping;
+#   * shape: its binned residual pattern differs from the night's median pattern beyond a
+#     per-chip zero point and stretch (pixel direction) or tilt (fiber direction);
+#   * chip offset: its per-chip residual zero points differ from the night's by a
+#     chip-differential amount. The model has no per-sequence per-chip zero point, so this part
+#     leaks into the other sequences' solutions (study: 600-1500 m/s per px, chip-dependent).
+const ARCSTAT_NXB = 8                  # pixel bins per chip
+const ARCSTAT_NFB = 10                 # fiber bins per chip
+
 """
-    arclamp_gate(offset_px; gate_px = 0.02) -> (dev_px, gated, flagged)
+    arclamp_sequence_stats(D, F, nseq, disp_chip) -> Vector of NamedTuples
 
-Gate B: `offset_px[s]` is sequence s's measured offset (px) from the nearest-in-time object
-exposure at the same measured position (NaN if none). The night median is removed; a sequence
-is flagged when |deviation| > `gate_px`. Ungated sequences (NaN) are never flagged.
+Per-sequence statistics about a joint fit (rows of `D`, fit `F`, sequences 1..nseq of the fit):
+`n_rows`, `n_keep`, `keep_frac`, `rsig_px` (robust scatter of the kept residuals, px), and, from
+the binned median residuals (8 pixel bins x 10 fiber bins per chip, bins with >= 10 kept rows)
+minus the night's median binned pattern over the sequences:
+  * `chip_zp_px`, `chip_stretch_px` (per chip, px): straight line in x through the difference;
+  * `chipoff_px`: the largest |zero point of R or B minus that of G| (chip-differential offset);
+  * `shape_px`: RMS of the difference after the per-chip line (pixel bins) and after a per-chip
+    line in fiber coordinate (fiber bins).
+For a single sequence the differences are zero by construction.
 """
-function arclamp_gate(offset_px::AbstractVector; gate_px = 0.02)
-    dev = offset_px .- _arc_nanmedian(offset_px)
-    gated = isfinite.(dev)
-    flagged = gated .& (abs.(dev) .> gate_px)
-    return dev, gated, flagged
-end
-
-"""Object-exposure reference for the gate: a (pixel window x fibers 100:200) slice of the
-exposure's chip-G wavelength solution, with its mid-exposure MJD."""
-struct ArcObjRef
-    expnum::Int
-    mjd_mid::Float64
-    kind::String                     # "fpi" or "sky" (which per-exposure solution file)
-    px0::Int                         # first pixel of the slice
-    fibers::UnitRange{Int}
-    wave::Matrix{Float64}            # (pixels, fibers) chip G
-end
-
-const ARCGATE_FIBERS = 100:200
-const ARCGATE_PX = collect(900.0:25.0:1150.0)
-
-"""Measured offset (px) of arc state (`th`, `g`, ...) from an object exposure's chip-G
-solution: median over fibers 100-200 and pixels 900-1150 of (λ_arc − λ_obj)/(dλ_obj/dpix)."""
-function arclamp_offset_to_ref(TH, okf, g, lay, grpv, d, t, tau, ref::ArcObjRef)
-    v = Float64[]
-    for (jf, f) in enumerate(ref.fibers)
-        okf[f] || continue
-        la = arcfit_eval(view(TH, f, :), g, lay, f, 2, ARCGATE_PX; grpv = grpv, d = d, t = t,
-            tau = tau)
-        for (k, p) in enumerate(ARCGATE_PX)
-            i = Int(p) - ref.px0 + 1
-            (2 <= i <= size(ref.wave, 1) - 1) || continue
-            lr = ref.wave[i, jf]
-            dl = (ref.wave[i + 1, jf] - ref.wave[i - 1, jf]) / 2
-            isfinite(lr) && isfinite(dl) && dl != 0 && push!(v, (la[k] - lr) / dl)
+function arclamp_sequence_stats(D::ArcJointData, F, nseq::Integer, disp_chip)
+    xe = range(-0.5, 0.5, length = ARCSTAT_NXB + 1)
+    fe = range(-1.0, 1.0, length = ARCSTAT_NFB + 1)
+    xc = collect((xe[1:(end - 1)] .+ xe[2:end]) ./ 2)
+    fc = collect((fe[1:(end - 1)] .+ fe[2:end]) ./ 2)
+    binof(v, e, nb) = clamp(searchsortedlast(e, v), 1, nb)
+    Bx = fill(NaN, nseq, N_CHIPS, ARCSTAT_NXB)
+    Bf = fill(NaN, nseq, N_CHIPS, ARCSTAT_NFB)
+    base = map(1:nseq) do j
+        rows = [i for i in eachindex(D.seq)
+                if D.seq[i] == j && F.okf[D.fiber[i]] && isfinite(F.resid[i])]
+        kept = [i for i in rows if F.keep[i]]
+        rpx = [F.resid[i] / disp_chip[D.chip[i]] for i in kept]
+        for c in 1:N_CHIPS
+            m = [D.chip[i] == c for i in kept]
+            x = D.x[kept[m]]
+            ph = arcfit_phi.(D.fiber[kept[m]])
+            r = rpx[m]
+            bx = [binof(v, xe, ARCSTAT_NXB) for v in x]
+            bf = [binof(v, fe, ARCSTAT_NFB) for v in ph]
+            for b in 1:ARCSTAT_NXB
+                sel = bx .== b
+                count(sel) >= 10 && (Bx[j, c, b] = median(r[sel]))
+            end
+            for b in 1:ARCSTAT_NFB
+                sel = bf .== b
+                count(sel) >= 10 && (Bf[j, c, b] = median(r[sel]))
+            end
         end
+        (n_rows = length(rows), n_keep = length(kept),
+         keep_frac = isempty(rows) ? NaN : length(kept) / length(rows), rsig_px = _arc_robstd(rpx))
     end
-    return isempty(v) ? NaN : median(v)
+    refx = [_arc_nanmedian(Bx[:, c, b]) for c in 1:N_CHIPS, b in 1:ARCSTAT_NXB]
+    reff = [_arc_nanmedian(Bf[:, c, b]) for c in 1:N_CHIPS, b in 1:ARCSTAT_NFB]
+    out = map(1:nseq) do j
+        zp = fill(NaN, N_CHIPS)
+        st = fill(NaN, N_CHIPS)
+        res = Float64[]
+        for c in 1:N_CHIPS
+            for (B, ref, cc, setzp) in ((Bx, refx, xc, true), (Bf, reff, fc, false))
+                d = B[j, c, :] .- ref[c, :]
+                ok = isfinite.(d)
+                count(ok) >= 3 || continue
+                A = hcat(ones(count(ok)), cc[ok])
+                cf = A \ d[ok]
+                append!(res, d[ok] .- A * cf)
+                if setzp
+                    zp[c] = cf[1]
+                    st[c] = cf[2]
+                end
+            end
+        end
+        offs = [abs(zp[c] - zp[2]) for c in (1, 3) if isfinite(zp[c]) && isfinite(zp[2])]
+        merge(base[j], (shape_px = isempty(res) ? NaN : sqrt(mean(res .^ 2)),
+            chipoff_px = isempty(offs) ? NaN : maximum(offs), chip_zp_px = zp, chip_stretch_px = st))
+    end
+    return out
+end
+
+"""Default thresholds of the arc-only sequence rejection (all are options of
+`fit_arclamp_night`, recorded in the product metadata; values chosen on the 2026_11_18/arc_gate
+sample, pending PI confirmation).
+
+Relative test (nights with at least `min_seq_compare` sequences): for a statistic `q` of sequence
+s, with the night median `m` and robust spread `σ` = max(1.4826 MAD, `q_scale_floor`) over the
+night's sequences, s is an outlier when its excess (q − m; m − q for the kept fraction `keep`)
+exceeds both `reject_k` σ and the absolute excess floor `q_floor`. Statistics: `rsig`, `keep`,
+`shape` and `chipoff` of `arclamp_sequence_stats`.
+
+Absolute test (every night): `rsig` > `rsig_max_px` or `keep` < `keep_min` (or no kept rows)
+marks a sequence as failing the absolute ceilings."""
+const ARCREJ_DEFAULTS = (reject_k = 5.0, min_seq_compare = 3,
+    rsig_scale_floor_px = 0.001, rsig_floor_px = 0.01,
+    keep_scale_floor = 0.0005, keep_floor = 0.02,
+    shape_scale_floor_px = 0.0005, shape_floor_px = 0.005,
+    chipoff_scale_floor_px = 0.001, chipoff_floor_px = 0.01,
+    rsig_max_px = 0.12, keep_min = 0.90)
+
+"""
+    arclamp_sequence_reject(stats; opts...) -> (quality, shape, chipoff, absfail, score, compared)
+
+Judge a night's sequences from their `arclamp_sequence_stats` (rule in `ARCREJ_DEFAULTS`).
+`quality[s]`: relative outlier in residual scatter or kept fraction, or no kept rows; `shape[s]`
+/ `chipoff[s]`: relative outlier in residual shape / chip-differential offset (all three only
+when `compared`, i.e. at least `min_seq_compare` sequences). `absfail[s]`: fails an absolute
+ceiling. `score[s]`: the largest ratio of a statistic's excess to its threshold (> 1 = fails
+something; the largest score marks the worst sequence). `fit_arclamp_night` removes failing
+sequences one at a time, worst first, refitting after each.
+"""
+function arclamp_sequence_reject(stats::AbstractVector; reject_k = ARCREJ_DEFAULTS.reject_k,
+        min_seq_compare = ARCREJ_DEFAULTS.min_seq_compare,
+        rsig_scale_floor_px = ARCREJ_DEFAULTS.rsig_scale_floor_px,
+        rsig_floor_px = ARCREJ_DEFAULTS.rsig_floor_px,
+        keep_scale_floor = ARCREJ_DEFAULTS.keep_scale_floor, keep_floor = ARCREJ_DEFAULTS.keep_floor,
+        shape_scale_floor_px = ARCREJ_DEFAULTS.shape_scale_floor_px,
+        shape_floor_px = ARCREJ_DEFAULTS.shape_floor_px,
+        chipoff_scale_floor_px = ARCREJ_DEFAULTS.chipoff_scale_floor_px,
+        chipoff_floor_px = ARCREJ_DEFAULTS.chipoff_floor_px,
+        rsig_max_px = ARCREJ_DEFAULTS.rsig_max_px, keep_min = ARCREJ_DEFAULTS.keep_min)
+    S = length(stats)
+    rs = [Float64(x.rsig_px) for x in stats]
+    kf = [Float64(x.keep_frac) for x in stats]
+    sh = [Float64(x.shape_px) for x in stats]
+    co = [Float64(x.chipoff_px) for x in stats]
+    empty = [x.n_keep == 0 || !isfinite(x.rsig_px) || !isfinite(x.keep_frac) for x in stats]
+    compared = S >= min_seq_compare
+    function rel(q, sfloor, afloor, sgn)
+        compared || return zeros(S)
+        m = _arc_nanmedian(q)
+        y = _arc_finite(q)
+        sc = max(length(y) >= 2 ? 1.4826 * median(abs.(y .- m)) : 0.0, sfloor)
+        thr = max(reject_k * sc, afloor)
+        return [isfinite(q[s]) ? sgn * (q[s] - m) / thr : 0.0 for s in 1:S]
+    end
+    r_rs = rel(rs, rsig_scale_floor_px, rsig_floor_px, 1)
+    r_kf = rel(kf, keep_scale_floor, keep_floor, -1)
+    r_sh = rel(sh, shape_scale_floor_px, shape_floor_px, 1)
+    r_co = rel(co, chipoff_scale_floor_px, chipoff_floor_px, 1)
+    quality = (r_rs .> 1) .| (r_kf .> 1) .| (compared .& empty)
+    shape = (r_sh .> 1) .& .!quality
+    chipoff = (r_co .> 1) .& .!quality .& .!shape
+    a_rs = [isfinite(x) ? x / rsig_max_px : Inf for x in rs]
+    a_kf = [isfinite(x) ? (1 - x) / (1 - keep_min) : Inf for x in kf]
+    absfail = (a_rs .> 1) .| (a_kf .> 1) .| empty
+    score = [maximum((r_rs[s], r_kf[s], r_sh[s], r_co[s], a_rs[s], a_kf[s])) for s in 1:S]
+    return quality, shape, chipoff, absfail, score, compared
 end
 
 # ------------------------------------------------------------------------------------------
 # the night fit
 # ------------------------------------------------------------------------------------------
-# per-sequence flag bits
-const ARCSEQ_POS_OUTLIER = 1        # > outlier_px from the night median: excluded
-const ARCSEQ_GATE_FAIL = 2          # |gate deviation| > gate_px: excluded from the final fit
-const ARCSEQ_UNGATED = 4            # no same-position object exposure to gate against
-const ARCSEQ_LAMP_MISMATCH = 8      # ThAr and UNe rows disagree in position by > 0.1 px
-const ARCSEQ_FEW_LINES = 16         # < 1000 fitted rows in the sequence
-# night flag bits
-const ARCNIGHT_MULTIPOS = 1         # > 2 measured position clusters: no shared position terms
-const ARCNIGHT_NO_TIME_TERMS = 2    # time terms not identifiable
-const ARCNIGHT_FEW_FIBERS = 4       # < 250 good fibers
-const ARCNIGHT_ALL_GATED = 8        # every gated sequence failed the gate
-const ARCNIGHT_NO_GATE = 16         # no sequence could be gated (no object references)
-const ARCNIGHT_CHIPSCALE_FREE = 32  # chip scales fitted (no chip-transform calibration given)
-const ARCNIGHT_POS_OUTLIER = 64     # at least one sequence was a position outlier
+# per-sequence flag bits (UInt16; the meanings are also written to the product metadata).
+# Bit positions are never reused: 2 and 4 (the retired gate B against the object exposures'
+# solutions) are reserved.
+const ARCSEQ_POS_OUTLIER = 0x0001     # > outlier_px from the night median: excluded
+#     0x0002 reserved (was ARCSEQ_GATE_FAIL, retired)
+#     0x0004 reserved (was ARCSEQ_UNGATED, retired)
+const ARCSEQ_LAMP_MISMATCH = 0x0008   # ThAr and UNe rows disagree in position by > 0.1 px
+const ARCSEQ_FEW_LINES = 0x0010       # < 1000 kept rows in the sequence
+const ARCSEQ_QUALITY = 0x0020         # rejected: residual scatter / kept fraction / ceiling
+const ARCSEQ_SHAPE = 0x0040           # rejected: residual-shape outlier
+const ARCSEQ_NOT_COMPARED = 0x0080    # night has < min_seq_compare sequences: not judged
+const ARCSEQ_ABS_FAIL = 0x0100     # fails an absolute ceiling (rsig_max_px, keep_min)
+const ARCSEQ_CHIPOFF = 0x0200      # rejected: chip-differential offset outlier
+const ARCSEQ_REJECTED = ARCSEQ_QUALITY | ARCSEQ_SHAPE | ARCSEQ_CHIPOFF   # mask: rejected
+# night flag bits (UInt16). 8 and 16 (retired gate B) are reserved.
+const ARCNIGHT_MULTIPOS = 0x0001    # > 2 measured position clusters: no shared position terms
+const ARCNIGHT_NO_TIME_TERMS = 0x0002  # time terms not identifiable
+const ARCNIGHT_FEW_FIBERS = 0x0004  # < 250 good fibers
+#     0x0008 reserved (was ARCNIGHT_ALL_GATED, retired)
+#     0x0010 reserved (was ARCNIGHT_NO_GATE, retired)
+const ARCNIGHT_CHIPSCALE_FREE = 0x0020  # chip scales fitted (no chip-transform calibration used)
+const ARCNIGHT_POS_OUTLIER = 0x0040 # at least one sequence was a position outlier
+const ARCNIGHT_SEQ_REJECTED = 0x0080  # at least one sequence rejected by the arc-only rule
+const ARCNIGHT_FEW_SEQ = 0x0100     # < min_seq_compare sequences: rejection not possible
+const ARCNIGHT_ABS_FAIL = 0x0200    # sequences in the final fit fail the absolute ceilings
+"Bit meanings of `seq_flags` (written to the product metadata)."
+const ARCLAMP_SEQFLAG_BITS = (
+    "1: position outlier (> position_outlier_px from the night median), excluded",
+    "2: reserved (retired gate B: gate failure)",
+    "4: reserved (retired gate B: ungated)",
+    "8: ThAr and UNe positions disagree by > lamp_mismatch_px",
+    "16: fewer than 1000 kept rows",
+    "32: rejected (line-residual scatter, kept fraction, no rows, or absolute ceiling)",
+    "64: rejected, residual-shape outlier (pattern differs from the night's median pattern)",
+    "128: not judged (night has fewer than min_seq_compare sequences)",
+    "256: fails an absolute ceiling (reject_rsig_max_px, reject_keep_min)",
+    "512: rejected, chip-differential offset outlier among the night's sequences")
+"Bit meanings of `night_flags` (written to the product metadata)."
+const ARCLAMP_NIGHTFLAG_BITS = (
+    "1: more than 2 measured position clusters, no shared position terms",
+    "2: time terms not identifiable",
+    "4: fewer than 250 good fibers",
+    "8: reserved (retired gate B: all gated sequences failed)",
+    "16: reserved (retired gate B: no object reference)",
+    "32: chip scales fitted (no chip-transform calibration used)",
+    "64: at least one position outlier",
+    "128: at least one sequence rejected by the arc-only rule",
+    "256: fewer than min_seq_compare sequences, rejection not possible",
+    "512: sequences in the final fit fail the absolute ceilings (night solution suspect)")
 
 """
-    fit_arclamp_night(lines, tseq, tele, ll; objrefs = ArcObjRef[], chip_scales = nothing, ...)
+    fit_arclamp_night(lines, tseq, tele, ll; chip_scales = nothing, reject = (;), ...)
 
-Fit one night's arc sequences jointly.
+Fit one night's arc sequences jointly, from arc data only.
 
   * `lines`: per sequence s, a line table from `arclamp_sequence_lines`.
   * `tseq`: per sequence, the mean mid-exposure MJD of its ThAr and UNe exposures.
-  * `objrefs`: object-exposure references for the gate (may be empty).
   * `chip_scales`: N_FIBERS x 2 (b_R, b_B) to hold the chip scales fixed, or `nothing`.
+  * `reject`: overrides of the rejection thresholds (keys of `ARCREJ_DEFAULTS`).
 
 Stage 1 (shift + tilt per sequence only) measures each sequence's position; the positions are
-clustered; gate B is evaluated against the object references; the final fit uses the
-non-outlier, non-flagged sequences with the second-position and time terms when identifiable.
-Returns a NamedTuple with everything the night product stores.
+clustered and position outliers excluded. The joint fit of the remaining sequences gives each
+sequence's residual statistics (`arclamp_sequence_stats`), judged by `arclamp_sequence_reject`:
+ 1. relative outliers among the night's sequences are removed one at a time, worst first, with a
+    refit after each removal (kept in the tables, flagged);
+ 2. if sequences fail the absolute ceilings, the worst is removed and the night refitted, as long
+    as at least 2 sequences remain; if that does not leave a set that passes, these absolute
+    removals are undone and the night is flagged (`ARCNIGHT_ABS_FAIL`) instead.
+Nights with fewer than `min_seq_compare` sequences are flagged, never trimmed. Nothing from later pipeline
+stages (sky, FPI) is used. Returns a NamedTuple with everything the night product stores.
 """
 function fit_arclamp_night(lines::AbstractVector, tseq::AbstractVector{<:Real}, tele::AbstractString,
-        ll::ArcLineList; objrefs::AbstractVector{ArcObjRef} = ArcObjRef[],
-        chip_scales = nothing, gate_px = 0.02, group_px = 0.25, outlier_px = 3.0,
-        floor_px = 0.02, disp_chip = arclamp_seed_dispersion(ll), lamp_mismatch_px = 0.1)
+        ll::ArcLineList; chip_scales = nothing, group_px = 0.25, outlier_px = 3.0,
+        floor_px = 0.02, disp_chip = arclamp_seed_dispersion(ll), lamp_mismatch_px = 0.1,
+        reject::NamedTuple = NamedTuple())
+    unknown = setdiff(keys(reject), keys(ARCREJ_DEFAULTS))
+    isempty(unknown) || throw(ArgumentError("unknown rejection options: $(collect(unknown))"))
+    ropt = merge(ARCREJ_DEFAULTS, reject)
     S = length(lines)
     S >= 1 || throw(ArgumentError("no arc sequences"))
     L = (seq = vcat([fill(Int8(k), length(lines[k].fiber)) for k in 1:S]...),
@@ -1149,38 +1307,81 @@ function fit_arclamp_night(lines::AbstractVector, tseq::AbstractVector{<:Real}, 
 
     full_all = fit_subset(.!posout)
 
-    # gate B against the object references (measured positions only)
-    function offsets(FF)
-        off = fill(NaN, S)
-        obj = zeros(Int, S)
+    # arc-only rejection: each sequence against the night's other sequences (arc data only)
+    seq_rsig_px = fill(NaN, S)
+    seq_keep_frac = fill(NaN, S)
+    seq_shape_px = fill(NaN, S)
+    seq_chipoff_px = fill(NaN, S)
+    seq_score = fill(NaN, S)
+    seq_chip_zp_px = fill(NaN, S, N_CHIPS)
+    seq_chip_stretch_px = fill(NaN, S, N_CHIPS)
+    seq_absfail = falses(S)
+    rej_quality = falses(S)
+    rej_shape = falses(S)
+    rej_chipoff = falses(S)
+    rej_round = zeros(Int8, S)          # removal round (0 = not removed)
+    function judge(FF)
+        st = arclamp_sequence_stats(FF.D, FF.F, length(FF.sidx), disp_chip)
+        q, sh, co, ab, sc, cmp = arclamp_sequence_reject(st; ropt...)
         for (j, s) in enumerate(FF.sidx)
-            d, t = arcfit_seq_state(FF.F.g, FF.lay, j)
-            best = 0
-            bt = Inf
-            bo = NaN
-            for (ie, R) in enumerate(objrefs)
-                o = arclamp_offset_to_ref(FF.F.TH, FF.F.okf, FF.F.g, FF.lay, FF.grp[j], d, t,
-                    FF.tau[j], R)
-                (isfinite(o) && abs(o) < group_px) || continue
-                dt = abs(R.mjd_mid - tseq[s])
-                if dt < bt
-                    bt = dt
-                    best = ie
-                    bo = o
-                end
-            end
-            best == 0 && continue
-            off[s] = bo
-            obj[s] = objrefs[best].expnum
+            seq_rsig_px[s] = st[j].rsig_px
+            seq_keep_frac[s] = st[j].keep_frac
+            seq_shape_px[s] = st[j].shape_px
+            seq_chipoff_px[s] = st[j].chipoff_px
+            seq_score[s] = sc[j]
+            seq_chip_zp_px[s, :] .= st[j].chip_zp_px
+            seq_chip_stretch_px[s, :] .= st[j].chip_stretch_px
+            seq_absfail[s] = ab[j]
         end
-        return off, obj
+        return st, q, sh, co, ab, sc, cmp
     end
-    off_all, gobj = offsets(full_all)
-    gdev, gated, flag = arclamp_gate(off_all; gate_px = gate_px)
-    # flagged sequences are refitted out; if nothing would remain, the all-sequence fit is kept
-    useseq = .!flag .& .!posout
-    all_gated = any(gated) && !any(gated .& .!flag)
-    full = (count(flag) > 0 && count(useseq) >= 1) ? fit_subset(useseq) : full_all
+    cur = .!posout
+    compared = count(cur) >= ropt.min_seq_compare
+    full = full_all
+    snap = nothing                      # state before the first absolute-only removal
+    rnd = 0
+    abs_fail_night = false
+    while true
+        st, q, sh, co, ab, sc, cmp = judge(full)
+        rel = q .| sh .| co
+        if cmp && any(rel)
+            # worst relative outlier first
+            jj = findall(rel)
+            j = jj[argmax(sc[jj])]
+        elseif any(ab) && count(cur) >= ropt.min_seq_compare
+            snap === nothing && (snap = (cur = copy(cur), full = full, rq = copy(rej_quality),
+                rs = copy(rej_shape), rc = copy(rej_chipoff), rr = copy(rej_round)))
+            jj = findall(ab)
+            j = jj[argmax(sc[jj])]
+        else
+            if any(ab) && snap !== nothing
+                # absolute removals did not leave a passing set: undo them, flag the night
+                cur, full = snap.cur, snap.full
+                rej_quality .= snap.rq
+                rej_shape .= snap.rs
+                rej_chipoff .= snap.rc
+                rej_round .= snap.rr
+                judge(full)
+                abs_fail_night = true
+            elseif any(ab)
+                abs_fail_night = true
+            end
+            break
+        end
+        s = full.sidx[j]
+        rnd += 1
+        rej_round[s] = rnd
+        if q[j] || ab[j]
+            rej_quality[s] = true
+        elseif sh[j]
+            rej_shape[s] = true
+        else
+            rej_chipoff[s] = true
+        end
+        cur[s] = false
+        full = fit_subset(cur)
+    end
+    rejected = rej_quality .| rej_shape .| rej_chipoff
     F = full.F
     lay = full.lay
 
@@ -1201,13 +1402,16 @@ function fit_arclamp_night(lines::AbstractVector, tseq::AbstractVector{<:Real}, 
     keep_main[full.sel[F.keep]] .= true
 
     # per-sequence QA
-    seqflags = zeros(Int, S)
+    seqflags = zeros(UInt16, S)
     lamp_off_px = fill(NaN, S)
     nrows_seq = zeros(Int, S)
     for s in 1:S
         posout[s] && (seqflags[s] |= ARCSEQ_POS_OUTLIER)
-        flag[s] && (seqflags[s] |= ARCSEQ_GATE_FAIL)
-        gated[s] || (seqflags[s] |= ARCSEQ_UNGATED)
+        rej_quality[s] && (seqflags[s] |= ARCSEQ_QUALITY)
+        rej_shape[s] && (seqflags[s] |= ARCSEQ_SHAPE)
+        rej_chipoff[s] && (seqflags[s] |= ARCSEQ_CHIPOFF)
+        (compared || posout[s]) || (seqflags[s] |= ARCSEQ_NOT_COMPARED)
+        seq_absfail[s] && (seqflags[s] |= ARCSEQ_ABS_FAIL)
         r = [i for i in eachindex(L.id) if L.seq[i] == s && keep_main[i]]
         nrows_seq[s] = length(r)
         nrows_seq[s] < 1000 && (seqflags[s] |= ARCSEQ_FEW_LINES)
@@ -1225,12 +1429,13 @@ function fit_arclamp_night(lines::AbstractVector, tseq::AbstractVector{<:Real}, 
         seq_tilt_px[s] = t * N_XPIX
     end
     gpx(ix) = ntuple(c -> ix[c] > 0 ? F.g[ix[c]] * N_XPIX : NaN, 3)
-    nflags = 0
+    nflags = 0x0000
     ncl > 2 && (nflags |= ARCNIGHT_MULTIPOS)
     lay.timeok || (nflags |= ARCNIGHT_NO_TIME_TERMS)
     count(F.okf) < 250 && (nflags |= ARCNIGHT_FEW_FIBERS)
-    all_gated && (nflags |= ARCNIGHT_ALL_GATED)
-    any(gated) || (nflags |= ARCNIGHT_NO_GATE)
+    any(rejected) && (nflags |= ARCNIGHT_SEQ_REJECTED)
+    compared || (nflags |= ARCNIGHT_FEW_SEQ)
+    abs_fail_night && (nflags |= ARCNIGHT_ABS_FAIL)
     chip_scales === nothing && (nflags |= ARCNIGHT_CHIPSCALE_FREE)
     any(posout) && (nflags |= ARCNIGHT_POS_OUTLIER)
 
@@ -1245,7 +1450,9 @@ function fit_arclamp_night(lines::AbstractVector, tseq::AbstractVector{<:Real}, 
     wrms = sqrt(_arc_nanmean((F.resid[F.keep] .^ 2) .* full.D.w[F.keep]))
 
     return (; S, L, tseq, tau, tmean, dpx1, posout, igrp, n_clusters = ncl, grp,
-        gate_offset_px = off_all, gate_dev_px = gdev, gate_obj = gobj, gated, gate_flag = flag,
+        rej_quality, rej_shape, rej_chipoff, rej_round, compared, seq_rsig_px, seq_keep_frac,
+        seq_shape_px, seq_chipoff_px,
+        seq_score, seq_absfail, seq_chip_zp_px, seq_chip_stretch_px, reject_opts = ropt,
         used_seq = full.sidx, TH = F.TH, okf = F.okf, g = F.g, lay, grp_used = full.grp,
         tau_used = full.tau, resid = resid_all, keep_main, seqflags, lamp_off_px, nrows_seq,
         seq_shift_px, seq_tilt_px, pos2_zp_px = gpx(lay.idx_alpha), pos2_stretch_px = gpx(lay.idx_beta),
@@ -1351,59 +1558,38 @@ function arclamp_mjd_mid(fn::AbstractString)
 end
 
 """
-    arclamp_object_refs(apred_mjd_dir, tele, mjd)
-
-Gate references: for every object exposure with a per-exposure wavelength solution
-(`waveCalNightfpiDither_*_object.h5`, else `waveCalNightskyDither_*_object.h5`), a chip-G slice
-of its solution (pixels 880-1170, fibers 100-200) and its mid-exposure MJD. Opened read-only.
-"""
-function arclamp_object_refs(apred_mjd_dir::AbstractString, tele::AbstractString, mjd::Integer)
-    isdir(apred_mjd_dir) || return ArcObjRef[]
-    fs = readdir(apred_mjd_dir)
-    found = Dict{Int, Tuple{String, String}}()
-    for (kind, pre) in (("sky", "waveCalNightskyDither"), ("fpi", "waveCalNightfpiDither"))
-        rx = Regex("^$(pre)_$(tele)_$(mjd)_(\\d{4})_object\\.h5\$")
-        for fn in fs
-            m = match(rx, fn)
-            m === nothing && continue
-            found[parse(Int, m.captures[1])] = (kind, joinpath(apred_mjd_dir, fn))   # fpi wins
-        end
-    end
-    px0, px1 = 880, 1170
-    refs = ArcObjRef[]
-    for e in sort(collect(keys(found)))
-        kind, fn = found[e]
-        W = try
-            h5open(fn, "r") do f
-                Float64.(f["chipWaveSoln"][px0:px1, ARCGATE_FIBERS, 2])
-            end
-        catch
-            continue
-        end
-        t = arclamp_mjd_mid(joinpath(apred_mjd_dir,
-            "ar1Dcal_$(tele)_$(mjd)_$(_arc_expstr(e))_$(FIRST_CHIP)_object.h5"))
-        push!(refs, ArcObjRef(e, t, kind, px0, ARCGATE_FIBERS, W))
-    end
-    return refs
-end
-
-"""
     get_and_save_arclamp_night_wavecal(tele, mjd; apred_dir, almanac_file, outname = nothing,
-        linelist = load_arclamp_linelist(), chip_scales = nothing, chip_scale_source = "free",
-        nsig = 8.0, checkpoint_mode = "commit_same", disp_chip = nothing)
+        linelist = load_arclamp_linelist(), chip_transform_cal = nothing, chip_scales = nothing,
+        chip_scale_source = nothing, nsig = 8.0, checkpoint_mode = "commit_same",
+        disp_chip = nothing, reject = (;))
 
 Stage-1 arc night product. Finds the night's arc sequences, runs the local-noise finder on the
 first ThAr and first UNe exposure of each, associates with the frozen line list, fits the night
-jointly with measured positions and gate B (against the night's object-exposure solutions), and
+jointly with measured positions and arc-only sequence rejection, and
 writes `arclampWaveCalNight_<tele>_<mjd>.h5` (default: in `apred_dir/<mjd>/`). Inputs are opened
 read-only. Returns the output path, or `nothing` if the night has no usable arc sequence.
+Chip scales: `chip_scales` (N_FIBERS x 2) if given, else `chip_scales(chip_transform_cal, tele,
+mjd)` (the pipeline passes its loaded `--chip_transform_cal`), else fitted freely; the source is
+recorded in the product (`chip_scale_source`). `reject` overrides thresholds of the arc-only sequence rejection (keys of `ARCREJ_DEFAULTS`);
+the thresholds used are recorded in the product metadata. Only arc data and static calibration
+inputs are read: this stage runs before the sky and FPI wavelength stages.
 Nothing in the pipeline reads this product yet.
 """
 function get_and_save_arclamp_night_wavecal(tele::AbstractString, mjd::Integer;
         apred_dir::AbstractString, almanac_file::AbstractString, outname = nothing,
-        linelist::ArcLineList = load_arclamp_linelist(), chip_scales = nothing,
-        chip_scale_source::AbstractString = chip_scales === nothing ? "free" : "fixed",
-        nsig = 8.0, checkpoint_mode = "commit_same", disp_chip = nothing)
+        linelist::ArcLineList = load_arclamp_linelist(), chip_transform_cal = nothing,
+        chip_scales = nothing, chip_scale_source = nothing,
+        nsig = 8.0, checkpoint_mode = "commit_same", disp_chip = nothing,
+        reject::NamedTuple = NamedTuple())
+    # chip scales: an explicit matrix wins; else the chip-transform calibration's block for this
+    # (tele, mjd); else fitted freely (flagged ARCNIGHT_CHIPSCALE_FREE)
+    if chip_scales === nothing && chip_transform_cal !== nothing
+        chip_scales = ApogeeReduction.chip_scales(chip_transform_cal, tele, mjd)
+        chip_scale_source = something(chip_scale_source, chip_scales === nothing ?
+            "free (no block for this night in $(chip_transform_id(chip_transform_cal)))" :
+            "chip_transform_cal $(chip_transform_id(chip_transform_cal))")
+    end
+    chip_scale_source = something(chip_scale_source, chip_scales === nothing ? "free" : "fixed (given)")
     mdir = joinpath(apred_dir, string(mjd))
     outname = something(outname, joinpath(mdir, "arclampWaveCalNight_$(tele)_$(mjd).h5"))
     check_file(outname, mode = checkpoint_mode) && return outname
@@ -1419,23 +1605,21 @@ function get_and_save_arclamp_night_wavecal(tele::AbstractString, mjd::Integer;
     tth = [arclamp_mjd_mid(ar1d(s.thar)[1]) for s in seqs]
     tun = [arclamp_mjd_mid(ar1d(s.une)[1]) for s in seqs]
     tseq = [_arc_nanmean([a, b]) for (a, b) in zip(tth, tun)]
-    refs = arclamp_object_refs(mdir, tele, mjd)
-    R = fit_arclamp_night(lines, tseq, tele, linelist; objrefs = refs, chip_scales = chip_scales,
+    R = fit_arclamp_night(lines, tseq, tele, linelist; chip_scales = chip_scales, reject = reject,
         disp_chip = something(disp_chip, arclamp_seed_dispersion(linelist)))
     write_arclamp_night_wavecal(outname, R, seqs, linelist; tele = tele, mjd = mjd,
-        chip_scales = chip_scales, chip_scale_source = chip_scale_source, nsig = nsig,
-        n_objrefs = length(refs))
+        chip_scales = chip_scales, chip_scale_source = chip_scale_source, nsig = nsig)
     return outname
 end
 
 """Write the night product (see `get_and_save_arclamp_night_wavecal`). Datasets:
   fiber_params (N_FIBERS x 9: a_R b_R a_B b_B p0..p4), fiber_ok, the global terms
   (global_params with its decoded per-sequence and per-chip parts), per-sequence tables (seq_*),
-  gate quantities, flags, the per-chip residual summary, and the line table (lines_*).
+  per-sequence rejection statistics, flags, the per-chip residual summary, and the line table (lines_*).
   Wavelength grids are not stored (about 15 MB per night); `arclamp_night_wavelength` evaluates
   the solution from the stored parameters at any sequence state."""
 function write_arclamp_night_wavecal(outname, R, seqs, ll::ArcLineList; tele, mjd,
-        chip_scales, chip_scale_source, nsig, n_objrefs)
+        chip_scales, chip_scale_source, nsig)
     S = R.S
     used = falses(S)
     used[R.used_seq] .= true
@@ -1445,10 +1629,16 @@ function write_arclamp_night_wavecal(outname, R, seqs, ll::ArcLineList; tele, mj
         "linelist_fingerprint" => ll.fingerprint, "linelist_selection" => ll.selection,
         "n_fit_lines" => length(ll.fit_ids), "chip_scale_source" => String(chip_scale_source),
         "finder" => "get_arclamp_peaks_local", "finder_nsig" => Float64(nsig),
-        "weight_floor_px" => 0.02, "gate" => "B", "gate_px" => 0.02, "group_px" => 0.25,
-        "position_outlier_px" => 3.0, "n_object_refs" => n_objrefs,
+        "weight_floor_px" => 0.02, "group_px" => 0.25, "position_outlier_px" => 3.0,
+        "sequence_rejection" => "arc-only: outliers among the night's sequences (arclamp_sequence_reject)",
+        "inputs" => "arc ar1Dcal files, almanac, line list, chip scales; no sky/FPI products",
+        "seq_flag_bits" => collect(String, ARCLAMP_SEQFLAG_BITS),
+        "night_flag_bits" => collect(String, ARCLAMP_NIGHTFLAG_BITS),
         "dither_label_use" => "pairs ThAr with UNe within an almanac arc block only",
         "read_by" => "nothing (stage 1)")
+    for (k, v) in pairs(R.reject_opts)
+        metadata["reject_" * replace(String(k), "reject_" => "")] = v
+    end
     safe_jldsave(outname, metadata;
         fiber_params = R.TH, fiber_ok = Vector{Bool}(R.okf),
         chip_scales = chip_scales === nothing ? fill(NaN, N_FIBERS, 2) : Matrix{Float64}(chip_scales),
@@ -1457,8 +1647,11 @@ function write_arclamp_night_wavecal(outname, R, seqs, ll::ArcLineList; tele, mj
         seq_tau = R.tau, seq_used = Vector{Bool}(used), seq_flags = R.seqflags,
         seq_stage1_shift_px = R.dpx1, seq_pos_cluster = R.igrp, seq_pos_group = R.grp,
         seq_shift_px = R.seq_shift_px, seq_tilt_px = R.seq_tilt_px,
-        seq_gate_offset_px = R.gate_offset_px, seq_gate_dev_px = R.gate_dev_px,
-        seq_gate_obj = R.gate_obj, seq_lamp_offset_px = R.lamp_off_px,
+        seq_rsig_px = R.seq_rsig_px, seq_keep_frac = R.seq_keep_frac, seq_shape_px = R.seq_shape_px,
+        seq_chipoff_px = R.seq_chipoff_px,
+        seq_chip_zp_px = R.seq_chip_zp_px, seq_chip_stretch_px = R.seq_chip_stretch_px,
+        seq_reject_score = R.seq_score, seq_reject_round = R.rej_round,
+        night_compared = R.compared, seq_lamp_offset_px = R.lamp_off_px,
         seq_n_rows = R.nrows_seq,
         n_pos_clusters = R.n_clusters, has_pos2 = R.lay.has2, has_time_terms = R.lay.timeok,
         pos2_zp_px = collect(R.pos2_zp_px), pos2_stretch_px = collect(R.pos2_stretch_px),
@@ -1479,7 +1672,7 @@ end
 
 Evaluate a stored night product at the state of almanac-order sequence `seq` (default: the
 reference sequence, i.e. the first sequence used in the final fit). Sequences not used in the
-final fit (position outliers, gate failures) have no fitted state and raise an error.
+final fit (position outliers, rejected sequences) have no fitted state and raise an error.
 """
 function arclamp_night_wavelength(fname::AbstractString; seq = nothing, px = 1.0:N_XPIX)
     TH, okf, g, used, grp, tau, has2 = h5open(fname, "r") do f

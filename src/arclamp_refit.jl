@@ -48,9 +48,9 @@ const WAVE_ABS_ARC_WINDOW = 1 << 5
 const WAVE_REL_ARC_TIME = 1 << 6
 const WAVE_REL_ARC_NEAREST = 1 << 7
 const WAVE_FPIFIB_UNAVAILABLE = 1 << 8
-const WAVE_ARC_SEQ_GATED = 1 << 9
-const WAVE_ARC_ALL_GATED = 1 << 10
-const WAVE_ARC_UNGATED = 1 << 11
+const WAVE_ARC_SEQ_GATED = 1 << 9       # an arc sequence was rejected (#417 arc-only rejection)
+const WAVE_ARC_ALL_GATED = 1 << 10      # final-fit sequences fail the absolute ceilings (ARCNIGHT_ABS_FAIL)
+const WAVE_ARC_UNGATED = 1 << 11        # RESERVED (retired with gate B; never set)
 const WAVE_ARC_MULTIPOS = 1 << 12
 const WAVE_COMB_MODE_SLIP = 1 << 13
 const WAVE_LEVEL_INCONSISTENT = 1 << 14
@@ -95,9 +95,10 @@ refit_era(tele::AbstractString, mjd::Integer) = mjd > get_fps_plate_divide(Strin
 "Night-level arc flags of the stage-1 product mapped onto the per-exposure bits 2^9-2^12, 2^16."
 function refit_arc_night_bits(night_flags::Integer, seq_flags::AbstractVector{<:Integer})
     b = 0
-    any(s -> (s & ARCSEQ_GATE_FAIL) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_GATED)
-    (night_flags & ARCNIGHT_ALL_GATED) != 0 && (b |= WAVE_ARC_ALL_GATED)
-    (night_flags & ARCNIGHT_NO_GATE) != 0 && (b |= WAVE_ARC_UNGATED)
+    # #417 arc-only rejection: a rejected sequence -> 2^9; sequences in the final fit failing the absolute
+    # ceilings -> 2^10 (the former all-gated screen); 2^11 (formerly "ungated") is retired / reserved
+    any(s -> (s & ARCSEQ_REJECTED) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_GATED)
+    (night_flags & ARCNIGHT_ABS_FAIL) != 0 && (b |= WAVE_ARC_ALL_GATED)
     (night_flags & ARCNIGHT_MULTIPOS) != 0 && (b |= WAVE_ARC_MULTIPOS)
     (night_flags & ARCNIGHT_CHIPSCALE_FREE) != 0 && (b |= WAVE_CHIPSCALE_FREE)
     return b
@@ -549,6 +550,70 @@ function refit_prod_wave(lin::AbstractMatrix, nl::AbstractMatrix, f::Integer, c:
 end
 
 # ------------------------------------------------------------------------------------------
+# previous-run position references (LEGACY anchor rules only: nearest_science / morning / any /
+# anchor_pairing = position, and the verified_pair "no adjacent pair" fallback). They read a LATER-stage
+# product (pass-1 per-exposure solutions) and are not available in an in-order pipeline; the default
+# verified_pair rule does not use them. Refit-local copy of the former stage-1 gate helpers (#417 removed
+# gate B and with it ArcObjRef / arclamp_offset_to_ref / arclamp_object_refs).
+# ------------------------------------------------------------------------------------------
+"""A (pixel window x fibers) slice of an exposure's chip-G wavelength solution and its mid-exposure MJD."""
+struct RefitObjRef
+    expnum::Int
+    mjd_mid::Float64
+    kind::String
+    px0::Int
+    fibers::UnitRange{Int}
+    wave::Matrix{Float64}
+end
+const REFIT_REF_FIBERS = 100:200
+const REFIT_REF_PX = collect(900.0:25.0:1150.0)
+
+"""Measured offset (px) of an arc state from a reference solution slice: median over fibers 100-200 and
+pixels 900-1150 of (lambda_arc - lambda_ref)/(dlambda_ref/dpix)."""
+function refit_offset_to_ref(TH, okf, g, lay, grpv, d, t, tau, ref::RefitObjRef)
+    v = Float64[]
+    for (jf, f) in enumerate(ref.fibers)
+        okf[f] || continue
+        la = arcfit_eval(view(TH, f, :), g, lay, f, 2, REFIT_REF_PX; grpv = grpv, d = d, t = t, tau = tau)
+        for (k, p) in enumerate(REFIT_REF_PX)
+            i = Int(p) - ref.px0 + 1
+            (2 <= i <= size(ref.wave, 1) - 1) || continue
+            lr = ref.wave[i, jf]
+            dl = (ref.wave[i + 1, jf] - ref.wave[i - 1, jf]) / 2
+            isfinite(lr) && isfinite(dl) && dl != 0 && push!(v, (la[k] - lr) / dl)
+        end
+    end
+    return isempty(v) ? NaN : median(v)
+end
+
+"""Science-exposure references from their pass-1 per-exposure solutions (read-only; legacy rules only)."""
+function refit_object_refs(apred_mjd_dir::AbstractString, tele::AbstractString, mjd::Integer)
+    isdir(apred_mjd_dir) || return RefitObjRef[]
+    fs = readdir(apred_mjd_dir)
+    found = Dict{Int, Tuple{String, String}}()
+    for (kind, pre) in (("sky", "waveCalNightskyDither"), ("fpi", "waveCalNightfpiDither"))
+        rx = Regex("^$(pre)_$(tele)_$(mjd)_(\\d{4})_object\\.h5\$")
+        for fn in fs
+            m = match(rx, fn)
+            m === nothing && continue
+            found[parse(Int, m.captures[1])] = (kind, joinpath(apred_mjd_dir, fn))
+        end
+    end
+    refs = RefitObjRef[]
+    for e in sort(collect(keys(found)))
+        kind, fn = found[e]
+        W = try
+            h5open(f -> Float64.(f["chipWaveSoln"][880:1170, REFIT_REF_FIBERS, 2]), fn, "r")
+        catch
+            continue
+        end
+        t = arclamp_mjd_mid(joinpath(apred_mjd_dir, "ar1Dcal_$(tele)_$(mjd)_$(_arc_expstr(e))_$(FIRST_CHIP)_object.h5"))
+        push!(refs, RefitObjRef(e, t, kind, 880, REFIT_REF_FIBERS, W))
+    end
+    return refs
+end
+
+# ------------------------------------------------------------------------------------------
 # stage 3: arc-anchored comb
 # ------------------------------------------------------------------------------------------
 const COMB_ANCHOR_ARC = "arc"
@@ -604,12 +669,12 @@ const REFIT_LOCAL_MIDNIGHT_FRAC = Dict("apo" => 0.29, "lco" => 0.18)
 "Arc taken after local midnight (the UT day wraps during the night, so compare in local time)."
 refit_is_morning(tele, t) = isfinite(t) && (mod(t - REFIT_LOCAL_MIDNIGHT_FRAC[String(tele)] + 0.5, 1.0) - 0.5) > 0
 
-"""Quality tier of an arc sequence for anchoring, from its stage-1 flags: 0 = verified by the 0.02 px
-gate and clean; 1 = not gate-verified (ungated) or few lines / lamp mismatch; 2 = gate failure or
-position outlier (only in the final fit when every gated sequence failed)."""
+"""Quality tier of an arc sequence for anchoring, from its stage-1 flags (#417 arc-only rejection):
+0 = clean; 1 = few lines / lamp mismatch / not compared (night too small to judge) / absolute ceiling;
+2 = rejected (ARCSEQ_REJECTED) or position outlier (never an anchor candidate of verified_pair)."""
 function refit_anchor_quality(sf::Integer)
-    (sf & (ARCSEQ_GATE_FAIL | ARCSEQ_POS_OUTLIER)) != 0 && return 2
-    (sf & (ARCSEQ_UNGATED | ARCSEQ_FEW_LINES | ARCSEQ_LAMP_MISMATCH)) != 0 && return 1
+    (sf & (ARCSEQ_REJECTED | ARCSEQ_POS_OUTLIER)) != 0 && return 2
+    (sf & (ARCSEQ_FEW_LINES | ARCSEQ_LAMP_MISMATCH | ARCSEQ_NOT_COMPARED | ARCSEQ_ABS_FAIL)) != 0 && return 1
     return 0
 end
 
@@ -718,7 +783,7 @@ function refit_anchor_samepos(A::RefitArc, scis, pos_match_px::Real)
         i = argmin([isfinite(t) ? abs(t - A.tseq_u[j]) : Inf for t in st_sci])
         scis[i].ref === nothing && continue
         d, t = arcfit_seq_state(A.g, A.lay, j)
-        o = arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], scis[i].ref)
+        o = refit_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], scis[i].ref)
         samepos[j] = isfinite(o) && abs(o) < pos_match_px
     end
     return samepos
@@ -729,9 +794,9 @@ end
         anchor_block_h, pos_match_px)
 
 Pick the arc sequence that anchors the comb and the comb exposure it is paired with.
-`combs`: per comb exposure (order of the FPI file list) a NamedTuple (ref::ArcObjRef or nothing,
+`combs`: per comb exposure (order of the FPI file list) a NamedTuple (ref::RefitObjRef or nothing,
 t); `scis`: the same for the night's science (object) exposures with a pass-1 per-exposure
-solution (`arclamp_object_refs`). Positions are always MEASURED: a pair is allowed only if the arc
+solution (`refit_object_refs`). Positions are always MEASURED: a pair is allowed only if the arc
 sequence's own state matches the comb exposure's measured solution within `pos_match_px`, and
 "same position as the science" compares the arc state with the science exposure's measured
 solution (never the recorded dither).
@@ -758,7 +823,7 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
     for j in 1:nU, k in 1:nC
         combs[k].ref === nothing && continue
         d, t = arcfit_seq_state(A.g, A.lay, j)
-        offs[j, k] = arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], combs[k].ref)
+        offs[j, k] = refit_offset_to_ref(A.TH, A.okf, A.g, A.lay, A.grp_u[j], d, t, A.tau_u[j], combs[k].ref)
     end
     if anchor_pairing == "position"
         cls = refit_arc_clusters(A)
@@ -767,7 +832,7 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
             st = refit_arc_state(A, combs[1].t, cl; mode = :time)
             st === nothing && continue
             o = combs[1].ref === nothing ? (length(cls) == 1 ? 0.0 : NaN) :
-                arclamp_offset_to_ref(A.TH, A.okf, A.g, A.lay, st[1], st[2], st[3], st[4], combs[1].ref)
+                refit_offset_to_ref(A.TH, A.okf, A.g, A.lay, st[1], st[2], st[3], st[4], combs[1].ref)
             (isfinite(o) && abs(o) < abs(best[1])) && (best = (o, cl, st))
         end
         (best[3] === nothing || abs(best[1]) >= pos_match_px) &&
@@ -795,7 +860,7 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
     dts = fill(Inf, nU)
     samepos = anchor_samepos == "pass1" ? refit_anchor_samepos(A, scis, pos_match_px) : falses(nU)
     S = refit_anchor_select(anchor_block, A.tseq_u, q, [x[1] for x in bc], [x[2] for x in bc], st_sci,
-        Vector{Bool}(samepos), [(seq_flags[A.used[j]] & ARCSEQ_UNGATED) == 0 for j in 1:nU],
+        Vector{Bool}(samepos), [refit_anchor_quality(seq_flags[A.used[j]]) == 0 for j in 1:nU],
         [refit_is_morning(tele, t) for t in A.tseq_u]; prefer = anchor_prefer, anchor_block_h)
     S.ok || return (; ok = false,
         reason = "no arc sequence matches any comb exposure by measured position", offsets = offs)
@@ -883,10 +948,11 @@ function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A
         scis = NamedTuple[], anchor_block = "nearest_science", anchor_prefer = "strict",
         anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2,
         adjacency = nothing, lamp_off_px = nothing, anchor_max_candidates = 3, anchor_pattern_tol_px = 0.02,
-        anchor_lamp_tol_px = 0.1, anchor_adjacency = "strict_then_nomove", force = nothing)
+        anchor_lamp_tol_px = 0.1, anchor_adjacency = "strict_then_nomove", force = nothing, seq_score = nothing)
     if anchor_block == "verified_pair" && adjacency !== nothing
         Q = refit_verified_pair_comb(fpi_fnames, A, tele; adjacency, lamp_off_px, pass1_comb, comb_arc_qa_ms,
-            anchor_max_candidates, anchor_pattern_tol_px, anchor_lamp_tol_px, anchor_adjacency, n_sigma, max_iter, force)
+            anchor_max_candidates, anchor_pattern_tol_px, anchor_lamp_tol_px, anchor_adjacency, n_sigma, max_iter, force,
+            seq_flags = [seq_flags[s] for s in A.used], seq_score = seq_score === nothing ? nothing : seq_score[A.used])
         Q === nothing || return Q
         force === nothing || return (; ok = false, reason = "forced pair $(force) not refittable")
         # no sequence-adjacent pair at all: the "any" rule, flagged
@@ -950,10 +1016,16 @@ no adjacent pair. The chosen fit carries `anchor_kind` ("verified_pair:strict|no
 """
 function refit_verified_pair_comb(fpi_fnames, A::RefitArc, tele; adjacency, lamp_off_px, pass1_comb = nothing,
         comb_arc_qa_ms = 150.0, anchor_max_candidates = 3, anchor_pattern_tol_px = 0.02, anchor_lamp_tol_px = 0.1,
-        anchor_adjacency = "strict_then_nomove", n_sigma = 4, max_iter = 2, force = nothing)
+        anchor_adjacency = "strict_then_nomove", n_sigma = 4, max_iter = 2, force = nothing,
+        seq_flags = nothing, seq_score = nothing)
     nU, nC = size(adjacency)
     cls_ok = anchor_adjacency == "strict" ? ("strict",) : ("strict", "nomove")
-    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in 1:nU for k in 1:nC if adjacency[j, k] == c]
+    # candidates: never a rejected sequence or a position outlier; within a class, cleaner sequences first
+    # (#417 seq_reject_score, < 1 passes, lower is cleaner)
+    sf = seq_flags === nothing ? zeros(Int, nU) : seq_flags
+    sc = seq_score === nothing ? zeros(nU) : [isfinite(x) ? x : Inf for x in seq_score]
+    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in sortperm(sc) for k in 1:nC
+            if adjacency[j, k] == c && refit_anchor_quality(sf[j]) < 2]
     isempty(cand) && return nothing
     cand = cand[1:min(end, anchor_max_candidates)]
     # force = (stage-1 sequence index, FPI file basename): refit only that pair (continuity swap)

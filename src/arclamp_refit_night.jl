@@ -132,7 +132,7 @@ function refit_quartz_pattern(arc_fname, almanac_file, tele, mjd)
         i0 === nothing && continue
         (occursin("quartz", lowercase(it[j])) && abs(di[j] - di[i0]) < 0.01) && (after[s] = true)
     end
-    ng = count(s -> after[s] && (sfl[s] & ARCSEQ_GATE_FAIL) != 0, eachindex(after))
+    ng = count(s -> after[s] && (sfl[s] & ARCSEQ_REJECTED) != 0, eachindex(after))
     return (; after, n_gated = ng)
 end
 
@@ -186,15 +186,15 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
         e = parse(Int, split(basename(fn), "_")[4])
         t = arclamp_mjd_mid(ar1dcal_name(mdir, tele, mjd, e, "R", "arclamp"))
         rf = joinpath(mdir, "waveCalNightfpiDither_$(tele)_$(mjd)_$(_arc_expstr(e))_arclamp.h5")
-        ref = isfile(rf) ? ArcObjRef(e, t, "fpi", 880, ARCGATE_FIBERS,
-            h5open(f -> Float64.(f["chipWaveSoln"][880:1170, ARCGATE_FIBERS, 2]), rf, "r")) : nothing
+        ref = isfile(rf) ? RefitObjRef(e, t, "fpi", 880, REFIT_REF_FIBERS,
+            h5open(f -> Float64.(f["chipWaveSoln"][880:1170, REFIT_REF_FIBERS, 2]), rf, "r")) : nothing
         (; ref, t)
     end
     # science exposures (object exposures with a pass-1 per-exposure solution = measured position)
     # science exposures: object-exposure times; their pass-1 per-exposure solutions (a later-stage
     # product) only feed the optional same-position input (cfg.anchor_samepos)
     scis = cfg.anchor_block == "verified_pair" ? NamedTuple[] :
-           [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
+           [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in refit_object_refs(mdir, tele, mjd)]
     arcf = refit_path(outroot, "arc", tele, mjd)
     reason = ""
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
@@ -220,7 +220,8 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
             anchor_pairing = cfg.anchor_pairing, adjacency, lamp_off_px = lampoff,
             anchor_max_candidates = cfg.anchor_max_candidates, anchor_pattern_tol_px = cfg.anchor_pattern_tol_px,
             anchor_lamp_tol_px = cfg.anchor_lamp_tol_px, anchor_adjacency = cfg.anchor_adjacency,
-            anchor_block_h = cfg.anchor_block_h, force = force_pair)
+            anchor_block_h = cfg.anchor_block_h, force = force_pair,
+            seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"])) : nothing, arcf, "r"))
         if Q.ok
             keep === nothing || (Q = merge(Q, keep))
             ispath(out) && rm(out)        # a forced refit replaces the product (or a symlink to a reused one)
