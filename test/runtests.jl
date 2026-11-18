@@ -7,6 +7,8 @@ using FITSIO: FITS
     include("exposureClassifier.jl")
     include("ar1D.jl")
     include("wavecal.jl")
+    include("chip_transform.jl")
+    include("chip_transform_bootstrap.jl")
     include("fpi_gate.jl")
     include("fpi_homogeneity.jl")
     include("safe_jldsave.jl")
