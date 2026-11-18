@@ -203,6 +203,23 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
         lampoff = lo[A.used]
         provenance["anchor_adjacency_counts"] = join(["$(c)=$(count(==(c), adjacency))" for c in ("strict", "nomove", "other", "unknown")], ",")
     end
+    # experiment (comb_level = "stored_cavity"): the comb's level from the stored global cavity on EVERY night (no
+    # nightly arc -> comb level transfer; arcs only seed the integer orders and calibrate the table globally)
+    if cfg.comb_level == "stored_cavity" && cfg.anchor_block == "verified_pair"
+        sc = comb_cavity_reference(cfg.cavity_ref_file, String(tele), mjd)
+        if sc !== nothing
+            Qs = refit_stored_cavity_comb(fnames, A, tele, sc...; seq_flags = sfl[A.used],
+                seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r"),
+                exclude_seqs, pass1_comb, comb_arc_qa_ms = cfg.comb_arc_qa_ms)
+            if Qs.ok
+                Qs = merge(Qs, (; anchor_kind = "stored_cavity_level", anchor_bits = 0))
+                keep === nothing || (Qs = merge(Qs, keep))
+                ispath(out) && rm(out)
+                write_refit_comb(out, Qs, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = provenance)
+                return refit_write_status(outroot, "comb", tele, mjd, "ok_arc"), ""
+            end
+        end
+    end
     Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = pass1_comb,
         pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
         anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer, anchor_samepos = cfg.anchor_samepos,
@@ -502,7 +519,9 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         end
         tmid[k] = tm isa Real ? Float64(tm) : NaN
         bits[k] |= extra_bits
-        sky = kind == "object" ? refit_read_sky(mdir, tele, mjd, e) : nothing
+        # sky-line peaks: this run's apred tree, or a separate peaks tree (refit: re-measured peaks, #407 list)
+        skydir = isempty(cfg.sky_peaks_dir) ? mdir : joinpath(cfg.sky_peaks_dir, string(mjd))
+        sky = kind == "object" ? refit_read_sky(skydir, tele, mjd, e) : nothing
         (sky !== nothing && isempty(sky.pix)) && (sky = nothing)
         # rows that set the POOLED per-exposure terms (and the position match): all fibers, or only sky
         # fibers and faint-target fibers (`sky_line_fibers = "faint"`: stellar lines bias the sky-line

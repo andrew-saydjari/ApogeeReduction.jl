@@ -202,6 +202,9 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     nights): strict pairs scatter 3.6-4.0 m/s about the table; a wrong (non-adjacent) pair moves it by
     |median| 28 (LCO) / 67 (APO) m/s; 30 m/s flags <= 0.5 % of confirmed strict pairs
     (nocross/NOCROSS.md).
+  * `comb_level` ("pair"): experiment switch. "stored_cavity" = on every verified_pair night the comb cavity is
+    fixed at the stored (L, eps) of the epoch (no nightly arc -> comb level transfer; the night's comb still fits
+    its per-fiber shape, chip transform and dithers; integers from the cleanest arc sequence).
   * `noadjacent_route` ("stored_cavity"): verified_pair night with NO sequence-adjacent pair (no-move-less 2021 APO
     nights, a commanded move between arcs and FPI): "stored_cavity" = comb cavity fixed at the stored (L, eps) of
     the epoch (`comb_cavity_reference`, same file), integers from the night's cleanest arc sequence (harness:
@@ -239,6 +242,8 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     level, FPI-route QA) and the position match: "all" fibers, or "faint" = sky fibers plus fibers whose median
     per-pixel S/N on chip G (ar1Dcal flux x sqrt(ivar), an in-order input) is below `sky_faint_snr`. The
     per-fiber terms always use every fiber. (wave_stability Task 4: stellar lines bias bright-fiber centroids.)
+  * `sky_peaks_dir` (""): root of the sky-line peak files (`<dir>/<mjd>/skyLinePeaks_*`); "" = the run's own apred
+    tree. The archive refit points it at re-measured peaks (#407 line list; class-A guards masked on read).
   * `fiber_term_file` (""): per-fiber term table for `sky_fiber_term = "stored"` (rows tele,era,fiber,chip,zp_ms),
     built from sky / faint-target fibers by `scripts/cal/build_fiber_term.jl`; missing -> no per-fiber term.
   * `prefps_time` ("skyshift", the only value): the arc route (plate era; FPS exposures without usable FPI
@@ -279,6 +284,7 @@ Base.@kwdef struct RefitConfig
     fiber_term_file::String = ""
     sky_line_fibers::String = "all"
     sky_faint_snr::Float64 = 20.0
+    sky_peaks_dir::String = ""
     prefps_time::String = "skyshift"
     mode_offset_file::String = "default"
     sky_exp_terms::String = "chipzp_stretch_tilt"
@@ -298,6 +304,7 @@ Base.@kwdef struct RefitConfig
     cavity_ref_file::String = "default"
     cavity_ref_ms::Float64 = 30.0
     noadjacent_route::String = "stored_cavity"
+    comb_level::String = "pair"
     fps_route::String = "fpifib"
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
@@ -314,7 +321,7 @@ const REFIT_SWITCH_VALUES = Dict(
     :plate_shape => ("arc", "template"),
     :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
     :anchor_block => ("nearest_science", "morning", "any", "verified_pair"),
-    :anchor_adjacency => ("strict_then_nomove", "strict"), :cavity_ref_check => ("on", "off"), :noadjacent_route => ("stored_cavity", "any"),
+    :anchor_adjacency => ("strict_then_nomove", "strict"), :cavity_ref_check => ("on", "off"), :noadjacent_route => ("stored_cavity", "any"), :comb_level => ("pair", "stored_cavity"),
     :fps_route => ("fpifib", "sky"), :anchor_prefer => ("strict", "none"),
     :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
@@ -347,14 +354,14 @@ const REFIT_SWITCH_STAGES = Dict(
     "anchor_adjacency" => "comb,fpifib,assemble", "anchor_max_candidates" => "comb,fpifib,assemble",
     "anchor_pattern_tol_px" => "comb,fpifib,assemble", "anchor_lamp_tol_px" => "comb,fpifib,assemble",
     "cavity_ref_check" => "comb,fpifib,assemble", "cavity_ref_file" => "comb,fpifib,assemble",
-    "cavity_ref_ms" => "comb,fpifib,assemble", "noadjacent_route" => "comb,fpifib,assemble",
+    "cavity_ref_ms" => "comb,fpifib,assemble", "noadjacent_route" => "comb,fpifib,assemble", "comb_level" => "comb,fpifib,assemble",
     "fps_route" => "assemble", "mode_offset_file" => "assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
     "pos_match_px" => "comb,fpifib,assemble", "comb_arc_qa_ms" => "comb,fpifib,assemble",
     "exp_terms" => "assemble", "sky_fiber_term" => "assemble", "fiber_term_file" => "assemble",
-    "sky_line_fibers" => "assemble", "sky_faint_snr" => "assemble", "prefps_time" => "assemble",
+    "sky_line_fibers" => "assemble", "sky_faint_snr" => "assemble", "sky_peaks_dir" => "assemble", "prefps_time" => "assemble",
     "sky_exp_terms" => "assemble",
     "shape_template_file" => "assemble", "shape_template_block" => "assemble",
     "xcheck_threshold_ms" => "assemble",
@@ -365,8 +372,8 @@ const REFIT_SWITCH_STAGES = Dict(
 another value, invalidates its stages)."""
 const REFIT_SWITCH_LEGACY = Dict("anchor_prefer" => "strict", "anchor_samepos" => "pass1",
     "anchor_adjacency" => "strict_then_nomove", "anchor_max_candidates" => "3", "anchor_pattern_tol_px" => "0.02",
-    "anchor_lamp_tol_px" => "0.1", "fiber_term_file" => "", "sky_line_fibers" => "all", "sky_faint_snr" => "20.0",
-    "cavity_ref_check" => "off", "cavity_ref_file" => "default", "cavity_ref_ms" => "30.0", "noadjacent_route" => "any",
+    "anchor_lamp_tol_px" => "0.1", "fiber_term_file" => "", "sky_line_fibers" => "all", "sky_faint_snr" => "20.0", "sky_peaks_dir" => "",
+    "cavity_ref_check" => "off", "cavity_ref_file" => "default", "cavity_ref_ms" => "30.0", "noadjacent_route" => "any", "comb_level" => "pair",
     "fps_route" => "fpifib")
 
 "FNV-1a fingerprint of a file, or \"none\" for an empty path / missing file."
