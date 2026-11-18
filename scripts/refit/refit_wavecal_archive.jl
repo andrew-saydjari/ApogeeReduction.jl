@@ -128,7 +128,11 @@ function build_nights()
     rows = [(tele = String(m.captures[1]), mjd = parse(Int, m.captures[2]))
             for m in (match(rx, f) for f in readdir(WAVECAL)) if m !== nothing]
     df = DataFrame(rows)
-    sort!(df, [:mjd, :tele])
+    # most expensive first (FPS nights with a comb, newest first), then the plate era: workers
+    # claim nights dynamically, so this keeps the tail of each phase short
+    df.fps = [r.mjd >= (r.tele == "apo" ? 59558 : 59809) for r in eachrow(df)]
+    sort!(df, [order(:fps, rev = true), order(:mjd, rev = true), :tele])
+    select!(df, :tele, :mjd)
     A_["max_nights"] > 0 && (df = df[1:min(end, A_["max_nights"]), :])
     return df
 end
