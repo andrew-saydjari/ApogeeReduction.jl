@@ -885,7 +885,7 @@ end
 """
     make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "none",
         fallback_file = "", type_order = ["quartz","dome"], almanac_file = "",
-        checkpoint_mode = "commit_same")
+        checkpoint_mode = "commit_same", template_cal = nothing)
 
 Write `apred/<mjd>/traceMain_<tele>_<mjd>_<chip>.h5`, the trace every exposure of the night
 is extracted with: a copy of the chosen per-flat trace (or of `fallback_file`) plus
@@ -902,15 +902,25 @@ behaviour). `fallback = "none"` (default) writes no traceMain when the night has
 trace (and removes a stale one): the night's exposures are then not extracted, and the caller
 logs them; `fallback_file` is not needed and not read. `fallback = "fixed_file"` (previous
 behaviour) copies `fallback_file`. Returns the trace level.
+
+`template_cal` (a `TraceTemplateCal` from `--trace_template_cal`, or `nothing` = off): its
+identity for this (telescope, chip, night) (`trace_template_metadata`, src/trace_template_cal.jl)
+is written into the metadata, and a checkpointed traceMain whose recorded `trace_template_id`
+differs from the configured one (a traceMain without the key counts as "none") is recomputed,
+under either selection rule.
 """
 function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "none",
         fallback_file = "", type_order = ["quartz", "dome"], almanac_file = "",
-        checkpoint_mode = "commit_same")
+        checkpoint_mode = "commit_same", template_cal = nothing)
     select in ("last", "gated") || error("--trace_select must be last or gated, got $(select)")
     fallback in ("fixed_file", "none") ||
         error("--trace_fallback must be fixed_file or none, got $(fallback)")
     traceMain_fname = joinpath(outdir, "apred", "$(mjd)", "traceMain_$(tele)_$(mjd)_$(chip).h5")
     exists = check_file(traceMain_fname, mode = checkpoint_mode)
+    # a traceMain made with another template (or without one) is recomputed
+    if exists && template_needs_recompute(read_metadata(traceMain_fname), template_cal, tele, chip, mjd)
+        exists = false
+    end
     if select == "last" && exists
         return get(read_metadata(traceMain_fname), "trace_level", TRACE_LEVEL_OWN_FLAT)
     end
@@ -970,6 +980,7 @@ function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "n
     end
     md["trace_identify"] = isnothing(qa) ? "" : string(get(qa, "identify", ""))
     merge!(md, info)
+    merge!(md, trace_template_metadata(template_cal, tele, chip, mjd))
     trace_params = h5open(src, "r") do f
         read(f["trace_params"])
     end

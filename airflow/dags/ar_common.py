@@ -152,6 +152,16 @@ EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
 CHIP_TRANSFORM_CAL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
                       "chip_transform/chiptransform_pass1dr21_v2_allblock.h5")
 
+# Per-epoch trace-template calibration (HDF5 built by scripts/cal/trace_templates/:
+# the epoch table plus one template per telescope, chip and epoch). OFF by default
+# ("none": template-free traces, the bootstrap mode the file is rebuilt from); turning
+# it on is a PI decision. Set it to the path of a versioned file to turn it on; it is
+# passed to make_traces_from_flats.jl and to every pipeline_2d_1d.jl call of the DAG,
+# and a changed file makes the affected traceMains recompute (trace_template_id).
+# Use the word none, not "": the value is spliced unquoted into bash -c '...' commands.
+# A path that does not exist or cannot be read is a hard error at startup.
+TRACE_TEMPLATE_CAL = "none"
+
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
     "tunnel_check": ("The Utah ControlMaster (ssh alias `mwm`) is down. Only "

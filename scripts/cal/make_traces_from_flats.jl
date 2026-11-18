@@ -47,11 +47,21 @@ function parse_commandline()
         help = "almanac hdf5 file; used to identify the FPI guide fibers from the night's configurations for the dome-flat trace plots. If empty, FPI fibers are not annotated."
         arg_type = String
         default = ""
+        "--trace_template_cal"
+        required = false
+        help = "per-epoch trace-template calibration file (HDF5, scripts/cal/trace_templates/; src/trace_template_cal.jl). OFF BY DEFAULT (none): traces exactly as without templates. A path turns it on: each flat's QA record carries the night's template identity (trace_template_id) and a checkpointed trace whose record has another identity, or none, is refitted. A path that does not exist or cannot be read is a hard error. Use the same file as pipeline_2d_1d.jl --trace_template_cal."
+        arg_type = String
+        default = "none"
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
+# trace templates: off by default; a configured path that is missing is a hard error
+const TRACE_TEMPLATE_OFF = strip(parg["trace_template_cal"]) in ("", "none")
+TRACE_TEMPLATE_OFF || isfile(parg["trace_template_cal"]) ||
+    error("trace-template calibration file $(parg["trace_template_cal"]) (--trace_template_cal) does not exist; " *
+          "install it, or run with --trace_template_cal none (scripts/cal/trace_templates/README.md, Bootstrap).")
 
 # memory usage is under 3GB per worker in testing
 proj_path = dirname(Base.active_project()) * "/"
@@ -71,8 +81,13 @@ end
     using ApogeeReduction: get_cal_file, get_fpi_fiberIDs_from_almanac, get_fps_plate_divide, trace_extract,
                            safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace,
                            trace_lamp_metrics, flat_trace_qa, write_trace_qa, read_trace_qa, trace_qa_path,
-                           trace_reference_positions
+                           trace_reference_positions, load_trace_template_cal, trace_template_metadata,
+                           template_needs_recompute
 end
+@everywhere TRACE_TEMPLATE_CAL = $(TRACE_TEMPLATE_OFF) ? nothing :
+                                 load_trace_template_cal($(parg["trace_template_cal"]))
+println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" :
+        "Trace templates from $(TRACE_TEMPLATE_CAL) [$(ApogeeReduction.trace_template_cal_id(TRACE_TEMPLATE_CAL))]")
 
 @passobj 1 workers() parg # make it available to all workers
 @passobj 1 workers() proj_path
@@ -143,7 +158,8 @@ end
         return qa
     end
 
-    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "robust")
+    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "robust",
+            template_cal = nothing)
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, teleloc, mjdloc, expnumloc, chiploc, image_type = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)
@@ -162,9 +178,19 @@ end
         extra = Dict{String, Any}("flat_type" => String(flat_type), "mjd" => parse(Int, mjdloc),
             "expnum" => parse(Int, expnumloc), "image_file" => String(fname),
             "trace_file" => "", "identify" => String(identify))
+        # the night's template identity ("none" when off) goes into the QA record; a trace whose
+        # record carries another identity (or none, or has no record while templates are on) is
+        # refitted
+        merge!(extra, trace_template_metadata(template_cal, teleloc, chiploc, parse(Int, mjdloc)))
         trace_done = check_file(savename, mode = checkpoint_mode)
-        if trace_done && check_file(qaname, mode = checkpoint_mode)
-            return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
+        if trace_done
+            qa_done = check_file(qaname, mode = checkpoint_mode)
+            rec = qa_done ? read_trace_qa(qaname) : Dict{String, Any}()
+            if template_needs_recompute(rec, template_cal, teleloc, chiploc, parse(Int, mjdloc))
+                trace_done = false
+            elseif qa_done
+                return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
+            end
         end
 
         f = jldopen(fname, "r")
@@ -243,7 +269,7 @@ end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
 @everywhere make_traces_partial(fname) = make_traces(fname, parg["flat_type"], checkpoint_mode = parg["checkpoint_mode"],
-    identify = parg["trace_identify"])
+    identify = parg["trace_identify"], template_cal = TRACE_TEMPLATE_CAL)
 plot_paths = @showprogress desc=desc pmap(make_traces_partial, flist)
 
 if !parg["slack_quiet"]
