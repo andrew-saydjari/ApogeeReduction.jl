@@ -94,6 +94,11 @@ function parse_commandline()
         help = "per-epoch trace-template calibration file (HDF5: the epoch table and one template per telescope, chip and epoch; built by scripts/cal/trace_templates/, read by src/trace_template_cal.jl). OFF BY DEFAULT (none): the traces are made exactly as without templates. A path turns it on: the night's template identity is written into every traceMain (trace_template_id) and a traceMain made with another template, or without one, is recomputed under checkpointing. Pass none (or an empty string) to keep it off; that is also the bootstrap mode the file is rebuilt from (scripts/cal/trace_templates/README.md, Bootstrap). A path that does not exist or cannot be read is a hard error, never a silent fallback to the template-free traces. Use the same file as make_traces_from_flats.jl --trace_template_cal."
         arg_type = String
         default = "none"
+        "--trace_register"
+        required = false
+        help = "per-exposure registration of the night trace to each science exposure's own light before extraction (src/trace_register.jl): \"off\" (default: every exposure is extracted with the night trace unchanged) or \"object\" (science frames: shift and rotation measured from the frame's bright fibers; an accepted registration sets TRACE_EXPOSURE_REGISTERED, a refused one keeps the night trace and sets TRACE_EXPOSURE_REG_FAILED; parameters in the 1D metadata trace_expreg_*). Existing 1D files are not recomputed by changing this switch under checkpointing."
+        arg_type = String
+        default = "off"
     end
     return parse_args(s)
 end
@@ -101,6 +106,8 @@ parg = parse_commandline()
 dirNamePlots = parg["outdir"] * "plots/"
 mkpath(dirNamePlots) # will work even if it already exists
 
+parg["trace_register"] in ("off", "object") ||
+    error("--trace_register must be \"off\" or \"object\", got $(parg["trace_register"])")
 parg["trace_select"] in ("last", "gated") ||
     error("--trace_select must be \"last\" or \"gated\", got $(parg["trace_select"])")
 # --trace_fallback: none | fixed_file | template (= T1,T2,T3) | a comma list of T1,T2,T3
@@ -317,7 +324,8 @@ flush(stdout);
     chip_list = CHIP_LIST,
     profile_path = joinpath(proj_path, "data"),
     plot_path = joinpath(parg["outdir"], "plots/"),
-    checkpoint_mode = parg["checkpoint_mode"]
+    checkpoint_mode = parg["checkpoint_mode"],
+    trace_register = parg["trace_register"]
 )
 if parg["doUncals"]
     desc = "Extracting 2D to 1D (uncals):"

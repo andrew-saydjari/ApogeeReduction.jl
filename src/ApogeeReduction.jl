@@ -46,6 +46,8 @@ include("traceExtract_GH.jl")
 # (uses trace_qa.jl and traceExtract_GH.jl)
 include("slit_model.jl")
 include("trace_levels.jl")
+# per-exposure registration of the night trace to the science light (switch, default off)
+include("trace_register.jl")
 # lsf.jl depends on traceExtract_GH.jl (int_gauss_hermite_term) and
 # fileNameHandling.jl (adjFiberIndx2FiberIndx), included above
 include("lsf.jl")

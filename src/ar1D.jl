@@ -1116,7 +1116,10 @@ function process_1D(fname;
         profile_path = "./data/",
         plot_path = "../outdir/$(sjd)/plots/",
         checkpoint_mode = "commit_same",
-        per_chip_relflux::Bool = false)
+        per_chip_relflux::Bool = false,
+        trace_register::String = "off")
+    trace_register in ("off", "object") ||
+        error("process_1D: trace_register must be \"off\" or \"object\", got $(trace_register)")
     sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
     fnameType, tele, mjd, expnum, chip, image_type = sname[(end - 5):end]
     dfindx = parse(Int, expnum)
@@ -1164,6 +1167,18 @@ function process_1D(fname;
     # a traceMain made before that, derived from its trace_type and heights (TRACE_QA_MISSING).
     bitmsk_trace, trace_md_legacy = trace_bits_for_1d(traceFname, regularized_trace_params, trace_metadata)
     metadata = merge(metadata, trace_md_legacy)
+
+    # Per-exposure registration of the night trace to this exposure's own light (trace-reg,
+    # src/trace_register.jl). Off by default. On ("object"): science frames only; an accepted
+    # registration moves the trace rigidly (TRACE_EXPOSURE_REGISTERED), a refused one keeps the
+    # night trace (TRACE_EXPOSURE_REG_FAILED); the parameters go into the metadata either way.
+    if trace_register == "object" && image_type == "object"
+        expreg = register_exposure_trace(dimage, ivarimage, pix_bitmask, regularized_trace_params,
+            slit_profile(tele, chip; data_path = profile_path))
+        regularized_trace_params = apply_exposure_registration(regularized_trace_params, expreg)
+        bitmsk_trace = bitmsk_trace .| exposure_registration_bits(expreg)
+        metadata = merge(metadata, exposure_registration_metadata(expreg))
+    end
 
     # Carry the exposure-type classifier's verdict into the 1D products, so a
     # downstream consumer reading a 1D file can see WHETHER the frame was judged

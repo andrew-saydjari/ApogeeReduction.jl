@@ -72,6 +72,13 @@ const TRACE_FIXED_FALLBACK = TraceBits(2^7)
 const TRACE_UNGATED = TraceBits(2^8)
 "warn: no QA record exists for the trace source (products made before QA records existed)."
 const TRACE_QA_MISSING = TraceBits(2^9)
+"info (exposure level, trace-reg): the night trace was registered to this exposure's own light
+(rigid shift/rotation, `--trace_register`; src/trace_register.jl); the applied parameters are in the
+metadata (`trace_expreg_*`)."
+const TRACE_EXPOSURE_REGISTERED = TraceBits(2^10)
+"warn (exposure level, trace-reg): registration to this exposure was attempted and refused
+(`trace_expreg_outcome` says why); the unregistered night trace was used."
+const TRACE_EXPOSURE_REG_FAILED = TraceBits(2^11)
 
 "Per-fiber bits (not replicated night-level bits); excluded from the night-level `trace_flags`."
 const TRACE_PER_FIBER_BITS = TRACE_FIBER_UNLIT | TRACE_FIBER_DELTA
@@ -85,7 +92,8 @@ const TRACE_BIT_NAMES = Dict(
     TRACE_FIBER_UNLIT => "TRACE_FIBER_UNLIT", TRACE_FIBER_DELTA => "TRACE_FIBER_DELTA",
     TRACE_EPOCH_PROVISIONAL => "TRACE_EPOCH_PROVISIONAL",
     TRACE_FIXED_FALLBACK => "TRACE_FIXED_FALLBACK", TRACE_UNGATED => "TRACE_UNGATED",
-    TRACE_QA_MISSING => "TRACE_QA_MISSING")
+    TRACE_QA_MISSING => "TRACE_QA_MISSING", TRACE_EXPOSURE_REGISTERED => "TRACE_EXPOSURE_REGISTERED",
+    TRACE_EXPOSURE_REG_FAILED => "TRACE_EXPOSURE_REG_FAILED")
 
 "Names of the bits set in `b`, for logs."
 trace_bit_names(b::Integer) = [v for (k, v) in sort(collect(TRACE_BIT_NAMES)) if (b & k) != 0]
