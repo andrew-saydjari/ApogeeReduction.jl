@@ -164,7 +164,7 @@ function refit_neighbour_cavity(outroot, tele, mjd, window)
 end
 
 function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::RefitConfig,
-        allow_arcwin::Bool = false)
+        allow_arcwin::Bool = false, almanac_file::AbstractString = "")
     out = refit_path(outroot, "comb", tele, mjd)
     isfile(out) && return "done"
     mkpath(dirname(out))
@@ -201,10 +201,23 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
     if A !== nothing
         sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
+        # verified_pair: sequence adjacency of every (used arc sequence, FPI file) from the almanac
+        adjacency = nothing; lampoff = nothing
+        if cfg.anchor_block == "verified_pair"
+            ex, code, dith = refit_exposure_sequence(almanac_file, tele, mjd)
+            the, une, lo = h5open(f -> (Int.(read(f["seq_thar_exp"])), Int.(read(f["seq_une_exp"])),
+                Float64.(read(f["seq_lamp_offset_px"]))), arcf, "r")
+            fe = [parse(Int, split(basename(fn), "_")[4]) for fn in fnames]
+            adjacency = [refit_pair_adjacency((the[s], une[s]), e, ex, code, dith) for s in A.used, e in fe]
+            lampoff = lo[A.used]
+            prov["anchor_adjacency_counts"] = join(["$(c)=$(count(==(c), adjacency))" for c in ("strict", "nomove", "other", "unknown")], ",")
+        end
         Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = p1,
             pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
             anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer, anchor_samepos = cfg.anchor_samepos,
-            anchor_pairing = cfg.anchor_pairing,
+            anchor_pairing = cfg.anchor_pairing, adjacency, lamp_off_px = lampoff,
+            anchor_max_candidates = cfg.anchor_max_candidates, anchor_pattern_tol_px = cfg.anchor_pattern_tol_px,
+            anchor_lamp_tol_px = cfg.anchor_lamp_tol_px, anchor_adjacency = cfg.anchor_adjacency,
             anchor_block_h = cfg.anchor_block_h)
         if Q.ok
             write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = prov)

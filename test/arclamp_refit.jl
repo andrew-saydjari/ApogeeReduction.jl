@@ -305,3 +305,21 @@ end
 @testset "arclamp_refit anchor samepos switch" begin
     @test refit_check_config(RefitConfig(anchor_samepos = "none")) && RefitConfig().anchor_samepos == "pass1"
 end
+
+using ApogeeReduction: refit_pair_adjacency, refit_chip_pattern_px
+@testset "arclamp_refit verified_pair adjacency" begin
+    # LCO 60103-like night: D Q | T U | T U D F d O O ... Q Q Q | T U | T U D I I I D F
+    ex = collect(1:20)
+    code = ["D", "Q", "T", "U", "T", "U", "D", "F", "d", "O", "O", "Q", "T", "U", "T", "U", "D", "I", "D", "F"]
+    dith = [13.0, 13.0, 13.5, 13.5, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.5, 13.5, 13.5, 13.5, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0]
+    @test refit_pair_adjacency((5, 6), 8, ex, code, dith) == "strict"      # arcs -> dark -> FPI, no move
+    @test refit_pair_adjacency((3, 4), 8, ex, code, dith) == "other"       # a commanded move in between
+    @test refit_pair_adjacency((15, 16), 20, ex, code, dith) == "nomove"   # flats in between, no move
+    @test refit_pair_adjacency((5, 6), 20, ex, code, dith) == "other"      # objects in between
+    @test refit_pair_adjacency((15, 16), 8, ex, code, dith) == "other"
+    @test refit_pair_adjacency((5, 6), 99, ex, code, dith) == "unknown"
+    # chip pattern: a rigid shift has b = 0; a pixel motion of 0.01 px has b = 0.01
+    a, b = refit_chip_pattern_px([30.0, 30.0, 30.0], "apo"); @test abs(b) < 1e-12 && a ≈ 30
+    a, b = refit_chip_pattern_px(0.01 .* [4231.0, 5253.0, 6328.0], "apo"); @test b ≈ 0.01 && abs(a) < 1e-9
+    @test refit_check_config(RefitConfig(anchor_block = "verified_pair", anchor_adjacency = "strict"))
+end

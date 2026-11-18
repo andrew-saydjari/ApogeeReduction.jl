@@ -150,6 +150,20 @@ Switches of the refit (defaults = the design's recommendation where it has one):
   * `anchor_prefer` ("strict"): "strict" = preferred kinds (same measured position, or closing an
     object sequence) rank before all others of the same quality; "none" = time to the nearest
     science exposure only (quality tiers kept).
+  * `anchor_block = "verified_pair"` (switch, not default; PI 2026-11-18): the anchor is an (arc
+    sequence, full-frame FPI exposure) PAIR between which the instrument did not move, from the
+    exposure SEQUENCE (almanac; commanded dither used only as evidence of a commanded move):
+    candidates are "strict" pairs (only darks between, no commanded dither change), then, with
+    `anchor_adjacency = "strict_then_nomove"`, "nomove" pairs (flats allowed between, no object
+    exposure, no commanded change); at most `anchor_max_candidates`, each costing one comb fit.
+    Checks (in-order inputs only: raw arc-line and comb-peak positions, timestamps, sequence):
+    the sequence's ThAr - UNe line-position offset |.| < `anchor_lamp_tol_px`, and the per-chip
+    arc - comb residual pattern after the cavity fit expressed as a pixel shift b (z_c = a + b v_c,
+    a rigid shift is absorbed by L, a motion is not) agreeing with the other candidates' within
+    `anchor_pattern_tol_px`. Choice among verified pairs by check quality (smallest |b - median b|,
+    strict before nomove), never by clock or science proximity. Fallbacks, each flagged: the first
+    strict/nomove candidate unverified (WAVE_ANCHOR_UNVERIFIED); no adjacent pair at all: the
+    "any" rule (WAVE_ANCHOR_FALLBACK | NOT_PREFERRED | UNVERIFIED).
   * `anchor_samepos` ("pass1"): source of the "same measured position as the science" input:
     "pass1" = the science exposures' pass-1 per-exposure solutions (`refit_anchor_samepos`; a
     later-stage product, fine for a refit of an existing run, NOT available in an in-order
@@ -217,6 +231,10 @@ Base.@kwdef struct RefitConfig
     anchor_block::String = "nearest_science"
     anchor_prefer::String = "strict"
     anchor_samepos::String = "pass1"
+    anchor_adjacency::String = "strict_then_nomove"
+    anchor_max_candidates::Int = 3
+    anchor_pattern_tol_px::Float64 = 0.02
+    anchor_lamp_tol_px::Float64 = 0.1
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 15
@@ -232,7 +250,8 @@ const REFIT_SWITCH_VALUES = Dict(
     :neon => ("none", "lab", "lab_offset", "lab_line_offset"),
     :plate_shape => ("arc", "template"),
     :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
-    :anchor_block => ("nearest_science", "morning", "any"), :anchor_prefer => ("strict", "none"),
+    :anchor_block => ("nearest_science", "morning", "any", "verified_pair"),
+    :anchor_adjacency => ("strict_then_nomove", "strict"), :anchor_prefer => ("strict", "none"),
     :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
@@ -260,6 +279,8 @@ const REFIT_SWITCH_STAGES = Dict(
     "neon_offset_set" => "arc,comb,fpifib,assemble", "chip_transform_file" => "arc,comb,fpifib,assemble",
     "neon_line_offset_file" => "arc,comb,fpifib,assemble", "anchor_block" => "comb,fpifib,assemble",
     "anchor_prefer" => "comb,fpifib,assemble", "anchor_samepos" => "comb,fpifib,assemble",
+    "anchor_adjacency" => "comb,fpifib,assemble", "anchor_max_candidates" => "comb,fpifib,assemble",
+    "anchor_pattern_tol_px" => "comb,fpifib,assemble", "anchor_lamp_tol_px" => "comb,fpifib,assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
@@ -785,6 +806,52 @@ function refit_order_change_lambda(lin, nl, p1lin, p1nl, L; px = REFIT_PXG)
     return out
 end
 
+"""Exposure sequence of a night from the almanac (read-only): sorted exposure numbers, a one-letter
+type code per exposure (T ThAr, U UNe, F full-frame FPI = arclamp with no lamp, O object, D dark,
+Q quartz flat, I internal flat, d dome flat, x other) and the COMMANDED dither (used only to detect
+a commanded move, never as a position). Empty vectors if the night is not in the almanac."""
+function refit_exposure_sequence(almanac_file::AbstractString, tele::AbstractString, mjd::Integer)
+    (isempty(almanac_file) || !isfile(almanac_file)) && return (Int[], String[], Float64[])
+    h5open(almanac_file, "r") do f
+        k = "raw/$(tele)/$(mjd)/exposures"
+        haskey(f, k) || return (Int[], String[], Float64[])
+        g = f[k]
+        ex = Int.(read(g["exposure"])); o = sortperm(ex)
+        it = String.(read(g["image_type"]))[o]; th = Int.(read(g["lamp_thar"]))[o]
+        un = Int.(read(g["lamp_une"]))[o]; d = Float64.(read(g["dithered_pixels"]))[o]
+        c = [it[i] == "arclamp" ? (th[i] == 1 ? "T" : un[i] == 1 ? "U" : "F") : it[i] == "object" ? "O" :
+             it[i] == "dark" ? "D" : it[i] == "quartzflat" ? "Q" : it[i] == "internalflat" ? "I" :
+             it[i] == "domeflat" ? "d" : "x" for i in eachindex(it)]
+        (ex[o], c, d)
+    end
+end
+
+"""Sequence adjacency of an arc sequence (its ThAr and UNe exposure numbers) and an FPI exposure:
+"strict" (every exposure between them a dark, no commanded dither change from the sequence through
+the FPI exposure), "nomove" (no object exposure between and no commanded change; flats allowed),
+else "other"; "unknown" if an exposure is missing from the sequence."""
+function refit_pair_adjacency(seqexp::NTuple{2, <:Integer}, fpiexp::Integer, ex, code, dith)
+    ia = findfirst(==(minimum(seqexp)), ex); ib = findfirst(==(maximum(seqexp)), ex)
+    ik = findfirst(==(fpiexp), ex)
+    (ia === nothing || ib === nothing || ik === nothing) && return "unknown"
+    lo, hi = ik > ib ? (ib, ik) : (ik, ia)
+    nomove = all(abs(dith[j] - dith[ia]) < 0.01 for j in lo:hi)
+    btw = (lo + 1):(hi - 1)
+    nomove && all(code[j] == "D" for j in btw) && return "strict"
+    nomove && !any(code[j] == "O" for j in btw) && return "nomove"
+    return "other"
+end
+
+"""Per-chip arc - comb residual (m/s, after the cavity fit) -> (a, b): z_c = a + b v_c with v_c the
+velocity of one pixel on chip c. A rigid velocity shift between arc and comb only changes a (and is
+absorbed by the cavity L); a motion of the spectrum between the two exposures by b px gives b."""
+function refit_chip_pattern_px(z::AbstractVector{<:Real}, tele::AbstractString)
+    v = tele == "apo" ? [4231.0, 5253.0, 6328.0] : [4256.0, 5281.0, 6359.0]
+    all(isfinite, z) || return (NaN, NaN)
+    ab = hcat(ones(3), v) \ collect(Float64, z)
+    return (ab[1], ab[2])
+end
+
 """
     refit_arc_anchored_comb(fpi_fnames, A, combs, tele; seq_flags, pass1_comb = nothing, ...)
 
@@ -798,7 +865,20 @@ then the production comb loop (L, eps refit per night). Returns a NamedTuple (`o
 function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A::RefitArc,
         combs, tele; seq_flags, pass1_comb = nothing, pos_match_px = 0.25, comb_arc_qa_ms = 150.0,
         scis = NamedTuple[], anchor_block = "nearest_science", anchor_prefer = "strict",
-        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2)
+        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2,
+        adjacency = nothing, lamp_off_px = nothing, anchor_max_candidates = 3, anchor_pattern_tol_px = 0.02,
+        anchor_lamp_tol_px = 0.1, anchor_adjacency = "strict_then_nomove")
+    if anchor_block == "verified_pair" && adjacency !== nothing
+        Q = refit_verified_pair_comb(fpi_fnames, A, tele; adjacency, lamp_off_px, pass1_comb, comb_arc_qa_ms,
+            anchor_max_candidates, anchor_pattern_tol_px, anchor_lamp_tol_px, anchor_adjacency, n_sigma, max_iter)
+        Q === nothing || return Q
+        # no sequence-adjacent pair at all: the "any" rule, flagged
+        Qf = refit_arc_anchored_comb(fpi_fnames, A, combs, tele; seq_flags, pass1_comb, pos_match_px, comb_arc_qa_ms,
+            scis, anchor_block = "any", anchor_pairing, anchor_block_h, n_sigma, max_iter)
+        Qf.ok || return Qf
+        return merge(Qf, (; anchor_bits = Qf.anchor_bits | WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED |
+            WAVE_ANCHOR_UNVERIFIED, anchor_kind = "verified_pair:fallback_any"))
+    end
     P = refit_choose_anchor(A, seq_flags, combs, tele; scis, anchor_block, anchor_prefer, anchor_samepos, anchor_pairing,
         anchor_block_h, pos_match_px)
     P.ok || return (; ok = false, reason = P.reason, cluster_offsets_px = vec(P.offsets))
@@ -820,6 +900,65 @@ function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A
             anchor_morning = P.j_seq == 0 ? false : refit_is_morning(tele, A.tseq_u[P.j_seq]),
             anchor_kind = P.kind, anchor_rank = P.rank, anchor_dt_sci_h = P.dt_sci_h,
             anchor_quality = P.quality))
+end
+
+"""
+    refit_verified_pair_comb(fpi_fnames, A, tele; adjacency, lamp_off_px, ...) -> NamedTuple or nothing
+
+`anchor_block = "verified_pair"`: candidates = sequence-adjacent (used arc sequence j, FPI file k)
+pairs (`adjacency[j, k]` from `refit_pair_adjacency`), strict first, then nomove, at most
+`anchor_max_candidates`; each gets the arc-seeded comb fit with its FPI exposure as the frame, then
+the checks: lamp offset (ThAr - UNe, from the arc line positions) and the per-chip residual pattern
+as a pixel shift b (`refit_chip_pattern_px`), compared across candidates. `nothing` if the night has
+no adjacent pair. The chosen fit carries `anchor_kind` ("verified_pair:strict|nomove" or
+"verified_pair:unverified_<class>") and per-candidate QA (`vp_*`).
+"""
+function refit_verified_pair_comb(fpi_fnames, A::RefitArc, tele; adjacency, lamp_off_px, pass1_comb = nothing,
+        comb_arc_qa_ms = 150.0, anchor_max_candidates = 3, anchor_pattern_tol_px = 0.02, anchor_lamp_tol_px = 0.1,
+        anchor_adjacency = "strict_then_nomove", n_sigma = 4, max_iter = 2)
+    nU, nC = size(adjacency)
+    cls_ok = anchor_adjacency == "strict" ? ("strict",) : ("strict", "nomove")
+    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in 1:nU for k in 1:nC if adjacency[j, k] == c]
+    isempty(cand) && return nothing
+    cand = cand[1:min(end, anchor_max_candidates)]
+    fits = Any[]
+    for (j, k, c) in cand
+        d, t = arcfit_seq_state(A.g, A.lay, j)
+        st = (A.grp_u[j], d, t, A.tau_u[j])
+        order = vcat(k, setdiff(1:length(fpi_fnames), k))
+        fn = fpi_fnames[order]
+        lin0, nl0, nfill = refit_arc_lin_nl(A, st)
+        R = comb_fpi_fit_core(fn, lin0, nl0; cporder = 1, wporder = 4, dporder = 2,
+            n_sigma = n_sigma, max_ang_sigma = 0.2, max_iter = max_iter, verbose = false, seed_LE_from_initial = true)
+        R === nothing && continue
+        arcG = refit_arc_grid(A, st, REFIT_PXG)
+        Q = refit_comb_qa(R, arcG; anchor = COMB_ANCHOR_ARC, pass1_comb = pass1_comb, comb_arc_qa_ms = comb_arc_qa_ms,
+            extra = (; arc_cluster = A.clus_u[j], arc_cluster_offset_px = NaN, cluster_offsets_px = Float64[],
+                arc_state = collect(Float64, st), n_seed_fibers_filled = nfill, frame_offset_verified = false,
+                anchor_seq = A.used[j], anchor_dt_h = NaN, fnames_ordered = fn,
+                anchor_morning = refit_is_morning(tele, A.tseq_u[j]), anchor_rank = 0, anchor_dt_sci_h = NaN,
+                anchor_quality = -1))
+        a, b = refit_chip_pattern_px(Q.chip_arc_minus_comb_ms, tele)
+        lo = lamp_off_px === nothing ? NaN : lamp_off_px[j]
+        push!(fits, (; j, k, c, Q, a, b, lamp_ok = !isfinite(lo) || abs(lo) < anchor_lamp_tol_px, lamp = lo))
+    end
+    isempty(fits) && return nothing
+    bs = [x.b for x in fits if x.lamp_ok && isfinite(x.b)]
+    bref = isempty(bs) ? NaN : median(bs)
+    # pattern check: needs >= 2 candidates to compare (a single candidate cannot verify itself)
+    verified = [x.lamp_ok && length(bs) >= 2 && isfinite(x.b) && abs(x.b - bref) < anchor_pattern_tol_px for x in fits]
+    score(i) = (verified[i] ? 0 : 1, fits[i].c == "strict" ? 0 : 1, isfinite(fits[i].b) && isfinite(bref) ? abs(fits[i].b - bref) : Inf, i)
+    ib = sort(collect(eachindex(fits)), by = score)[1]
+    x = fits[ib]
+    bits = verified[ib] ? 0 : WAVE_ANCHOR_UNVERIFIED
+    x.c == "strict" || (bits |= WAVE_ANCHOR_NOT_PREFERRED)
+    ib == 1 || (bits |= WAVE_ANCHOR_FALLBACK)
+    kind = "verified_pair:" * (verified[ib] ? "" : "unverified_") * x.c
+    return merge(x.Q, (; anchor_bits = bits, anchor_kind = kind, anchor_rank = ib,
+        vp_seq = [A.used[f.j] for f in fits], vp_fpi = [basename(fpi_fnames[f.k]) for f in fits],
+        vp_class = [f.c for f in fits], vp_b_px = [f.b for f in fits], vp_a_ms = [f.a for f in fits],
+        vp_lamp_px = [f.lamp for f in fits], vp_verified = verified,
+        vp_L = [f.Q.R.cavity_size for f in fits], vp_eps = [f.Q.R.m_offset for f in fits]))
 end
 
 """Stage 3 for a night WITHOUT an arc anchor: integer orders from the pass-1 seed (`lin0`, `nl0`,
@@ -921,7 +1060,13 @@ function write_refit_comb(outname::AbstractString, Q, fpi_fnames; tele, mjd, cfg
         cluster_offsets_px = Float64.(Q.cluster_offsets_px), arc_state = Float64.(Q.arc_state),
         n_seed_fibers_filled = Q.n_seed_fibers_filled,
         frame_offset_verified = Q.frame_offset_verified,
-        neighbour_mjd = hasproperty(Q, :neighbour_mjd) ? Q.neighbour_mjd : -1)
+        neighbour_mjd = hasproperty(Q, :neighbour_mjd) ? Q.neighbour_mjd : -1,
+        vp_seq = hasproperty(Q, :vp_seq) ? Q.vp_seq : Int[], vp_fpi = hasproperty(Q, :vp_fpi) ? Q.vp_fpi : String[],
+        vp_class = hasproperty(Q, :vp_class) ? Q.vp_class : String[],
+        vp_b_px = hasproperty(Q, :vp_b_px) ? Q.vp_b_px : Float64[], vp_a_ms = hasproperty(Q, :vp_a_ms) ? Q.vp_a_ms : Float64[],
+        vp_lamp_px = hasproperty(Q, :vp_lamp_px) ? Q.vp_lamp_px : Float64[],
+        vp_verified = hasproperty(Q, :vp_verified) ? Vector{Bool}(Q.vp_verified) : Bool[],
+        vp_L = hasproperty(Q, :vp_L) ? Q.vp_L : Float64[], vp_eps = hasproperty(Q, :vp_eps) ? Q.vp_eps : Float64[])
     mv(tmp, outname; force = true)
     return outname
 end
