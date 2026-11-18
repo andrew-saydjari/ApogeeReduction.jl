@@ -108,11 +108,14 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     D2/D3 (OPEN-UNDER-TEST): "shift" (one pixel shift, all chips), "chipzp" (per-chip zero point),
     "chipzp_stretch" (+ per-chip stretch; design D2'), "chipzp_stretch_tilt" (+ linear in fiber
     through the two FPI fibers; design D3).
-  * `sky_fiber_term` ("none"): per-fiber sky term, design D6 (OPEN-UNDER-TEST; the design's earlier
-    recommendation is marked not established): "none"; "pooled" (fiber-common per-exposure per-chip
-    sky tweak applied in every era, arc-anchored); "static" (per-fiber night-median sky offset,
-    fiber median removed); "full" (per-fiber per-exposure sky zero point + stretch, fiber median
-    removed).
+  * `sky_fiber_term` ("full"): per-fiber sky term, design D6 (OPEN-UNDER-TEST, ARCFPI_VALIDATION Q5
+    pending): "full" (per-fiber per-exposure sky zero point + stretch, fiber median removed, i.e.
+    fiber-relative only; the design's D6 recommendation, pass 1's per-fiber dporder-1 behaviour
+    without its absolute level); "static" (per-fiber night-median sky offset, fiber median
+    removed); "pooled" (fiber-common per-exposure sky tweak in every era, arc-anchored); "none".
+    Smoke test (7 nights with stable-star rows, first-order RV): dropping the per-fiber term
+    raises the row-level repeat scatter by +61 m/s at APO FPS ("none") vs +4 ("full") / +1
+    ("static"); a small sample, so the choice stays a switch.
   * `prefps_time` ("regularised"): time dependence where no FPI fibers are usable (plate era, FPS
     exposures without FPI light), ARCFPI_VALIDATION Q4: "regularised" = option (c), the arc time
     model of the night's REFERENCE position cluster plus `reg_weight_<tele>` x the pooled-sky
@@ -142,7 +145,7 @@ Base.@kwdef struct RefitConfig
     neon_offset_set::String = "all"
     chip_transform_file::String = ""
     exp_terms::String = "chipzp_stretch_tilt"
-    sky_fiber_term::String = "none"
+    sky_fiber_term::String = "full"
     prefps_time::String = "regularised"
     sky_exp_terms::String = "chipzp_stretch_tilt"
     reg_weight_apo::Float64 = 0.825

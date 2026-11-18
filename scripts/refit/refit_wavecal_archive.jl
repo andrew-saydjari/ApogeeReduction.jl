@@ -46,7 +46,7 @@ function parse_cli()
         "--neon_offset_set"; arg_type = String; default = "all"
         "--chip_transform_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
         "--exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
-        "--sky_fiber_term"; arg_type = String; default = "none"
+        "--sky_fiber_term"; arg_type = String; default = "full"
         "--prefps_time"; arg_type = String; default = "regularised"
         "--sky_exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
         "--reg_weight_apo"; arg_type = Float64; default = 0.825

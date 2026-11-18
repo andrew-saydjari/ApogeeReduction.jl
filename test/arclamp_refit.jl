@@ -38,7 +38,7 @@ end
         @test_throws ArgumentError refit_check_config(RefitConfig(exp_terms = "bogus"))
         @test_throws ArgumentError refit_check_config(RefitConfig(prefps_time = "both"))
         d = refit_config_dict(cfg)
-        @test d["sky_fiber_term"] == "none" && haskey(d, "chip_transform_file")
+        @test d["sky_fiber_term"] == "full" && haskey(d, "chip_transform_file")
     end
 
     @testset "bits and naming" begin
