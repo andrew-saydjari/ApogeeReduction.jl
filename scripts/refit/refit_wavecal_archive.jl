@@ -57,9 +57,20 @@ function parse_cli()
         "--plate_shape"; arg_type = String; default = "arc"; help = "plate-era shape, both telescopes: arc | template"
         "--fps_shape_apo"; arg_type = String; default = "template"
         "--fps_shape_lco"; arg_type = String; default = "template"
-        "--anchor_block"; arg_type = String; default = "nearest_science"; help = "nearest_science | morning | any"
+        "--anchor_block"; arg_type = String; default = "verified_pair"; help = "verified_pair | nearest_science | morning | any"
         "--anchor_prefer"; arg_type = String; default = "strict"; help = "nearest_science preference: strict | none"
         "--anchor_samepos"; arg_type = String; default = "pass1"; help = "same-position input: pass1 (later-stage solutions) | none"
+        "--anchor_adjacency"; arg_type = String; default = "strict_then_nomove"
+        "--anchor_max_candidates"; arg_type = Int; default = 3
+        "--anchor_pattern_tol_px"; arg_type = Float64; default = 0.02
+        "--anchor_lamp_tol_px"; arg_type = Float64; default = 0.1
+        "--anchor_trend"; arg_type = String; default = "both"; help = "verified_pair continuity: both | trailing | off"
+        "--anchor_trend_nights"; arg_type = Int; default = 10
+        "--anchor_trend_ms"; arg_type = Float64; default = 20.0
+        "--anchor_trend_min_nights"; arg_type = Int; default = 4
+        "--fps_route"; arg_type = String; default = "fpifib"; help = "fpifib | sky (experiment)"
+        "--plate_tie_check"; arg_type = String; default = "replace"; help = "replace | off"
+        "--plate_tie_ms"; arg_type = Float64; default = 300.0
         "--anchor_pairing"; arg_type = String; default = "block"
         "--anchor_block_h"; arg_type = Float64; default = 1.5
         "--arcwin_nights"; arg_type = Int; default = 15
@@ -83,7 +94,12 @@ const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset
     neon_offset_set = A_["neon_offset_set"], neon_line_offset_file = A_["neon_line_offset_file"],
     plate_shape = A_["plate_shape"],
     fps_shape_apo = A_["fps_shape_apo"], fps_shape_lco = A_["fps_shape_lco"],
-    anchor_block = A_["anchor_block"], anchor_prefer = A_["anchor_prefer"], anchor_samepos = A_["anchor_samepos"], anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
+    anchor_block = A_["anchor_block"], anchor_prefer = A_["anchor_prefer"], anchor_samepos = A_["anchor_samepos"],
+    anchor_adjacency = A_["anchor_adjacency"], anchor_max_candidates = A_["anchor_max_candidates"],
+    anchor_pattern_tol_px = A_["anchor_pattern_tol_px"], anchor_lamp_tol_px = A_["anchor_lamp_tol_px"],
+    anchor_trend = A_["anchor_trend"], anchor_trend_nights = A_["anchor_trend_nights"], anchor_trend_ms = A_["anchor_trend_ms"],
+    anchor_trend_min_nights = A_["anchor_trend_min_nights"], fps_route = A_["fps_route"],
+    plate_tie_check = A_["plate_tie_check"], plate_tie_ms = A_["plate_tie_ms"], anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
     chip_transform_file = A_["chip_transform_file"],
     exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], prefps_time = A_["prefps_time"],
     sky_exp_terms = A_["sky_exp_terms"], reg_weight_apo = A_["reg_weight_apo"], reg_weight_lco = A_["reg_weight_lco"],
@@ -179,10 +195,12 @@ function invalidated_stages(base)
     inv = Set{String}()
     for (k, v) in mine
         get(theirs, k, "") == v && continue
+        # a switch the base run did not have yet: unchanged behaviour only at its legacy value
+        (!haskey(theirs, k) && get(AR.REFIT_SWITCH_LEGACY, k, nothing) == v) && continue
         foreach(s -> push!(inv, s), split(get(AR.REFIT_SWITCH_STAGES, k, "arc,comb,fpifib,assemble"), ","))
     end
     # downstream closure
-    order = ["arc", "comb", "fpifib", "assemble"]
+    order = ["arc", "comb", "anchorcheck", "fpifib", "assemble"]
     if !isempty(inv)
         first_bad = minimum(findfirst(==(s), order) for s in inv)
         foreach(s -> push!(inv, s), order[first_bad:end])
@@ -255,12 +273,15 @@ function phase12(phase)
                 almanac_file = ALMANAC, outroot = OUT, cfg = CFG))
             push!(recs, ("arc", st, dt))
             st, dt = run_stage("comb", tele, mjd, () -> AR.refit_night_comb(tele, mjd; apred_dir = APRED,
-                wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = false))
+                wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = false, almanac_file = ALMANAC))
             push!(recs, ("comb", st, dt))
         else
             st, dt = run_stage("comb", tele, mjd, () -> AR.refit_night_comb(tele, mjd; apred_dir = APRED,
-                wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = true); force_retry_deferred = true)
+                wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = true, almanac_file = ALMANAC); force_retry_deferred = true)
             push!(recs, ("comb2", st, dt))
+            st, dt = run_stage("anchorcheck", tele, mjd, () -> AR.refit_night_anchorcheck(tele, mjd; apred_dir = APRED,
+                wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, almanac_file = ALMANAC))
+            push!(recs, ("anchorcheck", st, dt))
             st, dt = run_stage("fpifib", tele, mjd, () -> AR.refit_night_fpifib(tele, mjd; apred_dir = APRED,
                 outroot = OUT, cfg = CFG))
             push!(recs, ("fpifib", st, dt))
@@ -373,7 +394,7 @@ if ph == "prep"
     nf = joinpath(OUT, "nights.csv")
     isfile(nf) || CSV.write(nf, build_nights())
     rm(joinpath(OUT, "locks"); force = true, recursive = true)
-    foreach(d -> mkpath(joinpath(OUT, d)), ("arc", "comb", "fpifib", "exp", "status", "timing", "logs"))
+    foreach(d -> mkpath(joinpath(OUT, d)), ("arc", "comb", "anchorcheck", "fpifib", "exp", "status", "timing", "logs"))
     println("prep done: $(nrow(load_nights())) nights; config $(joinpath(OUT, "config.txt"))")
 elseif ph == "1" || ph == "2"
     phase12(parse(Int, ph))

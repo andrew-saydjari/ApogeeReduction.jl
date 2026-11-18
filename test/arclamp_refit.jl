@@ -7,7 +7,7 @@ using ApogeeReduction: RefitConfig, refit_check_config, refit_config_dict, Refit
                        refit_ref_wave_disp, refit_ref_invert, refit_vs_pass1, refit_comb_vs_arc,
                        refit_fiber_sky_terms, WAVE_SKY, WAVE_ROUGH, WAVE_NIGHT_AVE, WAVE_ARC_SEQ_GATED,
                        WAVE_ARC_MULTIPOS, WAVE_CHIPSCALE_FREE, WAVE_FPIFIB_ROTATION, WAVE_FPIFIB_UNAVAILABLE,
-                       WAVE_FPIFIB_ONE_FIBER, ARCSEQ_GATE_FAIL, ARCNIGHT_MULTIPOS, ARCNIGHT_CHIPSCALE_FREE,
+                       WAVE_FPIFIB_ONE_FIBER, ARCSEQ_QUALITY, ARCNIGHT_MULTIPOS, ARCNIGHT_CHIPSCALE_FREE,
                        N_FIBERS, N_XPIX
 
 # a synthetic arc night: 3 used sequences, two position groups, time terms on
@@ -25,7 +25,7 @@ function _rf_arc(; rng = MersenneTwister(3))
     end
     lines = (seq = Int[], fiber = Int[], chip = Int[], id = Int[], pix = Float64[], pixvar = Float64[], keep = Bool[])
     RefitArc("synthetic", TH, trues(N_FIBERS), g, lay, [1, 2, 3], grp, tau, 60000.0 .+ [0.1, 0.2, 0.4],
-        [1, 2, 1], 60000.25, 0, [0, ARCSEQ_GATE_FAIL, 0], "fixed", lines)
+        [1, 2, 1], 60000.25, 0, [0, ARCSEQ_QUALITY, 0], "fixed", lines)
 end
 
 @testset "arclamp_refit" begin
@@ -45,7 +45,7 @@ end
         nm, b = refit_pass1_type("error_night_ave_fpi")
         @test nm == "sky_nightpos" && (b & WAVE_NIGHT_AVE) != 0
         @test refit_pass1_type("error_fixed_fallback")[2] == WAVE_ROUGH
-        b = refit_arc_night_bits(ARCNIGHT_MULTIPOS | ARCNIGHT_CHIPSCALE_FREE, [0, ARCSEQ_GATE_FAIL])
+        b = refit_arc_night_bits(ARCNIGHT_MULTIPOS | ARCNIGHT_CHIPSCALE_FREE, [0, ARCSEQ_QUALITY])
         @test (b & WAVE_ARC_SEQ_GATED) != 0 && (b & WAVE_ARC_MULTIPOS) != 0 && (b & WAVE_CHIPSCALE_FREE) != 0
     end
 
@@ -199,8 +199,7 @@ end
 
 using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor_rank, refit_anchor_quality,
                        refit_era, WAVE_ANCHOR_FALLBACK, WAVE_ANCHOR_NOT_SAME_BLOCK, WAVE_ANCHOR_NOT_PREFERRED,
-                       WAVE_ANCHOR_UNVERIFIED, WAVE_FPS_NO_COMB, WAVE_BIT_NAMES, ARCSEQ_UNGATED, ARCSEQ_POS_OUTLIER,
-                       ARCSEQ_FEW_LINES
+                       WAVE_ANCHOR_UNVERIFIED, WAVE_FPS_NO_COMB, WAVE_BIT_NAMES, ARCSEQ_FEW_LINES, ARCSEQ_POS_OUTLIER
 @testset "arclamp_refit anchors" begin
     @test refit_is_morning("apo", 60000.40) && !refit_is_morning("apo", 60000.08)
     @test refit_is_morning("lco", 60000.30) && !refit_is_morning("lco", 60000.05)
@@ -227,18 +226,18 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor
     @test_throws ArgumentError refit_check_config(RefitConfig(plate_shape = "comb"))
     @test_throws ArgumentError refit_check_config(RefitConfig(anchor_block = "evening"))
     c = RefitConfig()
-    @test c.plate_shape == "arc" && c.anchor_block == "nearest_science" && c.anchor_prefer == "strict" &&
+    @test c.plate_shape == "arc" && c.anchor_block == "verified_pair" && c.anchor_prefer == "strict" &&
           c.anchor_pairing == "block" && c.neon == "none"
     @test !hasfield(RefitConfig, :plate_shape_apo) && !hasfield(RefitConfig, :plate_shape_lco)
     # era: canonical plate/FPS boundary (FPS = mjd > get_fps_plate_divide), the same for any FPI light
     @test refit_era("apo", 59393) == "plate" && refit_era("apo", 59558) == "fps"
     @test refit_era("lco", 59808) == "plate" && refit_era("lco", 59809) == "fps"
-    @test length(WAVE_BIT_NAMES) == 30 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
+    @test length(WAVE_BIT_NAMES) == 32 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
           WAVE_BIT_NAMES[30] == "WAVE_FPS_NO_COMB" && WAVE_FPS_NO_COMB == 1 << 29
     # anchor quality tiers
-    @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_UNGATED) == 1 &&
-          refit_anchor_quality(ARCSEQ_FEW_LINES) == 1 && refit_anchor_quality(ARCSEQ_GATE_FAIL) == 2 &&
-          refit_anchor_quality(ARCSEQ_POS_OUTLIER | ARCSEQ_UNGATED) == 2
+    @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_FEW_LINES) == 1 &&
+          refit_anchor_quality(ApogeeReduction.ARCSEQ_NOT_COMPARED) == 1 && refit_anchor_quality(ARCSEQ_QUALITY) == 2 &&
+          refit_anchor_quality(ApogeeReduction.ARCSEQ_SHAPE) == 2 && refit_anchor_quality(ARCSEQ_POS_OUTLIER | ARCSEQ_FEW_LINES) == 2
     # ranking (times in days): science 0.10-0.30; seq 1 evening (0.05, leading), seq 2 mid-night after
     # an object (0.205), seq 3 morning (0.34, closes the object sequence), seq 4 mid-night before an object
     tseq = [0.05, 0.205, 0.34, 0.149]
@@ -257,7 +256,7 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor
     @test all(isinf, r0.dt_sci_h) && !any(r0.pref) && r0.order == [1, 2, 3, 4]
 end
 
-using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
+using ApogeeReduction: refit_choose_anchor, RefitObjRef, REFIT_REF_FIBERS
 @testset "arclamp_refit choose anchor" begin
     A = _rf_arc()
     A.g .*= 0.01                          # small time / chip terms: same-group states agree to << 0.25 px
@@ -265,12 +264,12 @@ using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
     function ref_at(j, e, t)
         d, tt = arcfit_seq_state(A.g, A.lay, j)
         px = collect(880.0:1170.0)
-        W = zeros(length(px), length(ARCGATE_FIBERS))
-        for (jf, f) in enumerate(ARCGATE_FIBERS)
+        W = zeros(length(px), length(REFIT_REF_FIBERS))
+        for (jf, f) in enumerate(REFIT_REF_FIBERS)
             W[:, jf] .= arcfit_eval(view(A.TH, f, :), A.g, A.lay, f, 2, px; grpv = A.grp_u[j], d = d, t = tt,
                 tau = A.tau_u[j])
         end
-        return ArcObjRef(e, t, "fpi", 880, ARCGATE_FIBERS, W)
+        return RefitObjRef(e, t, "fpi", 880, REFIT_REF_FIBERS, W)
     end
     # sequences at 60000.1 (evening, leading), .2 (other position), .4 (closes the object sequence)
     combs = [(; ref = ref_at(1, 5, 60000.105), t = 60000.105), (; ref = ref_at(3, 40, 60000.41), t = 60000.41)]
@@ -280,10 +279,10 @@ using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
     @test P.ok && P.j_seq == 3 && P.k_comb == 2 && P.bits == 0 && P.rank == 1 &&
           P.kind == "nearest_science:same_position" && P.dt_sci_h ≈ 1.2
     # the preferred block unverified (ungated): the next verified block in rank anchors (same position, no flag)
-    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs, "apo"; scis)
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_FEW_LINES], combs, "apo"; scis)
     @test P.ok && P.j_seq == 1 && P.k_comb == 1 && P.bits == 0 && P.quality == 0
     # first-ranked block without a same-block comb exposure: fallback to the next with one
-    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs[2:2], "apo"; scis)
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_FEW_LINES], combs[2:2], "apo"; scis)
     @test P.ok && P.j_seq == 3 && P.rank == 3 && P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_UNVERIFIED
     # no science exposures: "any" behaviour, flagged
     P = refit_choose_anchor(A, ok0, combs, "apo")
@@ -292,7 +291,7 @@ using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
     # morning switch (APO local midnight = 0.29 UT day): the 0.4 sequence; without it, an evening one
     P = refit_choose_anchor(A, ok0, combs, "apo"; scis, anchor_block = "morning")
     @test P.ok && P.j_seq == 3 && P.kind == "morning" && P.bits == 0
-    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs, "apo"; scis, anchor_block = "morning")
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_FEW_LINES], combs, "apo"; scis, anchor_block = "morning")
     @test P.ok && P.j_seq == 1 && P.kind == "evening" && P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
     P = refit_choose_anchor(A, ok0, combs, "apo"; scis, anchor_block = "any")
     @test P.ok && P.j_seq == 1 && P.kind == "any"
@@ -304,4 +303,41 @@ end
 
 @testset "arclamp_refit anchor samepos switch" begin
     @test refit_check_config(RefitConfig(anchor_samepos = "none")) && RefitConfig().anchor_samepos == "pass1"
+end
+
+using ApogeeReduction: refit_pair_adjacency, refit_chip_pattern_px
+@testset "arclamp_refit verified_pair adjacency" begin
+    # LCO 60103-like night: D Q | T U | T U D F d O O ... Q Q Q | T U | T U D I I I D F
+    ex = collect(1:20)
+    code = ["D", "Q", "T", "U", "T", "U", "D", "F", "d", "O", "O", "Q", "T", "U", "T", "U", "D", "I", "D", "F"]
+    dith = [13.0, 13.0, 13.5, 13.5, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.5, 13.5, 13.5, 13.5, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0]
+    @test refit_pair_adjacency((5, 6), 8, ex, code, dith) == "strict"      # arcs -> dark -> FPI, no move
+    @test refit_pair_adjacency((3, 4), 8, ex, code, dith) == "other"       # a commanded move in between
+    @test refit_pair_adjacency((15, 16), 20, ex, code, dith) == "nomove"   # flats in between, no move
+    @test refit_pair_adjacency((5, 6), 20, ex, code, dith) == "other"      # objects in between
+    @test refit_pair_adjacency((15, 16), 8, ex, code, dith) == "other"
+    @test refit_pair_adjacency((5, 6), 99, ex, code, dith) == "unknown"
+    # 2021 APO ordering T T U U D F: the second ThAr/UNe between the pair is not an interruption
+    @test refit_pair_adjacency((1, 3), 6, 1:6, ["T", "T", "U", "U", "D", "F"], fill(13.0, 6)) == "strict"
+    @test refit_pair_adjacency((1, 3), 6, 1:6, ["T", "T", "U", "U", "Q", "F"], fill(13.0, 6)) == "nomove"
+    # chip pattern: a rigid shift has b = 0; a pixel motion of 0.01 px has b = 0.01
+    a, b = refit_chip_pattern_px([30.0, 30.0, 30.0], "apo"); @test abs(b) < 1e-12 && a ≈ 30
+    a, b = refit_chip_pattern_px(0.01 .* [4231.0, 5253.0, 6328.0], "apo"); @test b ≈ 0.01 && abs(a) < 1e-9
+    @test refit_check_config(RefitConfig(anchor_block = "verified_pair", anchor_adjacency = "strict"))
+end
+
+using ApogeeReduction: refit_comb_mode_velocity, refit_strict_vmodes, REFIT_MODE_REF, REFIT_MODE_M0
+@testset "arclamp_refit fixed-mode comb velocity" begin
+    L0, e0 = REFIT_MODE_REF["apo"]
+    @test abs(refit_comb_mode_velocity(L0, e0, "apo")) < 1e-6
+    # a rigid scaling of every comb wavelength (L -> L (1 + v/c)) is that velocity
+    @test refit_comb_mode_velocity(L0 * (1 + 25.0 / 299792458.0), e0, "apo") ≈ 25.0 atol = 1e-3
+    # an L - eps trade at the fixed mode leaves the velocity unchanged
+    dL = 111.0
+    @test abs(refit_comb_mode_velocity(L0 + dL, e0 + dL / L0 * (REFIT_MODE_M0 + e0), "apo")) < 1e-3
+    # one whole order is wrapped away
+    @test abs(refit_comb_mode_velocity(L0, e0 + 1.0, "apo") - refit_comb_mode_velocity(L0, e0, "apo")) < 1.0
+    @test isempty(refit_strict_vmodes("/nonexistent/waveCalFPIArc_apo_1.h5"))
+    @test ApogeeReduction.WAVE_ANCHOR_TREND_OUTLIER == 1 << 30
+    @test refit_check_config(RefitConfig(anchor_trend = "trailing")) && RefitConfig().anchor_trend == "both"
 end
