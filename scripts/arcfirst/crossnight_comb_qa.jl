@@ -96,4 +96,6 @@ function crossnight_qa_main(args)
     return fl
 end
 
-abspath(PROGRAM_FILE) == @__FILE__ && crossnight_qa_main(ARGS)
+if abspath(PROGRAM_FILE) == @__FILE__
+    crossnight_qa_main(ARGS)
+end
