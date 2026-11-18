@@ -142,6 +142,33 @@ end
         end
     end
 
+    @testset "dark-fiber positions" begin
+        ep = AR.TraceEpoch("apo", "e", 100, 200, false)
+        t = synthetic_trace_template("apo", "G", ep)              # fibers 28, 90 dark; true slot = base
+        C = copy(t.center); hr = copy(t.height_rel)
+        C[:, 28] .= C[16, 28]                                     # frozen at its central value (never fitted)
+        hr[28] = 0.01
+        C[:, 90] .-= 20.0                                         # left its slot, sits on lit light
+        hr[90] = 0.5
+        hr[150] = 0.08                                            # a faint LIT fiber: untouched (lit)
+        bad = AR.TraceTemplate("apo", "G", ep, t.xc, C, t.width, t.center_poly, t.width_poly, hr, t.lit,
+            t.input_mjd, t.input_exp, t.input_d_center, t.input_s_center, Dict{String, String}())
+        @test_throws ArgumentError AR.check_trace_template(bad, ep)  # 90 out of order
+        fixed, rep = AR.interpolate_unlit_template(bad)
+        @test rep == [28, 90]
+        @test maximum(abs.(fixed.center[:, [28, 90]] .- t.center[:, [28, 90]])) < 1e-6
+        @test fixed.center[:, 150] == t.center[:, 150]
+        @test maximum(abs.(AR.template_centers(fixed, fixed.xc) .- fixed.center)) < 1e-9
+        @test isnothing(AR.check_trace_template(fixed, ep))
+        @test fixed.provenance["unlit_repaired_fibers"] == "28;90"
+        # a dark fiber that WAS fitted (throughput above 5 %) and sits in its slot is kept
+        C2 = copy(t.center); C2[:, 28] .+= 0.8; hr2 = copy(t.height_rel); hr2[[28, 90]] .= 0.09
+        ok = AR.TraceTemplate("apo", "G", ep, t.xc, C2, t.width, t.center_poly, t.width_poly, hr2, t.lit,
+            t.input_mjd, t.input_exp, t.input_d_center, t.input_s_center, Dict{String, String}())
+        k, rep2 = AR.interpolate_unlit_template(ok)
+        @test isempty(rep2) && k.center == ok.center
+    end
+
     @testset "builder unit file -> template" begin
         mktempdir() do dir
             ep = AR.TraceEpoch("apo", "apoE5", 59534, 59815, false)

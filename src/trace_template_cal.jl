@@ -81,7 +81,7 @@ struct TraceTemplateCal
 end
 
 function Base.show(io::IO, cal::TraceTemplateCal)
-    ne = join(["$(t): $(length(e)) epoch(s)" for (t, e) in sort(collect(cal.epochs))], ", ")
+    ne = join(["$(t): $(length(e)) epoch(s)" for (t, e) in sort(collect(cal.epochs), by = first)], ", ")
     print(io, "TraceTemplateCal($(cal.calibration_version); $(ne); $(length(cal.templates)) template(s)",
         cal.complete ? "" : ", INCOMPLETE", "; $(cal.path))")
 end
@@ -465,6 +465,74 @@ _upoly(c::AbstractMatrix, xs) = (u = (Float64.(xs) .- 1024) ./ 1024;
 template_centers(t::TraceTemplate, xs::AbstractVector) = _upoly(t.center_poly, xs)
 "Template Gauss-Hermite widths at arbitrary columns `xs`: [length(xs), 300] (px)."
 template_widths(t::TraceTemplate, xs::AbstractVector) = _upoly(t.width_poly, xs)
+
+# ------------------------------------------------------------------ unlit fibers
+"Fibers dark in the epoch with a template throughput below this were never fitted by the builder."
+const TRACE_TEMPLATE_UNLIT_HREL = 0.05
+"A dark fiber further than this many local fiber spacings from its interpolated slot has left its slot."
+const TRACE_TEMPLATE_SLOT_TOL = 0.5
+
+"""
+    interpolate_unlit_template(t::TraceTemplate; hrel_max = TRACE_TEMPLATE_UNLIT_HREL,
+        slot_tol = TRACE_TEMPLATE_SLOT_TOL) -> (TraceTemplate, repaired::Vector{Int})
+
+Re-place a fiber that is dark in the epoch (`!t.lit`) between its lit neighbours, band by band
+(linear in fiber index between the nearest lit fiber on each side; at the slit ends, continuing
+the median spacing of up to 8 lit neighbours; widths likewise; its polynomials refitted), IF
+- its template throughput `height_rel` is below `hrel_max` (the builder never fitted it: the
+  bootstrap's band walk froze it at its central-band start, so it does not follow the trace
+  curvature; measured: 1-2.4 px off at the chip edges on the APO dead fibers), or
+- in some band it sits more than `slot_tol` local fiber spacings from that interpolated slot (it
+  left its slot; measured: APO G apoE6 fibers 276/280 about 20 px = 3 spacings low, on top of
+  lit neighbours, which is why they show height_rel ~0.5).
+A faint but LIT fiber the builder's 15 % census called dark (LCO fiber 270, height_rel 0.08-0.10)
+was fitted in the bootstrap, sits ~0.8 px from the linear interpolation in every epoch and chip
+(a real slit offset) and is kept. Lit fibers are never touched. Returns the re-placed fibers.
+"""
+function interpolate_unlit_template(t::TraceTemplate; hrel_max::Real = TRACE_TEMPLATE_UNLIT_HREL,
+        slot_tol::Real = TRACE_TEMPLATE_SLOT_TOL)
+    nb = length(t.xc)
+    litf = findall(t.lit)
+    length(litf) >= 16 || throw(ArgumentError("$(t.tele) $(t.chip) $(t.epoch): fewer than 16 lit fibers"))
+    Ci = copy(t.center); Wi = copy(t.width); spc = fill(NaN, nb, N_FIBERS)
+    for b in 1:nb, f in findall(.!t.lit)
+        lo = findlast(<(f), litf); hi = findfirst(>(f), litf)
+        if !isnothing(lo) && !isnothing(hi)
+            a, c = litf[lo], litf[hi]
+            w = (f - a) / (c - a)
+            Ci[b, f] = (1 - w) * t.center[b, a] + w * t.center[b, c]
+            Wi[b, f] = (1 - w) * t.width[b, a] + w * t.width[b, c]
+            spc[b, f] = (t.center[b, c] - t.center[b, a]) / (c - a)
+        else
+            nbr = isnothing(lo) ? litf[hi:min(hi + 8, end)] : litf[max(1, lo - 8):lo]
+            sp = median(diff(t.center[b, nbr]) ./ diff(nbr))
+            a = isnothing(lo) ? litf[hi] : litf[lo]
+            Ci[b, f] = t.center[b, a] + sp * (f - a)
+            Wi[b, f] = t.width[b, a]
+            spc[b, f] = sp
+        end
+    end
+    repaired = [f for f in findall(.!t.lit)
+                if t.height_rel[f] < hrel_max ||
+                   any(abs.(Ci[:, f] .- t.center[:, f]) .> slot_tol .* abs.(spc[:, f]))]
+    C = copy(t.center); W = copy(t.width)
+    u = (t.xc .- 1024) ./ 1024
+    cp = copy(t.center_poly); wp = copy(t.width_poly)
+    Ac = hcat([u .^ p for p in 0:(size(cp, 1) - 1)]...); Aw = hcat([u .^ p for p in 0:(size(wp, 1) - 1)]...)
+    for f in repaired
+        cp[:, f] = Ac \ Ci[:, f]; wp[:, f] = Aw \ Wi[:, f]
+        C[:, f] = Ac * cp[:, f]; W[:, f] = Aw * wp[:, f]       # keep center == poly(xc)
+    end
+    prov = copy(t.provenance)
+    prov["unlit_positions"] = "interpolate_unlit_template(hrel_max = $(hrel_max), slot_tol = $(slot_tol))"
+    prov["unlit_repaired_fibers"] = isempty(repaired) ? "none" : join(repaired, ";")
+    prov["unlit_repair_max_shift_px"] = isempty(repaired) ? "0" :
+        string(round(maximum(maximum(abs.(C[:, f] .- t.center[:, f])) for f in repaired), digits = 3))
+    ep = TraceEpoch(t.tele, t.epoch, t.mjd_start, t.mjd_end, false)
+    t2 = TraceTemplate(t.tele, t.chip, ep, t.xc, C, W, cp, wp, t.height_rel, t.lit, t.input_mjd,
+        t.input_exp, t.input_d_center, t.input_s_center, prov)
+    return t2, repaired
+end
 
 # ------------------------------------------------------------------ builder output -> unit
 """
