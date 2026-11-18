@@ -155,6 +155,59 @@ class DagImport(unittest.TestCase):
         self.assertEqual(D.compute_date_mjd(**ctx), "2026-11-15")
         D.stale_run_guard(**{**ctx, "params": {"stale_run_max_age_h": 36}})
 
+    def test_p2d1d_passes_wavecal_order_and_history_roots(self):
+        """The inline p2d1d_full step passes --wavecal_order and
+        --arcfirst_history_roots (default "": no history, the arc_first
+        cross-night step reports "unchecked"), like run_all.sh's env route."""
+        sys.path.insert(0, HERE)
+        import _render_task as R
+        self.assertEqual(self.C.ARCFIRST_HISTORY_ROOTS, "")
+        tasks = [t for t in self.dag.tasks if t.task_id.endswith("p2d1d_full")]
+        self.assertEqual(len(tasks), 2)
+        with tempfile.TemporaryDirectory() as d:
+            for t in tasks:
+                with self.subTest(task=t.task_id):
+                    text = R.render(t, d + "/", 61360)
+                    self.assertIn(f"--wavecal_order {self.C.WAVECAL_ORDER} ", text)
+                    self.assertIn("--arcfirst_history_roots '' ", text)
+
+    def test_slurm_submit_exports_wavecal_env(self):
+        """slurm_submit_and_wait exports AR_WAVECAL_ORDER and
+        AR_ARCFIRST_HISTORY_ROOTS into the sbatch'd run_all.sh (subprocess
+        is stubbed: no Slurm command runs)."""
+        from unittest import mock
+        import apogee_daily as D
+        seen = {}
+
+        class Res:
+            def __init__(self, out):
+                self.returncode, self.stdout, self.stderr = 0, out, ""
+
+        def fake_run(cmd, **kw):
+            if cmd[0] == "sbatch":
+                seen["env"] = kw.get("env") or {}
+                return Res("4242\n")
+            if cmd[0] == "squeue":
+                return Res("")
+            return Res("COMPLETED 0:0\n")
+
+        class TI:
+            def __init__(self, outdir):
+                self.outdir = outdir
+
+            def xcom_pull(self, task_ids=None, **_):
+                return {"outdir": self.outdir, "mjd": 61360}
+
+        with tempfile.TemporaryDirectory() as d:
+            for roots in ("", "/a/wavecal_arcfirst,/b/wavecal_arcfirst"):
+                with self.subTest(roots=roots), \
+                        mock.patch.object(D.C, "ARCFIRST_HISTORY_ROOTS", roots), \
+                        mock.patch.object(D.subprocess, "run", fake_run):
+                    seen.clear()
+                    D.slurm_submit_and_wait("apo", params={}, ti=TI(d))
+                    self.assertEqual(seen["env"]["AR_WAVECAL_ORDER"], self.C.WAVECAL_ORDER)
+                    self.assertEqual(seen["env"]["AR_ARCFIRST_HISTORY_ROOTS"], roots)
+
     def test_every_bash_command_renders_and_parses(self):
         """Render each BashOperator template with stand-in context and run
         `bash -n` on it (catches quoting mistakes in the nested bash -c)."""
@@ -170,6 +223,53 @@ class DagImport(unittest.TestCase):
                     r = subprocess.run(["bash", "-n"], input=text,
                                        capture_output=True, text=True)
                     self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class RunAllWavecalOptions(unittest.TestCase):
+    """scripts/daily/run_all.sh turns AR_WAVECAL_ORDER / AR_ARCFIRST_HISTORY_ROOTS
+    into pipeline_2d_1d.jl flags (unset or "" -> no flag). Runs only the
+    option blocks of the script, extracted from it (no Airflow needed)."""
+    SCRIPT = os.path.join(REPO, "scripts", "daily", "run_all.sh")
+
+    def _block(self, var):
+        lines = open(self.SCRIPT).read().splitlines()
+        i = next(k for k, l in enumerate(lines)
+                 if l.startswith("if ") and "${" + var + "+set}" in l)
+        j = next(k for k in range(i, len(lines)) if lines[k] == "fi")
+        return "\n".join(lines[i:j + 1])
+
+    def _opts(self, var, arr, value):
+        env = {k: v for k, v in os.environ.items() if k != var}
+        if value is not None:
+            env[var] = value
+        script = self._block(var) + '\nprintf "%s\\n" "${' + arr + '[@]}"\n'
+        r = subprocess.run(["bash", "-c", script], capture_output=True,
+                           text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [l for l in r.stdout.splitlines() if l]
+
+    def test_history_roots(self):
+        v, a = "AR_ARCFIRST_HISTORY_ROOTS", "arcfirst_hist_opt"
+        self.assertEqual(self._opts(v, a, None), [])
+        self.assertEqual(self._opts(v, a, ""), [])
+        self.assertEqual(self._opts(v, a, "/x/wavecal_arcfirst,/y/wavecal_arcfirst"),
+                         ["--arcfirst_history_roots",
+                          "/x/wavecal_arcfirst,/y/wavecal_arcfirst"])
+
+    def test_wavecal_order(self):
+        v, a = "AR_WAVECAL_ORDER", "wavecal_order_opt"
+        self.assertEqual(self._opts(v, a, None), [])
+        self.assertEqual(self._opts(v, a, "arc_first"),
+                         ["--wavecal_order", "arc_first"])
+
+    def test_flags_reach_pipeline_2d_1d(self):
+        # the science 2D->1D call (the flats' relFlux pass runs --waveSoln false)
+        call = [l for l in open(self.SCRIPT).read().splitlines()
+                if "pipeline_2d_1d.jl" in l and l.lstrip().startswith("julia")
+                and "--waveSoln false" not in l]
+        self.assertEqual(len(call), 1)
+        self.assertIn('"${wavecal_order_opt[@]}"', call[0])
+        self.assertIn('"${arcfirst_hist_opt[@]}"', call[0])
 
 
 FAKE_ALMANAC = textwrap.dedent("""\

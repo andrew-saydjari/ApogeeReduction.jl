@@ -291,6 +291,8 @@ def slurm_submit_and_wait(tele, **context):
     env["AR_CHIP_TRANSFORM_CAL"] = C.CHIP_TRANSFORM_CAL
     # wavelength-chain order (pipeline_2d_1d.jl --wavecal_order; "legacy" unless changed)
     env["AR_WAVECAL_ORDER"] = C.WAVECAL_ORDER
+    # arc_first cross-night step: earlier runs' arc-first roots ("" = none, step "unchecked")
+    env["AR_ARCFIRST_HISTORY_ROOTS"] = C.ARCFIRST_HISTORY_ROOTS
     print("submitting:", " ".join(cmd))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if res.returncode != 0:
@@ -763,6 +765,7 @@ def build_observatory_group(tele: str) -> TaskGroup:
                             f"--runname {C.xn('runname', tele)} "
                             f"--chip_transform_cal '{C.CHIP_TRANSFORM_CAL}' "
                             f"--wavecal_order {C.WAVECAL_ORDER} "
+                            f"--arcfirst_history_roots '{C.ARCFIRST_HISTORY_ROOTS}' "
                             "--checkpoint_mode {{ params.checkpoint_mode }} "
                             "--workers_per_node {{ params.workers }}"),
                     tele,

@@ -158,6 +158,15 @@ CHIP_TRANSFORM_CAL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
 # src/wavecal_arcfirst.jl). Flipping the production default is the PI's decision.
 WAVECAL_ORDER = "legacy"
 
+# Earlier runs' arc-first products for the cross-night comb step of an arc_first daily
+# (pipeline_2d_1d.jl --arcfirst_history_roots): comma-separated wavecal_arcfirst roots of
+# previous daily outdirs, whose comb products serve as the trailing nights (FSR continuity,
+# cavity vs the trailing 15 nights). Empty (the default) = only tonight's own night, so the
+# step reports "unchecked" in a daily; it is only read with WAVECAL_ORDER = "arc_first".
+# To enable, set it to the wavecal_arcfirst directories (comma-separated) of the daily
+# outdirs that hold the preceding nights; no production path is chosen here.
+ARCFIRST_HISTORY_ROOTS = ""
+
 # ---------------------------------------------------------------------------
 # Robustness knobs (2026-11-17 restart after the 09-26 -> 11-17 outage)
 # ---------------------------------------------------------------------------
