@@ -479,7 +479,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
     vpx = tele == "apo" ? (4231.0, 5253.0, 6328.0) : (4256.0, 5281.0, 6359.0)
     # GLOBAL arc-sky offset per chip (stored calibration, not tonight's data): the sky line list's level
     # against the arc fit at the same position; zeros (flagged) without the file
-    Osky, omiss = refit_mode_offsets(cfg.mode_offset_file, String(tele), "arc_sky"; era)
+    Osky, omiss = refit_mode_offsets(cfg.mode_offset_file, String(tele), "arc_sky"; era, mjd)
     nE = length(exps)
     tmid = fill(NaN, nE)
     p1type = fill("", nE)

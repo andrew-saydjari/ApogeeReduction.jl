@@ -1,0 +1,16 @@
+# instrument epochs (trace-template epochs apoE1-9 / lcoE1-5, draft 2026-11-18, trace_prb/cal_agent/epochs_check/trace_epochs_draft.csv); used to key the wavecal mode offsets
+tele,epoch,mjd_start,mjd_end
+apo,apoE1,57618,57768
+apo,apoE2,57769,57968
+apo,apoE3,57969,59442
+apo,apoE4,59443,59533
+apo,apoE5,59534,59815
+apo,apoE6,59816,60120
+apo,apoE7,60121,60236
+apo,apoE8,60237,60914
+apo,apoE9,60915,61227
+lco,lcoE1,57802,59141
+lco,lcoE2,59142,59151
+lco,lcoE3,59152,60248
+lco,lcoE4,60249,60701
+lco,lcoE5,60702,61230

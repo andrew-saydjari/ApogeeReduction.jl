@@ -386,6 +386,13 @@ end
             (("plate", 1.0), ("fps", 2.0)) for c in ("R", "G", "B")], "\n") * "\n")
         @test AR.refit_mode_offsets(h, "apo"; era = "plate")[1][1, :] == [1.0, 1.0, 1.0]
         @test AR.refit_mode_offsets(h, "apo"; era = "fps")[1][1, :] == [2.0, 2.0, 2.0]
+        k = joinpath(d, "off_epoch.csv")
+        write(k, "tele,era,mode,chip,term,value_ms,mjd_lo,mjd_hi\n" * join(["apo,$(e),arc_sky,$(c),zp,$(v),$(lo),$(hi)" for
+            (e, v, lo, hi) in (("apoE1", 5.0, 57000, 58999), ("apoE2", 7.0, 59000, 59999)) for c in ("R", "G", "B")], "\n") *
+            "\n" * join(["apo,plate,arc_sky,$(c),zp,1.0,," for c in ("R", "G", "B")], "\n") * "\n")
+        @test AR.refit_mode_offsets(k, "apo"; era = "plate", mjd = 58000)[1][1, :] == [5.0, 5.0, 5.0]
+        @test AR.refit_mode_offsets(k, "apo"; era = "plate", mjd = 59500)[1][1, :] == [7.0, 7.0, 7.0]
+        @test AR.refit_mode_offsets(k, "apo"; era = "plate", mjd = 61000)[1][1, :] == [1.0, 1.0, 1.0]   # outside: era row
         O, miss = AR.refit_mode_offsets("", "apo")
         @test miss && all(iszero, O)
     end

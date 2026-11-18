@@ -55,7 +55,7 @@ function parse_cli()
         "--sky_faint_snr"; arg_type = Float64; default = 20.0
         "--sky_peaks_root"; arg_type = String; default = ""; help = "separate root <dir>/<mjd>/skyLinePeaks_* (default \"\" = <pass1>/apred)"
         "--prefps_time"; arg_type = String; default = "skyshift"; help = "arc route: skyshift (arc fit shifted to each exposure's sky lines minus the global arc-sky offset)"
-        "--mode_offset_file"; arg_type = String; default = "default"; help = "global mode offsets (default = data/wavecal_mode_offsets_v1.csv; \"\" = none, offsets 0, flagged)"
+        "--mode_offset_file"; arg_type = String; default = "default"; help = "global mode offsets (default = data/wavecal_mode_offsets_v2.csv; \"\" = none, offsets 0, flagged)"
         "--sky_exp_terms"; arg_type = String; default = "chipzp_stretch_tilt"
         "--shape_template_file"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_refit/cal/template_shape_v1.h5"
         "--shape_template_block"; arg_type = String; default = "all"

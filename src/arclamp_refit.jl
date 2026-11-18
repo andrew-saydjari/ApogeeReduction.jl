@@ -256,7 +256,7 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     sky lines takes the other chips' zero point in pixels. No sky lines (calibration frames): the state of
     the nearest arc sequence in time (WAVE_REL_ARC_NEAREST). The earlier "regularised" (arc time model + w x
     sky departure about a per-night tie) and "sky"/"arc" options were removed (AKS: "this is crazy").
-  * `mode_offset_file` ("default" = `data/wavecal_mode_offsets_v1.csv`): global offsets between solution
+  * `mode_offset_file` ("default" = `data/wavecal_mode_offsets_v2.csv`): global offsets between solution
     modes (rows tele, mode, chip, term, value_ms), built after a bulk run from finished products by
     `scripts/cal/build_mode_offsets.jl`; "" or a missing file / row -> offset 0, WAVE_MODE_OFFSET_MISSING.
   * `sky_exp_terms` ("chipzp_stretch_tilt"): terms of the pooled-sky per-exposure transform,
@@ -1110,7 +1110,7 @@ end
 # global stored calibration tables (per-night inputs, like the chip-scale file; never another night's product)
 # ------------------------------------------------------------------------------------------
 const COMB_MODE_REF_DEFAULT = joinpath(dirname(@__DIR__), "data", "comb_mode_velocity_ref_v1.csv")
-const MODE_OFFSETS_DEFAULT = joinpath(dirname(@__DIR__), "data", "wavecal_mode_offsets_v1.csv")
+const MODE_OFFSETS_DEFAULT = joinpath(dirname(@__DIR__), "data", "wavecal_mode_offsets_v2.csv")
 _refit_default_path(p::AbstractString, dflt) = p == "default" ? dflt : String(p)
 
 "Rows of a small comma-separated calibration table (lines starting with # are provenance): Vector of Dicts."
@@ -1204,27 +1204,29 @@ end
     refit_mode_offsets(path, tele, mode = "arc_sky"; era = "all") -> (O::Matrix 3x3, missing::Bool)
 
 GLOBAL offsets between wavelength-solution modes (m/s), rows `tele,era,mode,chip,term,value_ms[,...]` of the
-mode-offset file (`data/wavecal_mode_offsets_v1.csv` for "default"; built after a bulk run by
+mode-offset file (`data/wavecal_mode_offsets_v2.csv` for "default"; built after a bulk run by
 `scripts/cal/build_mode_offsets.jl`). mode "arc_sky": the pooled sky-line level minus the arc-scale solution
 at the same position, per chip (R, G, B) and term (zp, stretch, tilt) = O[term, chip]. Rows of the given `era`
-("plate" | "fps") win over rows with era "all" (or no era column). Missing file or rows: zeros and
+("plate" | "fps") win over rows with era "all" (or no era column); rows carrying an MJD range (`mjd_lo`,
+`mjd_hi`: instrument / LSF epochs) that contains `mjd` win over both. Missing file or rows: zeros and
 `missing = true` (WAVE_MODE_OFFSET_MISSING on the exposures that use it).
 """
 function refit_mode_offsets(path::AbstractString, tele::AbstractString, mode::AbstractString = "arc_sky";
-        era::AbstractString = "all")
+        era::AbstractString = "all", mjd::Union{Nothing, Integer} = nothing)
     O = zeros(3, 3)
-    seen = falses(3)
-    rows = [r for r in _read_cal_table(_refit_default_path(path, MODE_OFFSETS_DEFAULT))
-            if get(r, "tele", "") == tele && get(r, "mode", "") == mode]
-    any(r -> get(r, "era", "all") == era, rows) && (rows = [r for r in rows if get(r, "era", "all") == era])
-    for r in rows
-        get(r, "era", "all") in (era, "all") || continue
+    rank = fill(0, 3, 3)            # per (term, chip): 3 = epoch row containing mjd, 2 = era row, 1 = "all" row
+    inr(r) = mjd !== nothing && !isempty(get(r, "mjd_lo", "")) && !isempty(get(r, "mjd_hi", "")) &&
+             parse(Int, r["mjd_lo"]) <= mjd <= parse(Int, r["mjd_hi"])
+    for r in _read_cal_table(_refit_default_path(path, MODE_OFFSETS_DEFAULT))
+        (get(r, "tele", "") == tele && get(r, "mode", "") == mode) || continue
         c = findfirst(==(get(r, "chip", "")), ("R", "G", "B")); q = findfirst(==(get(r, "term", "")), ("zp", "stretch", "tilt"))
         (c === nothing || q === nothing) && continue
-        O[q, c] = parse(Float64, r["value_ms"])
-        q == 1 && (seen[c] = true)
+        hasrange = !isempty(get(r, "mjd_lo", ""))
+        k = inr(r) ? 3 : hasrange ? 0 : get(r, "era", "all") == era ? 2 : get(r, "era", "all") == "all" ? 1 : 0
+        k > rank[q, c] || continue
+        O[q, c] = parse(Float64, r["value_ms"]); rank[q, c] = k
     end
-    return O, !all(seen)
+    return O, any(iszero, rank[1, :])
 end
 
 "Reference cavity (L, eps) per telescope for the fixed-mode comb velocity (any fixed value works; it only sets the zero)."
