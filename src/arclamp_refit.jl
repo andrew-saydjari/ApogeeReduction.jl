@@ -235,6 +235,12 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     Smoke test (7 nights with stable-star rows, first-order RV): dropping the per-fiber term
     raises the row-level repeat scatter by +61 m/s at APO FPS ("none") vs +4 ("full") / +1
     ("static"); a small sample, so the choice stays a switch.
+  * `sky_line_fibers` ("all"), `sky_faint_snr` (20): rows that set the POOLED per-exposure sky terms (arc-route
+    level, FPI-route QA) and the position match: "all" fibers, or "faint" = sky fibers plus fibers whose median
+    per-pixel S/N on chip G (ar1Dcal flux x sqrt(ivar), an in-order input) is below `sky_faint_snr`. The
+    per-fiber terms always use every fiber. (wave_stability Task 4: stellar lines bias bright-fiber centroids.)
+  * `fiber_term_file` (""): per-fiber term table for `sky_fiber_term = "stored"` (rows tele,era,fiber,chip,zp_ms),
+    built from sky / faint-target fibers by `scripts/cal/build_fiber_term.jl`; missing -> no per-fiber term.
   * `prefps_time` ("skyshift", the only value): the arc route (plate era; FPS exposures without usable FPI
     fibers). AKS 2026-11-18: "If we just fit the wavelength solution to the arc, then shifted it to match the
     sky". Night solution = the arc fit at a FIXED state (the matched position cluster's reference sequence;
@@ -270,6 +276,9 @@ Base.@kwdef struct RefitConfig
     chip_transform_file::String = ""
     exp_terms::String = "chipzp_stretch_tilt"
     sky_fiber_term::String = "static"
+    fiber_term_file::String = ""
+    sky_line_fibers::String = "all"
+    sky_faint_snr::Float64 = 20.0
     prefps_time::String = "skyshift"
     mode_offset_file::String = "default"
     sky_exp_terms::String = "chipzp_stretch_tilt"
@@ -310,7 +319,8 @@ const REFIT_SWITCH_VALUES = Dict(
     :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
-    :sky_fiber_term => ("none", "pooled", "static", "full"),
+    :sky_fiber_term => ("none", "pooled", "static", "full", "stored"),
+    :sky_line_fibers => ("all", "faint"),
     :prefps_time => ("skyshift",),
     :sky_exp_terms => ("chipzp", "chipzp_stretch", "chipzp_stretch_tilt"))
 
@@ -343,7 +353,8 @@ const REFIT_SWITCH_STAGES = Dict(
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",
     "pos_match_px" => "comb,fpifib,assemble", "comb_arc_qa_ms" => "comb,fpifib,assemble",
-    "exp_terms" => "assemble", "sky_fiber_term" => "assemble", "prefps_time" => "assemble",
+    "exp_terms" => "assemble", "sky_fiber_term" => "assemble", "fiber_term_file" => "assemble",
+    "sky_line_fibers" => "assemble", "sky_faint_snr" => "assemble", "prefps_time" => "assemble",
     "sky_exp_terms" => "assemble",
     "shape_template_file" => "assemble", "shape_template_block" => "assemble",
     "xcheck_threshold_ms" => "assemble",
@@ -354,7 +365,8 @@ const REFIT_SWITCH_STAGES = Dict(
 another value, invalidates its stages)."""
 const REFIT_SWITCH_LEGACY = Dict("anchor_prefer" => "strict", "anchor_samepos" => "pass1",
     "anchor_adjacency" => "strict_then_nomove", "anchor_max_candidates" => "3", "anchor_pattern_tol_px" => "0.02",
-    "anchor_lamp_tol_px" => "0.1", "cavity_ref_check" => "off", "cavity_ref_file" => "default", "cavity_ref_ms" => "30.0", "noadjacent_route" => "any",
+    "anchor_lamp_tol_px" => "0.1", "fiber_term_file" => "", "sky_line_fibers" => "all", "sky_faint_snr" => "20.0",
+    "cavity_ref_check" => "off", "cavity_ref_file" => "default", "cavity_ref_ms" => "30.0", "noadjacent_route" => "any",
     "fps_route" => "fpifib")
 
 "FNV-1a fingerprint of a file, or \"none\" for an empty path / missing file."
@@ -1144,6 +1156,41 @@ function refit_eps_for_vmode(L::Real, v::Real, tele::AbstractString)
     lref = 2L0 / (REFIT_MODE_M0 + e0)
     eps = 2L / lref - REFIT_MODE_M0 - v * (REFIT_MODE_M0 + e0) / REFIT_C_MPS
     return eps - round(eps - e0)
+end
+
+"""Per-fiber stored sky term (N_FIBERS x 3, m/s; NaN where absent) of `tele`/`era` from a table with rows
+`tele,era,fiber,chip,zp_ms[,...]`; all NaN without the file."""
+function refit_fiber_term_table(path::AbstractString, tele::AbstractString, era::AbstractString)
+    Z = fill(NaN, N_FIBERS, 3)
+    for r in _read_cal_table(path)
+        (get(r, "tele", "") == tele && get(r, "era", "") == era) || continue
+        f = parse(Int, r["fiber"]); c = findfirst(==(r["chip"]), ("R", "G", "B"))
+        (c === nothing || !(1 <= f <= N_FIBERS)) && continue
+        Z[f, c] = parse(Float64, r["zp_ms"])
+    end
+    return Z
+end
+
+"""Fibers usable for the pooled sky terms of one exposure: sky fibers plus fibers whose median per-pixel S/N on
+chip G (flux x sqrt(ivar) of the ar1Dcal file) is below `snr_max`. `nothing` if the file is missing."""
+function refit_faint_fibers(mdir::AbstractString, tele::AbstractString, mjd::Integer, e::Integer, snr_max::Real)
+    fn = joinpath(mdir, "ar1Dcal_$(tele)_$(mjd)_$(_arc_expstr(e))_G_object.h5")
+    isfile(fn) || return nothing
+    h5open(fn, "r") do f
+        ft = String.(read(f["fiberTypeList"])); F = read(f["flux_1d"]); I = read(f["ivar_1d"])
+        m = falses(N_FIBERS)
+        for j in 1:min(N_FIBERS, size(F, 2))
+            s = [F[i, j] * sqrt(max(I[i, j], 0)) for i in axes(F, 1) if isfinite(F[i, j]) && isfinite(I[i, j]) && I[i, j] > 0]
+            m[j] = ft[j] == "sky" || (!isempty(s) && median(s) < snr_max)
+        end
+        m
+    end
+end
+
+"Rows of a sky-line table restricted to the fibers in `mask`."
+function refit_sky_subset(rows, mask::AbstractVector{Bool})
+    ii = [i for i in eachindex(rows.fiber) if mask[rows.fiber[i]]]
+    return (fiber = rows.fiber[ii], chip = rows.chip[ii], line = rows.line[ii], pix = rows.pix[ii], lam = rows.lam[ii])
 end
 
 """

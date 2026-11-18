@@ -504,6 +504,16 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         bits[k] |= extra_bits
         sky = kind == "object" ? refit_read_sky(mdir, tele, mjd, e) : nothing
         (sky !== nothing && isempty(sky.pix)) && (sky = nothing)
+        # rows that set the POOLED per-exposure terms (and the position match): all fibers, or only sky
+        # fibers and faint-target fibers (`sky_line_fibers = "faint"`: stellar lines bias the sky-line
+        # centroids on bright-target fibers); the per-fiber terms always use every fiber
+        skyP = sky
+        if sky !== nothing && cfg.sky_line_fibers == "faint"
+            fm = refit_faint_fibers(mdir, tele, mjd, e, cfg.sky_faint_snr)
+            skyP = fm === nothing ? sky : refit_sky_subset(sky, fm)
+            isempty(skyP.pix) && (skyP = nothing)
+        end
+        skyP === nothing && (sky = nothing)
         hassky[k] = sky !== nothing
         # (1) FPI fibers on a comb night
         if C !== nothing && FP !== nothing && cfg.fps_route == "fpifib"
@@ -533,8 +543,8 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
                     st = refit_arc_state(A, NaN, cl; mode = :nearest)
                     st === nothing && continue
                     m = arcmodel(st)
-                    v = refit_sky_velocities(sky, (f, c, p) -> m(f, c, [p])[1])
-                    zp, _, _ = refit_pooled_sky(sky, v)
+                    v = refit_sky_velocities(skyP, (f, c, p) -> m(f, c, [p])[1])
+                    zp, _, _ = refit_pooled_sky(skyP, v)
                     vg = isfinite(zp[2]) ? zp[2] : _arc_nanmean(zp)
                     isfinite(vg) || continue
                     if abs(vg / vpxG) < abs(bo)
@@ -574,12 +584,14 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         if models[k] !== nothing && sky !== nothing
             m = models[k]
             v = refit_sky_velocities(sky, (f, c, p) -> m(f, c, [p])[1])
-            zp, nlc, keep = refit_pooled_sky(sky, v)
+            vP = skyP === sky ? v : refit_sky_velocities(skyP, (f, c, p) -> m(f, c, [p])[1])
+            zp, nlc, keepP = refit_pooled_sky(skyP, vP)
             vraw[:, k] .= zp
             nlines[:, k] .= nlc
-            theta[:, :, k] .= refit_sky_terms(sky, v, keep, zp, nlc,
+            theta[:, :, k] .= refit_sky_terms(skyP, vP, keepP, zp, nlc,
                 route[k] == :arc ? cfg.sky_exp_terms : "chipzp")
             if cfg.sky_fiber_term in ("static", "full")
+                keep = skyP === sky ? keepP : refit_pooled_sky(sky, v)[3]
                 z, s = refit_fiber_sky_terms(sky, v, keep)
                 fz[:, :, k] .= Float32.(z)
                 fs[:, :, k] .= Float32.(s)
@@ -594,6 +606,9 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         for f in 1:N_FIBERS, c in 1:3
             static[f, c] = _arc_nanmedian(Float64.(fz[f, c, :]))
         end
+    elseif cfg.sky_fiber_term == "stored"
+        # GLOBAL stored per-fiber term (telescope, era): built from sky / faint-target fibers only
+        static .= refit_fiber_term_table(cfg.fiber_term_file, String(tele), era)
     end
     # ---------------- pass B: final grids, coefficients, QA
     B = refit_coeff_basis(cfg.coeff_degree)
@@ -646,10 +661,10 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             end
             applied[:, :, k] .= T
             refit_apply_sky_terms!(G, T)
-            if cfg.sky_fiber_term in ("static", "full")
+            if cfg.sky_fiber_term in ("static", "stored", "full")
                 u = (px_all .- 1024.5) ./ 1024
                 for c in 1:3, f in 1:N_FIBERS
-                    if cfg.sky_fiber_term == "static" && isfinite(static[f, c])
+                    if cfg.sky_fiber_term in ("static", "stored") && isfinite(static[f, c])
                         G[:, f, c] .*= 1 + static[f, c] / REFIT_C_MPS
                     elseif cfg.sky_fiber_term == "full" && isfinite(fz[f, c, k])
                         G[:, f, c] .*= 1 .+ (fz[f, c, k] .+ fs[f, c, k] .* u) ./ REFIT_C_MPS
