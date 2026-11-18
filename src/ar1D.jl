@@ -554,23 +554,55 @@ function get_fpi_fiberIDs_from_almanac(almanac_file, tele, mjd)
 end
 
 """
+Translation of confSummary/almanac fiber `category` to the AR.jl fiber type.
+Any category not listed here becomes `"fiberTypeFail"` in `get_fibTargDict`.
+
+Downstream, arMADGICS.jl matches on the FIRST THREE CHARACTERS of the AR.jl type:
+it fits fibers whose prefix is in `accepted_fibtypes = ["sci", "tel"]` and takes
+sky fibers from prefix `"sky"` (so `"skyB"` counts as sky). A new AR.jl type must
+therefore be at least three characters long, and must not start with `"sci"`,
+`"tel"` or `"sky"` unless it is meant to be fitted or used as sky.
+"""
+const ALMANAC_CATEGORY_TO_FIBER_TYPE = Dict(
+    # fps era
+    "science" => "sci",
+    "sky_boss" => "skyB",
+    "standard_apogee" => "tel",
+    "sky_apogee" => "sky",
+
+    # Stars at the "veto locations" of manually built FPS designs (first seen in
+    # apo configurations 27968, 28001, 28004, 28007; MJD 61330-61336): APOGEE
+    # fibers placed on Gaia bright-neighbor stars (`veto_location_boss`, carton
+    # ops_gaia_brightneighbors, median H ~ 10-10.5) or on bright 2MASS stars
+    # (`veto_location_apogee`, carton ops_2mass_psc_brightneighbors, H 2-7).
+    # They are assigned catalog targets with a known identity, ~98% are on
+    # target, and on-target ones give normal stellar spectra, so they are reduced
+    # and fitted exactly like science fibers. Requires the almanac change that
+    # accepts these categories; before it, the whole night fails in almanac.
+    "veto_location_boss" => "sci",
+    "veto_location_apogee" => "sci",
+
+    # almanac relabels a fiber whose positioner was assigned a target but did not
+    # reach it (`assigned == 1 && on_target == 0`) as "offtarget", keeps the
+    # confSummary category in `original_category`, and withholds its sdss_id.
+    # The light in such a fiber is from some other patch of sky. It is extracted
+    # and labelled deliberately, but it is NOT "sci"/"tel" (so arMADGICS.jl does
+    # not fit it) and NOT "sky*" (so it is never used as a sky fiber), until we
+    # decide how these spectra should be handled.
+    "offtarget" => "offtarget",
+
+    # Plate era
+    "standard" => "tel",
+    "sky" => "sky"
+)
+
+"""
 Given an open HDF.file, `f`, and the telescope, mjd, and expnum, return a dictionary
 mapping fiber index (1:300 laid out on the chip) to fiber type.
 """
 function get_fibTargDict(f, tele, mjd, dfindx)
     # translate confSummary/almanac terminology to AR.jl terminology
-    fiber_type_names = Dict(
-        # fps era
-        "science" => "sci",
-        "sky_boss" => "skyB",
-        "standard_apogee" => "tel",
-        "sky_apogee" => "sky",
-
-        # Plate era
-        "science" => "sci",
-        "standard" => "tel",
-        "sky" => "sky"
-    )
+    fiber_type_names = ALMANAC_CATEGORY_TO_FIBER_TYPE
     # TODO other fiber types:
     # "blank"s from plate era
     # FPI era "serendipitous" APOGEE fibers are those which "accidentally" point at a bright
