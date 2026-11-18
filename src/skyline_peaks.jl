@@ -10,12 +10,13 @@ box `[lb, ub]`.
 Vertex `j` is Optim's default `AffineSimplexer` vertex, `(1 + b) * x0[j] + a`, clamped to
 lie at most `frac` of the way from `x0[j]` to the bound it would cross. The default
 simplex ignores the box: for the sky-line centroid (`x0 ~ 1000 px`, box `+-10 px`) the
-vertex lands ~500 px outside, where Fminbox's barrier is `Inf`. Optim <= 1.11 tolerated
-an `Inf` vertex (Nelder-Mead contracted away from it). Optim >= 1.12 treats a non-finite
-initial simplex as "stopped" and returns at iteration 0: 1.12-1.13 return the
-out-of-box vertex itself (centroid ~500 px off) and 2.x return the best finite vertex
-(centroid never moves from the seed). Keeping every vertex inside the box gives a
-working fit on all versions. The simplex is rebuilt around the current point on each
+vertex lands ~500 px outside, where Fminbox's barrier is `Inf`. Optim <= 1.11 usually
+contracted away from that vertex, but on faint lines the poisoned simplex stalls until the
+iteration limit and the fit returns its start point (about 0.9 % of sky-line fits on Optim
+1.10). Optim >= 1.12 treats a non-finite initial simplex as "stopped" and returns at
+iteration 0: 1.12-1.13 return the out-of-box vertex itself (centroid ~500 px off) and 2.x
+return the best finite vertex (centroid never moves from the seed). Keeping every vertex
+inside the box gives a working fit on all versions. The simplex is rebuilt around the current point on each
 Fminbox outer iteration, so the clamp is applied every time.
 """
 struct BoxAffineSimplexer{T <: AbstractVector} <: Optim.Simplexer
