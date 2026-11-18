@@ -234,6 +234,7 @@ function phase12(phase)
     for r in eachrow(nights)
         tele, mjd = String(r.tele), Int(r.mjd)
         claim(phase, tele, mjd) || continue
+        foreach(st -> link_reused(st, tele, mjd), AR.REFIT_STAGES)   # products of valid stages from --reuse_from
         recs = Tuple{String, String, Float64}[]
         if phase == 1
             st, dt = run_stage("arc", tele, mjd, () -> AR.refit_night_arc(tele, mjd; apred_dir = APRED,

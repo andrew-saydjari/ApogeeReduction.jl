@@ -24,6 +24,7 @@ s = ArgParseSettings()
     "--rvrows"; arg_type = String; default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_17/wavecal_consistency/rv_rows.h5"
     "--nboot"; arg_type = Int; default = 200
     "--noplots"; action = :store_true
+    "--rv_min_nights"; arg_type = Int; default = 5; help = "minimum nights per telescope/era subset in the RV test"
 end
 const O = parse_args(s)
 const OUT = O["outroot"]
@@ -133,18 +134,18 @@ if isfile(O["rvrows"])
     subsets = [(t, e) for t in ("apo", "lco") for e in ("plate", "fps", "fps1", "fps2")]
     for (t, e) in subsets
         rows = findall(k -> ok[k] && tele_r[k] == t && (e == "fps" ? era_r[k] != "plate" : era_r[k] == e), 1:NR)
-        length(rows) < 100 && continue
+        length(rows) < 10 * O["rv_min_nights"] && continue
         g = Dict{Int, Vector{Int}}()
         for k in rows; push!(get!(g, mjd_r[k], Int[]), k); end
         ks = [m for (m, v) in g if length(v) >= 10]
-        nn = length(ks); nn < 5 && continue
+        nn = length(ks); nn < O["rv_min_nights"] && continue
         z0 = [median(dvm[g[m]]) for m in ks]
         z1 = [median(dvm[g[m]] .+ pred[g[m]]) for m in ks]
         sh = z1 .- z0
         bias = median(sh)
         rng = MersenneTwister(7)
         Bs = [rand(rng, 1:nn, nn) for _ in 1:O["nboot"]]
-        ci(f) = (v = [f(b) for b in Bs]; (quantile(v, 0.025), quantile(v, 0.975)))
+        ci(f) = (v = filter(isfinite, [f(b) for b in Bs]); isempty(v) ? (NaN, NaN) : (quantile(v, 0.025), quantile(v, 0.975)))
         bci = ci(b -> median(sh[b]))
         dsig = robsig(z1) - robsig(z0); dsci = ci(b -> robsig(z1[b]) - robsig(z0[b]))
         drms = rmsclip(z1) - rmsclip(z0); drci = ci(b -> rmsclip(z1[b]) - rmsclip(z0[b]))
