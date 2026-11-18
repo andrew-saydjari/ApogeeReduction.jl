@@ -1,0 +1,335 @@
+row_id,lamp,chip_idx,assoc_wave,med_pix,emp_wave,emp_class,lab_id,lab_wave,lab_species,lab_class,lab_status,store,shape_clean,shape_blend,strict_clean,prelim_classB,drp_rederived,neon,use_default,use_with_blended,use_with_neon
+1,ThAr,1,16524.37800175654,1843.4117549306015,16524.378412270158,B,111,16524.37800175654,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+2,ThAr,1,16544.93693469601,1760.1271672556024,16544.941982983677,A,114,16544.93693469601,Th I,B,clean,true,true,true,true,true,false,false,true,true,true
+3,ThAr,1,16553.800311528372,1727.3545514027064,16553.800311528372,B,115,16553.78009458598,Ar I,A,unusable,true,false,false,false,false,false,false,false,false,false
+4,ThAr,1,16582.479595928846,1614.080268712774,16582.479595928846,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+5,ThAr,1,16596.125046926223,1557.769135383848,16596.125046926223,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+6,ThAr,1,16611.590070624396,1495.7429442368066,16611.590070624396,B,121,16611.556,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+7,ThAr,1,16614.016218421515,1485.9699442696174,16614.016218421515,B,122,16613.9757,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+8,ThAr,1,16628.90587349666,1422.1573431391623,16628.90587349666,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+9,ThAr,1,16744.651251864452,943.7815465485221,16744.656365916322,B,127,16744.651251864452,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+10,ThAr,1,16753.108223560426,900.8838843817949,16753.108223560426,A,128,16753.018817764725,Th I,A,unusable,true,false,false,false,false,true,false,false,true,false
+11,ThAr,1,16761.783332447136,863.9642411460396,16761.783332447136,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+12,ThAr,1,16773.127974291772,817.4782130810535,16773.120047335397,B,129,16773.127974291772,Th I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+13,ThAr,1,16774.57517529037,818.9974468113434,16774.57517529037,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+14,ThAr,1,16783.056596097056,779.4333718109385,16783.056596097056,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+15,ThAr,1,16789.72394909476,751.3642386760674,16789.72394909476,B,659,16789.643755525514,Th I,drp_extra,clean_offset,true,true,true,false,false,true,false,false,true,false
+16,ThAr,1,16793.41827202319,732.9592139186897,16793.41827202319,B,130,16793.378,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+17,ThAr,1,16821.81850151754,608.7233084968872,16821.81850151754,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+18,ThAr,1,16864.696713810972,415.66352569671756,16864.708558380382,B,132,16864.696713810972,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+19,ThAr,1,16866.28711120966,404.7705084806828,16866.28711120966,A,133,16866.2554,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+20,ThAr,1,16895.03444856245,286.73741261218413,16895.03444856245,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+21,ThAr,1,16932.788728370888,98.3893419979604,16932.788728370888,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+22,ThAr,1,16945.209035536333,54.71949128334394,16945.209035536333,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+23,ThAr,2,15887.505530242082,1927.9210563254017,15887.507022640715,B,69,15887.505530242082,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+24,ThAr,2,15896.042578128336,1915.4953562971004,15896.042578128336,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+25,ThAr,2,15904.034687058444,1873.0058232742167,15904.034687058444,B,73,15904.028223161253,Ar I,A,unusable,true,false,false,false,false,false,false,false,false,false
+26,ThAr,2,15912.46849998004,1844.9585372618649,15912.46849998004,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+27,ThAr,2,15926.4739930578,1814.3109255454417,15926.473487318606,A,74,15926.4739930578,Th I,B,clean,true,true,true,true,true,false,false,true,true,true
+28,ThAr,2,15936.883253056218,1779.0387817849628,15936.883253056218,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+29,ThAr,2,15940.601746939892,1766.956053509677,15940.601746939892,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+30,ThAr,2,15958.805369727548,1705.2531460515536,15958.800282819191,A,77,15958.805369727548,Th I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+31,ThAr,2,15965.24907970274,1668.466590265913,15965.24907970274,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+32,ThAr,2,15993.86142803303,1571.8192584224114,15993.865510172991,B,80,15993.86142803303,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+33,ThAr,2,16010.125674427345,1531.1106421929476,16010.130635472393,A,81,16010.125674427345,Th I,B,clean,true,true,true,true,true,false,false,true,true,true
+34,ThAr,2,16027.14018468374,1458.8036155051254,16027.14018468374,B,82,16027.1469,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+35,ThAr,2,16073.063962156168,1301.1872349751443,16073.063962156168,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+36,ThAr,2,16102.799337866192,1199.9752335890946,16102.799337866192,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+37,ThAr,2,16110.589220436585,1171.0734459620876,16110.589220436585,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+38,ThAr,2,16114.106989882563,1159.4723870881846,16114.106989882563,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+39,ThAr,2,16127.062935588947,1113.5592966630306,16127.071317473965,B,87,16127.062935588947,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+40,ThAr,2,16151.998706870983,1038.1577396326304,16152.009148571373,A,88,16151.998706870983,Th I,B,clean,true,true,true,true,true,false,false,true,true,true
+41,ThAr,2,16156.842726589042,1009.1071309563356,16156.842726589042,B,89,16156.837654479565,Ar I,A,unusable,true,false,false,false,false,false,false,false,false,false
+42,ThAr,2,16184.443616376378,911.6527145683908,16184.453664669105,B,90,16184.443616376378,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+43,ThAr,2,16192.523128372273,882.9605153385776,16192.523128372273,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+44,ThAr,2,16207.087347061988,842.280778463136,16207.087347061988,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+45,ThAr,2,16225.157970936845,778.1350826713477,16225.177612722322,A,91,16225.157970936845,Th I,B,undetected/weak,true,false,false,false,true,false,false,false,false,false
+46,ThAr,2,16242.560340904574,715.0564520495614,16242.551970782988,A,92,16242.560340904574,Th I,B,undetected/weak,true,false,false,false,true,false,false,false,false,false
+47,ThAr,2,16268.514301358087,610.1993565753407,16268.525658190829,B,96,16268.514301358087,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+48,ThAr,2,16273.376352987529,595.0940042195684,16273.376352987529,B,99,16273.4004,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+49,ThAr,2,16275.337297987313,585.3769724788118,16275.337297987313,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+50,ThAr,2,16284.657304569804,561.0118794951748,16284.657304569804,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+51,ThAr,2,16296.56532052853,508.0246374086885,16296.56532052853,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+52,ThAr,2,16351.504787489386,311.70445949967166,16351.504787489386,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+53,ThAr,2,16384.407821778383,182.62546787152178,16384.407821778383,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+54,ThAr,2,16385.386170322472,186.02374834207632,16385.335562448803,A,105,16385.386170322472,Th II,B,unusable,true,false,false,false,true,false,false,false,false,false
+55,ThAr,2,16402.989543465785,120.07408794214936,16402.989543465785,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+56,ThAr,2,16409.946868771403,86.60565905464219,16409.946868771403,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+57,ThAr,3,15168.201312152565,1953.4435697332315,15168.201312152565,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+58,ThAr,3,15173.603571465921,1954.792971056554,15173.603571465921,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+59,ThAr,3,15176.838165899142,1925.0670284223522,15176.847825435507,B,5,15176.838165899142,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+60,ThAr,3,15181.873608078384,1910.415257760148,15181.880741868154,B,8,15181.873608078384,Ar I,A,clean,true,true,true,true,false,false,false,true,true,true
+61,ThAr,3,15195.17330430699,1871.8009440022024,15195.17330430699,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+62,ThAr,3,15234.887077711657,1755.3261582590612,15234.887077711657,B,15,15234.8765,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+63,ThAr,3,15243.833728880243,1722.5810433156714,15243.833728880243,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+64,ThAr,3,15248.35067867569,1715.7087459808258,15248.35067867569,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+65,ThAr,3,15258.512033388804,1686.4531683335558,15258.512033388804,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+66,ThAr,3,15265.236477686203,1662.1570814644174,15265.236477686203,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+67,ThAr,3,15278.853699276793,1626.2407049878125,15278.853699276793,B,20,15278.89833642591,Ar I,A,unusable,true,false,false,false,false,false,false,false,false,false
+68,ThAr,3,15306.060912367353,1544.7096574921948,15306.078422398132,B,21,15306.060912367353,Ar I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+69,ThAr,3,15311.472269578608,1533.156243202945,15311.468113275765,B,22,15311.472269578608,Th I,B,clean,true,true,true,true,true,false,false,true,true,true
+70,ThAr,3,15333.534897760743,1463.1359889680061,15333.539596940715,B,23,15333.534897760743,Ar I,B,clean,true,true,true,true,true,false,false,true,true,true
+71,ThAr,3,15353.439006742294,1403.6120757580957,15353.439006742294,B,26,15353.440577832263,Ar I,A,unusable,true,false,false,false,false,false,false,false,false,false
+72,ThAr,3,15357.324945653883,1391.9634908207825,15357.32556540655,B,27,15357.324945653883,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+73,ThAr,3,15359.882641649325,1403.2207736911325,15359.865292355284,A,28,15359.882641649325,Th I,B,unusable,true,false,false,false,true,false,false,false,false,false
+74,ThAr,3,15370.053237411983,1353.5997348292613,15370.053237411983,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+75,ThAr,3,15374.426862492906,1341.4584542298003,15374.426862492906,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+76,ThAr,3,15395.947581244105,1275.6113627531681,15395.947581244105,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+77,ThAr,3,15406.849601846949,1243.0012522464274,15406.85977388859,B,32,15406.849601846949,Ar I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+78,ThAr,3,15411.946798028908,1227.618604388801,15411.946798028908,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+79,ThAr,3,15421.682213611228,1192.7282027995695,15421.682213611228,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+80,ThAr,3,15433.996289531473,1160.9007942850574,15434.001404413635,B,35,15433.996289531473,Th I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+81,ThAr,3,15444.327812999289,1148.4463158395392,15444.311159669674,A,37,15444.327812999289,Th I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+82,ThAr,3,15450.960929754568,1109.2740915196132,15450.960929754568,B,38,15450.95274282841,Ar I,A,unusable,true,false,false,false,false,false,false,false,false,false
+83,ThAr,3,15455.602705997308,1095.2320878772853,15455.602705997308,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+84,ThAr,3,15459.245607637815,1084.3355921435066,15459.245607637815,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+85,ThAr,3,15466.74591842571,1061.224308616725,15466.74591842571,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+86,ThAr,3,15470.610833400313,1052.0249442000452,15470.610833400313,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+87,ThAr,3,15477.389812059171,1048.1711487930413,15477.389812059171,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+88,ThAr,3,15503.811856970497,963.6454393417314,15503.811856970497,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+89,ThAr,3,15505.151113691767,947.3397382848535,15505.151113691767,A,44,15505.133,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+90,ThAr,3,15507.059663399026,937.5101878061232,15507.059663399026,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+91,ThAr,3,15520.672585242346,895.7593589371529,15520.672282018515,B,45,15520.672585242346,Th I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+92,ThAr,3,15551.641016075728,800.2242143161001,15551.641016075728,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+93,ThAr,3,15555.923726244564,805.8728325384754,15555.90905632819,A,46,15555.923726244564,Th I,B,clean,true,true,true,true,true,false,false,true,true,true
+94,ThAr,3,15559.711934961899,775.0132930029265,15559.718400743744,B,47,15559.711934961899,Ar I,B,clean,true,true,true,true,true,false,false,true,true,true
+95,ThAr,3,15576.490602826372,723.4429259475512,15576.490602826372,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+96,ThAr,3,15580.83104628417,709.369380464268,15580.833398874402,B,51,15580.83104628417,Th I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+97,ThAr,3,15589.479517071723,702.1506542216848,15589.491059371583,A,52,15589.479517071723,Th I,B,undetected/weak,true,false,false,false,true,false,false,false,false,false
+98,ThAr,3,15603.018785488564,658.2698491921998,15603.018785488564,A,53,15602.935547528026,Th I,B,clean_offset,true,true,true,false,true,true,false,false,true,false
+99,ThAr,3,15608.512341716043,622.8652730546033,15608.512341716043,B,55,15608.4777,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+100,ThAr,3,15634.32075873889,560.6988859766101,15634.32075873889,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+101,ThAr,3,15641.087865024245,539.4708329958553,15641.087865024245,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+102,ThAr,3,15644.798463354431,527.9410094638791,15644.798463354431,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+103,ThAr,3,15652.097498151314,486.12292297028443,15652.097498151314,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+104,ThAr,3,15689.281429874243,368.067664055648,15689.281429874243,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+105,ThAr,3,15691.441915816067,360.94391895641854,15691.441915816067,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+106,ThAr,3,15698.910725353157,337.15368553913055,15698.910725353157,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+107,ThAr,3,15705.59029178411,334.86309625748453,15705.595382724956,A,61,15705.59029178411,Th I,B,undetected/weak,true,false,false,false,true,false,false,false,false,false
+108,ThAr,3,15711.21199614278,297.94962282662595,15711.21199614278,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+109,ThAr,3,15717.440530175674,295.675139883131,15717.454469735701,A,62,15717.440530175674,Th I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+110,ThAr,3,15722.707970586858,260.87664080690456,15722.707970586858,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+111,ThAr,3,15729.238903637075,240.08409385274095,15729.238903637075,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+112,ThAr,3,15739.209359390099,208.04322377971346,15739.218035394671,B,63,15739.209359390099,Ar I,B,clean,true,true,true,true,true,false,false,true,true,true
+113,ThAr,3,15760.585931377174,137.87720503489984,15760.585931377174,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+114,ThAr,3,15764.367587865123,126.76130173342509,15764.367587865123,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+115,ThAr,3,15780.924908015357,73.40719724822591,15780.934618807172,B,66,15780.924908015357,Ar I,B,clean,true,true,true,true,true,false,false,true,true,true
+116,UNe,1,16488.7329025443,1982.365616930224,16488.729575907593,B,526,16488.7329025443,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+117,UNe,1,16512.07566070842,1890.689621493974,16512.030013302792,A,531,16512.07566070842,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+118,UNe,1,16524.37772870148,1843.440118173535,16524.36303920894,B,537,16524.37772870148,Ar I,B,unusable,true,false,false,false,true,false,false,false,false,false
+119,UNe,1,16528.29945682058,1827.6516987662615,16528.30670642939,B,538,16528.29945682058,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+120,UNe,1,16532.595226007405,1811.1494034271593,16532.595226007405,B,540,16532.6019,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+121,UNe,1,16534.44448378571,1803.6020044279571,16534.44448378571,B,541,16534.479018407506,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+122,UNe,1,16545.178527080203,1761.4767594116893,16545.178527080203,B,543,16545.136298253747,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+123,UNe,1,16552.506996657547,1733.0819870505554,16552.506996657547,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+124,UNe,1,16553.789959586735,1727.2297591807928,16553.82536369115,B,547,16553.789959586735,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+125,UNe,1,16558.987983539835,1705.6920462588223,16558.96300921861,A,549,16558.987983539835,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+126,UNe,1,16574.695614416756,1644.1695388778821,16574.698243202125,B,552,16574.695614416756,U I,B,clean,true,true,true,true,true,false,false,true,true,true
+127,UNe,1,16596.020333282424,1558.6475314924153,16596.020333282424,B,561,16596.0411,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+128,UNe,1,16605.07071036891,1522.1014677628145,16605.080649846375,B,564,16605.07071036891,U I,B,clean,true,true,true,true,true,false,false,true,true,true
+129,UNe,1,16611.56542738743,1495.9241925516717,16611.56542738743,B,566,16611.556,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+130,UNe,1,16613.98150944995,1486.133703778433,16613.98150944995,B,568,16613.9757,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+131,UNe,1,16638.644565421673,1385.7241971779627,16638.644565421673,B,574,16638.5935,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+132,UNe,1,16651.687086491776,1332.2135290017893,16651.689306382446,B,576,16651.687086491776,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+133,UNe,1,16655.109615548143,1318.1886332952754,16655.109615548143,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+134,UNe,1,16664.917112544717,1277.794738378704,16664.917112544717,B,580,16664.93268042127,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+135,UNe,1,16671.67477932387,1249.8486448765061,16671.67477932387,A,583,16671.664,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+136,UNe,1,16672.733874523605,1243.6690394282214,16672.729924983436,A,584,16672.733874523605,U I,B,blend_modelled,true,false,true,false,true,false,false,false,false,false
+137,UNe,1,16711.865578309764,1082.4896006607396,16711.836293377004,B,590,16711.865578309764,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+138,UNe,1,16714.98104078203,1069.2847651754887,16714.98559062029,B,591,16714.98104078203,U I,B,clean,true,true,true,true,true,false,false,true,true,true
+139,UNe,1,16721.5448259385,1021.0814621499786,16721.56313693322,A,593,16721.5448259385,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+140,UNe,1,16732.761198114826,994.141265403266,16732.761198114826,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+141,UNe,1,16735.14688773126,984.1706527341667,16735.149143312003,A,598,16735.14688773126,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+142,UNe,1,16736.407412239518,974.0329289731609,16736.407412239518,A,599,16736.39831235515,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+143,UNe,1,16738.822068000958,968.5166831878157,16738.822068000958,B,600,16738.810101262603,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+144,UNe,1,16745.43945222682,919.7777153989548,16745.43945222682,A,605,16745.462720589447,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+145,UNe,1,16750.375231830512,918.493783038959,16750.375231830512,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+146,UNe,1,16761.41447297185,870.6566957240384,16761.43672223076,B,612,16761.41447297185,U I,B,blend_modelled,true,false,true,false,true,false,false,false,false,false
+147,UNe,1,16768.267078598252,842.3794190910303,16768.267078598252,B,613,16768.2343775265,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+148,UNe,1,16770.88416103744,831.424634143391,16770.88416103744,A,615,16770.8812019704,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+149,UNe,1,16772.220260378253,825.1958300859438,16772.220260378253,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+150,UNe,1,16776.1513596052,806.3835972887599,16776.1513596052,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+151,UNe,1,16780.041576915817,789.3640737693966,16780.084627464013,B,620,16780.041576915817,U I,A,blend_modelled,true,false,true,false,false,false,false,false,false,false
+152,UNe,1,16793.386904379397,733.8183010300353,16793.386904379397,B,623,16793.378,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+153,UNe,1,16805.965432044984,677.5301099873948,16805.95953646244,B,624,16805.965432044984,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+154,UNe,1,16821.814485479343,608.8387087314852,16821.814485479343,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+155,UNe,1,16828.866649205036,577.0210058361831,16828.88184452016,B,629,16828.866649205036,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+156,UNe,1,16833.20343991899,550.1425232572163,16833.248083585102,A,630,16833.20343991899,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+157,UNe,1,16856.246190276368,454.84218866934856,16856.246190276368,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+158,UNe,1,16866.266509937162,409.7699510859654,16866.266509937162,B,637,16866.2554,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+159,UNe,1,16874.64921758583,369.3979225974897,16874.64921758583,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+160,UNe,1,16888.856929484624,301.2616934080144,16888.856929484624,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+161,UNe,1,16910.620118020233,205.48610742967023,16910.620065701107,B,650,16910.620118020233,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+162,UNe,1,16912.465677842156,195.95549240748235,16912.442787787502,B,651,16912.465677842156,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+163,UNe,1,16921.833790696888,153.23873435275715,16921.833790696888,B,655,16921.863599423206,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+164,UNe,1,16932.771289849887,101.97575790667165,16932.771289849887,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+165,UNe,1,16935.99038978754,88.67721179198546,16935.99038978754,B,656,16936.00417506375,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+166,UNe,2,15864.690272676402,2002.7917339569854,15864.690272676402,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+167,UNe,2,15866.079168759548,1998.2270284086023,15866.079168759548,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+168,UNe,2,15871.497399926044,1980.7201338799562,15871.497399926044,B,366,15871.520171186407,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+169,UNe,2,15880.06045234769,1952.2721761364123,15880.06045234769,B,369,15880.080744493758,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+170,UNe,2,15894.338527457685,1905.112082590726,15894.338527457685,A,377,15894.346085462565,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+171,UNe,2,15897.763506635256,1893.5839070399404,15897.763506635256,B,378,15897.806357087622,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+172,UNe,2,15905.139480103408,1868.6608348981822,15905.139480103408,A,380,15905.1252914316,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+173,UNe,2,15907.43613096548,1861.6787067530283,15907.43613096548,B,382,15907.386432634652,U?,B,unusable,true,false,false,false,false,false,false,false,false,false
+174,UNe,2,15914.04227399824,1839.6664410347953,15914.040147287678,B,386,15914.04227399824,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+175,UNe,2,15928.080511477425,1793.2698269149487,15928.083351725314,A,390,15928.080511477425,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+176,UNe,2,15936.237710531246,1765.7326515442596,15936.244886955152,B,393,15936.237710531246,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+177,UNe,2,15939.93119815617,1753.3494486045663,15939.932594514445,B,395,15939.93119815617,U I,B,clean,true,true,true,true,true,false,false,true,true,true
+178,UNe,2,15942.668181608638,1744.3395517052334,15942.668181608638,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+179,UNe,2,15969.969048123889,1652.5069001863017,15969.995377721985,B,401,15969.969048123889,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+180,UNe,2,15982.50082377805,1611.247196811439,15982.540031572793,A,405,15982.50082377805,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+181,UNe,2,15989.095181260856,1587.9979998815952,15989.090812562648,B,407,15989.095181260856,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+182,UNe,2,15993.860404818683,1571.8276733885034,15993.855247770443,B,408,15993.860404818683,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+183,UNe,2,16010.122198138843,1516.5741615956263,16010.122198138843,B,415,16010.167865489357,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+184,UNe,2,16012.890504959616,1507.2359354716646,16012.888325654625,B,418,16012.890504959616,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+185,UNe,2,16027.149949717377,1458.6904109063114,16027.149949717377,B,422,16027.1469,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+186,UNe,2,16031.176834813075,1443.8577070287217,16031.176834813075,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+187,UNe,2,16049.873155885238,1380.8591735542018,16049.873155885238,B,430,16049.882,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+188,UNe,2,16054.472735790408,1365.0295207954325,16054.472735790408,A,432,16054.529659515374,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+189,UNe,2,16065.400211203616,1327.536985888847,16065.400211203616,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+190,UNe,2,16070.08051786547,1311.6156367788653,16070.08051786547,A,436,16070.08562880847,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+191,UNe,2,16089.423879766333,1245.6502789424085,16089.423879766333,A,438,16089.384640729108,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+192,UNe,2,16090.869577101206,1239.079875289975,16090.869577101206,A,439,16090.880261902892,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+193,UNe,2,16102.886469029001,1197.9010759266553,16102.886469029001,B,443,16102.884,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+194,UNe,2,16112.61847007867,1163.7852853186318,16112.61847007867,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+195,UNe,2,16125.84414381622,1118.4604731547522,16125.84414381622,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+196,UNe,2,16141.300427420021,1063.9127921333466,16141.252879581629,A,449,16141.300427420021,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+197,UNe,2,16148.473837730759,1037.7946968556114,16148.473837730759,A,451,16148.442686173297,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+198,UNe,2,16154.901860597618,1016.6979563138925,16154.901860597618,A,452,16154.856577991044,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+199,UNe,2,16158.132533527318,1001.9207814888605,16158.076607564399,A,455,16158.132533527318,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+200,UNe,2,16175.08979261013,944.9198103826113,16175.08979261013,B,458,16175.104172523403,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+201,UNe,2,16181.04263360423,921.7671740290064,16181.04263360423,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+202,UNe,2,16184.158861685535,912.2889975298425,16184.158861685535,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+203,UNe,2,16189.646315733899,893.4769579064318,16189.646315733899,B,463,16189.657040086126,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+204,UNe,2,16204.534148568322,839.575875796025,16204.566248986306,A,464,16204.534148568322,U I,A,blend_modelled,true,false,true,false,false,false,false,false,false,false
+205,UNe,2,16214.710460270666,802.1716295653936,16214.710460270666,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+206,UNe,2,16216.493198463617,797.6170330466623,16216.493198463617,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+207,UNe,2,16224.27689262275,769.7307897563492,16224.27689262275,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+208,UNe,2,16234.141132245824,734.355107349033,16234.141132245824,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+209,UNe,2,16236.517900348914,726.0934860132841,16236.517900348914,A,469,16236.535142884351,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+210,UNe,2,16243.212027125508,702.0108420551187,16243.212027125508,A,470,16243.181741728116,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+211,UNe,2,16252.432351536328,668.3803723810379,16252.432351536328,B,473,16252.439125432848,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+212,UNe,2,16257.099914834916,651.5529536529882,16257.099914834916,B,475,16257.112,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+213,UNe,2,16260.281286156453,640.107535974203,16260.281286156453,A,476,16260.269152658024,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+214,UNe,2,16268.650648816458,609.7535627543721,16268.650648816458,B,480,16268.6908,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+215,UNe,2,16273.35964670809,592.6580054559053,16273.35964670809,B,482,16273.4004,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+216,UNe,2,16280.997778343884,564.8413154408943,16281.010947692868,B,483,16280.997778343884,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+217,UNe,2,16309.920892706003,459.19042868748113,16309.920892706003,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+218,UNe,2,16323.407195578528,409.6354470603758,16323.407195578528,B,489,16323.383463913055,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+219,UNe,2,16335.604377687621,364.08425788769995,16335.604377687621,A,497,16335.637763636161,U I,A,undetected/weak,true,false,false,false,false,false,false,false,false,false
+220,UNe,2,16341.483500779814,342.920151817066,16341.483500779814,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+221,UNe,2,16347.49330316763,320.6219388507525,16347.497797040003,B,501,16347.49330316763,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+222,UNe,2,16351.447643567128,305.960838037882,16351.447643567128,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+223,UNe,2,16357.614084952615,282.8519558078315,16357.608577239856,B,504,16357.614084952615,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+224,UNe,2,16362.523510904786,262.5706179434665,16362.523510904786,A,506,16362.529512889949,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+225,UNe,2,16363.791610217739,260.00054170330685,16363.791610217739,A,507,16363.781793028007,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+226,UNe,2,16365.370110945916,254.09769801062993,16365.384660086198,B,508,16365.370110945916,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+227,UNe,2,16407.00481860584,97.94978968293395,16407.00481860584,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+228,UNe,2,16409.74161554838,87.67027558451892,16409.74161554838,B,520,16409.7373,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+229,UNe,2,16413.983930557977,70.1926818545312,16413.983930557977,A,521,16413.99590572569,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+230,UNe,2,16416.368729981972,61.365501334236015,16416.368729981972,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+231,UNe,2,16421.36188454372,43.03295969355918,16421.36188454372,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+232,UNe,3,15153.732886776485,1988.278484026248,15153.732886776485,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+233,UNe,3,15156.639473533522,1983.8738920670773,15156.611143284083,B,142,15156.639473533522,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+234,UNe,3,15176.509041175963,1923.283270825878,15176.509041175963,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+235,UNe,3,15178.515836619632,1920.283874642927,15178.515836619632,B,149,15178.4581,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+236,UNe,3,15180.409830263383,1906.7070132117915,15180.409830263383,A,150,15180.369353566743,U?,A,unusable,true,false,false,false,false,false,false,false,false,false
+237,UNe,3,15185.795136743618,1900.086346230463,15185.795136743618,A,153,15185.796166008633,U I,A,undetected/weak,true,false,false,false,false,false,false,false,false,false
+238,UNe,3,15195.028572824007,1871.9567077564045,15195.028572824007,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+239,UNe,3,15196.683121188196,1868.3266836746404,15196.683121188196,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+240,UNe,3,15204.859366175839,1843.341597043872,15204.859366175839,B,168,15204.895161259545,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+241,UNe,3,15234.893999928134,1755.306830040456,15234.893999928134,B,182,15234.8765,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+242,UNe,3,15240.762284404938,1738.0748672940367,15240.746796152442,B,185,15240.762284404938,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+243,UNe,3,15256.780696913569,1693.5048846615093,15256.782035848544,A,190,15256.780696913569,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+244,UNe,3,15260.36541863464,1681.1797772300479,15260.36541863464,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+245,UNe,3,15264.797498320408,1667.2480926600483,15264.797498320408,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+246,UNe,3,15272.053608016417,1646.532558768767,15272.053608016417,B,196,15272.07919232815,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+247,UNe,3,15278.142012927294,1627.777127279671,15278.145865340022,B,198,15278.142012927294,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+248,UNe,3,15280.9111286047,1619.5776583554043,15280.909734627578,B,200,15280.9111286047,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+249,UNe,3,15289.129599943444,1595.8740417295965,15289.129599943444,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+250,UNe,3,15293.790269983574,1581.4420457761332,15293.799122746888,B,202,15293.790269983574,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+251,UNe,3,15302.331686669824,1557.361689436898,15302.349466461785,A,204,15302.331686669824,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+252,UNe,3,15306.061380918367,1543.6327911914898,15306.046576431694,B,205,15306.061380918367,Ar I,B,unusable,true,false,false,false,true,false,false,false,false,false
+253,UNe,3,15315.070356973767,1515.679314281902,15315.10619258185,B,207,15315.070356973767,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+254,UNe,3,15324.92926161077,1489.9677212087415,15324.92926161077,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+255,UNe,3,15327.742855899996,1480.3767903730043,15327.77360917885,B,215,15327.742855899996,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+256,UNe,3,15330.75243481715,1472.9150662495333,15330.75243481715,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+257,UNe,3,15333.534897760743,1456.850629794518,15333.523224169634,A,220,15333.534897760743,Ar I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+258,UNe,3,15343.187127029178,1435.6918448758552,15343.163834220675,A,221,15343.187127029178,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+259,UNe,3,15346.506703070218,1425.9865946079403,15346.519318629382,A,222,15346.506703070218,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+260,UNe,3,15352.441523516434,1406.6483961584038,15352.441523516434,B,223,15352.3836,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+261,UNe,3,15357.324238111625,1392.8092405466182,15357.329291082486,A,228,15357.324238111625,Ar I,B,undetected/weak,true,false,false,false,true,false,false,false,false,false
+262,UNe,3,15366.614559306076,1364.3135218117193,15366.614559306076,A,231,15366.611153759432,U I,A,undetected/weak,true,false,false,false,false,false,false,false,false,false
+263,UNe,3,15367.934319415814,1357.9630197775848,15367.948849681496,B,232,15367.934319415814,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+264,UNe,3,15374.301987740286,1341.0695464617074,15374.301987740286,B,236,15374.2789,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+265,UNe,3,15385.953489154988,1306.2054897596736,15385.940184507717,B,238,15385.953489154988,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+266,UNe,3,15388.21456963234,1299.1654662909586,15388.225966037424,B,239,15388.21456963234,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+267,UNe,3,15389.882275865026,1294.0312204728948,15389.892678278877,B,240,15389.882275865026,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+268,UNe,3,15394.27575011417,1280.993929852182,15394.27575011417,B,241,15394.233,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+269,UNe,3,15404.409814235756,1251.6422569171318,15404.410914006527,A,244,15404.409814235756,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+270,UNe,3,15407.24883627125,1241.8496213395422,15407.24883627125,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+271,UNe,3,15411.85978108781,1227.8937433071255,15411.85978108781,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+272,UNe,3,15425.013494958683,1188.1551165711528,15425.008324790226,B,252,15425.013494958683,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+273,UNe,3,15432.608105974692,1165.2040127055307,15432.608105974692,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+274,UNe,3,15435.423355266637,1156.5523327083438,15435.423355266637,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+275,UNe,3,15451.786985161376,1107.0845374855285,15451.786985161376,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+276,UNe,3,15455.484770652427,1095.5226413467312,15455.484770652427,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+277,UNe,3,15458.507287271732,1086.4420828403568,15458.487758224946,B,268,15458.507287271732,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+278,UNe,3,15467.244737409183,1059.9570896102214,15467.25420641798,B,270,15467.244737409183,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+279,UNe,3,15470.507331829136,1049.7053757362394,15470.507331829136,B,272,15470.4528,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+280,UNe,3,15474.479017233169,1037.543025424578,15474.502082433251,B,273,15474.479017233169,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+281,UNe,3,15501.81458815934,953.7693496284892,15501.785419526288,B,275,15501.81458815934,U I,A,blend_modelled,true,false,true,false,false,false,false,false,false,false
+282,UNe,3,15503.758233834586,947.4162446324345,15503.758233834586,A,278,15503.719,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+283,UNe,3,15505.120399155281,942.8849598352136,15505.120399155281,A,279,15505.133,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+284,UNe,3,15510.883292666458,925.9105440560322,15510.883292666458,B,281,15510.864515250818,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+285,UNe,3,15519.072148197456,901.2326749239706,15519.080376561216,B,285,15519.072148197456,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+286,UNe,3,15523.957981446463,888.2218981025634,15523.957981446463,A,286,15523.897223479571,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+287,UNe,3,15527.295463750317,876.68989554273,15527.29655919255,A,287,15527.295463750317,U I,A,clean,true,true,true,true,false,false,false,true,true,true
+288,UNe,3,15532.807860353045,858.1980186869928,15532.807860353045,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+289,UNe,3,15534.976322783355,850.8353853154689,15534.976322783355,A,290,15534.966132841733,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+290,UNe,3,15536.163351516105,847.1677581999072,15536.163351516105,A,291,15536.168316361753,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+291,UNe,3,15540.45957139556,835.4954471293221,15540.45957139556,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+292,UNe,3,15551.40284980086,800.8038378101378,15551.40284980086,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+293,UNe,3,15555.157343527562,790.1899554381007,15555.136605629035,A,293,15555.157343527562,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+294,UNe,3,15556.718061307576,784.8712607901803,15556.718061307576,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+295,UNe,3,15558.605353376925,778.4263712280259,15558.624691297257,B,295,15558.605353376925,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+296,UNe,3,15571.818662111904,737.2954543559109,15571.818662111904,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+297,UNe,3,15585.626324447043,694.517275574739,15585.634564362526,B,299,15585.626324447043,U I,B,unusable,true,false,false,false,true,false,false,false,false,false
+298,UNe,3,15587.40658506202,688.7466285176947,15587.430814329204,B,300,15587.40658506202,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+299,UNe,3,15590.484372807832,679.8276592285036,15590.476415305971,A,302,15590.484372807832,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+300,UNe,3,15594.433069646471,666.8747072255213,15594.433069646471,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+301,UNe,3,15597.052348542535,660.9264051684974,15597.052348542535,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+302,UNe,3,15600.037989212513,649.3662836549584,15600.045134309978,B,309,15600.037989212513,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+303,UNe,3,15603.993972618562,636.9059695049186,15603.993972618562,B,310,15603.995802587546,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+304,UNe,3,15608.482930663562,622.9568695612154,15608.482930663562,B,312,15608.4777,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+305,UNe,3,15624.280951449062,573.2649029999873,15624.280951449062,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+306,UNe,3,15625.875902675587,568.4607482104473,15625.875902675587,B,317,15625.853806418141,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+307,UNe,3,15630.130827732544,556.1692476754372,15630.130827732544,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+308,UNe,3,15633.471120730781,545.5929928430471,15633.471120730781,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+309,UNe,3,15638.81664803348,527.6890951677344,15638.81664803348,B,321,15638.81224784859,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+310,UNe,3,15649.403788275755,496.0572415863999,15649.403788275755,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+311,UNe,3,15651.79636607824,488.3251433294892,15651.79636607824,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+312,UNe,3,15655.836246789655,474.0181350208888,15655.836246789655,B,325,15655.836616440552,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+313,UNe,3,15658.33299564139,467.13656121179923,15658.33299564139,B,326,15658.364794772311,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+314,UNe,3,15662.82153855544,453.39815650383184,15662.82153855544,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+315,UNe,3,15664.656206370864,447.3320683864278,15664.656206370864,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+316,UNe,3,15666.918554160873,440.220218474607,15666.912732789475,A,329,15666.918554160873,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+317,UNe,3,15669.234592856044,431.89272318141366,15669.234592856044,B,330,15669.166974748603,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+318,UNe,3,15671.61662339353,424.37367615467195,15671.61662339353,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+319,UNe,3,15673.666203476972,418.0410092398856,15673.666203476972,B,333,15673.6289030745,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+320,UNe,3,15678.432834024896,402.3472972310301,15678.450540119422,B,335,15678.432834024896,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+321,UNe,3,15682.336582838932,389.2459186440712,15682.337367615788,A,337,15682.336582838932,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+322,UNe,3,15684.135808743758,385.46372044275955,15684.144594592035,A,338,15684.135808743758,U II,B,unusable,true,false,false,false,true,false,false,false,false,false
+323,UNe,3,15687.982346627226,372.1283452704577,15687.956935805447,B,340,15687.982346627226,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+324,UNe,3,15691.956638341308,359.03654583802785,15691.956638341308,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+325,UNe,3,15698.2083493527,341.04559357397534,15698.17514823749,A,344,15698.2083493527,U I,B,clean_offset,true,true,true,false,true,false,false,true,true,true
+326,UNe,3,15720.513170999646,268.150190080355,15720.51562743046,B,347,15720.513170999646,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+327,UNe,3,15724.604505872168,255.02000600865455,15724.604505872168,B,349,15724.578102100346,U I,A,unusable,true,false,false,false,false,false,false,false,false,false
+328,UNe,3,15745.66914976394,188.35069997829544,15745.644493418415,B,353,15745.66914976394,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+329,UNe,3,15749.334350446345,175.50698343610816,15749.342661636538,B,354,15749.334350446345,U I,B,clean,true,true,true,true,true,false,false,true,true,true
+330,UNe,3,15752.53349571465,166.32909740160142,15752.544658973882,A,355,15752.53349571465,U I,A,clean_offset,true,true,true,false,false,false,false,true,true,true
+331,UNe,3,15765.381127085568,123.60754442251488,15765.381127085568,B,358,15765.356,Ne I,Ne,unusable,true,false,false,false,false,false,true,false,false,true
+332,UNe,3,15774.161638868125,95.83232248484309,15774.161638868125,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+333,UNe,3,15781.9404523497,70.82300481300922,15781.9404523497,A,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
+334,UNe,3,15785.659633224259,58.06295208373621,15785.659633224259,B,0,NaN,,,,false,false,false,false,false,false,false,false,false,false
