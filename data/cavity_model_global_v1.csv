@@ -1,0 +1,5 @@
+# stored FPI cavity model (global), built 2026-11-18T18:19:11.411 by scripts/cal/build_cavity_model.jl
+# code b3ad5f6127f687fb4df8967df128a5327e85988b; roots: /mnt/ceph/users/sdssv/work/asaydjari/2026_11_18/wavecal_refit/run1; strict classes from /mnt/ceph/users/sdssv/work/asaydjari/2026_11_18/anchor_verified/interim_classes.csv; clip 60.0 m/s; eps fixed per telescope
+tele,mjd_lo,mjd_hi,vmode_ms,L_A,eps,n_nights,robsig_ms
+apo,0,99999,669.31,37363039.2,0.224468,122,15.50
+lco,0,99999,291.02,37361103.7,0.215934,81,4.03
