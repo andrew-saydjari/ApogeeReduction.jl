@@ -9,7 +9,6 @@ using ApogeeReduction: RefitConfig, refit_check_config, refit_config_dict, Refit
                        WAVE_ARC_MULTIPOS, WAVE_CHIPSCALE_FREE, WAVE_FPIFIB_ROTATION, WAVE_FPIFIB_UNAVAILABLE,
                        WAVE_FPIFIB_ONE_FIBER, ARCSEQ_GATE_FAIL, ARCNIGHT_MULTIPOS, ARCNIGHT_CHIPSCALE_FREE,
                        N_FIBERS, N_XPIX
-using LinearAlgebra: norm
 
 # a synthetic arc night: 3 used sequences, two position groups, time terms on
 function _rf_arc(; rng = MersenneTwister(3))
@@ -198,7 +197,10 @@ end
     end
 end
 
-using ApogeeReduction: refit_is_morning, refit_order_change_lambda, WAVE_ANCHOR_EVENING, WAVE_ANCHOR_NOT_SAME_BLOCK
+using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor_rank, refit_anchor_quality,
+                       refit_era, WAVE_ANCHOR_FALLBACK, WAVE_ANCHOR_NOT_SAME_BLOCK, WAVE_ANCHOR_NOT_PREFERRED,
+                       WAVE_ANCHOR_UNVERIFIED, WAVE_FPS_NO_COMB, WAVE_BIT_NAMES, ARCSEQ_UNGATED, ARCSEQ_POS_OUTLIER,
+                       ARCSEQ_FEW_LINES
 @testset "arclamp_refit anchors" begin
     @test refit_is_morning("apo", 60000.40) && !refit_is_morning("apo", 60000.08)
     @test refit_is_morning("lco", 60000.30) && !refit_is_morning("lco", 60000.05)
@@ -219,9 +221,83 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, WAVE_ANCHOR_
     p1lin[9, 1] -= fsr
     oc3 = refit_order_change_lambda(lin, nl, p1lin, nl, L)
     @test oc3[9, 1] == 1 && oc3[9, 2] == 1 && count(!=(0), oc3) == 3   # fiber 9 shifted on all chips
-    @test cfg_ok = refit_check_config(RefitConfig(neon = "lab_line_offset", plate_shape_lco = "template",
+    @test cfg_ok = refit_check_config(RefitConfig(neon = "lab_line_offset", plate_shape = "template",
         anchor_block = "any", anchor_pairing = "position"))
+    @test refit_check_config(RefitConfig(anchor_block = "morning", anchor_prefer = "none"))
+    @test_throws ArgumentError refit_check_config(RefitConfig(plate_shape = "comb"))
+    @test_throws ArgumentError refit_check_config(RefitConfig(anchor_block = "evening"))
     c = RefitConfig()
-    @test c.plate_shape_apo == "template" && c.plate_shape_lco == "arc" && c.anchor_block == "morning" &&
-          c.anchor_pairing == "block"
+    @test c.plate_shape == "arc" && c.anchor_block == "nearest_science" && c.anchor_prefer == "strict" &&
+          c.anchor_pairing == "block" && c.neon == "none"
+    @test !hasfield(RefitConfig, :plate_shape_apo) && !hasfield(RefitConfig, :plate_shape_lco)
+    # era: canonical plate/FPS boundary (FPS = mjd > get_fps_plate_divide), the same for any FPI light
+    @test refit_era("apo", 59393) == "plate" && refit_era("apo", 59558) == "fps"
+    @test refit_era("lco", 59808) == "plate" && refit_era("lco", 59809) == "fps"
+    @test length(WAVE_BIT_NAMES) == 30 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
+          WAVE_BIT_NAMES[30] == "WAVE_FPS_NO_COMB" && WAVE_FPS_NO_COMB == 1 << 29
+    # anchor quality tiers
+    @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_UNGATED) == 1 &&
+          refit_anchor_quality(ARCSEQ_FEW_LINES) == 1 && refit_anchor_quality(ARCSEQ_GATE_FAIL) == 2 &&
+          refit_anchor_quality(ARCSEQ_POS_OUTLIER | ARCSEQ_UNGATED) == 2
+    # ranking (times in days): science 0.10-0.30; seq 1 evening (0.05, leading), seq 2 mid-night after
+    # an object (0.205), seq 3 morning (0.34, closes the object sequence), seq 4 mid-night before an object
+    tseq = [0.05, 0.205, 0.34, 0.149]
+    sci = collect(0.10:0.05:0.30)
+    q0 = [0, 0, 0, 0]
+    r = refit_anchor_rank(tseq, q0, sci, falses(4))
+    @test r.trailing == [false, true, true, false]
+    @test r.dt_sci_h ≈ [1.2, 0.12, 0.96, 0.024]
+    @test r.order == [2, 3, 4, 1]                # preferred (closing) first by distance, then the others
+    @test refit_anchor_rank(tseq, q0, sci, falses(4); prefer = "none").order == [4, 2, 3, 1]
+    @test refit_anchor_rank(tseq, q0, sci, [false, false, false, true]).order == [4, 2, 3, 1]  # same position
+    # a bad preferred block drops behind the verified ones, in the same sensible order
+    @test refit_anchor_rank(tseq, [0, 2, 0, 1], sci, falses(4)).order == [3, 1, 4, 2]
+    # no science: nothing preferred, every dt Inf, almanac order
+    r0 = refit_anchor_rank(tseq, q0, Float64[], falses(4))
+    @test all(isinf, r0.dt_sci_h) && !any(r0.pref) && r0.order == [1, 2, 3, 4]
+end
+
+using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
+@testset "arclamp_refit choose anchor" begin
+    A = _rf_arc()
+    A.g .*= 0.01                          # small time / chip terms: same-group states agree to << 0.25 px
+    A.g[A.lay.idx_d[2]] = 0.5 / 2048      # sequence 2 half a pixel off (the other dither position)
+    function ref_at(j, e, t)
+        d, tt = arcfit_seq_state(A.g, A.lay, j)
+        px = collect(880.0:1170.0)
+        W = zeros(length(px), length(ARCGATE_FIBERS))
+        for (jf, f) in enumerate(ARCGATE_FIBERS)
+            W[:, jf] .= arcfit_eval(view(A.TH, f, :), A.g, A.lay, f, 2, px; grpv = A.grp_u[j], d = d, t = tt,
+                tau = A.tau_u[j])
+        end
+        return ArcObjRef(e, t, "fpi", 880, ARCGATE_FIBERS, W)
+    end
+    # sequences at 60000.1 (evening, leading), .2 (other position), .4 (closes the object sequence)
+    combs = [(; ref = ref_at(1, 5, 60000.105), t = 60000.105), (; ref = ref_at(3, 40, 60000.41), t = 60000.41)]
+    scis = [(; ref = ref_at(1, 20 + i, t), t) for (i, t) in enumerate((60000.25, 60000.30, 60000.35))]
+    ok0 = zeros(Int, 3)
+    P = refit_choose_anchor(A, ok0, combs, "apo"; scis)
+    @test P.ok && P.j_seq == 3 && P.k_comb == 2 && P.bits == 0 && P.rank == 1 &&
+          P.kind == "nearest_science:same_position" && P.dt_sci_h ≈ 1.2
+    # the preferred block unverified (ungated): the next verified block in rank anchors (same position, no flag)
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs, "apo"; scis)
+    @test P.ok && P.j_seq == 1 && P.k_comb == 1 && P.bits == 0 && P.quality == 0
+    # first-ranked block without a same-block comb exposure: fallback to the next with one
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs[2:2], "apo"; scis)
+    @test P.ok && P.j_seq == 3 && P.rank == 3 && P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_UNVERIFIED
+    # no science exposures: "any" behaviour, flagged
+    P = refit_choose_anchor(A, ok0, combs, "apo")
+    @test P.ok && P.kind == "nearest_science:no_science" && P.j_seq == 1 &&
+          P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
+    # morning switch (APO local midnight = 0.29 UT day): the 0.4 sequence; without it, an evening one
+    P = refit_choose_anchor(A, ok0, combs, "apo"; scis, anchor_block = "morning")
+    @test P.ok && P.j_seq == 3 && P.kind == "morning" && P.bits == 0
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs, "apo"; scis, anchor_block = "morning")
+    @test P.ok && P.j_seq == 1 && P.kind == "evening" && P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
+    P = refit_choose_anchor(A, ok0, combs, "apo"; scis, anchor_block = "any")
+    @test P.ok && P.j_seq == 1 && P.kind == "any"
+    # the only comb exposure sits at the other dither position: that block anchors, flagged
+    P = refit_choose_anchor(A, ok0, [(; ref = ref_at(2, 7, 60000.21), t = 60000.21)], "apo"; scis,
+        pos_match_px = 0.1)
+    @test P.ok && P.j_seq == 2 && (P.bits & WAVE_ANCHOR_NOT_PREFERRED) != 0
 end

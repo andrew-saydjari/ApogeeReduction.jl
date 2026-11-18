@@ -30,7 +30,7 @@ const O = parse_args(s)
 const OUT = O["outroot"]
 const VD = joinpath(OUT, "validation")
 mkpath(VD)
-era_of(tele, mjd) = mjd < (tele == "apo" ? 59558 : 59809) ? "plate" :
+era_of(tele, mjd) = AR.refit_era(tele, mjd) == "plate" ? "plate" :
                     (tele == "apo" ? (mjd < 60930 ? "fps1" : "fps2") : (mjd < 60700 ? "fps1" : "fps2"))
 nanmed(x) = (y = filter(isfinite, x); isempty(y) ? NaN : median(y))
 robsig(x) = (y = filter(isfinite, x); length(y) < 3 ? NaN : (q = quantile(y, [0.16, 0.84]); (q[2] - q[1]) / 2))

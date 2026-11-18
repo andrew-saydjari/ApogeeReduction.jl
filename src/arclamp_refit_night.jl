@@ -189,16 +189,20 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
             h5open(f -> Float64.(f["chipWaveSoln"][880:1170, ARCGATE_FIBERS, 2]), rf, "r")) : nothing
         (; ref, t)
     end
+    # science exposures (object exposures with a pass-1 per-exposure solution = measured position)
+    scis = [(; ref = r, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
     arcf = refit_path(outroot, "arc", tele, mjd)
     reason = ""
-    prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file))
+    prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
+        "n_science_refs" => string(length(scis)))
     A = isfile(arcf) ? load_refit_arc(arcf) : nothing
     (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
     if A !== nothing
         sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
         Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = p1,
-            pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms,
-            anchor_block = cfg.anchor_block, anchor_pairing = cfg.anchor_pairing,
+            pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
+            anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer,
+            anchor_pairing = cfg.anchor_pairing,
             anchor_block_h = cfg.anchor_block_h)
         if Q.ok
             write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = prov)
@@ -329,9 +333,12 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         (qp isa Integer && qp > 0) && (arcbits |= WAVE_ARC_QUARTZ_PATTERN)
     end
     fpi_gated_off = C === nothing && NA !== nothing && NA.nfpi > 0
-    isplate = mjd < (tele == "apo" ? 59558 : 59809)
-    shape_choice = isplate ? (tele == "apo" ? cfg.plate_shape_apo : cfg.plate_shape_lco) :
-                   (tele == "apo" ? cfg.fps_shape_apo : cfg.fps_shape_lco)
+    # era from the plate/FPS MJD boundary only (never from FPI light / comb presence)
+    era = refit_era(tele, mjd)
+    shape_choice = era == "plate" ? cfg.plate_shape : (tele == "apo" ? cfg.fps_shape_apo : cfg.fps_shape_lco)
+    # FPS era without a night comb (no FPI exposures, pass-1 FPI gate failed, comb fit failed or no
+    # anchor): every exposure takes the arc-route (or pass-1 copy) fallback, flagged on every exposure
+    fps_no_comb = era == "fps" && C === nothing
     Tp = (A !== nothing && shape_choice == "template") ?
          load_refit_template(cfg.shape_template_file, tele, cfg.shape_template_block) : nothing
     TP = Tp === nothing ? nothing : refit_fit_template(Tp, A, ll)
@@ -455,6 +462,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
             (C !== nothing || (FP !== nothing && kind == "object")) && (bits[k] |= WAVE_FPIFIB_UNAVAILABLE)
         end
         fpi_gated_off && (bits[k] |= WAVE_FPI_GATED_OFF)
+        fps_no_comb && (bits[k] |= WAVE_FPS_NO_COMB)
         # (3) sky measurements against the relative model
         if models[k] !== nothing && sky !== nothing
             m = models[k]
@@ -602,7 +610,9 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         "arc_product" => isfile(arcf) ? arcf : "", "comb_product" => isfile(combf) ? combf : "",
         "fpifib_product" => isfile(fpif) ? fpif : "", "comb_anchor" => C === nothing ? "none" : C.anchor,
         "template" => Tp === nothing ? "none" : "$(cfg.shape_template_file)#$(cfg.shape_template_block)",
-        "shape_choice" => shape_choice,
+        "shape_choice" => shape_choice, "era" => era,
+        "era_boundary_mjd" => get_fps_plate_divide(String(tele)), "fps_no_comb" => fps_no_comb,
+        "comb_anchor_kind" => C === nothing ? "none" : C.anchor_kind,
         "template_fingerprint" => Tp === nothing ? "none" : Tp.fingerprint,
         "linelist_fingerprint" => ll.fingerprint, "linelist_selection" => ll.selection,
         "chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),

@@ -33,7 +33,7 @@ s = ArgParseSettings()
     "--max_nights"; arg_type = Int; default = 0
 end
 const O = parse_args(s)
-const FPS_START = Dict("apo" => 59558, "lco" => 59809)
+# FPS era = after the canonical plate/FPS boundary (the template is built from FPS comb nights)
 const ERA_SPLIT = Dict("apo" => 60930, "lco" => 60700)
 const PXG = collect(65.0:20.0:1985.0)
 const TG = (PXG .- 1025) ./ 960
@@ -63,7 +63,7 @@ function nights_of(tele)
         rx = Regex("^waveCalFPIArc_$(tele)_(\\d+)\\.h5\$")
         ms = [parse(Int, m.captures[1]) for m in (match(rx, f) for f in readdir(joinpath(O["refit_root"], "comb"))) if m !== nothing]
     end
-    ms = sort(filter(>=(FPS_START[tele]), ms))
+    ms = sort(filter(m -> AR.refit_era(tele, m) == "fps", ms))
     O["max_nights"] > 0 && (ms = ms[1:min(end, O["max_nights"])])
     return ms
 end
