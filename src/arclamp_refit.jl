@@ -1433,17 +1433,29 @@ end
 # ------------------------------------------------------------------------------------------
 # stage 5: sky lines (pooled, robust to misassigned OH lines) and per-fiber sky terms
 # ------------------------------------------------------------------------------------------
+"Wavelength-solution class code of the sky line list (#407 `WAVECAL_CLASS_CODES[\"B\"]`)."
+const REFIT_SKY_CLASS_B = 2
+
 """OH-line rows of an object exposure from the pass-1 `skyLinePeaks_*` files (read-only), with
-pass-1's ingest mask (a line whose across-fiber IQR in x exceeds 0.002 is dropped). Returns a
-NamedTuple of vectors (fiber, chip, line, pix, lam) or `nothing` if a chip file is missing."""
+pass-1's ingest masks: a line whose across-fiber IQR in x exceeds 0.002 is dropped, and, when the
+peaks file carries the per-line `line_class` dataset (#407's generated line list: rows aligned with
+`sky_line_mat_clean`), every line that is not class B (code 2) is dropped, as #407's
+`ingest_skyLines_file` does (class-A association guards are fit but never enter a solution). A file
+without `line_class` (written before #407) is read unmasked, as before. Returns a NamedTuple of
+vectors (fiber, chip, line, pix, lam) or `nothing` if a chip file is missing."""
 function refit_read_sky(mdir::AbstractString, tele::AbstractString, mjd::Integer, e::Integer)
     rows = (fiber = Int[], chip = Int[], line = Int[], pix = Float64[], lam = Float64[])
     for (c, chip) in enumerate(CHIP_LIST)
         fn = joinpath(mdir, "skyLinePeaks_$(tele)_$(mjd)_$(_arc_expstr(e))_$(chip)_object.h5")
         isfile(fn) || return nothing
-        M = h5open(f -> read(f["sky_line_mat_clean"]), fn, "r")
+        M, cls = h5open(fn, "r") do f
+            read(f["sky_line_mat_clean"]), (haskey(f, "line_class") ? Int.(read(f["line_class"])) : nothing)
+        end
         size(M, 3) == N_FIBERS || return nothing
+        cls === nothing || length(cls) == size(M, 1) ||
+            throw(DimensionMismatch("$(fn): line_class has $(length(cls)) entries, sky_line_mat_clean $(size(M, 1)) lines"))
         for l in 1:size(M, 1)
+            (cls === nothing || cls[l] == REFIT_SKY_CLASS_B) || continue
             xx = filter(isfinite, (M[l, 1, :] .- 1024) ./ 2048)
             xx = filter(!=(0), xx)
             length(xx) < 10 && continue

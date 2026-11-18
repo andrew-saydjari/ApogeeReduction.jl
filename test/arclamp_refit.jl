@@ -361,3 +361,42 @@ end
     @test (AR.WAVE_FIBER_FILLED, AR.WAVE_NOT_ARCFIRST, AR.WAVE_REANCHORED, AR.WAVE_ANCHOR_CHECK_FAILED) ==
           (1 << 32, 1 << 33, 1 << 34, 1 << 35)
 end
+
+using HDF5: h5open
+using ApogeeReduction: refit_read_sky, N_FIBERS, CHIP_LIST
+@testset "arclamp_refit refit_read_sky line_class (#407)" begin
+    # 3 lines per chip, all with a tight x IQR (pass the 0.002 mask) and finite on every fiber;
+    # line 2 is a class-A guard when the class column is present
+    function write_peaks(dir, with_class)
+        for chip in CHIP_LIST
+            M = fill(NaN, 3, 9, N_FIBERS)
+            for l in 1:3, f in 1:N_FIBERS
+                M[l, 1, f] = 300.0 * l + 1e-3 * f        # pixel
+                M[l, 2, f] = 15200.0 + 10.0 * l          # wavelength
+                M[l, 9, f] = 100 + l                     # line index
+            end
+            h5open(joinpath(dir, "skyLinePeaks_apo_60000_0007_$(chip)_object.h5"), "w") do h
+                h["sky_line_mat_clean"] = M
+                with_class && (h["line_class"] = [2, 1, 2])
+            end
+        end
+    end
+    mktempdir() do d0
+        write_peaks(d0, false)
+        R = refit_read_sky(d0, "apo", 60000, 7)
+        @test length(R.pix) == 3 * 3 * N_FIBERS && sort(unique(R.line)) == [101, 102, 103]
+    end
+    mktempdir() do d1
+        write_peaks(d1, true)
+        R = refit_read_sky(d1, "apo", 60000, 7)
+        @test length(R.pix) == 3 * 2 * N_FIBERS && sort(unique(R.line)) == [101, 103]
+    end
+    mktempdir() do d2   # a line_class not aligned with the lines is an error, never silently ignored
+        write_peaks(d2, false)
+        for chip in CHIP_LIST
+            h5open(h -> (h["line_class"] = [2, 2]), joinpath(d2, "skyLinePeaks_apo_60000_0007_$(chip)_object.h5"), "r+")
+        end
+        @test_throws DimensionMismatch refit_read_sky(d2, "apo", 60000, 7)
+    end
+    @test refit_read_sky(mktempdir(), "apo", 60000, 7) === nothing
+end
