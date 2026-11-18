@@ -39,7 +39,7 @@ function parse_commandline()
         default = "commit_same"
         "--trace_identify"
         required = false
-        help = "fiber identification on the flat: \"robust\" (default: template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl) or \"production\" (the pre-existing path). The per-column refinement of lit fibers is the same in both."
+        help = "fiber identification on the flat: \"robust\" (default: template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl; with --trace_template_cal and an epoch template for the night, the slit model of src/slit_model.jl instead: template registration, label check, per-column refinement started from the registered template in every column, unlit fibers at the template) or \"production\" (the pre-existing path, never template-based). The per-column refinement of lit fibers is production's Gauss-Hermite fit in all modes."
         arg_type = String
         default = "robust"
         "--almanac_file"
@@ -47,11 +47,21 @@ function parse_commandline()
         help = "almanac hdf5 file; used to identify the FPI guide fibers from the night's configurations for the dome-flat trace plots. If empty, FPI fibers are not annotated."
         arg_type = String
         default = ""
+        "--trace_template_cal"
+        required = false
+        help = "per-epoch trace-template calibration file (HDF5, scripts/cal/trace_templates/; src/trace_template_cal.jl). OFF BY DEFAULT (none): traces exactly as without templates. A path turns it on: each flat's QA record carries the night's template identity (trace_template_id) and a checkpointed trace whose record has another identity, or none, is refitted. A path that does not exist or cannot be read is a hard error. Use the same file as pipeline_2d_1d.jl --trace_template_cal."
+        arg_type = String
+        default = "none"
     end
     return parse_args(s)
 end
 
 parg = parse_commandline()
+# trace templates: off by default; a configured path that is missing is a hard error
+const TRACE_TEMPLATE_OFF = strip(parg["trace_template_cal"]) in ("", "none")
+TRACE_TEMPLATE_OFF || isfile(parg["trace_template_cal"]) ||
+    error("trace-template calibration file $(parg["trace_template_cal"]) (--trace_template_cal) does not exist; " *
+          "install it, or run with --trace_template_cal none (scripts/cal/trace_templates/README.md, Bootstrap).")
 
 # memory usage is under 3GB per worker in testing
 proj_path = dirname(Base.active_project()) * "/"
@@ -71,8 +81,14 @@ end
     using ApogeeReduction: get_cal_file, get_fpi_fiberIDs_from_almanac, get_fps_plate_divide, trace_extract,
                            safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace,
                            trace_lamp_metrics, flat_trace_qa, write_trace_qa, read_trace_qa, trace_qa_path,
-                           trace_reference_positions
+                           trace_reference_positions, load_trace_template_cal, trace_template_metadata,
+                           template_needs_recompute, trace_template, trace_extract_template,
+                           SlitProfile, template_qa_fields, template_free_crosscheck
 end
+@everywhere TRACE_TEMPLATE_CAL = $(TRACE_TEMPLATE_OFF) ? nothing :
+                                 load_trace_template_cal($(parg["trace_template_cal"]))
+println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" :
+        "Trace templates from $(TRACE_TEMPLATE_CAL) [$(ApogeeReduction.trace_template_cal_id(TRACE_TEMPLATE_CAL))]")
 
 @passobj 1 workers() parg # make it available to all workers
 @passobj 1 workers() proj_path
@@ -143,7 +159,8 @@ end
         return qa
     end
 
-    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "robust")
+    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "robust",
+            template_cal = nothing)
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, teleloc, mjdloc, expnumloc, chiploc, image_type = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)
@@ -162,9 +179,19 @@ end
         extra = Dict{String, Any}("flat_type" => String(flat_type), "mjd" => parse(Int, mjdloc),
             "expnum" => parse(Int, expnumloc), "image_file" => String(fname),
             "trace_file" => "", "identify" => String(identify))
+        # the night's template identity ("none" when off) goes into the QA record; a trace whose
+        # record carries another identity (or none, or has no record while templates are on) is
+        # refitted
+        merge!(extra, trace_template_metadata(template_cal, teleloc, chiploc, parse(Int, mjdloc)))
         trace_done = check_file(savename, mode = checkpoint_mode)
-        if trace_done && check_file(qaname, mode = checkpoint_mode)
-            return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
+        if trace_done
+            qa_done = check_file(qaname, mode = checkpoint_mode)
+            rec = qa_done ? read_trace_qa(qaname) : Dict{String, Any}()
+            if template_needs_recompute(rec, template_cal, teleloc, chiploc, parse(Int, mjdloc))
+                trace_done = false
+            elseif qa_done
+                return trace_plots(dirNamePlots, flat_type, savename, teleloc, mjdloc, expnumloc, chiploc, mjdfps2plate, fpi_fiberIDs_for(teleloc, mjdloc); checkpoint_mode = checkpoint_mode)
+            end
         end
 
         f = jldopen(fname, "r")
@@ -195,14 +222,44 @@ end
         (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
 
+        # With an epoch template for this night (--trace_template_cal) and --trace_identify robust,
+        # the flat is fitted by the slit model (src/slit_model.jl): template registration, label
+        # check (k != 0 refuses), production's per-column Gauss-Hermite refinement started from the
+        # registered template in every column. Otherwise exactly as before.
+        tmpl = identify == "robust" ? trace_template(template_cal, teleloc, chiploc, parse(Int, mjdloc)) : nothing
+        extra["identify"] = isnothing(tmpl) ? String(identify) : "template"
         tqa = Dict{String, Any}()
+        fiber_delta = nothing
+        masked_cells = nothing
+        function fit_flat()
+            if isnothing(tmpl)
+                return trace_extract(
+                    image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
+                    med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+                    min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname;
+                    good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
+                    identify = identify, qa = tqa)
+            end
+            tp, cv, info = trace_extract_template(image_data, ivar_image, tmpl,
+                SlitProfile((med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+                    min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv));
+                good_pixels = copy(good_pixels))
+            merge!(tqa, template_qa_fields(info; tmpl = tmpl))
+            if !isempty(tp)
+                # template-free cross-check (QA flag only): PR A identification + center-band fit
+                merge!(tqa, template_free_crosscheck(image_data, ivar_image, tp, SlitProfile((med_center_to_fiber_func,
+                        x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv)),
+                    trace_reference_positions(teleloc, chiploc; data_path = joinpath(proj_path, "data"));
+                    good_pixels = copy(good_pixels), lit = info.lit))
+            end
+            tqa["outcome"] = String(info.outcome)
+            tqa["n_unlit"] = count(.!info.lit)
+            fiber_delta = info.delta
+            masked_cells = info.masked
+            return tp, cv
+        end
         trace_params, trace_param_covs = try
-            trace_extract(
-                image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
-		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname; 
-                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
-                identify = identify, qa = tqa)
+            fit_flat()
         catch e
             println("Trace fitting failed for $(fname)")
             println("Flux info is (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%)")
@@ -210,15 +267,13 @@ end
             write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
                 nothing, "fit_error", extra)
             # retried once as before (a second failure propagates, as before)
-            trace_extract(
-                image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
-		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname;
-                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
-                identify = identify, qa = tqa)
+            fit_flat()
         end
         for k in ("n_detected", "n_good_throughput", "n_unlit")
             haskey(tqa, k) && (extra[k] = tqa[k])
+        end
+        for (k, v) in tqa
+            startswith(k, "tmpl_") && (extra[k] = v)
         end
 
         if size(trace_params,1) == 0
@@ -232,7 +287,14 @@ end
         regularized_trace_params = regularize_trace(trace_params)
 
         mkpath(dirname(savename))
-        safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
+        if isnothing(fiber_delta)
+            safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
+        else
+            # per-fiber departure from the registered template (px; TRACE_FIBER_DELTA in traceMain)
+            safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params,
+                template_fiber_delta_px = fiber_delta, template_masked_cells = UInt8.(masked_cells),
+                no_metadata = true)
+        end
         extra["trace_file"] = savename
         write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
             trace_params, "ok", extra)
@@ -243,7 +305,7 @@ end
 
 desc = "trace extract for $(parg["tele"]) $(chips)"
 @everywhere make_traces_partial(fname) = make_traces(fname, parg["flat_type"], checkpoint_mode = parg["checkpoint_mode"],
-    identify = parg["trace_identify"])
+    identify = parg["trace_identify"], template_cal = TRACE_TEMPLATE_CAL)
 plot_paths = @showprogress desc=desc pmap(make_traces_partial, flist)
 
 if !parg["slack_quiet"]

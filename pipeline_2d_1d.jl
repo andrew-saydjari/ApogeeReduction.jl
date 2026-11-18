@@ -81,7 +81,7 @@ function parse_commandline()
         default = "gated"
         "--trace_fallback"
         required = false
-        help = "what a night with no eligible flat gets: \"none\" (default: no trace; the night's exposures are not extracted and are listed in the log) or \"fixed_file\" (the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK). The own-night and template levels that replace the fixed file arrive with the epoch templates (PR B)."
+        help = "what a night with no eligible flat gets: \"none\" (default: no trace; the night's exposures are not extracted and are listed in the log); \"template\" (needs --trace_template_cal: the own-night levels of src/trace_levels.jl in order, T1 = the epoch template registered on another calibration frame of the night (dome flat, UNe/ThAr/FPI arcs, internal flat; TRACE_REGISTERED_CAL), T2 = registered on the median of up to 8 science frames of the night (TRACE_REGISTERED_SCI), T3 = the epoch template at the epoch-median registration (TRACE_TEMPLATE_ONLY, bad); never another night's trace); a comma list of those levels, e.g. \"T1,T2\" (a night none of them serves is not extracted); or \"fixed_file\" (the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK)."
         arg_type = String
         default = "none"
         "--chip_transform_cal"
@@ -89,6 +89,11 @@ function parse_commandline()
         help = "comb-measured chip-transform calibration file (HDF5, built by scripts/cal/chip_transform/build_chip_transform.jl). A calibration input configured by path like --exp_class_model; ON BY DEFAULT with the pinned file below (airflow/dags/ar_common.py sets it for production). The sky-line wavelength fit then fixes the R/B chip scales to the file's values instead of 1. Pass the word none (or an empty string) to turn it off deliberately: chip scale 1, the pre-calibration behaviour, and the bootstrap mode used to rebuild the file from scratch (scripts/cal/chip_transform/README.md, Bootstrap). A path that does not exist or cannot be read is a hard error, never a silent fallback to scale 1."
         arg_type = String
         default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
+        "--trace_template_cal"
+        required = false
+        help = "per-epoch trace-template calibration file (HDF5: the epoch table and one template per telescope, chip and epoch; built by scripts/cal/trace_templates/, read by src/trace_template_cal.jl). OFF BY DEFAULT (none): the traces are made exactly as without templates. A path turns it on: the night's template identity is written into every traceMain (trace_template_id) and a traceMain made with another template, or without one, is recomputed under checkpointing. Pass none (or an empty string) to keep it off; that is also the bootstrap mode the file is rebuilt from (scripts/cal/trace_templates/README.md, Bootstrap). A path that does not exist or cannot be read is a hard error, never a silent fallback to the template-free traces. Use the same file as make_traces_from_flats.jl --trace_template_cal."
+        arg_type = String
+        default = "none"
     end
     return parse_args(s)
 end
@@ -98,8 +103,12 @@ mkpath(dirNamePlots) # will work even if it already exists
 
 parg["trace_select"] in ("last", "gated") ||
     error("--trace_select must be \"last\" or \"gated\", got $(parg["trace_select"])")
-parg["trace_fallback"] in ("fixed_file", "none") ||
-    error("--trace_fallback must be \"fixed_file\" or \"none\", got $(parg["trace_fallback"])")
+# --trace_fallback: none | fixed_file | template (= T1,T2,T3) | a comma list of T1,T2,T3
+# (parsed by ApogeeReduction.parse_trace_fallback; checked here before the workers start)
+const TRACE_FALLBACK_USES_TEMPLATES = !(parg["trace_fallback"] in ("fixed_file", "none"))
+parg["trace_fallback"] in ("fixed_file", "none", "template") ||
+    occursin(r"^T[123](,T[123])*$", parg["trace_fallback"]) ||
+    error("--trace_fallback must be \"none\", \"fixed_file\", \"template\" or a comma list of T1,T2,T3, got $(parg["trace_fallback"])")
 
 # if we are not refluxing, we should not be doing the wavelength solution
 if !parg["relFlux"] && parg["waveSoln"]
@@ -118,6 +127,22 @@ if !CHIP_TRANSFORM_OFF && !isfile(parg["chip_transform_cal"])
           "      AR_CHIP_TRANSFORM_CAL for the SLURM scripts at an existing file), or\n" *
           "  (2) run with --chip_transform_cal none (chip scale 1; bootstrap mode) -- this is how the file is rebuilt\n" *
           "      from scratch: see the \"Bootstrap\" section of scripts/cal/chip_transform/README.md.")
+end
+
+# The trace-template calibration is OFF by default ("none" or ""). A configured path that is
+# missing is a hard error here (an unreadable or invalid file when it is loaded below), never a
+# silent fallback to the template-free traces.
+const TRACE_TEMPLATE_OFF = strip(parg["trace_template_cal"]) in ("", "none")
+if TRACE_TEMPLATE_OFF && TRACE_FALLBACK_USES_TEMPLATES
+    error("--trace_fallback $(parg["trace_fallback"]) uses the epoch templates, but --trace_template_cal is none. " *
+          "Configure the template file, or use --trace_fallback none (or fixed_file).")
+end
+if !TRACE_TEMPLATE_OFF && !isfile(parg["trace_template_cal"])
+    error("trace-template calibration file $(parg["trace_template_cal"]) (--trace_template_cal) does not exist. Either\n" *
+          "  (1) install it at that path (or point --trace_template_cal / TRACE_TEMPLATE_CAL in airflow/dags/ar_common.py /\n" *
+          "      AR_TRACE_TEMPLATE_CAL for the SLURM scripts at an existing file), or\n" *
+          "  (2) run with --trace_template_cal none (template-free traces; bootstrap mode) -- this is how the file is\n" *
+          "      rebuilt from scratch: see the \"Bootstrap\" section of scripts/cal/trace_templates/README.md.")
 end
 
 workers_per_node = parg["workers_per_node"]
@@ -166,7 +191,7 @@ flush(stdout);
                            fpi_medwavecal_skyline_dither,
                            safe_jldsave, process_1D, check_file, modify_saved_dict,
                            make_traceMain, TRACE_LEVEL_NONE,
-                           load_chip_transform_cal
+                           load_chip_transform_cal, load_trace_template_cal
 
     ###decide order to look for traces from these cal types (i.e. dome or quartz flats)
     trace_type_order = ["quartz","dome"]
@@ -246,8 +271,15 @@ end
         fallback_file = joinpath(proj_path, "data", "fallback_traces", "traceMain_$(tele)_60933_$(chip).h5"),
         type_order = trace_type_order,
         almanac_file = joinpath(outdir, "almanac/$(parg["runname"]).h5"),
-        checkpoint_mode = checkpoint_mode)
+        checkpoint_mode = checkpoint_mode, template_cal = TRACE_TEMPLATE_CAL,
+        data_path = joinpath(proj_path, "data"))
 end
+
+## per-epoch trace templates (calibration input; nothing = off, template-free traces)
+@everywhere TRACE_TEMPLATE_CAL = $(TRACE_TEMPLATE_OFF) ? nothing :
+                                 load_trace_template_cal($(parg["trace_template_cal"]))
+println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" :
+        "Trace templates from $(TRACE_TEMPLATE_CAL) [$(ApogeeReduction.trace_template_cal_id(TRACE_TEMPLATE_CAL))]")
 
 @time "Finding traceMain files" begin
     # Create all (mjd, chip) combinations for parallel processing

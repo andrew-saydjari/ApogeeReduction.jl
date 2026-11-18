@@ -90,11 +90,22 @@ fi
 # the robust behaviour (first value); the pre-existing behaviour is the second value of each:
 #   AR_TRACE_IDENTIFY  robust|production     make_traces_from_flats.jl --trace_identify
 #   AR_TRACE_SELECT    gated|last            pipeline_2d_1d.jl --trace_select
-#   AR_TRACE_FALLBACK  none|fixed_file       pipeline_2d_1d.jl --trace_fallback
+#   AR_TRACE_FALLBACK  none|template|T1,T2|fixed_file  pipeline_2d_1d.jl --trace_fallback (template levels need AR_TRACE_TEMPLATE_CAL)
 trace_identify_opt=(); trace_main_opt=()
 if [ -n "${AR_TRACE_IDENTIFY:-}" ]; then trace_identify_opt=(--trace_identify "$AR_TRACE_IDENTIFY"); fi
 if [ -n "${AR_TRACE_SELECT:-}" ]; then trace_main_opt+=(--trace_select "$AR_TRACE_SELECT"); fi
 if [ -n "${AR_TRACE_FALLBACK:-}" ]; then trace_main_opt+=(--trace_fallback "$AR_TRACE_FALLBACK"); fi
+# Per-epoch trace-template calibration (scripts/cal/trace_templates): OFF BY DEFAULT.
+#   unset         -> no flag: both scripts use their default (none = off, template-free traces)
+#   set to none   -> off, explicitly (also the bootstrap mode for rebuilding the file, see
+#                    scripts/cal/trace_templates/README.md)
+#   set to ""     -> off as well
+#   set to a path -> that file, passed to make_traces_from_flats.jl AND every pipeline_2d_1d.jl call
+# A missing or unreadable file is a hard error in both scripts.
+if [ "${AR_TRACE_TEMPLATE_CAL+set}" = "set" ]; then
+    trace_identify_opt+=(--trace_template_cal "$AR_TRACE_TEMPLATE_CAL")
+    trace_main_opt+=(--trace_template_cal "$AR_TRACE_TEMPLATE_CAL")
+fi
 # Comb-measured chip-transform calibration (scripts/cal/chip_transform): ON BY DEFAULT,
 # same mechanism as AR_EXP_CLASS_MODEL above:
 #   unset         -> no flag: pipeline_2d_1d.jl uses its pinned cal_ref file
