@@ -175,6 +175,9 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     (about 5 robust sigma of strict pairs, 4.1-4.2 m/s): the night's other candidate closest to the
     trend is used if it is within `anchor_trend_ms` (comb refit, kind "...:trend_swap",
     WAVE_ANCHOR_FALLBACK), else the anchor is kept and flagged WAVE_ANCHOR_TREND_OUTLIER.
+  * `fps_route` ("fpifib"): per-exposure position of FPS exposures with FPI fibers: "fpifib" = the night comb
+    transported by the exposure's two FPI fibers; "sky" (experiment switch) = ignore the FPI fibers and use the
+    arc route (arc time model + pooled-sky per-exposure terms per `prefps_time`), i.e. position from the sky.
   * `anchor_samepos` ("pass1"): source of the "same measured position as the science" input:
     "pass1" = the science exposures' pass-1 per-exposure solutions (`refit_anchor_samepos`; a
     later-stage product, fine for a refit of an existing run, NOT available in an in-order
@@ -250,6 +253,7 @@ Base.@kwdef struct RefitConfig
     anchor_trend_nights::Int = 10
     anchor_trend_ms::Float64 = 20.0
     anchor_trend_min_nights::Int = 4
+    fps_route::String = "fpifib"
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 15
@@ -266,7 +270,8 @@ const REFIT_SWITCH_VALUES = Dict(
     :plate_shape => ("arc", "template"),
     :fps_shape_apo => ("template", "arc"), :fps_shape_lco => ("template", "arc"),
     :anchor_block => ("nearest_science", "morning", "any", "verified_pair"),
-    :anchor_adjacency => ("strict_then_nomove", "strict"), :anchor_trend => ("both", "trailing", "off"), :anchor_prefer => ("strict", "none"),
+    :anchor_adjacency => ("strict_then_nomove", "strict"), :anchor_trend => ("both", "trailing", "off"),
+    :fps_route => ("fpifib", "sky"), :anchor_prefer => ("strict", "none"),
     :anchor_samepos => ("pass1", "none"),
     :anchor_pairing => ("block", "position"),
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
@@ -298,6 +303,7 @@ const REFIT_SWITCH_STAGES = Dict(
     "anchor_pattern_tol_px" => "comb,fpifib,assemble", "anchor_lamp_tol_px" => "comb,fpifib,assemble",
     "anchor_trend" => "anchorcheck,fpifib,assemble", "anchor_trend_nights" => "anchorcheck,fpifib,assemble",
     "anchor_trend_ms" => "anchorcheck,fpifib,assemble", "anchor_trend_min_nights" => "anchorcheck,fpifib,assemble",
+    "fps_route" => "assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
     "nsig" => "arc,comb,fpifib,assemble", "arcwin_nights" => "comb,fpifib,assemble",

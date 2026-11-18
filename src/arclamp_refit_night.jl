@@ -508,7 +508,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         (sky !== nothing && isempty(sky.pix)) && (sky = nothing)
         hassky[k] = sky !== nothing
         # (1) FPI fibers on a comb night
-        if C !== nothing && FP !== nothing
+        if C !== nothing && FP !== nothing && cfg.fps_route == "fpifib"
             kk = findfirst(==(e), FP.exp)
             if kk !== nothing
                 P = (; a = FP.a[:, :, kk], b = FP.b[:, :, kk], ea = FP.ea[:, :, kk], eb = FP.eb[:, :, kk],

@@ -68,6 +68,7 @@ function parse_cli()
         "--anchor_trend_nights"; arg_type = Int; default = 10
         "--anchor_trend_ms"; arg_type = Float64; default = 20.0
         "--anchor_trend_min_nights"; arg_type = Int; default = 4
+        "--fps_route"; arg_type = String; default = "fpifib"; help = "fpifib | sky (experiment)"
         "--anchor_pairing"; arg_type = String; default = "block"
         "--anchor_block_h"; arg_type = Float64; default = 1.5
         "--arcwin_nights"; arg_type = Int; default = 15
@@ -95,7 +96,7 @@ const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset
     anchor_adjacency = A_["anchor_adjacency"], anchor_max_candidates = A_["anchor_max_candidates"],
     anchor_pattern_tol_px = A_["anchor_pattern_tol_px"], anchor_lamp_tol_px = A_["anchor_lamp_tol_px"],
     anchor_trend = A_["anchor_trend"], anchor_trend_nights = A_["anchor_trend_nights"], anchor_trend_ms = A_["anchor_trend_ms"],
-    anchor_trend_min_nights = A_["anchor_trend_min_nights"], anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
+    anchor_trend_min_nights = A_["anchor_trend_min_nights"], fps_route = A_["fps_route"], anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
     chip_transform_file = A_["chip_transform_file"],
     exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], prefps_time = A_["prefps_time"],
     sky_exp_terms = A_["sky_exp_terms"], reg_weight_apo = A_["reg_weight_apo"], reg_weight_lco = A_["reg_weight_lco"],
@@ -188,9 +189,12 @@ function invalidated_stages(base)
     theirs = Dict(split(l, "=", limit = 2)[1] => split(l, "=", limit = 2)[2]
                   for l in readlines(fn) if !startswith(l, "#") && occursin("=", l))
     mine = AR.refit_config_dict(CFG)
+    defaults = AR.refit_config_dict(AR.RefitConfig())
     inv = Set{String}()
     for (k, v) in mine
         get(theirs, k, "") == v && continue
+        # a switch the base run did not have yet counts as being at its default (added later)
+        (!haskey(theirs, k) && v == defaults[k]) && continue
         foreach(s -> push!(inv, s), split(get(AR.REFIT_SWITCH_STAGES, k, "arc,comb,fpifib,assemble"), ","))
     end
     # downstream closure
