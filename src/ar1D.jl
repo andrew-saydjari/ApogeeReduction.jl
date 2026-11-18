@@ -853,7 +853,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     chipBit_stack = zeros(Int, N_CHIPS * N_XPIX, N_FIBERS)
     thrpt_stack = zeros(N_CHIPS, N_FIBERS)
     bitmsk_thrpt_stack = zeros(Int, N_CHIPS, N_FIBERS)
-    bitmsk_trace_stack = zeros(Int, N_CHIPS, N_FIBERS)
+    bitmsk_trace_stack = zeros(TraceBits, N_CHIPS, N_FIBERS) # UInt16, see src/trace_qa.jl
     trace_level_chips = fill(-2, N_CHIPS) # -2: not recorded (1D file made before trace levels)
 
     ingestBit = zeros(Int, N_FIBERS)
@@ -947,8 +947,9 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
         extract_trace_centers = f["extract_trace_centers"]
         relthrpt = f["relthrpt"]
         bitmsk_relthrpt = f["bitmsk_relthrpt"]
-        # 1D files made before the trace bitmask existed carry no `bitmsk_trace`
-        bitmsk_trace = haskey(f, "bitmsk_trace") ? f["bitmsk_trace"] :
+        # 1D files made before the trace bitmask existed carry no `bitmsk_trace`; files made
+        # before it became UInt16 carry Int64 (same values)
+        bitmsk_trace = haskey(f, "bitmsk_trace") ? to_trace_bits(f["bitmsk_trace"]) :
                        fill(TRACE_QA_MISSING, N_FIBERS)
         close(f)
         push!(metadata_lst, read_metadata(fnameloc))

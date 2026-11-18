@@ -76,14 +76,14 @@ function parse_commandline()
         default = false
         "--trace_select"
         required = false
-        help = "how the night's trace is chosen among its flats (src/trace_qa.jl): \"last\" (default, the pre-existing rule: the lexically last quartz trace of the night, else the last dome trace) or \"gated\" (only flats that pass the trace QA gate; ranked by gate level, quartz before dome, closeness to the night's median science exposure, fit_rms, exposure number). Either way the choice, its QA and the candidate table are written into the traceMain metadata and the per-fiber bitmsk_trace."
+        help = "how the night's trace is chosen among its flats (src/trace_qa.jl): \"gated\" (default: only flats that pass the trace QA gate; ranked by gate level, quartz before dome, closeness to the night's median science exposure, fit_rms, exposure number) or \"last\" (the pre-existing rule: the lexically last quartz trace of the night, else the last dome trace). Either way the choice, its QA and the candidate table are written into the traceMain metadata and the per-fiber bitmsk_trace."
         arg_type = String
-        default = "last"
+        default = "gated"
         "--trace_fallback"
         required = false
-        help = "what a night with no eligible flat gets: \"fixed_file\" (default, the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK) or \"none\" (no trace: the night's exposures are not extracted and are listed in the log). The own-night and template levels that replace the fixed file arrive with the epoch templates (PR B)."
+        help = "what a night with no eligible flat gets: \"none\" (default: no trace; the night's exposures are not extracted and are listed in the log) or \"fixed_file\" (the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK). The own-night and template levels that replace the fixed file arrive with the epoch templates (PR B)."
         arg_type = String
-        default = "fixed_file"
+        default = "none"
     end
     return parse_args(s)
 end
@@ -215,8 +215,8 @@ end
 # The night's trace per chip: `make_traceMain` (src/trace_qa.jl) picks it among ALL the
 # night's per-flat traces (quartz, then dome) by --trace_select, falls back by --trace_fallback,
 # and writes the decision, the QA of the chosen flat, the candidate table, the trace level and
-# the per-fiber bitmsk_trace into the traceMain file. With the defaults (last, fixed_file) the
-# chosen file is exactly the previous one.
+# the per-fiber bitmsk_trace into the traceMain file. With --trace_select last --trace_fallback
+# fixed_file the chosen file is exactly the previous one.
 @everywhere function create_traceMain(mjd, chip, trace_type_order;
         tele = parg["tele"],
         outdir = parg["outdir"],

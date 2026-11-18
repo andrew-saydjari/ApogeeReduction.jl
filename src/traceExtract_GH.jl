@@ -412,15 +412,15 @@ function trace_extract(image_data, ivar_image, tele, mjd, expid, chip,
         max_prof_fib, all_y_prof, all_y_prof_deriv, flat_fname;
         good_pixels = ones(Bool, size(image_data)), mid = 1025, n_center_cols = 100, verbose = false,
         low_throughput_thresh = 0.05, median_trace_pos_path = "./data/",
-        identify::AbstractString = "production", qa = nothing)
+        identify::AbstractString = "robust", qa = nothing)
     # `identify` selects how fibers are found and labelled at the chip center and how unlit
     # fibers are placed (src/trace_qa.jl):
-    #   "production" (default): the pre-existing path, unchanged.
-    #   "robust": template-free whole-slit identification (`trace_peak_census` +
+    #   "robust" (default): template-free whole-slit identification (`trace_peak_census` +
     #       `trace_identify_slit`, refused with a named reason when ambiguous), and unlit fibers
     #       placed from lit neighbours on both sides along the reference spacing pattern
     #       (`fill_unlit_fibers_robust!`). The per-column Gauss-Hermite refinement of lit fibers
     #       (the outward column walk) is the same code in both modes.
+    #   "production": the pre-existing path, unchanged.
     # `qa`, if a Dict, receives `outcome` ("ok" or the named reason the flat was refused) and
     # the identification statistics; the return value is unchanged ([] , [] when refused).
     identify in ("production", "robust") ||

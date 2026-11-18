@@ -14,11 +14,15 @@
 # decision plus its statistics written next to the product and carried as bits into the 1D
 # products.
 #
-# Behaviour switches (all default to the pre-existing behaviour, so delivered spectra do not
-# change unless one is switched on):
-#   make_traces_from_flats.jl --trace_identify production|robust   (fiber identification)
-#   pipeline_2d_1d.jl         --trace_select   last|gated          (which flat of the night)
-#   pipeline_2d_1d.jl         --trace_fallback fixed_file|none     (no own-night flat)
+# Behaviour switches. The defaults are the robust behaviour (PI decision 2026-11-18); the
+# pre-existing behaviour is one switch away and is reproduced bit for bit:
+#   make_traces_from_flats.jl --trace_identify robust|production   (fiber identification)
+#   pipeline_2d_1d.jl         --trace_select   gated|last          (which flat of the night)
+#   pipeline_2d_1d.jl         --trace_fallback none|fixed_file     (no own-night flat)
+# With --trace_fallback none a night without an eligible flat of its own is not extracted
+# (listed loudly) until the epoch templates (PR B) give it a template level. Nothing here needs
+# a template or epoch file: the identification is template-free and uses only the static
+# reference positions in data/traceCenterPositions_*.
 # What is always on: the per-flat QA record, the traceMain QA/provenance metadata and the
 # per-fiber `bitmsk_trace` in the 1D products.
 
@@ -29,35 +33,45 @@ using Polynomials: fit
 _medornan(v) = isempty(v) ? NaN : median(v)
 
 # ---------------------------------------------------------------------------------------------
-# Per-fiber trace bitmask (`bitmsk_trace`), Int like `bitmsk_relthrpt`. Written per chip into
-# traceMain and ar1D* (length N_FIBERS) and stacked (N_CHIPS, N_FIBERS) into ar1Duni*.
+# Per-fiber trace bitmask (`bitmsk_trace`), stored as `TraceBits` = UInt16: the smallest type
+# that holds the 10 bits defined here (2^0-2^9, five of them reserved for PR B) plus the
+# per-exposure registration bit planned for PR C, with 5 bits to spare. Unsigned like the
+# other compact flag words (`exposure_flags` UInt8, `wavecal_flags` UInt32). Written per chip
+# into traceMain and ar1D* (length N_FIBERS) and stacked (N_CHIPS, N_FIBERS) into ar1Duni*;
+# `trace_flags` (metadata) is the same type. Readers convert with `to_trace_bits`, so files
+# written before this change (Int64 datasets) read the same.
 # Night-level bits are replicated into every fiber, so a consumer needs only this array.
 # Severity follows the wavelength-flag scheme (ARCLAMP_PRODUCTION_DESIGN.md §2.4,
 # `wavecal_flags`): "bad" bits are proposed for the default mask (arMADGICS, PR C).
 # Bits 1, 2, 3, 5, 6 are reserved for the template levels of PR B and are never set here.
 # ---------------------------------------------------------------------------------------------
+"Storage type of `bitmsk_trace` and `trace_flags`."
+const TraceBits = UInt16
+"Convert stored trace bits (any integer type, e.g. Int64 from files written before UInt16) to `TraceBits`."
+to_trace_bits(x::Integer) = TraceBits(x)
+to_trace_bits(x::AbstractArray{<:Integer}) = TraceBits.(x)
 "info: trace from a gated flat of the night that is not the preferred kind (dome, not quartz)."
-const TRACE_OTHER_FLAT = 2^0
+const TRACE_OTHER_FLAT = TraceBits(2^0)
 "(PR B, reserved) level T1: template registered on another calibration frame of the night."
-const TRACE_REGISTERED_CAL = 2^1
+const TRACE_REGISTERED_CAL = TraceBits(2^1)
 "(PR B, reserved) level T2: template registered on the stacked science frames of the night."
-const TRACE_REGISTERED_SCI = 2^2
+const TRACE_REGISTERED_SCI = TraceBits(2^2)
 "(PR B, reserved) bad: level T3, epoch template at the epoch-median registration."
-const TRACE_TEMPLATE_ONLY = 2^3
+const TRACE_TEMPLATE_ONLY = TraceBits(2^3)
 "bad: this fiber had no light on the trace source (median height < 5 % of the median fiber);
 its position is not measured but placed from its lit neighbours."
-const TRACE_FIBER_UNLIT = 2^4
+const TRACE_FIBER_UNLIT = TraceBits(2^4)
 "(PR B, reserved) per-fiber departure from the registered template > 0.3 px."
-const TRACE_FIBER_DELTA = 2^5
+const TRACE_FIBER_DELTA = TraceBits(2^5)
 "(PR B, reserved) the night is after the last confirmed epoch boundary."
-const TRACE_EPOCH_PROVISIONAL = 2^6
+const TRACE_EPOCH_PROVISIONAL = TraceBits(2^6)
 "bad: the night used the fixed survey-wide fallback file (`data/fallback_traces`), i.e. a
 trace from another night and possibly another instrument epoch."
-const TRACE_FIXED_FALLBACK = 2^7
+const TRACE_FIXED_FALLBACK = TraceBits(2^7)
 "warn: the trace source did not pass every gate criterion (`trace_gate_reasons` says which)."
-const TRACE_UNGATED = 2^8
+const TRACE_UNGATED = TraceBits(2^8)
 "warn: no QA record exists for the trace source (products made before QA records existed)."
-const TRACE_QA_MISSING = 2^9
+const TRACE_QA_MISSING = TraceBits(2^9)
 
 "Bits proposed for the default mask downstream (arMADGICS PR C)."
 const TRACE_BAD_BITS = TRACE_TEMPLATE_ONLY | TRACE_FIBER_UNLIT | TRACE_FIXED_FALLBACK
@@ -87,7 +101,7 @@ function trace_level_bits(level::Integer)
     level == TRACE_LEVEL_REGISTERED_SCI && return TRACE_REGISTERED_SCI
     level == TRACE_LEVEL_TEMPLATE && return TRACE_TEMPLATE_ONLY
     level == TRACE_LEVEL_FIXED_FALLBACK && return TRACE_FIXED_FALLBACK
-    return 0
+    return zero(TraceBits)
 end
 
 # ---------------------------------------------------------------------------------------------
@@ -743,13 +757,13 @@ struct TraceCandidate
 end
 
 """
-    select_night_trace(cands; mode = "last", type_order = ["quartz","dome"], sci_mid = nothing)
+    select_night_trace(cands; mode = "gated", type_order = ["quartz","dome"], sci_mid = nothing)
 
 Choose the night's trace among `cands` (all flats of the night and chip that have a trace).
 
-- `mode = "last"`: the pre-existing rule, bit for bit: the first `flat_type` in `type_order`
+- `mode = "last"`: the pre-existing rule (`--trace_select last`), bit for bit: the first `flat_type` in `type_order`
   that has any trace, and of those the lexically last file name.
-- `mode = "gated"`: among candidates with gate level >= 1, rank by (a) gate level (2 before
+- `mode = "gated"` (default): among candidates with gate level >= 1, rank by (a) gate level (2 before
   1), (b) `type_order`, (c) |exposure - median science exposure of the night| (`sci_mid`;
   ignored if `nothing`), (d) `fit_rms`, (e) larger exposure number. Deterministic: no file
   order, no dependence on what else has run. Candidates without a QA record are not eligible.
@@ -757,7 +771,7 @@ Choose the night's trace among `cands` (all flats of the night and chip that hav
 Returns `(chosen::Union{Nothing,TraceCandidate}, info::Dict)`; `info` holds the rule, the
 ranked candidate table and the chosen candidate's QA summary, for the traceMain metadata.
 """
-function select_night_trace(cands::AbstractVector{TraceCandidate}; mode = "last",
+function select_night_trace(cands::AbstractVector{TraceCandidate}; mode = "gated",
         type_order = ["quartz", "dome"], sci_mid = nothing)
     info = Dict{String, Any}("trace_select_rule" => mode, "trace_n_candidates" => length(cands))
     tord(c) = (i = findfirst(==(c.flat_type), type_order); isnothing(i) ? length(type_order) + 1 : i)
@@ -869,8 +883,8 @@ function night_trace_candidates(outdir, tele, mjd, chip; type_order = ["quartz",
 end
 
 """
-    make_traceMain(outdir, tele, mjd, chip; select = "last", fallback = "fixed_file",
-        fallback_file, type_order = ["quartz","dome"], almanac_file = "",
+    make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "none",
+        fallback_file = "", type_order = ["quartz","dome"], almanac_file = "",
         checkpoint_mode = "commit_same")
 
 Write `apred/<mjd>/traceMain_<tele>_<mjd>_<chip>.h5`, the trace every exposure of the night
@@ -881,14 +895,15 @@ is extracted with: a copy of the chosen per-flat trace (or of `fallback_file`) p
   (`trace_qa_*`), and the ranked candidate table (`trace_cand_*`);
 - dataset `bitmsk_trace` (per fiber, `trace_fiber_bits`).
 
+`select = "gated"` (default) uses `select_night_trace` and re-decides when the night's
+candidates changed (e.g. dome traces made after the quartz pass of a bulk run);
 `select = "last"` reproduces the previous choice exactly (and the previous checkpoint
-behaviour); `select = "gated"` uses `select_night_trace` and re-decides when the night's
-candidates changed (e.g. dome traces made after the quartz pass of a bulk run).
-`fallback = "fixed_file"` (previous behaviour) copies `fallback_file` when the night has no
-eligible trace; `fallback = "none"` writes no traceMain (and removes a stale one): the
-night's exposures are then not extracted, and the caller logs them. Returns the trace level.
+behaviour). `fallback = "none"` (default) writes no traceMain when the night has no eligible
+trace (and removes a stale one): the night's exposures are then not extracted, and the caller
+logs them; `fallback_file` is not needed and not read. `fallback = "fixed_file"` (previous
+behaviour) copies `fallback_file`. Returns the trace level.
 """
-function make_traceMain(outdir, tele, mjd, chip; select = "last", fallback = "fixed_file",
+function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "none",
         fallback_file = "", type_order = ["quartz", "dome"], almanac_file = "",
         checkpoint_mode = "commit_same")
     select in ("last", "gated") || error("--trace_select must be last or gated, got $(select)")
@@ -962,7 +977,7 @@ function make_traceMain(outdir, tele, mjd, chip; select = "last", fallback = "fi
     bits = trace_fiber_bits(trace_params, level;
         other_flat = own && md["trace_type"] != first(type_order),
         ungated = own && gl in (0, 1), qa_missing = own && gl == -1)
-    md["trace_flags"] = reduce(|, bits; init = 0) & ~TRACE_FIBER_UNLIT
+    md["trace_flags"] = reduce(|, bits; init = zero(TraceBits)) & ~TRACE_FIBER_UNLIT
     md["trace_n_unlit"] = count(b -> (b & TRACE_FIBER_UNLIT) != 0, bits)
     mkpath(dirname(traceMain_fname))
     tmp = traceMain_fname * ".tmp$(getpid())"
@@ -993,12 +1008,12 @@ traceMain's metadata already holds them).
 """
 function trace_bits_for_1d(traceFname, regularized_trace_params, trace_metadata::AbstractDict)
     bits = h5open(traceFname, "r") do f
-        haskey(f, "bitmsk_trace") ? Int.(read(f["bitmsk_trace"])) : nothing
+        haskey(f, "bitmsk_trace") ? to_trace_bits(read(f["bitmsk_trace"])) : nothing
     end
     md = Dict{String, Any}()
     if isnothing(bits)
         bits = trace_bits_from_metadata(regularized_trace_params, trace_metadata)
-        md["trace_flags"] = reduce(|, bits; init = 0) & ~TRACE_FIBER_UNLIT
+        md["trace_flags"] = reduce(|, bits; init = zero(TraceBits)) & ~TRACE_FIBER_UNLIT
         md["trace_level"] = endswith(string(get(trace_metadata, "trace_type", "")), "_fallback") ?
                             TRACE_LEVEL_FIXED_FALLBACK : TRACE_LEVEL_OWN_FLAT
     end
@@ -1014,7 +1029,8 @@ night-level bits over chips and fibers), `trace_level_chips` and `trace_level_ma
 function trace_exposure_summary(bitmsk_trace_stack::AbstractMatrix{<:Integer},
         trace_level_chips::AbstractVector{<:Integer})
     return Dict{String, Any}(
-        "trace_flags" => reduce(|, bitmsk_trace_stack; init = 0) & ~TRACE_FIBER_UNLIT,
+        "trace_flags" => reduce(|, to_trace_bits(bitmsk_trace_stack); init = zero(TraceBits)) &
+                         ~TRACE_FIBER_UNLIT,
         "trace_level_chips" => collect(Int, trace_level_chips),
         "trace_level_max" => maximum(trace_level_chips))
 end

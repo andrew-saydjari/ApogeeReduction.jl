@@ -39,9 +39,9 @@ function parse_commandline()
         default = "commit_same"
         "--trace_identify"
         required = false
-        help = "fiber identification on the flat: \"production\" (default, the pre-existing path) or \"robust\" (template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl). The per-column refinement of lit fibers is the same in both."
+        help = "fiber identification on the flat: \"robust\" (default: template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl) or \"production\" (the pre-existing path). The per-column refinement of lit fibers is the same in both."
         arg_type = String
-        default = "production"
+        default = "robust"
         "--almanac_file"
         required = false
         help = "almanac hdf5 file; used to identify the FPI guide fibers from the night's configurations for the dome-flat trace plots. If empty, FPI fibers are not annotated."
@@ -143,7 +143,7 @@ end
         return qa
     end
 
-    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "production")
+    function make_traces(fname, flat_type; checkpoint_mode = "commit_same", identify = "robust")
         sname = split(split(split(fname, "/")[end], ".h5")[1], "_")
         fnameType, teleloc, mjdloc, expnumloc, chiploc, image_type = sname[(end - 5):end]
         mjdfps2plate = get_fps_plate_divide(teleloc)

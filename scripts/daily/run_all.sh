@@ -85,10 +85,11 @@ else
     exp_class_opt=()
     exp_class_on=true
 fi
-# Trace choices (src/trace_qa.jl). Each unset/empty -> no flag -> the pre-existing behaviour:
-#   AR_TRACE_IDENTIFY  production|robust     make_traces_from_flats.jl --trace_identify
-#   AR_TRACE_SELECT    last|gated            pipeline_2d_1d.jl --trace_select
-#   AR_TRACE_FALLBACK  fixed_file|none       pipeline_2d_1d.jl --trace_fallback
+# Trace choices (src/trace_qa.jl). Each unset/empty -> no flag -> the script default, which is
+# the robust behaviour (first value); the pre-existing behaviour is the second value of each:
+#   AR_TRACE_IDENTIFY  robust|production     make_traces_from_flats.jl --trace_identify
+#   AR_TRACE_SELECT    gated|last            pipeline_2d_1d.jl --trace_select
+#   AR_TRACE_FALLBACK  none|fixed_file       pipeline_2d_1d.jl --trace_fallback
 trace_identify_opt=(); trace_main_opt=()
 if [ -n "${AR_TRACE_IDENTIFY:-}" ]; then trace_identify_opt=(--trace_identify "$AR_TRACE_IDENTIFY"); fi
 if [ -n "${AR_TRACE_SELECT:-}" ]; then trace_main_opt+=(--trace_select "$AR_TRACE_SELECT"); fi

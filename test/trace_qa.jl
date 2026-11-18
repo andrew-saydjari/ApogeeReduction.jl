@@ -10,7 +10,8 @@ using ApogeeReduction: trace_peak_census, trace_identify_slit, fill_unlit_fibers
                        TRACE_FIBER_UNLIT, TRACE_FIXED_FALLBACK, TRACE_UNGATED, TRACE_QA_MISSING,
                        TRACE_OTHER_FLAT, TRACE_TEMPLATE_ONLY, TRACE_BAD_BITS,
                        TRACE_LEVEL_OWN_FLAT, TRACE_LEVEL_FIXED_FALLBACK, TRACE_LEVEL_NONE,
-                       TRACE_LEVEL_TEMPLATE, TRACE_GATE_NLIT_MIN
+                       TRACE_LEVEL_TEMPLATE, TRACE_GATE_NLIT_MIN, TraceBits, to_trace_bits,
+                       TRACE_BIT_NAMES
 
 const DATA_DIR = joinpath(@__DIR__, "..", "data")
 
@@ -206,10 +207,11 @@ end
         img, iv, pm = synth_image(truth; noise = 2.0)
         hp = get_default_trace_hyperparams("apo", "G", profile_path = DATA_DIR, plot_path = mktempdir())
         qa = Dict{String, Any}()
+        # no `identify` keyword: robust is the default
         tp, _ = trace_extract(img, iv, "apo", "99999", "0001", "G", hp..., "synthetic";
-            good_pixels = (pm .& bad_pix_bits) .== 0, median_trace_pos_path = DATA_DIR,
-            identify = "robust", qa = qa)
+            good_pixels = (pm .& bad_pix_bits) .== 0, median_trace_pos_path = DATA_DIR, qa = qa)
         @test size(tp) == (2048, 300, 3)
+        @test qa["identify"] == "robust"
         @test qa["outcome"] == "ok" && qa["id_reason"] == "ok" && qa["n_unlit"] == 30
         xs = 100:1948
         lit = setdiff(1:300, 151:180)
@@ -232,6 +234,7 @@ end
         @test ch.expnum == 9                       # the previous rule: last quartz by name
         ch, info = select_night_trace(c; mode = "gated")
         @test ch.expnum == 7                       # gated quartz, lowest fit_rms
+        @test select_night_trace(c)[1].expnum == 7 # gated is the default
         ch, _ = select_night_trace(c; mode = "gated", sci_mid = 5)
         @test ch.expnum == 4                       # closest to the science
         ch, _ = select_night_trace(reverse(c); mode = "gated", sci_mid = 5)
@@ -252,9 +255,17 @@ end
     end
 
     @testset "trace bits" begin
+        # storage type: the smallest that holds every defined bit (UInt16, 10 of 16 bits used)
+        @test TraceBits == UInt16
+        @test all(k -> k isa TraceBits, keys(TRACE_BIT_NAMES))
+        @test length(TRACE_BIT_NAMES) == 10 && maximum(keys(TRACE_BIT_NAMES)) == 2^9
+        @test reduce(|, keys(TRACE_BIT_NAMES)) == 2^10 - 1      # contiguous, no collisions
+        @test to_trace_bits(Int64[3, 512]) == UInt16[3, 512] && eltype(to_trace_bits([1])) == UInt16
         tp = synth_trace(R)
         tp[:, [24, 151, 152], 1] .= 0.0
         b = trace_fiber_bits(tp, TRACE_LEVEL_OWN_FLAT)
+        @test eltype(b) == TraceBits
+        @test eltype(trace_fiber_bits(tp, TRACE_LEVEL_FIXED_FALLBACK)) == TraceBits
         @test findall(x -> (x & TRACE_FIBER_UNLIT) != 0, b) == [24, 151, 152]
         @test count(!=(0), b) == 3
         b = trace_fiber_bits(tp, TRACE_LEVEL_FIXED_FALLBACK)
@@ -278,6 +289,7 @@ end
             legacy = joinpath(d, "legacy.h5")
             h5open(f -> (f["regularized_trace_params"] = tp), legacy, "w")
             bits, md = trace_bits_for_1d(legacy, tp, Dict{String, Any}("trace_type" => "quartz_fallback"))
+            @test eltype(bits) == TraceBits && md["trace_flags"] isa TraceBits
             @test all(bits .== (TRACE_FIXED_FALLBACK | TRACE_QA_MISSING))
             @test md["trace_level"] == TRACE_LEVEL_FIXED_FALLBACK
             @test md["trace_flags"] == (TRACE_FIXED_FALLBACK | TRACE_QA_MISSING)
@@ -289,13 +301,23 @@ end
                 f["bitmsk_trace"] = fill(TRACE_UNGATED, 300)
             end
             bits, md = trace_bits_for_1d(stored, tp, Dict{String, Any}("trace_type" => "quartz"))
-            @test all(bits .== TRACE_UNGATED) && isempty(md)
+            @test all(bits .== TRACE_UNGATED) && isempty(md) && eltype(bits) == TraceBits
+            # a traceMain written before the UInt16 change stored Int64: same bits, read as UInt16
+            old64 = joinpath(d, "old64.h5")
+            h5open(old64, "w") do f
+                f["regularized_trace_params"] = tp
+                f["bitmsk_trace"] = fill(Int64(TRACE_UNGATED | TRACE_OTHER_FLAT), 300)
+            end
+            bits, md = trace_bits_for_1d(old64, tp, Dict{String, Any}("trace_type" => "dome"))
+            @test eltype(bits) == TraceBits && all(bits .== (TRACE_UNGATED | TRACE_OTHER_FLAT))
         end
         st = zeros(Int, 3, 300)
         st[2, 7] = TRACE_FIBER_UNLIT
         st[3, :] .= TRACE_OTHER_FLAT
         s = trace_exposure_summary(st, [0, 0, 0])
         @test s["trace_flags"] == TRACE_OTHER_FLAT && s["trace_level_max"] == 0
+        @test s["trace_flags"] isa TraceBits
+        @test trace_exposure_summary(TraceBits.(st), [0, 0, 0])["trace_flags"] == TRACE_OTHER_FLAT
         @test trace_exposure_summary(zeros(Int, 3, 300), [0, 4, -2])["trace_level_max"] == 4
     end
 
@@ -333,8 +355,9 @@ end
                 create_group(f, "metadata")["git_commit"] = "fallback"
             end
             tm = joinpath(outdir, "apred", string(mjd), "traceMain_$(tele)_$(mjd)_$(chip).h5")
-            # default rule: last quartz by name (0009), which failed the gate -> flagged
-            lv = make_traceMain(outdir, tele, mjd, chip; fallback_file = fb, checkpoint_mode = "clobber")
+            # previous rule: last quartz by name (0009), which failed the gate -> flagged
+            lv = make_traceMain(outdir, tele, mjd, chip; select = "last", fallback = "fixed_file",
+                fallback_file = fb, checkpoint_mode = "clobber")
             @test lv == TRACE_LEVEL_OWN_FLAT
             md = read_metadata(tm)
             @test endswith(md["trace_orig_param_fname"], "_0009_B.h5")
@@ -342,19 +365,20 @@ end
             @test md["trace_select_rule"] == "last" && md["trace_gate_level"] == 0
             @test (md["trace_flags"] & TRACE_UNGATED) != 0
             bits = h5open(f -> read(f["bitmsk_trace"]), tm)
+            @test eltype(bits) == UInt16 && md["trace_flags"] isa UInt16  # as stored on disk
             @test count(x -> (x & TRACE_FIBER_UNLIT) != 0, bits) == 30
             @test h5open(f -> read(f["trace_params"]), tm) == tp
-            # gated rule: 0004
-            make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback_file = fb,
-                checkpoint_mode = "clobber")
+            # gated rule (the default): 0004; no fallback file is needed or read
+            make_traceMain(outdir, tele, mjd, chip; checkpoint_mode = "clobber")
             md = read_metadata(tm)
+            @test md["trace_select_rule"] == "gated" && md["trace_fallback_rule"] == "none"
             @test endswith(md["trace_orig_param_fname"], "_0004_B.h5")
             @test md["trace_gate_level"] == 2 && md["trace_flags"] == 0
             @test md["trace_cand_gate_level"] == [2, 0]
             # no eligible flat: fixed file (flagged) or nothing
             other = joinpath(outdir, "apred", "57970")
-            lv = make_traceMain(outdir, tele, 57970, chip; select = "gated", fallback_file = fb,
-                checkpoint_mode = "clobber")
+            lv = make_traceMain(outdir, tele, 57970, chip; select = "gated", fallback = "fixed_file",
+                fallback_file = fb, checkpoint_mode = "clobber")
             @test lv == TRACE_LEVEL_FIXED_FALLBACK
             tm2 = joinpath(other, "traceMain_$(tele)_57970_$(chip).h5")
             md2 = read_metadata(tm2)
@@ -364,7 +388,12 @@ end
                 fallback_file = fb, checkpoint_mode = "clobber")
             @test lv == TRACE_LEVEL_NONE
             @test !isfile(tm2)
-            @test_throws ErrorException make_traceMain(outdir, tele, 57970, chip;
+            # defaults (gated, none): run with no fallback, template or epoch file at all
+            @test make_traceMain(outdir, tele, 57970, chip; checkpoint_mode = "clobber") == TRACE_LEVEL_NONE
+            @test make_traceMain(outdir, tele, 57970, chip; fallback_file = joinpath(outdir, "missing.h5"),
+                checkpoint_mode = "clobber") == TRACE_LEVEL_NONE
+            @test !isfile(tm2)
+            @test_throws ErrorException make_traceMain(outdir, tele, 57970, chip; fallback = "fixed_file",
                 fallback_file = joinpath(outdir, "missing.h5"), checkpoint_mode = "clobber")
             @test_throws ErrorException make_traceMain(outdir, tele, mjd, chip; select = "best")
         end
