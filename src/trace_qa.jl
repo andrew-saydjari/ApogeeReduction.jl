@@ -101,18 +101,22 @@ const TRACE_GATE_NLIT_MIN = 240
 """
 Maximum robust RMS (px) of the per-fiber band centers about a per-fiber cubic in x.
 Measures whether each fiber's trace is a smooth curve (defocused, sparse, faint or
-mis-walked flats are not).
+mis-walked flats are not). Pass-1 traceMain flats of 680 no-regression nights (2,040
+chip-flats): max 0.0059 (APO) / 0.0098 (LCO) px; refused frames of the wrong nights
+0.04-0.24 px (the LCO 57817 focus sweep 0.04-0.08).
 """
-const TRACE_GATE_FIT_RMS_MAX = 0.05
+const TRACE_GATE_FIT_RMS_MAX = 0.02
 """
 Maximum fraction of lit fibers, in the worst band across the chip, whose trace center is
 more than 1 px from the nearest fiber peak of the light (`trace_light_qa`, 9 bands). A block of fibers
 on the wrong alias, or an outward column walk that twists half the slit, fails here even when
 every fiber is individually smooth; so does a defocused or partially lit flat. (The spacing
 pattern statistics `spacing_rms`/`spacing_nbad` are recorded but not gated: on faint early LCO
-flats they fire on traces the light check accepts.)
+flats they fire on traces the light check accepts.) Pass-1 traceMain flats of 680 no-regression
+nights: p99 0.013 / 0.003, max 0.017 (APO) / 0.003 (LCO); production traces of the wrong nights
+0.05-1.0, their good flats <= 0.019.
 """
-const TRACE_GATE_LIGHT_MISMATCH_MAX = 0.02
+const TRACE_GATE_LIGHT_MISMATCH_MAX = 0.03
 """
 Minimum fraction of lit fibers whose central position agrees (< 0.35 spacing) with the
 whole-slit identification of the light (`trace_identify_slit`). A labelling error moves
