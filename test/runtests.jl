@@ -14,4 +14,5 @@ using FITSIO: FITS
     include("safe_jldsave.jl")
     include("lsf.jl")
     include("readonly_opens.jl")
+    include("scripts_parse.jl")
 end
