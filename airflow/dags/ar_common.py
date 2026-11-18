@@ -152,6 +152,12 @@ EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
 CHIP_TRANSFORM_CAL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
                       "chip_transform/chiptransform_pass1dr21_v2_allblock.h5")
 
+# Order of the wavelength chain in pipeline_2d_1d.jl (--wavecal_order): "legacy" (sky ->
+# FPI comb -> night average -> per-exposure dither; unchanged) or "arc_first" (arcs ->
+# arc-seeded comb -> per-exposure FPI-fiber/sky terms, each stage once and in order; see
+# src/wavecal_arcfirst.jl). Flipping the production default is the PI's decision.
+WAVECAL_ORDER = "legacy"
+
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
     "tunnel_check": ("The Utah ControlMaster (ssh alias `mwm`) is down. Only "

@@ -41,6 +41,7 @@ include("arclamp_wavecal.jl")
 # uses comb_fpi_fit_core from wavecal.jl and the stage-1 fit above)
 include("arclamp_refit.jl")
 include("arclamp_refit_night.jl")
+include("wavecal_arcfirst.jl")
 include("spectraInterpolation.jl")
 include("traceExtract_GH.jl")
 # lsf.jl depends on traceExtract_GH.jl (int_gauss_hermite_term) and

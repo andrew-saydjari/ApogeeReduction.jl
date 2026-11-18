@@ -272,6 +272,8 @@ def slurm_submit_and_wait(tele, **context):
     env["AR_EXP_CLASS_MODEL"] = C.EXP_CLASS_MODEL
     # chip-transform calibration for the sky wavelength fit ("" = off, as before)
     env["AR_CHIP_TRANSFORM_CAL"] = C.CHIP_TRANSFORM_CAL
+    # wavelength-chain order (pipeline_2d_1d.jl --wavecal_order; "legacy" unless changed)
+    env["AR_WAVECAL_ORDER"] = C.WAVECAL_ORDER
     print("submitting:", " ".join(cmd))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if res.returncode != 0:
@@ -631,6 +633,7 @@ def build_observatory_group(tele: str) -> TaskGroup:
                             f"--outdir {C.xn('outdir', tele)} "
                             f"--runname {C.xn('runname', tele)} "
                             f"--chip_transform_cal '{C.CHIP_TRANSFORM_CAL}' "
+                            f"--wavecal_order {C.WAVECAL_ORDER} "
                             "--checkpoint_mode {{ params.checkpoint_mode }} "
                             "--workers_per_node {{ params.workers }}"),
                     tele,

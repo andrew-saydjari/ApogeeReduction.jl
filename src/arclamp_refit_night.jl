@@ -163,12 +163,64 @@ function refit_neighbour_cavity(outroot, tele, mjd, window)
     return best
 end
 
+"""
+    refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg, pass1_comb = nothing,
+        provenance = Dict{String, String}()) -> (status or nothing, reason)
+
+The arc-anchored comb of one night from EXPLICIT inputs; shared by the archive refit
+(`refit_night_comb`, inputs gathered from a previous run's products) and the in-order nightly
+pipeline (`arcfirst_night_comb`, inputs measured in this run). Inputs:
+  * `fnames`: the night's FPI comb peak files (R-chip names), already accepted by the caller's
+    FPI gate;
+  * `combs`: per file `(ref::ArcObjRef or nothing, t)`, the comb exposure's MEASURED position
+    reference (chip-G slice of a per-exposure comb solution) and its mid-exposure MJD;
+  * `scis`: per science exposure `(ref, t)` (`ref` only for `cfg.anchor_samepos == "pass1"`);
+  * `pass1_comb`: optional previous comb (`refit_read_pass1_comb`) for the order-change QA only.
+Reads the night's arc product (`refit_path(outroot, "arc", ...)`, the earlier stage). On success
+writes the comb product and returns `("ok_arc", "")`; otherwise `(nothing, reason)` (no status
+written: the caller decides the fallback).
+"""
+function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::RefitConfig,
+        pass1_comb = nothing, provenance = Dict{String, String}(), exclude_seqs = Int[])
+    out = refit_path(outroot, "comb", tele, mjd)
+    mkpath(dirname(out))
+    arcf = refit_path(outroot, "arc", tele, mjd)
+    A = isfile(arcf) ? load_refit_arc(arcf) : nothing
+    (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
+    A === nothing && return nothing, (isfile(arcf) ? "arc fit unusable" : "no arc product")
+    sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
+    Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = pass1_comb,
+        pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
+        anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer, anchor_samepos = cfg.anchor_samepos,
+        anchor_pairing = cfg.anchor_pairing,
+        anchor_block_h = cfg.anchor_block_h, exclude_seqs)
+    Q.ok || return nothing, "arc_unmatched: " * Q.reason
+    write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = provenance)
+    return refit_write_status(outroot, "comb", tele, mjd, "ok_arc"), ""
+end
+
+"""Per comb exposure of a previous run (REFIT ONLY): (ref, t) with `ref` a chip-G slice of that
+run's per-exposure comb solution `waveCalNightfpiDither_*_arclamp.h5` (a stored solution of a
+previous run; the in-order pipeline measures this with `arcfirst_comb_refs_provisional`)."""
+function refit_comb_refs_pass1(mdir, tele, mjd, fnames)
+    map(fnames) do fn
+        e = parse(Int, split(basename(fn), "_")[4])
+        t = arclamp_mjd_mid(ar1dcal_name(mdir, tele, mjd, e, "R", "arclamp"))
+        rf = joinpath(mdir, "waveCalNightfpiDither_$(tele)_$(mjd)_$(_arc_expstr(e))_arclamp.h5")
+        ref = isfile(rf) ? ArcObjRef(e, t, "fpi", 880, ARCGATE_FIBERS,
+            h5open(f -> Float64.(f["chipWaveSoln"][880:1170, ARCGATE_FIBERS, 2]), rf, "r")) : nothing
+        (; ref, t)
+    end
+end
+
 function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::RefitConfig,
         allow_arcwin::Bool = false)
     out = refit_path(outroot, "comb", tele, mjd)
     isfile(out) && return "done"
     mkpath(dirname(out))
     mdir = joinpath(apred_dir, string(mjd))
+    # previous-run inputs (refit only): the pass-1 night-average file names the FPI files used and
+    # carries the pass-1 FPI gate verdict and the sky seed (arcwin)
     NA = refit_night_ave(wavecal_dir, tele, mjd)
     NA === nothing && return refit_write_status(outroot, "comb", tele, mjd, "nocomb", "no pass-1 night-average file")
     isempty(NA.used) && return refit_write_status(outroot, "comb", tele, mjd, "nocomb", "no FPI exposures used by pass 1")
@@ -181,39 +233,16 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
         nothing
     end
     # per comb exposure: a slice of its pass-1 per-exposure comb solution (measured position) and its time
-    combs = map(fnames) do fn
-        e = parse(Int, split(basename(fn), "_")[4])
-        t = arclamp_mjd_mid(ar1dcal_name(mdir, tele, mjd, e, "R", "arclamp"))
-        rf = joinpath(mdir, "waveCalNightfpiDither_$(tele)_$(mjd)_$(_arc_expstr(e))_arclamp.h5")
-        ref = isfile(rf) ? ArcObjRef(e, t, "fpi", 880, ARCGATE_FIBERS,
-            h5open(f -> Float64.(f["chipWaveSoln"][880:1170, ARCGATE_FIBERS, 2]), rf, "r")) : nothing
-        (; ref, t)
-    end
-    # science exposures (object exposures with a pass-1 per-exposure solution = measured position)
+    combs = refit_comb_refs_pass1(mdir, tele, mjd, fnames)
     # science exposures: object-exposure times; their pass-1 per-exposure solutions (a later-stage
     # product) only feed the optional same-position input (cfg.anchor_samepos)
     scis = [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
     arcf = refit_path(outroot, "arc", tele, mjd)
-    reason = ""
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "n_science_refs" => string(length(scis)))
-    A = isfile(arcf) ? load_refit_arc(arcf) : nothing
-    (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
-    if A !== nothing
-        sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
-        Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = p1,
-            pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
-            anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer, anchor_samepos = cfg.anchor_samepos,
-            anchor_pairing = cfg.anchor_pairing,
-            anchor_block_h = cfg.anchor_block_h)
-        if Q.ok
-            write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = prov)
-            return refit_write_status(outroot, "comb", tele, mjd, "ok_arc")
-        end
-        reason = "arc_unmatched: " * Q.reason
-    else
-        reason = isfile(arcf) ? "arc fit unusable" : "no arc product"
-    end
+    st, reason = refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg, pass1_comb = p1,
+        provenance = prov)
+    st === nothing || return st
     allow_arcwin || return refit_write_status(outroot, "comb", tele, mjd, "deferred", reason)
     nb = refit_neighbour_cavity(outroot, tele, mjd, cfg.arcwin_nights)
     nb === nothing && return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noanchor",
@@ -247,13 +276,15 @@ function refit_night_fpi_fibers(mdir, tele, mjd, exps)
     return sort(unique(fibs))
 end
 
-function refit_night_fpifib(tele, mjd; apred_dir, outroot, cfg::RefitConfig)
+function refit_night_fpifib(tele, mjd; apred_dir, outroot, cfg::RefitConfig, exps = nothing)
     out = refit_path(outroot, "fpifib", tele, mjd)
     isfile(out) && return "done"
     combf = refit_path(outroot, "comb", tele, mjd)
     isfile(combf) || return refit_write_status(outroot, "fpifib", tele, mjd, "nocomb")
     mdir = joinpath(apred_dir, string(mjd))
-    exps = refit_night_exposures(mdir, tele, mjd)
+    # exposure list: given by the caller (in-order pipeline: this run's list), else (refit) the
+    # night's ar1Dunical files of the previous run
+    exps === nothing && (exps = refit_night_exposures(mdir, tele, mjd))
     fibs = refit_night_fpi_fibers(mdir, tele, mjd, exps)
     isempty(fibs) && return refit_write_status(outroot, "fpifib", tele, mjd, "nofibers")
     C = load_refit_comb(combf)
@@ -314,27 +345,37 @@ the sky cross-check (`xcheck_resid_ms`), the per-chip pooled sky offsets, the FP
 the comparison with pass 1 (`dv_pass1_ms` = first-order RV prediction per chip and fiber), and
 night-level QA (per-chip arc - comb residual, mode slips, order changes).
 """
-function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::RefitConfig, ll = nothing)
+function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, cfg::RefitConfig, ll = nothing,
+        exps = nothing, inorder::Bool = false, on_grid = nothing, fiber_fill::AbstractString = "none",
+        extra_bits::Integer = 0, fpi_gated_off_in = nothing)
     out = refit_path(outroot, "assemble", tele, mjd)
     isfile(out) && return "done"
     mdir = joinpath(apred_dir, string(mjd))
-    exps = refit_night_exposures(mdir, tele, mjd)
+    # previous-run inputs are read only when `inorder == false` (archive refit): the exposure list
+    # and times from its ar1Dunical files, its adopted wavecal_type (pass-1 copy route and QA), its
+    # night-average file (FPI gated-off flag) and its adopted solutions (pass-1 copy + comparison).
+    # `inorder = true` (nightly pipeline): exposures from the caller, times from the ar1Dcal files,
+    # FPI gated-off from the caller, no pass-1 copy (route :pass1 -> no grid; the caller falls back).
+    exps === nothing && (exps = refit_night_exposures(mdir, tele, mjd))
     isempty(exps) && return refit_write_status(outroot, "assemble", tele, mjd, "noexp")
     arcf = refit_path(outroot, "arc", tele, mjd)
     combf = refit_path(outroot, "comb", tele, mjd)
     fpif = refit_path(outroot, "fpifib", tele, mjd)
     A = isfile(arcf) ? load_refit_arc(arcf) : nothing
     (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
+    nfill = 0
+    (A !== nothing && fiber_fill == "fill_only") && ((A, nfill) = refit_arc_fill_fibers(A))
     C = isfile(combf) ? load_refit_comb(combf) : nothing
     FP = isfile(fpif) ? load_refit_fpifib(fpif) : nothing
-    NA = refit_night_ave(wavecal_dir, tele, mjd)
+    NA = inorder ? nothing : refit_night_ave(wavecal_dir, tele, mjd)
     ll === nothing && (ll = refit_linelist(cfg, tele)[1])
     arcbits = A === nothing ? 0 : refit_arc_night_bits(A.night_flags, A.seq_flags)
     if A !== nothing && isfile(arcf)
         qp = refit_meta(arcf, "refit_quartz_pattern_gated", 0)
         (qp isa Integer && qp > 0) && (arcbits |= WAVE_ARC_QUARTZ_PATTERN)
     end
-    fpi_gated_off = C === nothing && NA !== nothing && NA.nfpi > 0
+    fpi_gated_off = fpi_gated_off_in !== nothing ? Bool(fpi_gated_off_in) :
+                    (C === nothing && NA !== nothing && NA.nfpi > 0)
     # era from the plate/FPS MJD boundary only (never from FPI light / comb presence)
     era = refit_era(tele, mjd)
     shape_choice = era == "plate" ? cfg.plate_shape : (tele == "apo" ? cfg.fps_shape_apo : cfg.fps_shape_lco)
@@ -384,15 +425,24 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
     arcmodel(st) = (f, c, px) -> A.okf[f] ?
         arcfit_eval(view(A.TH, f, :), A.g, A.lay, f, c, collect(Float64, px);
             grpv = st[1], d = st[2], t = st[3], tau = st[4]) : fill(NaN, length(px))
+    # fiber_fill == "fill_only": a fiber without its own template fit (e.g. an arc fiber filled
+    # across the slit) takes the arc shape instead of NaN (flagged WAVE_FIBER_FILLED)
     shapemodel(st) = Tp === nothing ? arcmodel(st) :
         (f, c, px) -> TP[2][f] ? [refit_template_lambda(Tp, view(TP[1], :, f), f, c,
-            p + refit_state_shift_px(A, f, c, p, st)) for p in px] : fill(NaN, length(px))
+            p + refit_state_shift_px(A, f, c, p, st)) for p in px] :
+            (fiber_fill == "fill_only" ? arcmodel(st)(f, c, px) : fill(NaN, length(px)))
+    tp_missing = (Tp !== nothing && fiber_fill == "fill_only") ? count(f -> !TP[2][f], 1:N_FIBERS) : 0
     # ---------------- pass A: relative model and sky measurements per exposure
     for (k, (e, kind)) in enumerate(exps)
-        uf = joinpath(mdir, "ar1Dunical_$(tele)_$(mjd)_$(_arc_expstr(e))_$(kind).h5")
-        p1type[k] = String(refit_meta(uf, "wavecal_type", ""))
-        tm = refit_meta(uf, "mjd_mid_exposure", NaN)
+        if inorder
+            tm = arclamp_mjd_mid(ar1dcal_name(mdir, tele, mjd, e, FIRST_CHIP, kind))
+        else
+            uf = joinpath(mdir, "ar1Dunical_$(tele)_$(mjd)_$(_arc_expstr(e))_$(kind).h5")
+            p1type[k] = String(refit_meta(uf, "wavecal_type", ""))
+            tm = refit_meta(uf, "mjd_mid_exposure", NaN)
+        end
         tmid[k] = tm isa Real ? Float64(tm) : NaN
+        bits[k] |= extra_bits
         sky = kind == "object" ? refit_read_sky(mdir, tele, mjd, e) : nothing
         (sky !== nothing && isempty(sky.pix)) && (sky = nothing)
         hassky[k] = sky !== nothing
@@ -539,9 +589,11 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
     wtype = fill("", nE)
     px_all = collect(1.0:N_XPIX)
     for (k, (e, kind)) in enumerate(exps)
-        src = refit_pass1_source(apred_dir, wavecal_dir, tele, mjd, e, kind, p1type[k])
+        src = inorder ? nothing : refit_pass1_source(apred_dir, wavecal_dir, tele, mjd, e, kind, p1type[k])
         G = nothing
-        if route[k] == :pass1
+        if route[k] == :pass1 && inorder
+            wtype[k] = "none_none"      # no in-order solution: the caller's fallback decides
+        elseif route[k] == :pass1
             nm, bb = refit_pass1_type(p1type[k])
             wtype[k] = nm
             bits[k] |= bb | WAVE_PASS1_COPY
@@ -589,6 +641,12 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
             (isfinite(xres[k]) && abs(xres[k]) > cfg.xcheck_threshold_ms) && (bits[k] |= WAVE_LEVEL_INCONSISTENT)
         end
         G === nothing && continue
+        if route[k] != :pass1 && (nfill > 0 || (route[k] == :arc && tp_missing > 0))
+            bits[k] |= WAVE_FIBER_FILLED
+        end
+        # the in-order caller writes the per-exposure product here and may add bits (e.g. a final
+        # fill of non-finite fibers); its return value is OR'd into the exposure's bits
+        on_grid === nothing || (bits[k] |= on_grid(k, e, kind, G, wtype[k], bits[k], xres[k]))
         coeffs[:, :, :, k], cmax[k] = refit_grid_to_coeffs(G, B)
         if src !== nothing
             Gp1 = try
@@ -621,6 +679,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::R
         "neon_offset_fingerprint" => refit_fingerprint(cfg.neon_offset_file),
         "arc_reference_cluster" => refcl, "reg_weight" => wreg,
         "sky_anchor_night" => anchor_night, "bit_names" => join(WAVE_BIT_NAMES, ","),
+        "inorder" => inorder, "fiber_fill" => String(fiber_fill), "n_arc_fibers_filled" => nfill,
         # where each scale enters (ARCFPI_VALIDATION scales list)
         "scale_arc_chip" => A === nothing ? "none" : A.chip_scale_source,
         "scale_comb" => "comb chip transform (cporder 1) and quartic fitted per night; cavity (L, eps) per night",

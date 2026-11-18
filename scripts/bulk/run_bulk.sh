@@ -99,6 +99,15 @@ if [ "${AR_CHIP_TRANSFORM_CAL+set}" = "set" ]; then
 else
     chip_cal_opt=()
 fi
+# Wavelength-chain order (pipeline_2d_1d.jl --wavecal_order), same mechanism:
+#   unset          -> no flag: pipeline_2d_1d.jl default (legacy)
+#   legacy         -> sky -> FPI comb -> night average -> per-exposure dither (unchanged)
+#   arc_first      -> arcs -> arc-seeded comb -> per-exposure FPI-fiber/sky terms, in order
+if [ "${AR_WAVECAL_ORDER+set}" = "set" ] && [ -n "$AR_WAVECAL_ORDER" ]; then
+    wavecal_order_opt=(--wavecal_order "$AR_WAVECAL_ORDER")
+else
+    wavecal_order_opt=()
+fi
 
 runname="allobs_${mjd_start}_${mjd_end}"
 almanac_file=${outdir}almanac/${runname}.h5
@@ -210,7 +219,7 @@ if [ "$run_2d_only" != "true" ]; then
     do
         print_elapsed_time "Running 2D->1D Pipeline for $tele"
         mkdir -p ${outdir}/wavecal
-        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode "${chip_cal_opt[@]}"
+        julia +$julia_version --project=$base_dir $base_dir/pipeline_2d_1d.jl --tele $tele --runlist $runlist --outdir $outdir --runname $runname --checkpoint_mode $checkpoint_mode "${chip_cal_opt[@]}" "${wavecal_order_opt[@]}"
     done
     # ## Plots
     #     print_elapsed_time "Making Plots"

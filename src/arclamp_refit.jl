@@ -75,6 +75,17 @@ const WAVE_ANCHOR_NOT_PREFERRED = 1 << 27  # anchor block of a non-preferred kin
 const WAVE_ANCHOR_UNVERIFIED = 1 << 28     # anchoring arc sequence not verified by the 0.02 px gate (ungated, few lines,
                                            # lamp mismatch, or only gate-failed sequences left)
 const WAVE_FPS_NO_COMB = 1 << 29           # FPS era (plate/FPS MJD boundary) but no night comb: arc-route fallback
+# in-order nightly pipeline (`--wavecal_order arc_first`, src/wavecal_arcfirst.jl)
+const WAVE_FIBER_FILLED = 1 << 30          # >= 1 fiber has no own fit at its route (arc fiber or template fit
+                                           # missing): filled across the slit (interpolate_wave_params) or by
+                                           # the arc shape / nearest finite fiber
+const WAVE_REANCHORED = 1 << 32            # arc_first: the end-of-night check rejected the first comb anchor;
+                                           # the comb was re-anchored on the next candidate (conditional 2nd pass)
+const WAVE_ANCHOR_CHECK_FAILED = 1 << 33   # arc_first: no candidate passed the end-of-night check (cap reached);
+                                           # the candidate with the smallest check metric is kept
+const WAVE_NOT_ARCFIRST = 1 << 31          # arc_first run, but this exposure has no arc-first solution (no usable
+                                           # arcs on the night, or the night's arc-first chain failed): the legacy
+                                           # chain's product (or its night-average / rough fallback) was resampled
 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
@@ -84,7 +95,8 @@ const WAVE_BIT_NAMES = [
     "WAVE_FPIFIB_ROTATION", "WAVE_PASS1_COPY", "WAVE_SHAPE_ARC", "WAVE_SKY_ANCHOR_NIGHT",
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
     "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_FALLBACK", "WAVE_ANCHOR_NOT_SAME_BLOCK",
-    "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB"]
+    "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_FIBER_FILLED",
+    "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED"]
 
 """Era of a telescope-night, keyed ONLY on the canonical plate/FPS MJD boundary
 (`get_fps_plate_divide`: FPS is mjd > divide), never on whether FPI light exists that night."""
@@ -382,6 +394,37 @@ function load_refit_arc(fname::AbstractString)
             Float64(read(f["tau_mjd_mean"])), Int(read(f["night_flags"])),
             Int.(read(f["seq_flags"])), css, lines)
     end
+end
+
+"""
+    refit_arc_fill_fibers(A) -> (A_filled, n_filled)
+
+Fibers without an arc fit (`okf` false or non-finite parameters) get their 9 per-fiber parameters
+(a_R, b_R, a_B, b_B, p0..p4) from the existing across-slit regulariser `interpolate_wave_params`
+(quadratic in fiber with per-MTP-block steps; the constant term per MTP block), evaluated on the
+fitted fibers. Fitted fibers are NOT changed ("fill_only"). Used by the in-order nightly path
+(`fiber_fill = "fill_only"`) so every fiber has a solution; the refit keeps NaN (`"none"`).
+"""
+function refit_arc_fill_fibers(A::RefitArc)
+    bad = [!(A.okf[f] && all(isfinite, view(A.TH, f, :))) for f in 1:N_FIBERS]
+    nb = count(bad)
+    (nb == 0 || nb == N_FIBERS) && return A, 0
+    TH = copy(A.TH)
+    TH[bad, :] .= NaN
+    inl, ilin = interpolate_wave_params(collect(1:N_FIBERS), TH[:, 1:4], TH[:, 5:9]; block_steps = true)
+    for f in findall(bad)
+        TH[f, 1:4] .= inl[f, :]
+        TH[f, 5:9] .= ilin[f, :]
+    end
+    # an MTP block without any fitted fiber can leave NaN: nearest filled-or-fitted fiber
+    good = [all(isfinite, view(TH, f, :)) for f in 1:N_FIBERS]
+    for f in findall(.!good)
+        g = findall(good)
+        TH[f, :] .= TH[g[argmin(abs.(g .- f))], :]
+    end
+    okf = trues(N_FIBERS)
+    return RefitArc(A.fname, TH, Vector{Bool}(okf), A.g, A.lay, A.used, A.grp_u, A.tau_u, A.tseq_u,
+        A.clus_u, A.tmean, A.night_flags, A.seq_flags, A.chip_scale_source, A.lines), nb
 end
 
 "An arc night fit is usable: at least one sequence in the final fit and >= 100 fitted fibers."
@@ -714,7 +757,8 @@ exposure) pair (QA); `kind` names the anchor kind, `rank` the chosen sequence's 
 """
 function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, combs, tele;
         scis = NamedTuple[], anchor_block = "nearest_science", anchor_prefer = "strict",
-        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, pos_match_px = 0.25)
+        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, pos_match_px = 0.25,
+        exclude_seqs = Int[])
     nU = length(A.used)
     nC = length(combs)
     offs = fill(NaN, nU, nC)
@@ -752,7 +796,9 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
         end
         return b
     end
-    bc = [bestcomb(j) for j in 1:nU]
+    # `exclude_seqs` (used-sequence indices j): candidates rejected by a later verification (the
+    # in-order chain's end-of-night check); they take no comb, so the rule falls to the next one
+    bc = [j in exclude_seqs ? (Inf, 0) : bestcomb(j) for j in 1:nU]
     # science exposures: times and, for the nearest one, the measured arc - science offset
     st_sci = Float64[s.t for s in scis]
     dts = fill(Inf, nU)
@@ -768,6 +814,32 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
     return (; ok = true, state = (A.grp_u[jj], d, t, A.tau_u[jj]), k_comb = k, j_seq = jj, bits,
         dt_h = dt, offset_px = offs[jj, k], reason = "", offsets = offs, kind, rank,
         dt_sci_h = S.dt_sci_h, quality = q[jj])
+end
+
+"""
+    refit_anchor_candidates(A, seq_flags, combs, tele; max_n = 10, kw...) -> Vector{NamedTuple}
+
+The ordered list of anchor candidates (arc sequence, paired comb exposure) that the configured rule
+(`anchor_block`, `anchor_prefer`, `anchor_pairing`; dispatched in `refit_choose_anchor` /
+`refit_anchor_select`, where a new rule such as a verified-pair rule drops in) would take in turn
+if each earlier one were rejected. Each element: (j_seq (used-sequence index), seq (almanac
+sequence), k_comb, verified = quality tier 0 and same calibration block, bits, kind, rank,
+offset_px, dt_h). The in-order chain re-anchors on the next element when its end-of-night check
+fails.
+"""
+function refit_anchor_candidates(A::RefitArc, seq_flags::AbstractVector{<:Integer}, combs, tele;
+        max_n::Integer = 10, kw...)
+    out = NamedTuple[]
+    ex = Int[]
+    for _ in 1:max_n
+        P = refit_choose_anchor(A, seq_flags, combs, tele; kw..., exclude_seqs = copy(ex))
+        (P.ok && P.j_seq > 0) || break
+        push!(out, (; j_seq = P.j_seq, seq = A.used[P.j_seq], k_comb = P.k_comb,
+            verified = P.quality == 0 && (P.bits & WAVE_ANCHOR_NOT_SAME_BLOCK) == 0, bits = P.bits,
+            kind = P.kind, rank = P.rank, offset_px = P.offset_px, dt_h = P.dt_h))
+        push!(ex, P.j_seq)
+    end
+    return out
 end
 
 """Integer-order change per fiber-chip between the new comb and the pass-1 comb solution (both in
@@ -798,9 +870,10 @@ then the production comb loop (L, eps refit per night). Returns a NamedTuple (`o
 function refit_arc_anchored_comb(fpi_fnames::AbstractVector{<:AbstractString}, A::RefitArc,
         combs, tele; seq_flags, pass1_comb = nothing, pos_match_px = 0.25, comb_arc_qa_ms = 150.0,
         scis = NamedTuple[], anchor_block = "nearest_science", anchor_prefer = "strict",
-        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2)
+        anchor_samepos = "pass1", anchor_pairing = "block", anchor_block_h = 1.5, n_sigma = 4, max_iter = 2,
+        exclude_seqs = Int[])
     P = refit_choose_anchor(A, seq_flags, combs, tele; scis, anchor_block, anchor_prefer, anchor_samepos, anchor_pairing,
-        anchor_block_h, pos_match_px)
+        anchor_block_h, pos_match_px, exclude_seqs)
     P.ok || return (; ok = false, reason = P.reason, cluster_offsets_px = vec(P.offsets))
     st = P.state
     order = vcat(P.k_comb, setdiff(1:length(fpi_fnames), P.k_comb))
