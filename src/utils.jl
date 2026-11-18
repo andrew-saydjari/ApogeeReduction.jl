@@ -28,9 +28,27 @@ function initalize_git(git_dir)
         return "", "", false
     end
 end
-# this will be reexecuted each time utils.jl is included somewhere, this is not inherently a problem
-# but it is a symptom of the fact that the include situation is a bit tangled
-const git_branch, git_commit, git_clean = initalize_git(dirname(Base.active_project()) * "/")
+# Provenance of the code that is RUNNING: read at load time (`__init__` -> `refresh_git_provenance!`),
+# never at precompile time (a `const` here froze the commit and dirty state of whatever tree was
+# precompiled, so products could record a commit other than the one that ran). The repository read
+# is the package's own source directory (the parent of `src/`), not the active project's.
+git_branch = ""
+git_commit = ""
+git_clean = false
+"""
+    refresh_git_provenance!(git_dir = dirname(@__DIR__) * "/")
+
+(Re)read the branch, HEAD commit and clean state of the package's git checkout into the globals
+`git_branch`, `git_commit`, `git_clean` recorded by `safe_jldsave`. Called from `__init__`.
+"""
+function refresh_git_provenance!(git_dir = dirname(@__DIR__) * "/")
+    global git_branch, git_commit, git_clean
+    b, c, k = initalize_git(git_dir)
+    git_branch = String(b)
+    git_commit = string(c)
+    git_clean = Bool(k)
+    return git_branch, git_commit, git_clean
+end
 
 # 0 	1 	reference array pixels
 # 1 	2 	reference pixels

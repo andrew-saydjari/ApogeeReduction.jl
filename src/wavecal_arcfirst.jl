@@ -34,9 +34,10 @@ const ARCFIRST_STAGES = [
     (stage = "peaks", reads = ["ar1Dcal"], writes = ["skyLinePeaks", "fpiPeaks", "arclampPeaks"]),
     (stage = "arc", reads = ["ar1Dcal", "almanac", "arc_linelist", "chip_transform"], writes = ["arclampWaveCalNight"]),
     (stage = "comb", reads = ["fpiPeaks", "ar1Dcal", "almanac", "arclampWaveCalNight"], writes = ["waveCalFPIArc"]),
+    (stage = "anchorcheck", reads = ["waveCalFPIArc"], writes = ["anchorCheck"]),   # this + neighbouring nights' combs
     (stage = "fpifib", reads = ["ar1Dcal", "waveCalFPIArc"], writes = ["fpiGuidePos"]),
     (stage = "assemble", reads = ["ar1Dcal", "skyLinePeaks", "arclampWaveCalNight", "waveCalFPIArc",
-        "fpiGuidePos", "shape_template", "arc_linelist"], writes = ["waveCalRefit", "waveCalExp"]),
+        "fpiGuidePos", "anchorCheck", "shape_template", "arc_linelist"], writes = ["waveCalRefit", "waveCalExp"]),
     (stage = "crossnight", reads = ["waveCalFPIArc"], writes = ["crossnight_flags"]),   # this + EARLIER nights
     (stage = "resample", reads = ["ar1Dcal", "waveCalExp"], writes = ["ar1Duni"]),
 ]
@@ -124,9 +125,9 @@ not be "pass1"). Returns the status string (also written to `status/comb_*.txt`)
 """
 function arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg::RefitConfig, fpi_fnames,
         sci_exps, fpi_fiberIndxs = Int[], exclude_seqs = Int[], cache = Dict{Symbol, Any}(),
-        almanac_file::AbstractString = "")
+        almanac_file::AbstractString = "", force_pair = nothing, keep = nothing)
     out = refit_path(outroot, "comb", tele, mjd)
-    isfile(out) && return "done"
+    (isfile(out) && force_pair === nothing) && return "done"
     cfg.anchor_samepos == "pass1" &&
         throw(ArgumentError("anchor_samepos = \"pass1\" reads a previous run's per-exposure solutions; not allowed in order"))
     mdir = joinpath(apred_dir, string(mjd))
@@ -158,7 +159,7 @@ function arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg::RefitConfig, fp
         "g1_lit_fraction" => string(light.lit), "g2_resid_rms_A" => string(info.rms))
     prov["excluded_anchor_seqs"] = join(exclude_seqs, ",")
     st, reason = refit_comb_anchor_stage(tele, mjd; outroot, fnames = fn, combs, scis, cfg,
-        pass1_comb = nothing, provenance = prov, exclude_seqs, almanac_file)
+        pass1_comb = nothing, provenance = prov, exclude_seqs, almanac_file, force_pair, keep)
     st === nothing || return st
     return refit_write_status(outroot, "comb", tele, mjd,
         arcfirst_comb_decision(length(fn), true, true, true, false), reason)
@@ -244,61 +245,93 @@ function arcfirst_clear_night(outroot, apred_dir, tele, mjd, exps)
     end
 end
 
-"""
-    arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg, checkpoint_mode = "commit_same",
-        fiber_fill = "fill_only", noarc_fallback = "legacy", ll = nothing) -> NamedTuple
-
-Stages (b)-(e) of one night in order (see the file header). `exps`: this run's exposures of the
-night as (expnum, kind) (from the ar1Dcal file names); `fpi_fnames`: tonight's FPI fpiPeaks files
-(R-chip names). Returns `(route, arc, comb, fpifib, assemble, n_exp_written)`; `route == :legacy`
-means the caller must run the legacy chain for the night (its exposures get WAVE_NOT_ARCFIRST at
-resampling). Checkpointing: the night is redone from the arc stage unless its assembly product
-passes `check_file(...; mode = checkpoint_mode)` (clobber: always redone).
-"""
-function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::RefitConfig,
-        checkpoint_mode = "commit_same", fiber_fill = "fill_only", noarc_fallback = "legacy", ll = nothing,
-        max_reanchor::Integer = 2, sky_check_ms::Real = 1000.0)
-    fiber_fill in ARCFIRST_FIBER_FILLS || throw(ArgumentError("fiber_fill \"$(fiber_fill)\" not in $(ARCFIRST_FIBER_FILLS)"))
-    refit_check_config(cfg)
-    apred_dir = joinpath(outdir, "apred")
-    outroot = arcfirst_root(outdir)
-    exps = sort(unique(collect(Tuple{Int, String}, exps)))
-    asm = refit_path(outroot, "assemble", tele, mjd)
-    have_all = isfile(asm) && all(x -> isfile(arcfirst_exp_name(apred_dir, tele, mjd, x...)), exps)
-    if have_all && check_file(asm, mode = checkpoint_mode)
-        return (; route = :arcfirst, arc = "done", comb = "done", fpifib = "done", assemble = "done", n_exp_written = 0,
-            n_attempts = 0)
-    end
-    arcfirst_clear_night(outroot, apred_dir, tele, mjd, exps)
-    s_arc = refit_night_arc(tele, mjd; apred_dir, almanac_file, outroot, cfg)
-    arcf = refit_path(outroot, "arc", tele, mjd)
-    usable = isfile(arcf) && refit_arc_usable(load_refit_arc(arcf))
-    route = arcfirst_night_route(usable, noarc_fallback)
-    route == :legacy && return (; route, arc = s_arc, comb = "", fpifib = "", assemble = "", n_exp_written = 0,
-        n_attempts = 0)
+"In-order inputs of a night: FPI fiber indices (almanac) and the science exposure numbers."
+function arcfirst_night_inputs(tele, mjd, almanac_file, exps)
     fpi_ids = isempty(almanac_file) ? Int[] : get_fpi_fiberIDs_from_almanac(almanac_file, tele, mjd)
     fpi_idx = try
         filter(i -> 1 <= i <= N_FIBERS, fiberID2fiberIndx.(fpi_ids))
     catch
         Int[]
     end
-    sci = [e for (e, k) in exps if k == "object"]
+    return fpi_idx, [e for (e, k) in exps if k == "object"]
+end
+
+"""
+    arcfirst_night_phase1(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg, checkpoint_mode, noarc_fallback)
+
+Phase 1 of a night (stages (b) arc and (c) comb), run for EVERY night before any night's phase 2
+so that the cross-night anchor continuity step (phase 2) sees its neighbours' comb products.
+Returns `(route, arc, comb, done)`; `done = true` when the night's products already pass the
+checkpoint (phase 2 then does nothing); `route == :legacy`: no usable arc fit (legacy chain).
+"""
+function arcfirst_night_phase1(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::RefitConfig,
+        checkpoint_mode = "commit_same", noarc_fallback = "legacy")
+    refit_check_config(cfg)
+    apred_dir = joinpath(outdir, "apred")
+    outroot = arcfirst_root(outdir)
+    exps = sort(unique(collect(Tuple{Int, String}, exps)))
+    asm = refit_path(outroot, "assemble", tele, mjd)
+    have_all = isfile(asm) && all(x -> isfile(arcfirst_exp_name(apred_dir, tele, mjd, x...)), exps)
+    (have_all && check_file(asm, mode = checkpoint_mode)) &&
+        return (; route = :arcfirst, arc = "done", comb = "done", done = true)
+    arcfirst_clear_night(outroot, apred_dir, tele, mjd, exps)
+    s_arc = refit_night_arc(tele, mjd; apred_dir, almanac_file, outroot, cfg)
+    arcf = refit_path(outroot, "arc", tele, mjd)
+    usable = isfile(arcf) && refit_arc_usable(load_refit_arc(arcf))
+    route = arcfirst_night_route(usable, noarc_fallback)
+    route == :legacy && return (; route, arc = s_arc, comb = "", done = false)
+    fpi_idx, sci = arcfirst_night_inputs(tele, mjd, almanac_file, exps)
+    s_comb = arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg, fpi_fnames, sci_exps = sci,
+        fpi_fiberIndxs = fpi_idx, almanac_file)
+    return (; route, arc = s_arc, comb = s_comb, done = false)
+end
+
+"""
+    arcfirst_night_phase2(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg, fiber_fill, ll,
+        max_reanchor = 2, sky_check_ms = 1000.0, history_roots = String[]) -> NamedTuple
+
+Phase 2 of a night: (c') the cross-night anchor continuity step of verified_pair
+(`refit_night_anchorcheck`: neighbours = this run's comb products of all nights (bulk) plus
+`history_roots` (daily: earlier runs, trailing nights); a swap refits the comb through the
+in-order gather), (d) FPI fibers, (e) assembly + waveCalExp, then the end-of-night check with the
+capped conditional re-anchor (a re-anchor removes the anchor-check product: the continuity step is
+not rerun on a re-anchored comb).
+"""
+function arcfirst_night_phase2(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::RefitConfig,
+        fiber_fill = "fill_only", ll = nothing, max_reanchor::Integer = 2, sky_check_ms::Real = 1000.0,
+        history_roots = String[])
+    fiber_fill in ARCFIRST_FIBER_FILLS || throw(ArgumentError("fiber_fill \"$(fiber_fill)\" not in $(ARCFIRST_FIBER_FILLS)"))
+    apred_dir = joinpath(outdir, "apred")
+    outroot = arcfirst_root(outdir)
+    exps = sort(unique(collect(Tuple{Int, String}, exps)))
+    arcf = refit_path(outroot, "arc", tele, mjd)
     A = load_refit_arc(arcf)
+    fpi_idx, sci = arcfirst_night_inputs(tele, mjd, almanac_file, exps)
+    combfn = (fp, kp) -> arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg, fpi_fnames, sci_exps = sci,
+        fpi_fiberIndxs = fpi_idx, almanac_file, force_pair = fp, keep = kp)
+    s_check = refit_night_anchorcheck(tele, mjd; apred_dir, outroot, cfg, almanac_file, history_roots,
+        refit_comb = combfn)
     cache = Dict{Symbol, Any}()
     exclude = Int[]                  # used-sequence indices rejected by the end-of-night check
     tried = Tuple{Int, Float64}[]    # (anchor j_seq, check metric) per attempt
     checklog = String[]
-    s_comb = s_fpifib = s_asm = ""
+    s_comb = refit_read_status(outroot, "comb", tele, mjd)
+    s_fpifib = s_asm = ""
     nw = Ref(0)
     attempt = 0
     best_j = 0
+    clear_downstream() = for st in ("comb", "anchorcheck", "fpifib", "assemble")
+        rm(refit_path(outroot, st, tele, mjd); force = true)
+        rm(refit_status_path(outroot, st, tele, mjd); force = true)
+    end
     while true
-        # stages (c)-(e), a pure function of (arc fit, tonight's peaks, excluded anchors)
+        # stages (c)-(e), a pure function of (arc fit, tonight's peaks, excluded anchors); attempt 0
+        # uses phase 1's comb
         extra = attempt == 0 ? 0 : WAVE_REANCHORED
         final_fail = attempt > max_reanchor
         final_fail && (extra |= WAVE_ANCHOR_CHECK_FAILED)
-        s_comb = arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg, fpi_fnames, sci_exps = sci,
-            fpi_fiberIndxs = fpi_idx, exclude_seqs = exclude, cache, almanac_file)
+        attempt == 0 || (s_comb = arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg, fpi_fnames, sci_exps = sci,
+            fpi_fiberIndxs = fpi_idx, exclude_seqs = exclude, cache, almanac_file))
         s_fpifib = refit_night_fpifib(tele, mjd; apred_dir, outroot, cfg, exps)
         cst = refit_read_status(outroot, "comb", tele, mjd)
         gated = cst == "nocomb_gated"
@@ -306,7 +339,7 @@ function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::
         prov = Dict{String, Any}("arc_product" => arcf, "comb_status" => cst,
             "chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
             "fiber_fill" => String(fiber_fill), "anchor_attempt" => attempt,
-            "excluded_anchor_seqs" => join(exclude, ","))
+            "excluded_anchor_seqs" => join(exclude, ","), "anchorcheck_status" => String(s_check))
         writer = function (k, e, kind, G, wtype, bits, xres)
             nw[] += 1
             return arcfirst_write_exp(arcfirst_exp_name(apred_dir, tele, mjd, e, kind), G, wtype, bits, xres;
@@ -323,10 +356,7 @@ function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::
             best_j = tried[argmin(last.(tried))][1]
             exclude = [jj for (jj, _) in tried if jj != best_j]
             attempt = max_reanchor + 1
-            for st in ("comb", "fpifib", "assemble")
-                rm(refit_path(outroot, st, tele, mjd); force = true)
-                rm(refit_status_path(outroot, st, tele, mjd); force = true)
-            end
+            clear_downstream()
             continue
         end
         aseq = h5open(f -> Int(read(f["anchor_seq"])), combf, "r")
@@ -334,7 +364,7 @@ function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::
         chk = arcfirst_check_night(outroot, tele, mjd; sky_check_ms)
         push!(checklog, "attempt=$(attempt)\tanchor_seq=$(aseq)\tpass=$(chk.pass)\tverifiable=$(chk.verifiable)" *
             "\tmetric_ms=$(round(chk.metric_ms, digits = 1))\tchip_ms=$(join(round.(chk.chip_ms, digits = 1), ","))" *
-            "\tn_exp=$(chk.n_exp)\tn_slip=$(chk.n_slip)")
+            "\tn_exp=$(chk.n_exp)\tn_slip=$(chk.n_slip)\tanchorcheck=$(s_check)")
         (chk.pass || final_fail || j == 0) && break
         push!(tried, (j, isfinite(chk.metric_ms) ? chk.metric_ms : Inf))
         attempt += 1
@@ -345,14 +375,32 @@ function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::
         else
             push!(exclude, j)
         end
-        for st in ("comb", "fpifib", "assemble")
-            rm(refit_path(outroot, st, tele, mjd); force = true)
-            rm(refit_status_path(outroot, st, tele, mjd); force = true)
-        end
+        clear_downstream()
+        s_check = "skipped_reanchor"
     end
     isempty(checklog) || arcfirst_write_check(outroot, tele, mjd, checklog)
-    return (; route, arc = s_arc, comb = s_comb, fpifib = s_fpifib, assemble = s_asm, n_exp_written = nw[],
-        n_attempts = attempt + 1)
+    return (; route = :arcfirst, comb = s_comb, anchorcheck = s_check, fpifib = s_fpifib, assemble = s_asm,
+        n_exp_written = nw[], n_attempts = attempt + 1)
+end
+
+"""
+    arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg, ...) -> NamedTuple
+
+One night end to end (phase 1 then phase 2); the continuity step then sees whatever neighbouring
+comb products exist (`history_roots` and earlier nights of the same root). A run over many nights
+(`pipeline_2d_1d.jl`) calls phase 1 for all nights first.
+"""
+function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::RefitConfig,
+        checkpoint_mode = "commit_same", fiber_fill = "fill_only", noarc_fallback = "legacy", ll = nothing,
+        max_reanchor::Integer = 2, sky_check_ms::Real = 1000.0, history_roots = String[])
+    p1 = arcfirst_night_phase1(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg, checkpoint_mode, noarc_fallback)
+    p1.done && return (; route = :arcfirst, arc = "done", comb = "done", anchorcheck = "done", fpifib = "done",
+        assemble = "done", n_exp_written = 0, n_attempts = 0)
+    p1.route == :legacy && return (; route = :legacy, arc = p1.arc, comb = "", anchorcheck = "", fpifib = "",
+        assemble = "", n_exp_written = 0, n_attempts = 0)
+    p2 = arcfirst_night_phase2(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg, fiber_fill, ll,
+        max_reanchor, sky_check_ms, history_roots)
+    return merge((; arc = p1.arc), p2)
 end
 
 """Exposures (expnum, kind) of one night from ar1Dcal (or ar2D/ar1D) file names of FIRST_CHIP."""

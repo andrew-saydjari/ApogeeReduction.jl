@@ -227,13 +227,13 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor
     @test_throws ArgumentError refit_check_config(RefitConfig(plate_shape = "comb"))
     @test_throws ArgumentError refit_check_config(RefitConfig(anchor_block = "evening"))
     c = RefitConfig()
-    @test c.plate_shape == "arc" && c.anchor_block == "nearest_science" && c.anchor_prefer == "strict" &&
+    @test c.plate_shape == "arc" && c.anchor_block == "verified_pair" && c.anchor_prefer == "strict" &&
           c.anchor_pairing == "block" && c.neon == "none"
     @test !hasfield(RefitConfig, :plate_shape_apo) && !hasfield(RefitConfig, :plate_shape_lco)
     # era: canonical plate/FPS boundary (FPS = mjd > get_fps_plate_divide), the same for any FPI light
     @test refit_era("apo", 59393) == "plate" && refit_era("apo", 59558) == "fps"
     @test refit_era("lco", 59808) == "plate" && refit_era("lco", 59809) == "fps"
-    @test length(WAVE_BIT_NAMES) == 34 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
+    @test length(WAVE_BIT_NAMES) == 35 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
           WAVE_BIT_NAMES[30] == "WAVE_FPS_NO_COMB" && WAVE_FPS_NO_COMB == 1 << 29
     # anchor quality tiers
     @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_NOT_COMPARED) == 1 &&
@@ -318,8 +318,27 @@ using ApogeeReduction: refit_pair_adjacency, refit_chip_pattern_px
     @test refit_pair_adjacency((5, 6), 20, ex, code, dith) == "other"      # objects in between
     @test refit_pair_adjacency((15, 16), 8, ex, code, dith) == "other"
     @test refit_pair_adjacency((5, 6), 99, ex, code, dith) == "unknown"
+    # 2021 APO ordering T T U U D F: the second ThAr/UNe between the pair is not an interruption
+    @test refit_pair_adjacency((1, 3), 6, 1:6, ["T", "T", "U", "U", "D", "F"], fill(13.0, 6)) == "strict"
+    @test refit_pair_adjacency((1, 3), 6, 1:6, ["T", "T", "U", "U", "Q", "F"], fill(13.0, 6)) == "nomove"
     # chip pattern: a rigid shift has b = 0; a pixel motion of 0.01 px has b = 0.01
     a, b = refit_chip_pattern_px([30.0, 30.0, 30.0], "apo"); @test abs(b) < 1e-12 && a ≈ 30
     a, b = refit_chip_pattern_px(0.01 .* [4231.0, 5253.0, 6328.0], "apo"); @test b ≈ 0.01 && abs(a) < 1e-9
     @test refit_check_config(RefitConfig(anchor_block = "verified_pair", anchor_adjacency = "strict"))
+end
+
+using ApogeeReduction: refit_comb_mode_velocity, refit_strict_vmodes, REFIT_MODE_REF, REFIT_MODE_M0
+@testset "arclamp_refit fixed-mode comb velocity" begin
+    L0, e0 = REFIT_MODE_REF["apo"]
+    @test abs(refit_comb_mode_velocity(L0, e0, "apo")) < 1e-6
+    # a rigid scaling of every comb wavelength (L -> L (1 + v/c)) is that velocity
+    @test refit_comb_mode_velocity(L0 * (1 + 25.0 / 299792458.0), e0, "apo") ≈ 25.0 atol = 1e-3
+    # an L - eps trade at the fixed mode leaves the velocity unchanged
+    dL = 111.0
+    @test abs(refit_comb_mode_velocity(L0 + dL, e0 + dL / L0 * (REFIT_MODE_M0 + e0), "apo")) < 1e-3
+    # one whole order is wrapped away
+    @test abs(refit_comb_mode_velocity(L0, e0 + 1.0, "apo") - refit_comb_mode_velocity(L0, e0, "apo")) < 1.0
+    @test isempty(refit_strict_vmodes("/nonexistent/waveCalFPIArc_apo_1.h5"))
+    @test ApogeeReduction.WAVE_ANCHOR_TREND_OUTLIER == 1 << 30
+    @test refit_check_config(RefitConfig(anchor_trend = "trailing")) && RefitConfig().anchor_trend == "both"
 end

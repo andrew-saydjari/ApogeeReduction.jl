@@ -26,7 +26,7 @@ using HDF5
             @test !(r in ("wavecalNightAve", "waveCalNightfpiDither", "waveCalNightskyDither", "waveCalFPI",
                           "ar1Duni", "ar1Dunical"))
         end
-        @test [s.stage for s in S] == ["peaks", "arc", "comb", "fpifib", "assemble", "crossnight", "resample"]
+        @test [s.stage for s in S] == ["peaks", "arc", "comb", "anchorcheck", "fpifib", "assemble", "crossnight", "resample"]
     end
 
     @testset "night route and comb decision" begin
@@ -42,7 +42,7 @@ using HDF5
     end
 
     @testset "bits" begin
-        @test length(AR.WAVE_BIT_NAMES) == 34
+        @test length(AR.WAVE_BIT_NAMES) == 35
         for (i, n) in enumerate(AR.WAVE_BIT_NAMES)
             @test getfield(AR, Symbol(n)) == 1 << (i - 1)
         end

@@ -5,6 +5,8 @@ function __init__()
     if !haskey(ENV, "SLACK_CHANNEL")
         ENV["SLACK_CHANNEL"] = "C07KQ7BJY5P" #apogee-reduction-jl-dev
     end
+    # record the provenance of the code actually running (not of the precompiled tree)
+    refresh_git_provenance!()
 end
 
 export N_FIBERS, N_XPIX, N_CHIPS, CHIP_LIST, FIRST_CHIP, LAST_CHIP
