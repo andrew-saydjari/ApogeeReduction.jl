@@ -35,6 +35,10 @@ include("arclamp_peaks.jl")
 # stage-1 arc-lamp wavelength calibration (new night product, read by nothing yet;
 # uses fit_gauss_and_bias from arclamp_peaks.jl and positional_poly_mat from wavecal.jl)
 include("arclamp_wavecal.jl")
+# arc + FPI wavelength refit, design stages 3-6 (offline/bulk; nothing in the pipeline calls it;
+# uses comb_fpi_fit_core from wavecal.jl and the stage-1 fit above)
+include("arclamp_refit.jl")
+include("arclamp_refit_night.jl")
 include("spectraInterpolation.jl")
 include("traceExtract_GH.jl")
 # lsf.jl depends on traceExtract_GH.jl (int_gauss_hermite_term) and
