@@ -610,6 +610,13 @@ const REFIT_LOCAL_MIDNIGHT_FRAC = Dict("apo" => 0.29, "lco" => 0.18)
 "Arc taken after local midnight (the UT day wraps during the night, so compare in local time)."
 refit_is_morning(tele, t) = isfinite(t) && (mod(t - REFIT_LOCAL_MIDNIGHT_FRAC[String(tele)] + 0.5, 1.0) - 0.5) > 0
 
+# ---- SEQUENCE-QUALITY ADAPTER ---------------------------------------------------------------
+# The only places that interpret the stage-1 per-sequence / per-night arc flags (ARCSEQ_*,
+# ARCNIGHT_*): `refit_anchor_quality`, `refit_seq_gated` (here) and `refit_arc_night_bits` (top of
+# the file). When #417 replaces gate B (new flag meanings / bit positions) only these change.
+"Sequence verified by the stage-1 sequence check (used by the \"morning\" anchor rule)."
+refit_seq_gated(sf::Integer) = (sf & ARCSEQ_UNGATED) == 0
+
 """Quality tier of an arc sequence for anchoring, from its stage-1 flags: 0 = verified by the 0.02 px
 gate and clean; 1 = not gate-verified (ungated) or few lines / lamp mismatch; 2 = gate failure or
 position outlier (only in the final fit when every gated sequence failed)."""
@@ -804,7 +811,7 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
     dts = fill(Inf, nU)
     samepos = anchor_samepos == "pass1" ? refit_anchor_samepos(A, scis, pos_match_px) : falses(nU)
     S = refit_anchor_select(anchor_block, A.tseq_u, q, [x[1] for x in bc], [x[2] for x in bc], st_sci,
-        Vector{Bool}(samepos), [(seq_flags[A.used[j]] & ARCSEQ_UNGATED) == 0 for j in 1:nU],
+        Vector{Bool}(samepos), [refit_seq_gated(seq_flags[A.used[j]]) for j in 1:nU],
         [refit_is_morning(tele, t) for t in A.tseq_u]; prefer = anchor_prefer, anchor_block_h)
     S.ok || return (; ok = false,
         reason = "no arc sequence matches any comb exposure by measured position", offsets = offs)

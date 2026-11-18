@@ -42,6 +42,16 @@ const NIGHTS = CSV.read(A_["nights"], DataFrame)
 const IN = Ref(A_["inputs"])
 const OUTROOT = Ref(A_["outroot"])
 
+"Symlink unless it exists (parallel workers share the almanac link)."
+function safe_symlink(target, l)
+    (islink(l) || isfile(l)) && return
+    try
+        symlink(target, l)
+    catch
+        (islink(l) || isfile(l)) || rethrow()
+    end
+end
+
 "Mode working directory with symlinks to the input copies of a night."
 function setup_mode(mode, tele, mjd)
     od = joinpath(OUTROOT[], mode)
@@ -50,12 +60,12 @@ function setup_mode(mode, tele, mjd)
     mkpath(joinpath(od, "almanac"))
     mkpath(joinpath(od, "wavecal"))
     alm = joinpath(od, "almanac", A_["almanac_name"])
-    islink(alm) || isfile(alm) || symlink(joinpath(IN[], A_["almanac_name"]), alm)
+    safe_symlink(joinpath(IN[], A_["almanac_name"]), alm)
     src = joinpath(IN[], "apred", string(mjd))
     for f in readdir(src)
         occursin("_$(tele)_$(mjd)_", f) || continue
         l = joinpath(md, f)
-        islink(l) || isfile(l) || symlink(joinpath(src, f), l)
+        safe_symlink(joinpath(src, f), l)
     end
     return od, md, alm
 end
