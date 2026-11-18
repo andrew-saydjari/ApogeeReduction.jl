@@ -1,6 +1,61 @@
 import FastRunningMedian: running_median
 using Optim, HDF5
 
+"""
+    BoxAffineSimplexer(lb, ub; a = 0.025, b = 0.5, frac = 0.5)
+
+Initial Nelder-Mead simplex for `Fminbox(NelderMead())` that stays strictly inside the
+box `[lb, ub]`.
+
+Vertex `j` is Optim's default `AffineSimplexer` vertex, `(1 + b) * x0[j] + a`, clamped to
+lie at most `frac` of the way from `x0[j]` to the bound it would cross. The default
+simplex ignores the box: for the sky-line centroid (`x0 ~ 1000 px`, box `+-10 px`) the
+vertex lands ~500 px outside, where Fminbox's barrier is `Inf`. Optim <= 1.11 tolerated
+an `Inf` vertex (Nelder-Mead contracted away from it). Optim >= 1.12 treats a non-finite
+initial simplex as "stopped" and returns at iteration 0: 1.12-1.13 return the
+out-of-box vertex itself (centroid ~500 px off) and 2.x return the best finite vertex
+(centroid never moves from the seed). Keeping every vertex inside the box gives a
+working fit on all versions. The simplex is rebuilt around the current point on each
+Fminbox outer iteration, so the clamp is applied every time.
+"""
+struct BoxAffineSimplexer{T <: AbstractVector} <: Optim.Simplexer
+    a::Float64
+    b::Float64
+    lb::T
+    ub::T
+    frac::Float64
+end
+function BoxAffineSimplexer(lb, ub; a = 0.025, b = 0.5, frac = 0.5)
+    BoxAffineSimplexer(a, b, lb, ub, frac)
+end
+
+function Optim.simplexer(S::BoxAffineSimplexer, x0::Tx) where {Tx}
+    simplex = Tx[copy(x0) for _ in 1:(length(x0) + 1)]
+    for j in eachindex(x0)
+        v = (1 + S.b) * x0[j] + S.a
+        lo = x0[j] - S.frac * (x0[j] - S.lb[j])
+        hi = x0[j] + S.frac * (S.ub[j] - x0[j])
+        simplex[j + 1][j] = clamp(v, lo, hi)
+    end
+    return simplex
+end
+
+"""
+    box_nelder_mead_fit(f, lb, ub, p0)
+
+Box-constrained Nelder-Mead minimisation used by the sky-line profile fits:
+`Fminbox(NelderMead())` with an in-box initial simplex (see `BoxAffineSimplexer`).
+Returns the minimizer. A minimizer outside `[lb, ub]` (which a working Fminbox never
+returns) is replaced by NaNs, so a broken optimizer cannot silently write wrong peaks.
+"""
+function box_nelder_mead_fit(f, lb, ub, p0)
+    res = Optim.optimize(f, lb, ub, p0,
+        Fminbox(NelderMead(initial_simplex = BoxAffineSimplexer(lb, ub))))
+    p = Optim.minimizer(res)
+    all(lb .<= p .<= ub) || return fill(NaN, length(p))
+    return p
+end
+
 # wavecal_class codes stored in the skyLinePeaks product (numeric for portability):
 # B = associate + fit + use in the wavelength solution;
 # A = associate + fit only (association guard; NaN-masked at ingest, see
@@ -513,16 +568,14 @@ function get_sky_peaks(flux_vec, tele, chip, roughwave_dict, df_sky_lines;
         lb = [0.0, cpix - 10, 0.3, -5, 0]
         ub = [20 * yamp, cpix + 10, 3.0, 5, 2 * yoffset]
 
-        opt_prob = Optim.optimize(gfit, lb, ub, p0, Fminbox(NelderMead()))
-        fitparams = Optim.minimizer(opt_prob)
+        fitparams = box_nelder_mead_fit(gfit, lb, ub, p0)
 
         model_pred = gfit2(fitparams)
         mod_res = y .- model_pred
         exclude_idx = argmax(abs.(mod_res))
 
         gfit_excl = (p) -> gfit(p; exclude_idx = exclude_idx)
-        opt_prob = Optim.optimize(gfit_excl, lb, ub, p0, Fminbox(NelderMead()))
-        fitparams = Optim.minimizer(opt_prob)
+        fitparams = box_nelder_mead_fit(gfit_excl, lb, ub, p0)
 
         # weight-averaged component position with the corrected pairing
         # (equals fitparams[2] for 1:1 weights)
