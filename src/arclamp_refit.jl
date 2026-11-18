@@ -606,6 +606,61 @@ function refit_anchor_rank(tseq::AbstractVector{<:Real}, quality::AbstractVector
 end
 
 """
+    refit_anchor_select(anchor_block, tseq, quality, comb_dt_h, comb_k, sci_t, samepos, gated, morning;
+        prefer = "strict", anchor_block_h = 1.5) -> NamedTuple
+
+Pure selection kernel of `refit_choose_anchor` (also used by the rule comparison scripts). Per
+used arc sequence j: `quality[j]` (`refit_anchor_quality`), its nearest comb exposure at a matching
+MEASURED position (`comb_dt_h[j]` h, `comb_k[j]`, 0 = none), whether it matches the nearest science
+exposure's measured position (`samepos[j]`), gate-verified (`gated[j]`) and after local midnight
+(`morning[j]`, used by the "morning" switch only). Returns (ok, j, bits, kind, rank, dt_sci_h)
+with all anchor bits (FALLBACK, NOT_SAME_BLOCK, NOT_PREFERRED, UNVERIFIED).
+"""
+function refit_anchor_select(anchor_block::AbstractString, tseq::AbstractVector{<:Real},
+        quality::AbstractVector{<:Integer}, cdt::AbstractVector{<:Real}, ck::AbstractVector{<:Integer},
+        sci_t::AbstractVector{<:Real}, samepos::AbstractVector{Bool}, gated::AbstractVector{Bool},
+        morning::AbstractVector{Bool}; prefer::AbstractString = "strict", anchor_block_h::Real = 1.5)
+    nU = length(tseq)
+    bits = 0
+    kind = String(anchor_block)
+    rk = refit_anchor_rank(tseq, quality, sci_t, samepos; prefer)
+    fail = (; ok = false, j = 0, bits = 0, kind = "none", rank = 0, dt_sci_h = NaN)
+    if anchor_block == "nearest_science" && any(isfinite, sci_t)
+        order = rk.order
+        r = something(findfirst(j -> ck[j] > 0 && cdt[j] <= anchor_block_h, order),
+            findfirst(j -> ck[j] > 0, order), 0)
+        r == 0 && return fail
+        jj = order[r]
+        r > 1 && (bits |= WAVE_ANCHOR_FALLBACK)
+        rk.pref[jj] || (bits |= WAVE_ANCHOR_NOT_PREFERRED)
+        kind = "nearest_science:" * (samepos[jj] ? "same_position" : rk.trailing[jj] ? "end_of_sequence" : "other")
+        rank = r
+    else
+        # "morning", "any", or "nearest_science" without science exposures: smallest arc - comb |dt|
+        cand = collect(1:nU)
+        if anchor_block == "nearest_science"
+            bits |= WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
+            kind = "nearest_science:no_science"
+        elseif anchor_block == "morning"
+            mo = [j for j in 1:nU if morning[j] && gated[j]]
+            isempty(mo) ? (bits |= WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED) : (cand = mo)
+        end
+        pick(js) = isempty(js) ? 0 : js[argmin([(cdt[j], j) for j in js])]
+        jj = pick([j for j in cand if ck[j] > 0])
+        if jj == 0 && length(cand) < nU
+            bits |= WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
+            jj = pick([j for j in 1:nU if ck[j] > 0])
+        end
+        jj == 0 && return fail
+        anchor_block == "morning" && (kind = morning[jj] ? "morning" : "evening")
+        rank = 1 + count(j -> ck[j] > 0 && (cdt[j], j) < (cdt[jj], jj), 1:nU)
+    end
+    quality[jj] > 0 && (bits |= WAVE_ANCHOR_UNVERIFIED)
+    cdt[jj] > anchor_block_h && (bits |= WAVE_ANCHOR_NOT_SAME_BLOCK)
+    return (; ok = true, j = jj, bits, kind, rank, dt_sci_h = rk.dt_sci_h[jj])
+end
+
+"""
     refit_choose_anchor(A, seq_flags, combs, tele; scis, anchor_block, anchor_prefer, anchor_pairing,
         anchor_block_h, pos_match_px)
 
@@ -685,49 +740,17 @@ function refit_choose_anchor(A::RefitArc, seq_flags::AbstractVector{<:Integer}, 
             samepos[j] = isfinite(o) && abs(o) < pos_match_px
         end
     end
-    bits = 0
-    kind = String(anchor_block)
-    rk = refit_anchor_rank(A.tseq_u, q, st_sci, Vector{Bool}(samepos); prefer = anchor_prefer)
-    order = collect(1:nU)
-    if anchor_block == "nearest_science" && any(isfinite, st_sci)
-        order = rk.order
-        j = something(findfirst(jj -> bc[jj][1] <= anchor_block_h, order),
-            findfirst(jj -> bc[jj][2] > 0, order), 0)
-        j == 0 && return (; ok = false,
-            reason = "no arc sequence matches any comb exposure by measured position", offsets = offs)
-        jj = order[j]
-        j > 1 && (bits |= WAVE_ANCHOR_FALLBACK)
-        rk.pref[jj] || (bits |= WAVE_ANCHOR_NOT_PREFERRED)
-        kind = "nearest_science:" * (samepos[jj] ? "same_position" : rk.trailing[jj] ? "end_of_sequence" : "other")
-        rank = j
-    else
-        # "morning", "any", or "nearest_science" without science exposures: smallest arc - comb |dt|
-        cand = collect(1:nU)
-        if anchor_block == "nearest_science"
-            bits |= WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
-            kind = "nearest_science:no_science"
-        elseif anchor_block == "morning"
-            morning = [j for j in 1:nU if refit_is_morning(tele, A.tseq_u[j]) && (seq_flags[A.used[j]] & ARCSEQ_UNGATED) == 0]
-            isempty(morning) ? (bits |= WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED) : (cand = morning)
-        end
-        pick(js) = isempty(js) ? 0 : js[argmin([(bc[j][1], j) for j in js])]
-        jj = pick([j for j in cand if bc[j][2] > 0])
-        if jj == 0 && length(cand) < nU
-            bits |= WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
-            jj = pick([j for j in 1:nU if bc[j][2] > 0])
-        end
-        jj == 0 && return (; ok = false,
-            reason = "no arc sequence matches any comb exposure by measured position", offsets = offs)
-        anchor_block == "morning" && (kind = refit_is_morning(tele, A.tseq_u[jj]) ? "morning" : "evening")
-        rank = 1 + count(j -> bc[j][2] > 0 && (bc[j][1], j) < (bc[jj][1], jj), 1:nU)
-    end
-    q[jj] > 0 && (bits |= WAVE_ANCHOR_UNVERIFIED)
+    S = refit_anchor_select(anchor_block, A.tseq_u, q, [x[1] for x in bc], [x[2] for x in bc], st_sci,
+        Vector{Bool}(samepos), [(seq_flags[A.used[j]] & ARCSEQ_UNGATED) == 0 for j in 1:nU],
+        [refit_is_morning(tele, t) for t in A.tseq_u]; prefer = anchor_prefer, anchor_block_h)
+    S.ok || return (; ok = false,
+        reason = "no arc sequence matches any comb exposure by measured position", offsets = offs)
+    jj, bits, kind, rank = S.j, S.bits, S.kind, S.rank
     dt, k = bc[jj]
-    dt > anchor_block_h && (bits |= WAVE_ANCHOR_NOT_SAME_BLOCK)
     d, t = arcfit_seq_state(A.g, A.lay, jj)
     return (; ok = true, state = (A.grp_u[jj], d, t, A.tau_u[jj]), k_comb = k, j_seq = jj, bits,
         dt_h = dt, offset_px = offs[jj, k], reason = "", offsets = offs, kind, rank,
-        dt_sci_h = rk.dt_sci_h[jj], quality = q[jj])
+        dt_sci_h = S.dt_sci_h, quality = q[jj])
 end
 
 """Integer-order change per fiber-chip between the new comb and the pass-1 comb solution (both in
