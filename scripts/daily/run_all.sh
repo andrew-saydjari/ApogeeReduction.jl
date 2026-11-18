@@ -89,7 +89,7 @@ fi
 # the robust behaviour (first value); the pre-existing behaviour is the second value of each:
 #   AR_TRACE_IDENTIFY  robust|production     make_traces_from_flats.jl --trace_identify
 #   AR_TRACE_SELECT    gated|last            pipeline_2d_1d.jl --trace_select
-#   AR_TRACE_FALLBACK  none|fixed_file       pipeline_2d_1d.jl --trace_fallback
+#   AR_TRACE_FALLBACK  none|template|T1,T2|fixed_file  pipeline_2d_1d.jl --trace_fallback (template levels need AR_TRACE_TEMPLATE_CAL)
 trace_identify_opt=(); trace_main_opt=()
 if [ -n "${AR_TRACE_IDENTIFY:-}" ]; then trace_identify_opt=(--trace_identify "$AR_TRACE_IDENTIFY"); fi
 if [ -n "${AR_TRACE_SELECT:-}" ]; then trace_main_opt+=(--trace_select "$AR_TRACE_SELECT"); fi

@@ -43,7 +43,7 @@ _medornan(v) = isempty(v) ? NaN : median(v)
 # Night-level bits are replicated into every fiber, so a consumer needs only this array.
 # Severity follows the wavelength-flag scheme (ARCLAMP_PRODUCTION_DESIGN.md §2.4,
 # `wavecal_flags`): "bad" bits are proposed for the default mask (arMADGICS, PR C).
-# Bits 1, 2, 3, 5, 6 are reserved for the template levels of PR B and are never set here.
+# Bits 1, 2, 3, 5, 6 are set only with epoch templates (PR B: src/slit_model.jl, src/trace_levels.jl).
 # ---------------------------------------------------------------------------------------------
 "Storage type of `bitmsk_trace` and `trace_flags`."
 const TraceBits = UInt16
@@ -52,18 +52,18 @@ to_trace_bits(x::Integer) = TraceBits(x)
 to_trace_bits(x::AbstractArray{<:Integer}) = TraceBits.(x)
 "info: trace from a gated flat of the night that is not the preferred kind (dome, not quartz)."
 const TRACE_OTHER_FLAT = TraceBits(2^0)
-"(PR B, reserved) level T1: template registered on another calibration frame of the night."
+"info: level T1, the epoch template registered on another calibration frame of the night (src/trace_levels.jl)."
 const TRACE_REGISTERED_CAL = TraceBits(2^1)
-"(PR B, reserved) level T2: template registered on the stacked science frames of the night."
+"info: level T2, the epoch template registered on the stacked science frames of the night."
 const TRACE_REGISTERED_SCI = TraceBits(2^2)
-"(PR B, reserved) bad: level T3, epoch template at the epoch-median registration."
+"bad: level T3, the epoch template at the epoch-median registration (nothing of the night registered)."
 const TRACE_TEMPLATE_ONLY = TraceBits(2^3)
 "bad: this fiber had no light on the trace source (median height < 5 % of the median fiber);
 its position is not measured but placed from its lit neighbours."
 const TRACE_FIBER_UNLIT = TraceBits(2^4)
-"(PR B, reserved) per-fiber departure from the registered template > 0.3 px."
+"screen (per fiber): departure of a template-seeded flat fit from the registered template > 0.3 px."
 const TRACE_FIBER_DELTA = TraceBits(2^5)
-"(PR B, reserved) the night is after the last confirmed epoch boundary."
+"info: the night is after the newest flat of an open-ended (unconfirmed) last epoch."
 const TRACE_EPOCH_PROVISIONAL = TraceBits(2^6)
 "bad: the night used the fixed survey-wide fallback file (`data/fallback_traces`), i.e. a
 trace from another night and possibly another instrument epoch."
@@ -72,6 +72,9 @@ const TRACE_FIXED_FALLBACK = TraceBits(2^7)
 const TRACE_UNGATED = TraceBits(2^8)
 "warn: no QA record exists for the trace source (products made before QA records existed)."
 const TRACE_QA_MISSING = TraceBits(2^9)
+
+"Per-fiber bits (not replicated night-level bits); excluded from the night-level `trace_flags`."
+const TRACE_PER_FIBER_BITS = TRACE_FIBER_UNLIT | TRACE_FIBER_DELTA
 
 "Bits proposed for the default mask downstream (arMADGICS PR C)."
 const TRACE_BAD_BITS = TRACE_TEMPLATE_ONLY | TRACE_FIBER_UNLIT | TRACE_FIXED_FALLBACK
@@ -183,8 +186,11 @@ Collapse columns `mid ± n_center_cols` into one spatial profile: per-row outlie
 about the median (5 sigma) and an inverse-variance weighted mean. Returns
 `(comb_fluxes, comb_errs, comb_ivars)` as length-2048 vectors (comb_errs = Inf where no
 pixel survived). This is exactly the computation `trace_extract` uses to find fibers.
+`nsigma` (default 5, production's value) is the per-row clipping threshold; `Inf` keeps every
+good pixel (used by `slit_bands` for arc frames, whose light is in a few columns per row).
 """
-function trace_center_band(image_data, noise_image, good_pixels; mid = 1025, n_center_cols = 100)
+function trace_center_band(image_data, noise_image, good_pixels; mid = 1025, n_center_cols = 100,
+        nsigma = 5)
     r = (mid - n_center_cols):(mid + n_center_cols)
     cutout_fluxes = image_data[r, :]'
     cutout_errs = noise_image[r, :]'
@@ -197,7 +203,7 @@ function trace_center_band(image_data, noise_image, good_pixels; mid = 1025, n_c
 
     med_flux = nanzeromedian(cutout_fluxes, 2)
     sigma_dists = (cutout_fluxes .- med_flux) .* (cutout_ivars .^ (0.5))
-    good_sigmas = (abs.(sigma_dists) .< 5) .& (cutout_ivars .!= 0)
+    good_sigmas = (abs.(sigma_dists) .< nsigma) .& (cutout_ivars .!= 0)
 
     cutout_fluxes[.!good_sigmas] .= 0
     cutout_ivars[.!good_sigmas] .= 0
@@ -823,15 +829,33 @@ night-level warn bits in every fiber, plus `TRACE_FIBER_UNLIT` where the trace s
 median height is below `lit_frac` of the median fiber. For the fixed fallback file the
 "unlit" fibers are those of the file's own night, so `TRACE_FIBER_UNLIT` is not set there
 (the whole night is already `TRACE_FIXED_FALLBACK`).
+
+With templates (PR B): `fiber_delta` (per fiber, px; from a template-seeded flat fit) sets
+`TRACE_FIBER_DELTA` above `delta_px` (0.3 px); `unlit_mask` (levels T1-T3: the fibers dark on
+every flat of the epoch) sets `TRACE_FIBER_UNLIT`; `provisional` sets
+`TRACE_EPOCH_PROVISIONAL` in every fiber.
 """
 function trace_fiber_bits(trace_params::AbstractArray{<:Real, 3}, level::Integer;
-        other_flat = false, ungated = false, qa_missing = false, lit_frac = TRACE_LIT_FRAC)
+        other_flat = false, ungated = false, qa_missing = false, lit_frac = TRACE_LIT_FRAC,
+        fiber_delta = nothing, unlit_mask = nothing, provisional = false,
+        delta_px = TRACE_FIBER_DELTA_PX)
     nfib = size(trace_params, 2)
     night = trace_level_bits(level)
     other_flat && (night |= TRACE_OTHER_FLAT)
     ungated && (night |= TRACE_UNGATED)
     qa_missing && (night |= TRACE_QA_MISSING)
+    provisional && (night |= TRACE_EPOCH_PROVISIONAL)
     bits = fill(night, nfib)
+    if !isnothing(fiber_delta)
+        for f in 1:nfib
+            (isfinite(fiber_delta[f]) && fiber_delta[f] > delta_px) && (bits[f] |= TRACE_FIBER_DELTA)
+        end
+    end
+    if !isnothing(unlit_mask)
+        for f in 1:nfib
+            unlit_mask[f] && (bits[f] |= TRACE_FIBER_UNLIT)
+        end
+    end
     if level == TRACE_LEVEL_OWN_FLAT
         hmed_f = [_medornan(filter(isfinite, view(trace_params, :, f, 1))) for f in 1:nfib]
         hpos = filter(v -> isfinite(v) && v > 0, hmed_f)
@@ -911,10 +935,13 @@ under either selection rule.
 """
 function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "none",
         fallback_file = "", type_order = ["quartz", "dome"], almanac_file = "",
-        checkpoint_mode = "commit_same", template_cal = nothing)
+        checkpoint_mode = "commit_same", template_cal = nothing, data_path = "./data/",
+        fallback_kw = (;))
     select in ("last", "gated") || error("--trace_select must be last or gated, got $(select)")
-    fallback in ("fixed_file", "none") ||
-        error("--trace_fallback must be fixed_file or none, got $(fallback)")
+    fb_levels, fb_fixed = parse_trace_fallback(fallback)
+    if !isempty(fb_levels) && isnothing(template_cal)
+        error("--trace_fallback $(fallback) needs the epoch templates (--trace_template_cal), which are off")
+    end
     traceMain_fname = joinpath(outdir, "apred", "$(mjd)", "traceMain_$(tele)_$(mjd)_$(chip).h5")
     exists = check_file(traceMain_fname, mode = checkpoint_mode)
     # a traceMain made with another template (or without one) is recomputed
@@ -935,7 +962,15 @@ function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "n
     end
     chosen, info = select_night_trace(cands; mode = select, type_order = type_order,
         sci_mid = sci_mid)
-    want = !isnothing(chosen) ? chosen.trace_file : (fallback == "fixed_file" ? fallback_file : "")
+    # own-night levels T1 > T2 > T3 (src/trace_levels.jl) when no flat of the night is eligible
+    fb = nothing
+    if isnothing(chosen) && !isempty(fb_levels)
+        fb = trace_fallback_chain(outdir, tele, mjd, chip; levels = fb_levels,
+            template_cal = template_cal, almanac_file = almanac_file, data_path = data_path,
+            checkpoint_mode = checkpoint_mode, fallback_kw...)
+    end
+    want = !isnothing(chosen) ? chosen.trace_file : !isnothing(fb) ? fb.source :
+           (fb_fixed ? fallback_file : "")
     if exists && select == "gated"
         md = read_metadata(traceMain_fname)
         if get(md, "trace_select_rule", "") == "gated" &&
@@ -944,8 +979,8 @@ function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "n
             return get(md, "trace_level", TRACE_LEVEL_OWN_FLAT)
         end
     end
-    if isnothing(chosen) && fallback == "none"
-        @warn "No trace for $(tele) $(mjd) chip $(chip): no flat of the night is eligible ($(length(cands)) candidate(s)) and --trace_fallback none; the night's exposures will not be extracted."
+    if isnothing(chosen) && isnothing(fb) && !fb_fixed
+        @warn "No trace for $(tele) $(mjd) chip $(chip): no flat of the night is eligible ($(length(cands)) candidate(s)) and --trace_fallback $(fallback) gave no trace; the night's exposures will not be extracted."
         isfile(traceMain_fname) && rm(traceMain_fname)
         return TRACE_LEVEL_NONE
     end
@@ -956,6 +991,16 @@ function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "n
         md["trace_type"] = chosen.flat_type
         md["trace_found_match"] = true
         qa = chosen.qa
+    elseif !isnothing(fb)
+        level = fb.level
+        src = fb.source
+        md["trace_type"] = level == TRACE_LEVEL_REGISTERED_CAL ? "registered_cal" :
+                           level == TRACE_LEVEL_REGISTERED_SCI ? "registered_sci" : "template"
+        md["trace_found_match"] = false
+        qa = fb.qa
+        merge!(md, fb.info)
+        md["trace_reg"] = reg_vector(fb.reg)
+        md["trace_reg_source"] = level == TRACE_LEVEL_TEMPLATE ? "epoch_median" : string(qa["kind"])
     else
         isfile(fallback_file) || error("Fallback trace file $(fallback_file) does not exist")
         level = TRACE_LEVEL_FIXED_FALLBACK
@@ -967,9 +1012,10 @@ function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "n
     md["trace_orig_param_fname"] = src
     md["trace_level"] = level
     md["trace_fallback_rule"] = fallback
-    gl = isnothing(qa) ? -1 : Int(get(qa, "gate_level", 0))
+    gl = (isnothing(qa) || !isnothing(fb)) ? -1 : Int(get(qa, "gate_level", 0))
     md["trace_gate_level"] = gl
     md["trace_gate_reasons"] = isnothing(qa) ? (level == TRACE_LEVEL_OWN_FLAT ? "qa_missing" : "") :
+                               !isnothing(fb) ? string(get(qa, "reg_gate_reasons", "")) :
                                string(get(qa, "gate_reasons", ""))
     for k in ("fit_rms", "light_mismatch_frac", "spacing_rms", "id_match_frac", "sat_frac", "id_margin",
         "id_shift_px", "trace_shift_px")
@@ -981,18 +1027,34 @@ function make_traceMain(outdir, tele, mjd, chip; select = "gated", fallback = "n
     md["trace_identify"] = isnothing(qa) ? "" : string(get(qa, "identify", ""))
     merge!(md, info)
     merge!(md, trace_template_metadata(template_cal, tele, chip, mjd))
-    trace_params = h5open(src, "r") do f
-        read(f["trace_params"])
-    end
     own = level == TRACE_LEVEL_OWN_FLAT
-    bits = trace_fiber_bits(trace_params, level;
-        other_flat = own && md["trace_type"] != first(type_order),
-        ungated = own && gl in (0, 1), qa_missing = own && gl == -1)
-    md["trace_flags"] = reduce(|, bits; init = zero(TraceBits)) & ~TRACE_FIBER_UNLIT
-    md["trace_n_unlit"] = count(b -> (b & TRACE_FIBER_UNLIT) != 0, bits)
     mkpath(dirname(traceMain_fname))
     tmp = traceMain_fname * ".tmp$(getpid())"
-    cp(src, tmp, force = true)
+    fiber_delta = nothing
+    unlit_mask = nothing
+    if isnothing(fb)
+        trace_params, fiber_delta = h5open(src, "r") do f
+            read(f["trace_params"]),
+            haskey(f, "template_fiber_delta_px") ? read(f["template_fiber_delta_px"]) : nothing
+        end
+        cp(src, tmp, force = true)
+    else
+        # T1-T3: the registered template (no per-fiber delta); epoch-dark fibers flagged unlit
+        trace_params = registered_trace_params(fb.tmpl, fb.reg)
+        unlit_mask = .!fb.tmpl.lit
+        isfile(tmp) && rm(tmp)
+        safe_jldsave(tmp; trace_params = trace_params,
+            regularized_trace_params = regularize_trace(trace_params), no_metadata = true)
+    end
+    provisional = (own && !isnothing(fiber_delta) || !isnothing(fb)) &&
+                  trace_template_provisional(template_cal, tele, chip, parse(Int, string(mjd)))
+    bits = trace_fiber_bits(trace_params, level;
+        other_flat = own && md["trace_type"] != first(type_order),
+        ungated = own && gl in (0, 1), qa_missing = own && gl == -1,
+        fiber_delta = fiber_delta, unlit_mask = unlit_mask, provisional = provisional)
+    md["trace_flags"] = reduce(|, bits; init = zero(TraceBits)) & ~TRACE_PER_FIBER_BITS
+    md["trace_n_unlit"] = count(b -> (b & TRACE_FIBER_UNLIT) != 0, bits)
+    md["trace_n_fiber_delta"] = count(b -> (b & TRACE_FIBER_DELTA) != 0, bits)
     chmod(tmp, 0o644)
     modify_saved_dict(tmp, "metadata", md)
     h5open(tmp, "r+") do f
@@ -1024,7 +1086,7 @@ function trace_bits_for_1d(traceFname, regularized_trace_params, trace_metadata:
     md = Dict{String, Any}()
     if isnothing(bits)
         bits = trace_bits_from_metadata(regularized_trace_params, trace_metadata)
-        md["trace_flags"] = reduce(|, bits; init = zero(TraceBits)) & ~TRACE_FIBER_UNLIT
+        md["trace_flags"] = reduce(|, bits; init = zero(TraceBits)) & ~TRACE_PER_FIBER_BITS
         md["trace_level"] = endswith(string(get(trace_metadata, "trace_type", "")), "_fallback") ?
                             TRACE_LEVEL_FIXED_FALLBACK : TRACE_LEVEL_OWN_FLAT
     end
@@ -1041,7 +1103,7 @@ function trace_exposure_summary(bitmsk_trace_stack::AbstractMatrix{<:Integer},
         trace_level_chips::AbstractVector{<:Integer})
     return Dict{String, Any}(
         "trace_flags" => reduce(|, to_trace_bits(bitmsk_trace_stack); init = zero(TraceBits)) &
-                         ~TRACE_FIBER_UNLIT,
+                         ~TRACE_PER_FIBER_BITS,
         "trace_level_chips" => collect(Int, trace_level_chips),
         "trace_level_max" => maximum(trace_level_chips))
 end

@@ -81,7 +81,7 @@ function parse_commandline()
         default = "gated"
         "--trace_fallback"
         required = false
-        help = "what a night with no eligible flat gets: \"none\" (default: no trace; the night's exposures are not extracted and are listed in the log) or \"fixed_file\" (the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK). The own-night and template levels that replace the fixed file arrive with the epoch templates (PR B)."
+        help = "what a night with no eligible flat gets: \"none\" (default: no trace; the night's exposures are not extracted and are listed in the log); \"template\" (needs --trace_template_cal: the own-night levels of src/trace_levels.jl in order, T1 = the epoch template registered on another calibration frame of the night (dome flat, UNe/ThAr/FPI arcs, internal flat; TRACE_REGISTERED_CAL), T2 = registered on the median of up to 8 science frames of the night (TRACE_REGISTERED_SCI), T3 = the epoch template at the epoch-median registration (TRACE_TEMPLATE_ONLY, bad); never another night's trace); a comma list of those levels, e.g. \"T1,T2\" (a night none of them serves is not extracted); or \"fixed_file\" (the pre-existing behaviour: data/fallback_traces/traceMain_<tele>_60933_<chip>.h5, flagged TRACE_FIXED_FALLBACK)."
         arg_type = String
         default = "none"
         "--chip_transform_cal"
@@ -103,8 +103,12 @@ mkpath(dirNamePlots) # will work even if it already exists
 
 parg["trace_select"] in ("last", "gated") ||
     error("--trace_select must be \"last\" or \"gated\", got $(parg["trace_select"])")
-parg["trace_fallback"] in ("fixed_file", "none") ||
-    error("--trace_fallback must be \"fixed_file\" or \"none\", got $(parg["trace_fallback"])")
+# --trace_fallback: none | fixed_file | template (= T1,T2,T3) | a comma list of T1,T2,T3
+# (parsed by ApogeeReduction.parse_trace_fallback; checked here before the workers start)
+const TRACE_FALLBACK_USES_TEMPLATES = !(parg["trace_fallback"] in ("fixed_file", "none"))
+parg["trace_fallback"] in ("fixed_file", "none", "template") ||
+    occursin(r"^T[123](,T[123])*$", parg["trace_fallback"]) ||
+    error("--trace_fallback must be \"none\", \"fixed_file\", \"template\" or a comma list of T1,T2,T3, got $(parg["trace_fallback"])")
 
 # if we are not refluxing, we should not be doing the wavelength solution
 if !parg["relFlux"] && parg["waveSoln"]
@@ -129,6 +133,10 @@ end
 # missing is a hard error here (an unreadable or invalid file when it is loaded below), never a
 # silent fallback to the template-free traces.
 const TRACE_TEMPLATE_OFF = strip(parg["trace_template_cal"]) in ("", "none")
+if TRACE_TEMPLATE_OFF && TRACE_FALLBACK_USES_TEMPLATES
+    error("--trace_fallback $(parg["trace_fallback"]) uses the epoch templates, but --trace_template_cal is none. " *
+          "Configure the template file, or use --trace_fallback none (or fixed_file).")
+end
 if !TRACE_TEMPLATE_OFF && !isfile(parg["trace_template_cal"])
     error("trace-template calibration file $(parg["trace_template_cal"]) (--trace_template_cal) does not exist. Either\n" *
           "  (1) install it at that path (or point --trace_template_cal / TRACE_TEMPLATE_CAL in airflow/dags/ar_common.py /\n" *
@@ -263,7 +271,8 @@ end
         fallback_file = joinpath(proj_path, "data", "fallback_traces", "traceMain_$(tele)_60933_$(chip).h5"),
         type_order = trace_type_order,
         almanac_file = joinpath(outdir, "almanac/$(parg["runname"]).h5"),
-        checkpoint_mode = checkpoint_mode, template_cal = TRACE_TEMPLATE_CAL)
+        checkpoint_mode = checkpoint_mode, template_cal = TRACE_TEMPLATE_CAL,
+        data_path = joinpath(proj_path, "data"))
 end
 
 ## per-epoch trace templates (calibration input; nothing = off, template-free traces)

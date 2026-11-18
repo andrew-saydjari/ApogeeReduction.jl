@@ -39,7 +39,7 @@ function parse_commandline()
         default = "commit_same"
         "--trace_identify"
         required = false
-        help = "fiber identification on the flat: \"robust\" (default: template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl) or \"production\" (the pre-existing path). The per-column refinement of lit fibers is the same in both."
+        help = "fiber identification on the flat: \"robust\" (default: template-free whole-slit identification, refused with a named reason when ambiguous; unlit fibers placed from lit neighbours on both sides; see src/trace_qa.jl; with --trace_template_cal and an epoch template for the night, the slit model of src/slit_model.jl instead: template registration, label check, per-column refinement started from the registered template in every column, unlit fibers at the template) or \"production\" (the pre-existing path, never template-based). The per-column refinement of lit fibers is production's Gauss-Hermite fit in all modes."
         arg_type = String
         default = "robust"
         "--almanac_file"
@@ -82,7 +82,8 @@ end
                            safe_jldsave, trace_plots, bad_pix_bits, check_file, nanzeropercentile, regularize_trace,
                            trace_lamp_metrics, flat_trace_qa, write_trace_qa, read_trace_qa, trace_qa_path,
                            trace_reference_positions, load_trace_template_cal, trace_template_metadata,
-                           template_needs_recompute
+                           template_needs_recompute, trace_template, trace_extract_template,
+                           SlitProfile, template_qa_fields
 end
 @everywhere TRACE_TEMPLATE_CAL = $(TRACE_TEMPLATE_OFF) ? nothing :
                                  load_trace_template_cal($(parg["trace_template_cal"]))
@@ -221,14 +222,35 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
         (med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, min_prof_fib, max_prof_fib,
         all_y_prof, all_y_prof_deriv) = ApogeeReduction.get_default_trace_hyperparams(teleloc, chiploc, profile_path = joinpath(proj_path, "data"), plot_path = joinpath(parg["trace_dir"], "plots/"))
 
+        # With an epoch template for this night (--trace_template_cal) and --trace_identify robust,
+        # the flat is fitted by the slit model (src/slit_model.jl): template registration, label
+        # check (k != 0 refuses), production's per-column Gauss-Hermite refinement started from the
+        # registered template in every column. Otherwise exactly as before.
+        tmpl = identify == "robust" ? trace_template(template_cal, teleloc, chiploc, parse(Int, mjdloc)) : nothing
+        extra["identify"] = isnothing(tmpl) ? String(identify) : "template"
         tqa = Dict{String, Any}()
+        fiber_delta = nothing
+        function fit_flat()
+            if isnothing(tmpl)
+                return trace_extract(
+                    image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
+                    med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+                    min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname;
+                    good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
+                    identify = identify, qa = tqa)
+            end
+            tp, cv, info = trace_extract_template(image_data, ivar_image, tmpl,
+                SlitProfile((med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub,
+                    min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv));
+                good_pixels = copy(good_pixels))
+            merge!(tqa, template_qa_fields(info; tmpl = tmpl))
+            tqa["outcome"] = String(info.outcome)
+            tqa["n_unlit"] = count(.!info.lit)
+            fiber_delta = info.delta
+            return tp, cv
+        end
         trace_params, trace_param_covs = try
-            trace_extract(
-                image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
-		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname; 
-                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
-                identify = identify, qa = tqa)
+            fit_flat()
         catch e
             println("Trace fitting failed for $(fname)")
             println("Flux info is (med_flux = $(round(flux_med,digits=2)), 68% interval = $(round(flux_68p,digits=2)), percent_good_pixels = $(round(sum(good_pixels)/length(good_pixels)*100,digits=2))%)")
@@ -236,15 +258,13 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
             write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
                 nothing, "fit_error", extra)
             # retried once as before (a second failure propagates, as before)
-            trace_extract(
-                image_data, ivar_image, teleloc, mjdloc, expnumloc, chiploc,
-                med_center_to_fiber_func, x_prof_min, x_prof_max_ind, n_sub, 
-		min_prof_fib, max_prof_fib, all_y_prof, all_y_prof_deriv, fname;
-                good_pixels = good_pixels, median_trace_pos_path = joinpath(proj_path, "data"),
-                identify = identify, qa = tqa)
+            fit_flat()
         end
         for k in ("n_detected", "n_good_throughput", "n_unlit")
             haskey(tqa, k) && (extra[k] = tqa[k])
+        end
+        for (k, v) in tqa
+            startswith(k, "tmpl_") && (extra[k] = v)
         end
 
         if size(trace_params,1) == 0
@@ -258,7 +278,13 @@ println(TRACE_TEMPLATE_OFF ? "Trace templates: OFF (--trace_template_cal none)" 
         regularized_trace_params = regularize_trace(trace_params)
 
         mkpath(dirname(savename))
-        safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
+        if isnothing(fiber_delta)
+            safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params, no_metadata = true)
+        else
+            # per-fiber departure from the registered template (px; TRACE_FIBER_DELTA in traceMain)
+            safe_jldsave(savename; trace_params = trace_params, trace_param_covs = trace_param_covs, regularized_trace_params = regularized_trace_params,
+                template_fiber_delta_px = fiber_delta, no_metadata = true)
+        end
         extra["trace_file"] = savename
         write_flat_qa(qaname, image_data, ivar_image, pix_bitmask_image, teleloc, chiploc,
             trace_params, "ok", extra)
