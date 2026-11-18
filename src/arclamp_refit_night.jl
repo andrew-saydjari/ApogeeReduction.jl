@@ -131,7 +131,7 @@ function refit_quartz_pattern(arc_fname, almanac_file, tele, mjd)
         i0 === nothing && continue
         (occursin("quartz", lowercase(it[j])) && abs(di[j] - di[i0]) < 0.01) && (after[s] = true)
     end
-    ng = count(s -> after[s] && (sfl[s] & ARCSEQ_GATE_FAIL) != 0, eachindex(after))
+    ng = count(s -> after[s] && (sfl[s] & ARCSEQ_REJECTED) != 0, eachindex(after))
     return (; after, n_gated = ng)
 end
 
@@ -214,6 +214,44 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
     return refit_write_status(outroot, "comb", tele, mjd, "ok_arc"), ""
 end
 
+"""
+    refit_object_refs_pass1(apred_mjd_dir, tele, mjd)
+
+REFIT ONLY (previous-run products; formerly #417's gate-B `arclamp_object_refs`): for every object
+exposure with a per-exposure wavelength solution (`waveCalNightfpiDither_*_object.h5`, else
+`waveCalNightskyDither_*_object.h5`), a chip-G slice of it (pixels 880-1170, fibers 100-200) and its
+mid-exposure MJD. Opened read-only. Feeds `anchor_samepos = "pass1"` and the science times.
+"""
+function refit_object_refs_pass1(apred_mjd_dir::AbstractString, tele::AbstractString, mjd::Integer)
+    isdir(apred_mjd_dir) || return ArcObjRef[]
+    fs = readdir(apred_mjd_dir)
+    found = Dict{Int, Tuple{String, String}}()
+    for (kind, pre) in (("sky", "waveCalNightskyDither"), ("fpi", "waveCalNightfpiDither"))
+        rx = Regex("^$(pre)_$(tele)_$(mjd)_(\\d{4})_object\\.h5\$")
+        for fn in fs
+            m = match(rx, fn)
+            m === nothing && continue
+            found[parse(Int, m.captures[1])] = (kind, joinpath(apred_mjd_dir, fn))   # fpi wins
+        end
+    end
+    px0, px1 = 880, 1170
+    refs = ArcObjRef[]
+    for e in sort(collect(keys(found)))
+        kind, fn = found[e]
+        W = try
+            h5open(fn, "r") do f
+                Float64.(f["chipWaveSoln"][px0:px1, ARCGATE_FIBERS, 2])
+            end
+        catch
+            continue
+        end
+        t = arclamp_mjd_mid(joinpath(apred_mjd_dir,
+            "ar1Dcal_$(tele)_$(mjd)_$(_arc_expstr(e))_$(FIRST_CHIP)_object.h5"))
+        push!(refs, ArcObjRef(e, t, kind, px0, ARCGATE_FIBERS, W))
+    end
+    return refs
+end
+
 """Per comb exposure of a previous run (REFIT ONLY): (ref, t) with `ref` a chip-G slice of that
 run's per-exposure comb solution `waveCalNightfpiDither_*_arclamp.h5` (a stored solution of a
 previous run; the in-order pipeline measures this with `arcfirst_comb_refs_provisional`)."""
@@ -251,7 +289,7 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     combs = refit_comb_refs_pass1(mdir, tele, mjd, fnames)
     # science exposures: object-exposure times; their pass-1 per-exposure solutions (a later-stage
     # product) only feed the optional same-position input (cfg.anchor_samepos)
-    scis = [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in arclamp_object_refs(mdir, tele, mjd)]
+    scis = [(; ref = cfg.anchor_samepos == "pass1" ? r : nothing, t = r.mjd_mid) for r in refit_object_refs_pass1(mdir, tele, mjd)]
     arcf = refit_path(outroot, "arc", tele, mjd)
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "n_science_refs" => string(length(scis)))

@@ -448,6 +448,38 @@ if parg["relFlux"]
     all1DArclamp = vcat(all1DArclampperchip...)
     all1DFPI = vcat(all1DFPIperchip...)
 
+    ## comb-measured chip transform (calibration input; nothing = chip scale fixed to 1)
+    @everywhere CHIP_TRANSFORM_CAL = $(CHIP_TRANSFORM_OFF) ? nothing :
+                                     load_chip_transform_cal($(parg["chip_transform_cal"]))
+    println(CHIP_TRANSFORM_OFF ? "Chip scales: OFF (sky wavecal: chip scale 1; arc stage: fitted freely; --chip_transform_cal none)" :
+            "Chip scales (sky wavecal and arc stage) from $(CHIP_TRANSFORM_CAL) [$(ApogeeReduction.chip_transform_id(CHIP_TRANSFORM_CAL))]")
+
+    ## stage-1 arc-lamp night product (off by default; nothing downstream reads it yet).
+    ## Arcs come first in the wavelength chain (absolute reference -> FPI comb -> per-exposure
+    ## position), so this stage uses only the night's arc ar1Dcal files and static calibration
+    ## inputs (line list, the --chip_transform_cal chip scales; free scales when that is none);
+    ## it runs before, and reads nothing from, the sky/FPI wavelength stages.
+    # (with --wavecal_order arc_first the arc stage runs inside the arc-first chain below, with the
+    # refit's settings, writing wavecal_arcfirst/arc/; this standalone product is then skipped)
+    if parg["arclamp_wavecal"] && parg["wavecal_order"] == "legacy" && size(all1DArclamp, 1) > 0
+        almanac_file_arc = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
+        sendto(workers(), almanac_file_arc = almanac_file_arc)
+        @everywhere arclamp_linelist = load_arclamp_linelist(
+            parg["arclamp_linelist"] == "" ? ApogeeReduction.ARCLAMP_LINELIST_DEFAULT :
+            parg["arclamp_linelist"]; selection = parg["arclamp_linelist_selection"])
+        @everywhere arclamp_night_partial(mjd) = try
+            get_and_save_arclamp_night_wavecal(parg["tele"], mjd;
+                apred_dir = joinpath(parg["outdir"], "apred"), almanac_file = almanac_file_arc,
+                linelist = arclamp_linelist, checkpoint_mode = parg["checkpoint_mode"],
+                chip_transform_cal = CHIP_TRANSFORM_CAL)
+        catch e
+            @warn "arc-lamp night product failed for $(parg["tele"]) $(mjd)" exception = e
+            nothing
+        end
+        desc = "Arc-lamp night products (stage 1): "
+        @showprogress desc=desc pmap(arclamp_night_partial, unique_mjds)
+    end
+
     ## load rough wave dict and sky lines list
     @everywhere begin
         roughwave_dict = load(joinpath(proj_path, "data", "roughwave_dict.jld2"), "roughwave_dict")
@@ -485,12 +517,6 @@ if parg["relFlux"]
     all1DfpiPeaks_out = reshape(all1DfpiPeaks, length(all1DfpiPeaks_a), length(CHIP_LIST))
     mskFPInothing = .!any.(isnothing.(eachrow(all1DfpiPeaks_out)))
     println("FPI peaks found for $(sum(mskFPInothing)) of $(length(mskFPInothing)) exposures")
-
-    ## comb-measured chip transform (calibration input; nothing = chip scale fixed to 1)
-    @everywhere CHIP_TRANSFORM_CAL = $(CHIP_TRANSFORM_OFF) ? nothing :
-                                     load_chip_transform_cal($(parg["chip_transform_cal"]))
-    println(CHIP_TRANSFORM_OFF ? "Sky wavecal chip scales: OFF (chip scale 1, --chip_transform_cal none)" :
-            "Sky wavecal chip scales from $(CHIP_TRANSFORM_CAL) [$(ApogeeReduction.chip_transform_id(CHIP_TRANSFORM_CAL))]")
 
     ## ---- arc-first order (--wavecal_order arc_first; skipped entirely with legacy) ----------
     ## Each stage once, in order, reading only earlier stages (src/wavecal_arcfirst.jl):
@@ -591,27 +617,6 @@ if parg["relFlux"]
             wavecalNightAve_fnames[mjd_ind], verbose = false, checkpoint_mode = parg["checkpoint_mode"],
             almanac_file = almanac_file)
         @showprogress desc=desc pmap(fpi_medwavecal_skyline_dither_partial, unique_mjd_inds)
-    end
-
-    ## stage-1 arc-lamp night product (off by default; nothing downstream reads it yet).
-    ## It needs the arc ar1Dcal files and, for the sequence gate, the per-exposure sky/FPI
-    ## wavelength solutions written above.
-    if parg["arclamp_wavecal"] && size(all1DArclamp, 1) > 0
-        almanac_file_arc = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
-        sendto(workers(), almanac_file_arc = almanac_file_arc)
-        @everywhere arclamp_linelist = load_arclamp_linelist(
-            parg["arclamp_linelist"] == "" ? ApogeeReduction.ARCLAMP_LINELIST_DEFAULT :
-            parg["arclamp_linelist"]; selection = parg["arclamp_linelist_selection"])
-        @everywhere arclamp_night_partial(mjd) = try
-            get_and_save_arclamp_night_wavecal(parg["tele"], mjd;
-                apred_dir = joinpath(parg["outdir"], "apred"), almanac_file = almanac_file_arc,
-                linelist = arclamp_linelist, checkpoint_mode = parg["checkpoint_mode"])
-        catch e
-            @warn "arc-lamp night product failed for $(parg["tele"]) $(mjd)" exception = e
-            nothing
-        end
-        desc = "Arc-lamp night products (stage 1): "
-        @showprogress desc=desc pmap(arclamp_night_partial, unique_mjds)
     end
 
     # ## TODO when are we going to split into individual fiber files? Then we should be writing fiber type to the file name

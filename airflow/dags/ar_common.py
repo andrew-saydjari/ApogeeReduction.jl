@@ -158,14 +158,216 @@ CHIP_TRANSFORM_CAL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
 # src/wavecal_arcfirst.jl). Flipping the production default is the PI's decision.
 WAVECAL_ORDER = "legacy"
 
+# ---------------------------------------------------------------------------
+# Robustness knobs (2026-11-17 restart after the 09-26 -> 11-17 outage)
+# ---------------------------------------------------------------------------
+#
+# All are parse-time, env-overridable (set them in airflow_env.sh). A value
+# that does not parse falls back to the default with a warning in the DAG
+# processor log, rather than breaking the DAG import (a broken import would
+# silently stop ALL scheduling, which is worse than a default timeout).
+
+
+def parse_duration_s(text) -> int:
+    """Parse a duration with a unit into whole seconds.
+
+    Accepts PostgreSQL-style units: ``ms``, ``s``, ``min``, ``h``, ``d``
+    (e.g. ``"5h"``, ``"300min"``, ``"90s"``), optionally with a space before
+    the unit. A bare number is REJECTED on purpose: PostgreSQL reads a bare
+    statement_timeout as milliseconds, Airflow reads seconds, and guessing
+    wrong here is a 1000x error. Zero and negative values are rejected too:
+    zero disables statement_timeout in PostgreSQL, which is the failure mode
+    these knobs exist to prevent."""
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(ms|s|min|h|d)\s*", str(text))
+    if not m:
+        raise ValueError(
+            f"duration {text!r}: expected a number with a unit "
+            "(ms, s, min, h, d), e.g. '5h' or '300min'")
+    scale = {"ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400}
+    seconds = float(m.group(1)) * scale[m.group(2)]
+    if seconds < 1:
+        raise ValueError(f"duration {text!r} must be at least 1 s")
+    return int(round(seconds))
+
+
+def pg_statement_timeout_option(text) -> str:
+    """The PGOPTIONS fragment that sets a server-side statement_timeout.
+
+    Normalized to integer milliseconds (PostgreSQL's native unit) so the
+    server never has to parse our unit spelling."""
+    return f"-c statement_timeout={parse_duration_s(text) * 1000}"
+
+
+def check_almanac_timeouts(statement_timeout_s: int,
+                           execution_timeout_s: int) -> None:
+    """The statement timeout must fire before the task's execution_timeout:
+    a statement_timeout produces a clear PostgreSQL error in almanac.log,
+    whereas execution_timeout just SIGTERMs the task (the "rc -15, no
+    message" failure seen on 2026-11-17)."""
+    if statement_timeout_s >= execution_timeout_s:
+        raise ValueError(
+            f"almanac statement_timeout ({statement_timeout_s} s) must be "
+            f"shorter than its execution_timeout ({execution_timeout_s} s)")
+
+
+def _env_duration_s(name: str, default: str) -> int:
+    raw = os.environ.get(name, default)
+    try:
+        return parse_duration_s(raw)
+    except ValueError as e:
+        print(f"WARNING: {name}={raw!r} ignored ({e}); using {default}")
+        return parse_duration_s(default)
+
+
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    raw = os.environ.get(name, str(default))
+    try:
+        val = int(raw)
+        if val < minimum:
+            raise ValueError(f"must be >= {minimum}")
+        return val
+    except ValueError as e:
+        print(f"WARNING: {name}={raw!r} ignored ({e}); using {default}")
+        return default
+
+
+def _almanac_timeouts() -> tuple[int, int]:
+    """(statement_timeout_s, execution_timeout_s) from env, defaults if the
+    pair is inconsistent."""
+    stmt = _env_duration_s("AR_ALMANAC_STATEMENT_TIMEOUT",
+                           ALMANAC_STATEMENT_TIMEOUT_DEFAULT)
+    exe = _env_duration_s("AR_ALMANAC_EXECUTION_TIMEOUT",
+                          ALMANAC_EXECUTION_TIMEOUT_DEFAULT)
+    try:
+        check_almanac_timeouts(stmt, exe)
+    except ValueError as e:
+        print(f"WARNING: {e}; using the defaults "
+              f"{ALMANAC_STATEMENT_TIMEOUT_DEFAULT} / "
+              f"{ALMANAC_EXECUTION_TIMEOUT_DEFAULT}")
+        stmt = parse_duration_s(ALMANAC_STATEMENT_TIMEOUT_DEFAULT)
+        exe = parse_duration_s(ALMANAC_EXECUTION_TIMEOUT_DEFAULT)
+    return stmt, exe
+
+
+# almanac timeouts, chosen from the measured lookup timings (DAILY_OPS
+# 2026-11-17): the slow step is ONE statement, the APOGEE-ID lookup
+# (create_apogee_id_lookup), which takes ~40 s warm, 11-40 min on the
+# partly-warm September nights, and an estimated 3.5-4 h fully cold (after
+# the 2026-11-16 DB restart). Nights without old-catalogid targets finish
+# in 6-19 s.
+#   statement_timeout 5h  : above the worst cold estimate (4 h) with 25 %
+#                           margin, so a legitimate cold run completes; it
+#                           only fires for a statement that is truly stuck
+#                           server-side, with a clear PostgreSQL error.
+#   execution_timeout 6h  : the statement budget plus 1 h for the rest of
+#                           almanac (confSummary parsing, other queries,
+#                           HDF5 write). Revisit (e.g. 1h / 45min) once the
+#                           DB-side covering index or precomputed lookup
+#                           lands and the cold case is gone.
+#   retries 1, 10 min     : one retry covers a transient tunnel drop; the
+#                           first attempt has partly warmed the DB cache,
+#                           so the retry is faster, not a repeat.
+# Note the outer bound: dagrun_timeout (20 h) covers both observatories, so
+# two worst-case almanac attempts on each would exceed it. In practice the
+# LCO lookup warms the cache for APO (same query).
+ALMANAC_STATEMENT_TIMEOUT_DEFAULT = "5h"
+ALMANAC_EXECUTION_TIMEOUT_DEFAULT = "6h"
+ALMANAC_STATEMENT_TIMEOUT_S, ALMANAC_EXECUTION_TIMEOUT_S = _almanac_timeouts()
+ALMANAC_PGOPTIONS = pg_statement_timeout_option(
+    f"{ALMANAC_STATEMENT_TIMEOUT_S}s")
+ALMANAC_RETRIES = _env_int("AR_ALMANAC_RETRIES", 1)
+ALMANAC_RETRY_DELAY_S = _env_duration_s("AR_ALMANAC_RETRY_DELAY", "10min")
+
+# Python of the almanac env (has h5py) — runs the almanac output check.
+ALMANAC_PYTHON = os.environ.get(
+    "ALMANAC_PYTHON", os.path.join(os.path.dirname(ALMANAC_BIN), "python"))
+
+# Startup race (2026-11-17): runs launched ~20 s after `airflow standalone`
+# started failed in update.repo after "Pre Execute", before running any
+# command — most likely before the API server (which Airflow 3 tasks talk
+# to) was ready. The first tasks of the run are idempotent (git pull
+# --ff-only, sdsscore update.sh, rsync, pure-Python setup), so they retry:
+# 3 x 60 s rides out a slow API-server start; a genuine failure (clone on
+# the wrong branch, ...) is reported ~3 min later than before.
+STARTUP_RETRIES = _env_int("AR_STARTUP_RETRIES", 3)
+STARTUP_RETRY_DELAY_S = _env_duration_s("AR_STARTUP_RETRY_DELAY", "60s")
+
+# Stale runs (2026-11-17): the scheduled run of 2026-09-27 was still
+# 'running' when the service came back 51 days later and resumed. A
+# SCHEDULED run whose logical date is older than this fails fast in
+# stale_run_guard, before update/setup do anything. 36 h lets a run that
+# was delayed by an outage of up to a day still go (the 7 am run of day D
+# is still processed by early evening of D+1), but never a previous
+# night's run on top of today's. Manual triggers are never stale: they are
+# how past nights are re-run on purpose. 0 disables the guard.
+STALE_RUN_MAX_AGE_H = _env_int("AR_STALE_RUN_MAX_AGE_H", 36)
+
+
+def stale_run_reason(run_type, logical_date, now,
+                     max_age_h: float) -> str | None:
+    """Why this run must not proceed, or None if it may.
+
+    Only runs whose type is 'scheduled' are checked (``run_type`` may be a
+    DagRunType enum or its string value); manual, backfill and asset runs
+    pass. ``logical_date`` and ``now`` must be timezone-aware."""
+    rt = str(getattr(run_type, "value", run_type) or "").lower()
+    if rt != "scheduled" or not max_age_h or max_age_h <= 0:
+        return None
+    if logical_date is None:
+        return None
+    age_h = (now - logical_date).total_seconds() / 3600.0
+    if age_h <= max_age_h:
+        return None
+    return (f"stale scheduled run: logical date {logical_date.isoformat()} "
+            f"is {age_h:.1f} h old (limit {max_age_h} h, "
+            "AR_STALE_RUN_MAX_AGE_H). This run outlived an outage; it is "
+            "failed without running anything so it cannot run on top of "
+            "today's run. To process that night, trigger a fresh run: "
+            "airflow dags trigger apogee_daily --logical-date <now ISO> "
+            "--run-id manual__rerun_<MJD>_<stamp> --conf "
+            "'{\"mjd\": <MJD>, \"almanac_clobber\": true}' "
+            "(see airflow/INSTALL.md, 'Re-running a failed night').")
+
+
+# DB tunnel. The almanac DB (operations.sdss.org:5432) is reached through
+# localhost:<port>, forwarded by the mwm-tunnel.service systemd user unit,
+# which owns the ssh ControlMaster to `mwm` in the foreground and
+# establishes the forward itself (ExitOnForwardFailure). tunnel_check runs a
+# real `select 1` through it. DB user/name must match the account's
+# ~/.almanac/config.yaml (password from ~/.pgpass or PGPASSFILE).
+TUNNEL_HOST = os.environ.get("AR_TUNNEL_HOST", "mwm")
+TUNNEL_UNIT = os.environ.get("AR_TUNNEL_UNIT", "mwm-tunnel.service")
+DB_FORWARD_PORT = _env_int("AR_DB_FORWARD_PORT", 63333, minimum=1)
+DB_REMOTE = os.environ.get("AR_DB_REMOTE", "operations.sdss.org:5432")
+DB_USER = os.environ.get("AR_DB_USER", "sdss")
+DB_NAME = os.environ.get("AR_DB_NAME", "sdss5db")
+PSQL_BIN = os.environ.get("AR_PSQL", "psql")
+
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
-    "tunnel_check": ("The Utah ControlMaster (ssh alias `mwm`) is down. Only "
-                     "AKS can reopen it: `sshpass -f ~/pass_file ssh -fN mwm` "
-                     "on ccalin051."),
+    "tunnel_check": (f"The DB tunnel is down. It is owned by the systemd "
+                     f"user unit `{TUNNEL_UNIT}` on ccalin051: check "
+                     f"`systemctl --user status {TUNNEL_UNIT}` and "
+                     f"`journalctl --user -u {TUNNEL_UNIT}`. If it hit its "
+                     "start limit (e.g. a changed password), fix the cause, "
+                     f"then `systemctl --user reset-failed {TUNNEL_UNIT}` "
+                     f"and `systemctl --user start {TUNNEL_UNIT}`."),
+    "stale_run_guard": ("A scheduled run outlived an outage and was failed "
+                        "on purpose without running anything. To process "
+                        "that night, trigger a fresh run with conf "
+                        "{\"mjd\": N, \"almanac_clobber\": true} "
+                        "(INSTALL.md, 'Re-running a failed night')."),
     "update_sdsscore": ("sdsscore git pull failed — check "
                         f"{SDSSCORE_DIR} (submodule auth / disk)."),
-    "almanac": ("almanac failed — exit 127 ('uvx: command not found') means "
+    "almanac": ("almanac failed. A slow run is NOT a hang: the APOGEE-ID "
+                "lookup can sit at 0% CPU for hours on a cold DB cache "
+                "(check pg_stat_activity for DataFileRead before killing "
+                "anything). rc -15 / SIGTERM with no error = the task's "
+                "execution_timeout; 'canceling statement due to statement "
+                "timeout' in almanac.log = the PGOPTIONS statement_timeout. "
+                "Re-run the night with a fresh trigger, conf "
+                "{\"mjd\": N, \"almanac_clobber\": true} (INSTALL.md, "
+                "'Re-running a failed night'). Exit 127 means "
                 "the PATH in airflow_env.sh doesn't match the account "
                 "running Airflow (first-night finding 2026-09-04); "
                 "otherwise check the DB tunnel (port 63333), "
@@ -195,6 +397,65 @@ def night_date_str(mjd: int) -> str:
     """Civil UTC date (YYYY-MM-DD) on which the night's MJD began."""
     from datetime import date, timedelta as td
     return str(date(1858, 11, 17) + td(days=int(mjd)))
+
+
+def _ctx_get(context, key):
+    """context[key] or None: Airflow 3 omits data_interval_* for runs
+    without a data interval, and Context objects may raise KeyError."""
+    try:
+        return context.get(key)
+    except (KeyError, AttributeError):
+        try:
+            return context[key]
+        except (KeyError, TypeError):
+            return None
+
+
+def run_reference_time(context, now=None):
+    """(datetime, source) the run's night arithmetic is based on:
+    data_interval_start (scheduled runs: the trigger time on this
+    CronTriggerTimetable instance), else logical_date, else the dag_run's
+    run_after, else now (UTC). A manual `airflow dags trigger` without
+    --logical-date has no data interval in Airflow 3."""
+    for key in ("data_interval_start", "logical_date"):
+        val = _ctx_get(context, key)
+        if val is not None:
+            return val, key
+    dag_run = _ctx_get(context, "dag_run")
+    for key in ("run_after", "logical_date"):
+        val = getattr(dag_run, key, None)
+        if val is not None:
+            return val, f"dag_run.{key}"
+    return (now or datetime.now(timezone.utc)), "now"
+
+
+def date_label_from_mjd(mjd: int) -> str:
+    """setup.date_mjd's label for a given night MJD.
+
+    Same convention as the scheduled arithmetic: a run at time T processes
+    mjd = int(mjd(T)) - 1 and labels it (T in America/New_York) - 2 days.
+    For the 7 am ET trigger that label is the civil date on which MJD-1
+    began, e.g. mjd 61360 (run of 2026-11-17) -> '2026-11-15'."""
+    return night_date_str(int(mjd) - 1)
+
+
+def compute_date_label(context, now=None) -> tuple[str, str]:
+    """(label, source description) for setup.date_mjd: from conf `mjd`
+    when given (>= 0), else ar_main.py's
+    (reference time in America/New_York - 2 days)."""
+    from datetime import timedelta as td
+    from zoneinfo import ZoneInfo
+    params = _ctx_params(context)
+    try:
+        override = int(params.get("mjd", -1))
+    except (TypeError, ValueError):
+        override = -1
+    if override >= 0:
+        return date_label_from_mjd(override), f"param mjd={override}"
+    ref, src = run_reference_time(context, now=now)
+    label = (ref.astimezone(ZoneInfo("America/New_York"))
+             - td(days=2)).strftime("%Y-%m-%d")
+    return label, f"{src}={ref}"
 
 
 def public_log_url(tele: str, mjd: int) -> str | None:
@@ -407,16 +668,27 @@ mkdir -p "$LOGDIR"
 
 
 def step_cmd(step: str, cmd: str, tele: str,
-             skip_exit_codes: dict | None = None) -> str:
+             skip_exit_codes: dict | None = None,
+             announce: str | None = None) -> str:
     """Wrap a chain step: log to <logdir>/<step>.log, append
     '<step>,<rc>,<wall_s>' to steps.csv (N1 raw material), tail the log into
     the Airflow log, propagate rc. skip_exit_codes maps a tool exit code to
     99 (BashOperator's skip_on_exit_code) so e.g. 'no exposures' skips
-    cleanly instead of failing."""
+    cleanly instead of failing.
+
+    announce: text echoed into the AIRFLOW task log before the step starts
+    (the step's own output only reaches the Airflow log at the end, as a
+    tail). Must not contain double quotes."""
     remap = ""
     for code, _ in (skip_exit_codes or {}).items():
         remap += f'if [ "$rc" -eq {code} ]; then rc=99; fi\n'
     preamble = STEP_PREAMBLE % {"logdir": xn("logdir", tele)}
+    if announce:
+        if '"' in announce:
+            raise ValueError("announce text must not contain double quotes")
+        preamble += (f'echo "$(date -u +%FT%TZ) {step}: {announce}"\n'
+                     f'echo "{step}: full log (follow with tail -f): '
+                     f'$LOGDIR/{step}.log"\n')
     return (
         preamble
         + f'START=$(date +%s)\n'

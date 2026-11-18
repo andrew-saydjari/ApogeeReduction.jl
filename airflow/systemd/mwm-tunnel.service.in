@@ -1,0 +1,46 @@
+# systemd USER unit: the ssh ControlMaster to the Utah host AND the almanac
+# DB port-forward, owned by one foreground process.
+#
+# TEMPLATE: the @-delimited placeholders are filled in by
+# airflow/scripts/render_systemd_units.sh. Install: airflow/INSTALL.md
+# step 4. Install it under the account whose ~/.ssh/config defines the
+# @TUNNEL_HOST@ alias (its ControlPath is used as-is).
+#
+# Why this shape (2026-11-17 restart):
+#  * ControlMaster=yes + ControlPersist=no + -N: this process IS the master
+#    and stays in the foreground, so systemd supervises the real connection
+#    (with ControlPersist=yes ssh forks a background master that systemd
+#    cannot see, and an exiting unit could remove the socket of a master it
+#    did not own).
+#  * The DB forward (-L) is established by the master itself, with
+#    ExitOnForwardFailure=yes: the forward lives and dies with the master,
+#    instead of being added ad hoc by the DAG's tunnel_check and silently
+#    vanishing when the master is rebuilt.
+#  * Keep-alives (30 s x 3): a dead link is noticed in ~90 s; ssh exits and
+#    systemd restarts it.
+#  * The restart cap protects the Utah account: a changed password makes
+#    every attempt fail, and unbounded retries could lock the account. After
+#    3 starts within an hour the unit stays failed until a human runs
+#    `systemctl --user reset-failed mwm-tunnel.service` and starts it.
+#  * The password file path is a render parameter (--pass-file); its CONTENT
+#    is never in this repo.
+
+[Unit]
+Description=SSH ControlMaster + DB port-forward to @TUNNEL_HOST@ (APOGEE daily reduction)
+After=network-online.target
+# At most 3 start attempts per hour, so a changed password cannot lock the
+# Utah account. (Start limits belong in [Unit].)
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+# Before starting, ask any existing master to exit and remove a stale
+# socket, so the new master can always create its own.
+ExecStartPre=/bin/sh -c 'p=$(/usr/bin/ssh -G @TUNNEL_HOST@ | /usr/bin/awk "/^controlpath /{print \\$2}"); /usr/bin/ssh -O exit @TUNNEL_HOST@ >/dev/null 2>&1; [ -n "$p" ] && /usr/bin/rm -f "$p"; exit 0'
+ExecStart=@SSHPASS@ -f @PASS_FILE@ /usr/bin/ssh -N -o ControlMaster=yes -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -L @DB_FORWARD@ @TUNNEL_HOST@
+Restart=always
+RestartSec=300
+
+[Install]
+WantedBy=default.target

@@ -5,7 +5,8 @@ production ar_main.py structure per AKS review 2026-09-03: the Airflow
 metadata DB is SQLite (single-writer), so parallel per-observatory DAG runs
 contend; serial is deliberate.
 
-  update(repo -> sdsscore -> sync_logs) -> setup(mjd, date_mjd)
+  stale_run_guard -> update(repo -> sdsscore -> sync_logs)
+    -> setup(mjd, date_mjd)
     -> [ LCO group ] -> [ APO group ] -> completion_notification
 
 Each observatory group:
@@ -32,6 +33,11 @@ so upstream skips pass through while a real LCO failure still blocks APO
 
 Trigger a manual/backfill run with e.g.:
   airflow dags trigger apogee_daily --conf '{"mjd": 61284}'
+Re-run a FAILED night with a fresh trigger (not by clearing tasks; see
+airflow/INSTALL.md, "Re-running a failed night"):
+  airflow dags trigger apogee_daily --logical-date <now, ISO> \\
+      --run-id manual__rerun_<N>_<stamp> \\
+      --conf '{"mjd": N, "almanac_clobber": true}'
 Smoke-test conf (MUST force local mode — the default is slurm — and the
 dev channel; summaries are the only posts in summary_only):
   {"mjd": ..., "mode": "local", "outdir": ".../o3_dag_test/",
@@ -47,13 +53,16 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 # make sibling ar_common importable regardless of how the bundle is parsed
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from airflow import DAG
-from airflow.exceptions import AirflowSkipException
+try:  # Airflow 3 Task SDK location; airflow.exceptions is deprecated there
+    from airflow.sdk.exceptions import (AirflowFailException,
+                                        AirflowSkipException)
+except ImportError:  # pragma: no cover - older Airflow
+    from airflow.exceptions import AirflowFailException, AirflowSkipException
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.operators.python import (
@@ -100,9 +109,12 @@ def compute_mjd(**context):
     if override >= 0:
         print(f"mjd from param override: {override}")
         return override
-    dis = context["data_interval_start"]
-    mjd = int(C.mjd_of(dis)) - 1
-    print(f"mjd from data_interval_start={dis}: {mjd}")
+    # A manual trigger without --logical-date has no data interval in
+    # Airflow 3 (2026-11-17: KeyError 'data_interval_start'); fall back to
+    # logical_date, then run_after, then now (C.run_reference_time).
+    ref, src = C.run_reference_time(context)
+    mjd = int(C.mjd_of(ref)) - 1
+    print(f"mjd from {src}={ref}: {mjd}")
     return mjd
 
 
@@ -110,12 +122,17 @@ def compute_date_mjd(**context):
     """ar_main.py setup.date_mjd, verbatim semantics:
         (data_interval_start astimezone America/New_York
          - timedelta(days=2)).strftime('%Y-%m-%d')
-    (zoneinfo replaces pytz)."""
-    dis = context["data_interval_start"]
-    date = (dis.astimezone(ZoneInfo("America/New_York"))
-            - timedelta(days=2)).strftime("%Y-%m-%d")
-    print(f"date_mjd from data_interval_start={dis}: {date}")
-    return date
+    (zoneinfo replaces pytz).
+
+    Manual runs (2026-11-17): when conf gives `mjd`, the label is derived
+    from that MJD (C.date_label_from_mjd, the same convention), not from
+    the trigger time, which named the wrong night for past-day re-runs.
+    Without a data interval (a trigger without --logical-date, which made
+    this task fail with KeyError 'data_interval_start') the reference time
+    falls back to logical_date, then run_after, then now."""
+    label, src = C.compute_date_label(context)
+    print(f"date_mjd from {src}: {label}")
+    return label
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +428,154 @@ def completion_notification(**context):
 
 
 # ---------------------------------------------------------------------------
+# robustness: stale-run guard, almanac step, tunnel check
+# ---------------------------------------------------------------------------
+
+def stale_run_guard(**context):
+    """First task of every run: fail a SCHEDULED run whose logical date is
+    older than params.stale_run_max_age_h (default AR_STALE_RUN_MAX_AGE_H,
+    36 h) before anything else runs. On 2026-11-17 the scheduled run of
+    2026-09-27, still 'running' when the service came back, resumed next to
+    the day's own run. AirflowFailException: no retries for this verdict.
+
+    Limitation: only a run that had not yet passed this task is caught; a
+    run interrupted further along resumes where it stopped."""
+    p = context["params"]
+    dag_run = context.get("dag_run")
+    run_type = getattr(dag_run, "run_type", None)
+    logical = context.get("logical_date") or getattr(dag_run,
+                                                     "logical_date", None)
+    max_age = float(p.get("stale_run_max_age_h", C.STALE_RUN_MAX_AGE_H))
+    reason = C.stale_run_reason(run_type, logical,
+                                datetime.now(timezone.utc), max_age)
+    if reason:
+        raise AirflowFailException(reason)
+    print(f"run type {run_type}, logical date {logical}: not stale "
+          f"(limit {max_age} h for scheduled runs)")
+
+
+_STMT_H = C.ALMANAC_STATEMENT_TIMEOUT_S / 3600
+_EXEC_H = C.ALMANAC_EXECUTION_TIMEOUT_S / 3600
+ALMANAC_ANNOUNCE = (
+    f"starting. It can sit at 0% CPU for hours in the APOGEE-ID database "
+    f"lookup when the DB cache is cold (about 4 h measured 2026-11-17, "
+    f"40 s warm); that is NOT a hang - check pg_stat_activity for "
+    f"DataFileRead before killing anything. Limits: statement_timeout "
+    f"{_STMT_H:g} h (PGOPTIONS), execution_timeout {_EXEC_H:g} h, "
+    f"retries {C.ALMANAC_RETRIES}.")
+
+
+def almanac_cmd(tele: str) -> str:
+    """The almanac step (run inside C.step_cmd's logging wrapper).
+
+    * Reuse an existing output only if it really holds this night
+      (check_almanac_output.py: raw/<tele>/<mjd>/exposures + fibers), not
+      merely because the file exists: a killed run once left a 96-byte stub
+      that made every retry skip.
+    * Write to "$AF.partial" and move it into place only on rc 0, so a
+      killed or failed run never leaves a stub at the real path.
+    * PGOPTIONS statement_timeout: a statement stuck server-side errors
+      with a clear message instead of waiting until execution_timeout.
+    The command is wrapped in bash -c '...': no single quotes inside."""
+    af = C.xn("almanac_file", tele)
+    mjd = C.xn("mjd", tele)
+    check = (f"{C.ALMANAC_PYTHON} "
+             f"{C.AR_REPO}/airflow/scripts/check_almanac_output.py")
+    return (
+        "bash -c 'set -uo pipefail\n"
+        f'AF="{af}"\n'
+        'TMP="$AF.partial"\n'
+        f'CHECK="{check}"\n'
+        f'NIGHT="{tele} {mjd}"\n'
+        'CLOBBER="{{ params.almanac_clobber }}"\n'
+        'if [ "$CLOBBER" != "True" ] && [ "$CLOBBER" != "true" ] '
+        '&& [ -e "$AF" ]; then\n'
+        '  if $CHECK "$AF" $NIGHT --fibers; then\n'
+        '    echo "almanac output already holds this night (skip; set '
+        'almanac_clobber to redo)"; exit 0\n'
+        '  fi\n'
+        '  echo "existing almanac output does not hold this night: '
+        'rebuilding it"\n'
+        'fi\n'
+        'mkdir -p "$(dirname "$AF")"\n'
+        'cleanup() { rm -f "$TMP"; }\n'
+        'trap cleanup EXIT\n'
+        'trap "exit 143" TERM INT\n'
+        'rm -f "$TMP"\n'
+        # DB identity comes from ~/.almanac/config.yaml + ~/.pgpass;
+        # provenance: log the clone's HEAD like the julia pipelines do
+        f'echo "almanac clone: $(git -C {C.ALMANAC_DIR} '
+        'rev-parse HEAD 2>/dev/null || echo UNKNOWN)"\n'
+        f'export PGOPTIONS="${{PGOPTIONS:-}} {C.ALMANAC_PGOPTIONS}"\n'
+        'echo "$(date -u +%FT%TZ) almanac start, PGOPTIONS=$PGOPTIONS; the '
+        'APOGEE-ID lookup may take hours at 0% CPU on a cold DB cache"\n'
+        f'{C.ALMANAC_BIN} -p 12 -v '
+        f'--{tele} --mjd-start {mjd} --mjd-end {mjd} '
+        '--output "$TMP" --fibers\n'
+        'rc=$?\n'
+        'echo "$(date -u +%FT%TZ) almanac exited rc=$rc"\n'
+        'if [ "$rc" -ne 0 ]; then\n'
+        '  echo "almanac failed: partial output discarded, $AF untouched"\n'
+        '  exit "$rc"\n'
+        'fi\n'
+        '$CHECK "$TMP" $NIGHT --fibers || echo "WARNING: almanac succeeded '
+        'but its output lacks this night (no exposures in the DB?); '
+        'installing it anyway, runlist decides"\n'
+        'mv -f "$TMP" "$AF" || exit 1\n'
+        'echo "installed $AF"\'')
+
+
+# tunnel_check: a real `select 1` through the forward, with timeouts. The
+# master and the forward belong to the tunnel systemd unit; if the forward
+# is missing while the master is up (a tunnel unit installed before it
+# carried the LocalForward), add it once over the master as a stopgap and
+# say so.
+TUNNEL_CHECK_CMD = (
+    "set -uo pipefail\n"
+    f"UNIT={C.TUNNEL_UNIT}\n"
+    f"HOST={C.TUNNEL_HOST}\n"
+    f"PORT={C.DB_FORWARD_PORT}\n"
+    "fatal() {\n"
+    '  echo "FATAL: $1"\n'
+    '  echo "The ssh ControlMaster and the DB port-forward are owned by the '
+    'systemd user unit $UNIT on $(hostname -s). Check:"\n'
+    '  echo "  systemctl --user status $UNIT"\n'
+    '  echo "  journalctl --user -u $UNIT -n 50"\n'
+    '  echo "If it hit its start limit (e.g. after a password change), fix '
+    'the cause, then: systemctl --user reset-failed $UNIT && '
+    'systemctl --user start $UNIT"\n'
+    "  exit 1\n"
+    "}\n"
+    "db_ok() {\n"
+    f"  PGCONNECT_TIMEOUT=10 PGOPTIONS='-c statement_timeout=15000' "
+    f"timeout 30 {C.PSQL_BIN} -X -w -At -h localhost -p \"$PORT\" "
+    f"-U {C.DB_USER} -d {C.DB_NAME} -c 'select 1' 2>&1\n"
+    "}\n"
+    "command -v "
+    f"{C.PSQL_BIN} >/dev/null || fatal '{C.PSQL_BIN} not found on PATH "
+    "(needed for the DB check; set AR_PSQL)'\n"
+    'ssh -O check "$HOST" 2>&1 || fatal "the ssh ControlMaster to $HOST is '
+    'down."\n'
+    'out=$(db_ok); rc=$?\n'
+    'if [ "$rc" -ne 0 ] || [ "$out" != "1" ]; then\n'
+    '  echo "select 1 via localhost:$PORT failed (rc=$rc): $out"\n'
+    "  if ! timeout 5 bash -c \"echo > /dev/tcp/localhost/$PORT\" "
+    "2>/dev/null; then\n"
+    '    echo "WARNING: port $PORT is not forwarded although the master is '
+    'up. The installed $UNIT predates the LocalForward; reinstall it from '
+    'airflow/systemd. Adding the forward over the master as a stopgap."\n'
+    f'    ssh -O forward -L "$PORT:{C.DB_REMOTE}" "$HOST" || true\n'
+    "    sleep 2\n"
+    "    out=$(db_ok); rc=$?\n"
+    "  fi\n"
+    "fi\n"
+    'if [ "$rc" -ne 0 ] || [ "$out" != "1" ]; then\n'
+    '  fatal "select 1 through localhost:$PORT failed (rc=$rc): $out"\n'
+    "fi\n"
+    'echo "tunnel OK: select 1 through localhost:$PORT returned 1"\n')
+
+
+# ---------------------------------------------------------------------------
 # observatory group builder
 # ---------------------------------------------------------------------------
 
@@ -438,52 +603,16 @@ def build_observatory_group(tele: str) -> TaskGroup:
 
         t_tunnel = BashOperator(
             task_id="tunnel_check",
-            bash_command=(
-                "set -uo pipefail\n"
-                "# The almanac DB (operations.sdss.org:5432) is reached via\n"
-                "# localhost:63333 forwarded over the persistent mwm\n"
-                "# ControlMaster. Only AKS can (re)open the master itself.\n"
-                "if ! ssh -O check mwm; then\n"
-                "  echo 'FATAL: mwm ControlMaster is DOWN. Only AKS can "
-                "reopen it: sshpass -f ~/pass_file ssh -fN mwm'\n"
-                "  exit 1\n"
-                "fi\n"
-                "if ! timeout 5 bash -c 'echo > /dev/tcp/localhost/63333' "
-                "2>/dev/null; then\n"
-                "  echo 'port 63333 not forwarded yet; adding forward via "
-                "ControlMaster'\n"
-                "  ssh -O forward -L 63333:operations.sdss.org:5432 mwm "
-                "|| true\n"
-                "  sleep 2\n"
-                "  timeout 5 bash -c 'echo > /dev/tcp/localhost/63333' || {\n"
-                "    echo 'FATAL: could not establish the 63333 forward "
-                "over the mwm ControlMaster'; exit 1; }\n"
-                "fi\n"
-                "echo 'tunnel OK'\n"),
+            bash_command=TUNNEL_CHECK_CMD,
         )
 
         t_almanac = BashOperator(
             task_id="almanac",
-            bash_command=C.step_cmd(
-                "almanac",
-                'bash -c \'set -uo pipefail\n'
-                f'AF="{C.xn("almanac_file", tele)}"\n'
-                'if [ -f "$AF" ] && [ "{{ params.almanac_clobber }}" != '
-                '"True" ] && [ "{{ params.almanac_clobber }}" != "true" ]; '
-                'then\n'
-                '  echo "almanac file exists: $AF (skip; set almanac_clobber '
-                'to redo)"; exit 0\nfi\n'
-                'mkdir -p "$(dirname "$AF")"\n'
-                # DB identity comes from ~/.almanac/config.yaml + ~/.pgpass;
-                # provenance: log the clone's HEAD like the julia pipelines do
-                f'echo "almanac clone: $(git -C {C.ALMANAC_DIR} '
-                'rev-parse HEAD 2>/dev/null || echo UNKNOWN)"\n'
-                f'{C.ALMANAC_BIN} -p 12 -v '
-                f'--{tele} --mjd-start {C.xn("mjd", tele)} '
-                f'--mjd-end {C.xn("mjd", tele)} '
-                '--output "$AF" --fibers\'',
-                tele,
-            ),
+            bash_command=C.step_cmd("almanac", almanac_cmd(tele), tele,
+                                    announce=ALMANAC_ANNOUNCE),
+            execution_timeout=timedelta(seconds=C.ALMANAC_EXECUTION_TIMEOUT_S),
+            retries=C.ALMANAC_RETRIES,
+            retry_delay=timedelta(seconds=C.ALMANAC_RETRY_DELAY_S),
         )
 
         t_runlist = BashOperator(
@@ -811,6 +940,19 @@ params = {
     # smoke tests: skip a no-data observatory immediately instead of
     # letting wait_for_raw poke/reschedule
     "raw_nowait": False,
+    # stale_run_guard: a SCHEDULED run older than this (hours) fails fast;
+    # manual triggers are never stale. 0 disables. Env default
+    # AR_STALE_RUN_MAX_AGE_H (36).
+    "stale_run_max_age_h": C.STALE_RUN_MAX_AGE_H,
+}
+
+# The first tasks of a run retry briefly: on 2026-11-17 runs launched ~20 s
+# after `airflow standalone` started failed after "Pre Execute", before any
+# command ran (most likely before the API server was up). They are all
+# idempotent. See ar_common.STARTUP_RETRIES.
+STARTUP_RETRY_ARGS = {
+    "retries": C.STARTUP_RETRIES,
+    "retry_delay": timedelta(seconds=C.STARTUP_RETRY_DELAY_S),
 }
 
 with DAG(
@@ -822,7 +964,12 @@ with DAG(
     # observatories' overnight transfers (why it never needed the sensor).
     schedule="0 7 * * *",
     catchup=False,
-    max_active_runs=2,                   # ar_main.py's setting
+    # 1, not ar_main.py's 2 (2026-11-17): the chain is serial anyway and
+    # the metadata DB is SQLite; two active runs (a stale one + today's)
+    # ran side by side after the outage and doubled the load of the slow
+    # almanac DB lookup. A run still going at the next 7 am makes that
+    # run QUEUE; if it waits past the stale limit, stale_run_guard fails it.
+    max_active_runs=1,
     dagrun_timeout=timedelta(hours=20),  # two serial observatories
     params=params,
     default_args={
@@ -832,10 +979,18 @@ with DAG(
     on_failure_callback=C.notify_dag_failure,
     tags=["apogee", "daily"],
 ) as dag:
+    # ---- stale-run guard: the very first task, before update/setup ----
+    t_stale = PythonOperator(
+        task_id="stale_run_guard",
+        python_callable=stale_run_guard,
+        **STARTUP_RETRY_ARGS,
+    )
+
     # ---- update group (ar_main.py template: runs first, once) ----
     with TaskGroup(group_id="update") as group_update:
         t_repo = BashOperator(
             task_id="repo",
+            **STARTUP_RETRY_ARGS,
             bash_command=(
                 # DELIBERATE NEW BEHAVIOR (AKS 2026-09-03): actually pull the
                 # production checkouts. ar_main.py's repo task was status-only.
@@ -882,6 +1037,7 @@ with DAG(
 
         t_sdsscore = BashOperator(
             task_id="sdsscore",
+            **STARTUP_RETRY_ARGS,
             bash_command=(
                 'if [ "{{ params.update_sdsscore }}" != "True" ] && '
                 '[ "{{ params.update_sdsscore }}" != "true" ]; then\n'
@@ -904,6 +1060,7 @@ with DAG(
 
         t_synclogs = BashOperator(
             task_id="sync_logs",
+            **STARTUP_RETRY_ARGS,
             bash_command=(
                 'if [ "{{ params.sync_logs }}" != "True" ] && '
                 '[ "{{ params.sync_logs }}" != "true" ]; then\n'
@@ -921,8 +1078,10 @@ with DAG(
 
     # ---- setup group (ar_main.py: mjd + date_mjd) ----
     with TaskGroup(group_id="setup") as group_setup:
-        PythonOperator(task_id="mjd", python_callable=compute_mjd)
-        PythonOperator(task_id="date_mjd", python_callable=compute_date_mjd)
+        PythonOperator(task_id="mjd", python_callable=compute_mjd,
+                       **STARTUP_RETRY_ARGS)
+        PythonOperator(task_id="date_mjd", python_callable=compute_date_mjd,
+                       **STARTUP_RETRY_ARGS)
 
     # ---- observatories, LCO first, serial (ar_main.py order; reason:
     # SQLite metadata DB is single-writer, serial avoids contention) ----
@@ -941,4 +1100,5 @@ with DAG(
         trigger_rule=TriggerRule.NONE_FAILED,
     )
 
-    group_update >> group_setup >> group_lco >> group_apo >> t_completion
+    (t_stale >> group_update >> group_setup >> group_lco >> group_apo
+     >> t_completion)

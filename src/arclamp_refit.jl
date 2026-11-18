@@ -105,9 +105,12 @@ refit_era(tele::AbstractString, mjd::Integer) = mjd > get_fps_plate_divide(Strin
 "Night-level arc flags of the stage-1 product mapped onto the per-exposure bits 2^9-2^12, 2^16."
 function refit_arc_night_bits(night_flags::Integer, seq_flags::AbstractVector{<:Integer})
     b = 0
-    any(s -> (s & ARCSEQ_GATE_FAIL) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_GATED)
-    (night_flags & ARCNIGHT_ALL_GATED) != 0 && (b |= WAVE_ARC_ALL_GATED)
-    (night_flags & ARCNIGHT_NO_GATE) != 0 && (b |= WAVE_ARC_UNGATED)
+    # #417 arc-only rejection (gate B removed; bit meanings per #417's mapping): a rejected
+    # sequence -> 2^9; ARCNIGHT_ABS_FAIL (final-fit sequences fail the ceilings, the old ALL_GATED
+    # screen) -> 2^10; ARCNIGHT_FEW_SEQ (< 3 sequences, rejection not possible) -> 2^11
+    any(s -> (s & ARCSEQ_REJECTED) != 0, seq_flags) && (b |= WAVE_ARC_SEQ_GATED)
+    (night_flags & ARCNIGHT_ABS_FAIL) != 0 && (b |= WAVE_ARC_ALL_GATED)
+    (night_flags & ARCNIGHT_FEW_SEQ) != 0 && (b |= WAVE_ARC_UNGATED)
     (night_flags & ARCNIGHT_MULTIPOS) != 0 && (b |= WAVE_ARC_MULTIPOS)
     (night_flags & ARCNIGHT_CHIPSCALE_FREE) != 0 && (b |= WAVE_CHIPSCALE_FREE)
     return b
@@ -631,19 +634,55 @@ const REFIT_LOCAL_MIDNIGHT_FRAC = Dict("apo" => 0.29, "lco" => 0.18)
 "Arc taken after local midnight (the UT day wraps during the night, so compare in local time)."
 refit_is_morning(tele, t) = isfinite(t) && (mod(t - REFIT_LOCAL_MIDNIGHT_FRAC[String(tele)] + 0.5, 1.0) - 0.5) > 0
 
+# ---- POSITION REFERENCES (re-homed from #417, which removed them with gate B) ----------------
+"""A (pixel window x fibers 100:200) slice of an exposure's chip-G wavelength solution, with its
+mid-exposure MJD: the measured-position reference of a comb (or science) exposure for the arc
+pairing. The refit builds it from a previous run's per-exposure solution, the in-order pipeline from
+its provisional comb fit (`arcfirst_comb_refs_provisional`)."""
+struct ArcObjRef
+    expnum::Int
+    mjd_mid::Float64
+    kind::String                     # "fpi" or "sky" (which per-exposure solution)
+    px0::Int                         # first pixel of the slice
+    fibers::UnitRange{Int}
+    wave::Matrix{Float64}            # (pixels, fibers) chip G
+end
+
+const ARCGATE_FIBERS = 100:200
+const ARCGATE_PX = collect(900.0:25.0:1150.0)
+
+"""Measured offset (px) of arc state (`th`, `g`, ...) from an exposure's chip-G solution slice:
+median over fibers 100-200 and pixels 900-1150 of (λ_arc − λ_ref)/(dλ_ref/dpix)."""
+function arclamp_offset_to_ref(TH, okf, g, lay, grpv, d, t, tau, ref::ArcObjRef)
+    v = Float64[]
+    for (jf, f) in enumerate(ref.fibers)
+        okf[f] || continue
+        la = arcfit_eval(view(TH, f, :), g, lay, f, 2, ARCGATE_PX; grpv = grpv, d = d, t = t,
+            tau = tau)
+        for (k, p) in enumerate(ARCGATE_PX)
+            i = Int(p) - ref.px0 + 1
+            (2 <= i <= size(ref.wave, 1) - 1) || continue
+            lr = ref.wave[i, jf]
+            dl = (ref.wave[i + 1, jf] - ref.wave[i - 1, jf]) / 2
+            isfinite(lr) && isfinite(dl) && dl != 0 && push!(v, (la[k] - lr) / dl)
+        end
+    end
+    return isempty(v) ? NaN : median(v)
+end
+
 # ---- SEQUENCE-QUALITY ADAPTER ---------------------------------------------------------------
 # The only places that interpret the stage-1 per-sequence / per-night arc flags (ARCSEQ_*,
 # ARCNIGHT_*): `refit_anchor_quality`, `refit_seq_gated` (here) and `refit_arc_night_bits` (top of
 # the file). When #417 replaces gate B (new flag meanings / bit positions) only these change.
 "Sequence verified by the stage-1 sequence check (used by the \"morning\" anchor rule)."
-refit_seq_gated(sf::Integer) = (sf & ARCSEQ_UNGATED) == 0
+refit_seq_gated(sf::Integer) = (sf & ARCSEQ_NOT_COMPARED) == 0
 
 """Quality tier of an arc sequence for anchoring, from its stage-1 flags: 0 = verified by the 0.02 px
 gate and clean; 1 = not gate-verified (ungated) or few lines / lamp mismatch; 2 = gate failure or
 position outlier (only in the final fit when every gated sequence failed)."""
 function refit_anchor_quality(sf::Integer)
-    (sf & (ARCSEQ_GATE_FAIL | ARCSEQ_POS_OUTLIER)) != 0 && return 2
-    (sf & (ARCSEQ_UNGATED | ARCSEQ_FEW_LINES | ARCSEQ_LAMP_MISMATCH)) != 0 && return 1
+    (sf & (ARCSEQ_REJECTED | ARCSEQ_POS_OUTLIER)) != 0 && return 2
+    (sf & (ARCSEQ_NOT_COMPARED | ARCSEQ_ABS_FAIL | ARCSEQ_FEW_LINES | ARCSEQ_LAMP_MISMATCH)) != 0 && return 1
     return 0
 end
 

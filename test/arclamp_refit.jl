@@ -7,7 +7,7 @@ using ApogeeReduction: RefitConfig, refit_check_config, refit_config_dict, Refit
                        refit_ref_wave_disp, refit_ref_invert, refit_vs_pass1, refit_comb_vs_arc,
                        refit_fiber_sky_terms, WAVE_SKY, WAVE_ROUGH, WAVE_NIGHT_AVE, WAVE_ARC_SEQ_GATED,
                        WAVE_ARC_MULTIPOS, WAVE_CHIPSCALE_FREE, WAVE_FPIFIB_ROTATION, WAVE_FPIFIB_UNAVAILABLE,
-                       WAVE_FPIFIB_ONE_FIBER, ARCSEQ_GATE_FAIL, ARCNIGHT_MULTIPOS, ARCNIGHT_CHIPSCALE_FREE,
+                       WAVE_FPIFIB_ONE_FIBER, ARCSEQ_QUALITY, ARCNIGHT_MULTIPOS, ARCNIGHT_CHIPSCALE_FREE,
                        N_FIBERS, N_XPIX
 
 # a synthetic arc night: 3 used sequences, two position groups, time terms on
@@ -25,7 +25,7 @@ function _rf_arc(; rng = MersenneTwister(3))
     end
     lines = (seq = Int[], fiber = Int[], chip = Int[], id = Int[], pix = Float64[], pixvar = Float64[], keep = Bool[])
     RefitArc("synthetic", TH, trues(N_FIBERS), g, lay, [1, 2, 3], grp, tau, 60000.0 .+ [0.1, 0.2, 0.4],
-        [1, 2, 1], 60000.25, 0, [0, ARCSEQ_GATE_FAIL, 0], "fixed", lines)
+        [1, 2, 1], 60000.25, 0, [0, ARCSEQ_QUALITY, 0], "fixed", lines)
 end
 
 @testset "arclamp_refit" begin
@@ -45,7 +45,7 @@ end
         nm, b = refit_pass1_type("error_night_ave_fpi")
         @test nm == "sky_nightpos" && (b & WAVE_NIGHT_AVE) != 0
         @test refit_pass1_type("error_fixed_fallback")[2] == WAVE_ROUGH
-        b = refit_arc_night_bits(ARCNIGHT_MULTIPOS | ARCNIGHT_CHIPSCALE_FREE, [0, ARCSEQ_GATE_FAIL])
+        b = refit_arc_night_bits(ARCNIGHT_MULTIPOS | ARCNIGHT_CHIPSCALE_FREE, [0, ARCSEQ_QUALITY])
         @test (b & WAVE_ARC_SEQ_GATED) != 0 && (b & WAVE_ARC_MULTIPOS) != 0 && (b & WAVE_CHIPSCALE_FREE) != 0
     end
 
@@ -199,7 +199,7 @@ end
 
 using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor_rank, refit_anchor_quality,
                        refit_era, WAVE_ANCHOR_FALLBACK, WAVE_ANCHOR_NOT_SAME_BLOCK, WAVE_ANCHOR_NOT_PREFERRED,
-                       WAVE_ANCHOR_UNVERIFIED, WAVE_FPS_NO_COMB, WAVE_BIT_NAMES, ARCSEQ_UNGATED, ARCSEQ_POS_OUTLIER,
+                       WAVE_ANCHOR_UNVERIFIED, WAVE_FPS_NO_COMB, WAVE_BIT_NAMES, ARCSEQ_NOT_COMPARED, ARCSEQ_POS_OUTLIER,
                        ARCSEQ_FEW_LINES
 @testset "arclamp_refit anchors" begin
     @test refit_is_morning("apo", 60000.40) && !refit_is_morning("apo", 60000.08)
@@ -236,9 +236,9 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor
     @test length(WAVE_BIT_NAMES) == 34 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
           WAVE_BIT_NAMES[30] == "WAVE_FPS_NO_COMB" && WAVE_FPS_NO_COMB == 1 << 29
     # anchor quality tiers
-    @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_UNGATED) == 1 &&
-          refit_anchor_quality(ARCSEQ_FEW_LINES) == 1 && refit_anchor_quality(ARCSEQ_GATE_FAIL) == 2 &&
-          refit_anchor_quality(ARCSEQ_POS_OUTLIER | ARCSEQ_UNGATED) == 2
+    @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_NOT_COMPARED) == 1 &&
+          refit_anchor_quality(ARCSEQ_FEW_LINES) == 1 && refit_anchor_quality(ARCSEQ_QUALITY) == 2 &&
+          refit_anchor_quality(ARCSEQ_POS_OUTLIER | ARCSEQ_NOT_COMPARED) == 2
     # ranking (times in days): science 0.10-0.30; seq 1 evening (0.05, leading), seq 2 mid-night after
     # an object (0.205), seq 3 morning (0.34, closes the object sequence), seq 4 mid-night before an object
     tseq = [0.05, 0.205, 0.34, 0.149]
@@ -280,10 +280,10 @@ using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
     @test P.ok && P.j_seq == 3 && P.k_comb == 2 && P.bits == 0 && P.rank == 1 &&
           P.kind == "nearest_science:same_position" && P.dt_sci_h ≈ 1.2
     # the preferred block unverified (ungated): the next verified block in rank anchors (same position, no flag)
-    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs, "apo"; scis)
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_NOT_COMPARED], combs, "apo"; scis)
     @test P.ok && P.j_seq == 1 && P.k_comb == 1 && P.bits == 0 && P.quality == 0
     # first-ranked block without a same-block comb exposure: fallback to the next with one
-    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs[2:2], "apo"; scis)
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_NOT_COMPARED], combs[2:2], "apo"; scis)
     @test P.ok && P.j_seq == 3 && P.rank == 3 && P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_UNVERIFIED
     # no science exposures: "any" behaviour, flagged
     P = refit_choose_anchor(A, ok0, combs, "apo")
@@ -292,7 +292,7 @@ using ApogeeReduction: refit_choose_anchor, ArcObjRef, ARCGATE_FIBERS
     # morning switch (APO local midnight = 0.29 UT day): the 0.4 sequence; without it, an evening one
     P = refit_choose_anchor(A, ok0, combs, "apo"; scis, anchor_block = "morning")
     @test P.ok && P.j_seq == 3 && P.kind == "morning" && P.bits == 0
-    P = refit_choose_anchor(A, [0, 0, ARCSEQ_UNGATED], combs, "apo"; scis, anchor_block = "morning")
+    P = refit_choose_anchor(A, [0, 0, ARCSEQ_NOT_COMPARED], combs, "apo"; scis, anchor_block = "morning")
     @test P.ok && P.j_seq == 1 && P.kind == "evening" && P.bits == WAVE_ANCHOR_FALLBACK | WAVE_ANCHOR_NOT_PREFERRED
     P = refit_choose_anchor(A, ok0, combs, "apo"; scis, anchor_block = "any")
     @test P.ok && P.j_seq == 1 && P.kind == "any"
