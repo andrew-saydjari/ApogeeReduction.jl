@@ -1201,6 +1201,83 @@ function comb_exp_get_and_save_fpi_wavecal(
         return outname, linParams, nlParams, chipWaveSoln
     end
 
+    R = comb_fpi_fit_core(fname_list, initial_linParams, initial_nlParams;
+        cporder = cporder, wporder = wporder, dporder = dporder, n_sigma = n_sigma,
+        max_ang_sigma = max_ang_sigma, max_iter = max_iter, verbose = verbose)
+    R === nothing && return nothing
+    (; linParams, nlParams, ditherParams, ditherPolyParams, chipPolyParams0, resid_vec, resid_xt,
+        fpi_line_chipInt, fpi_line_expInt, peak_ints, good_peaks, chipWaveSoln, med_m0,
+        m_offset, cavity_size) = R
+    x = 1:N_XPIX
+    ximport = (x .- (N_XPIX ÷ 2)) ./ N_XPIX
+
+    #loop over the exposures and make the expected waveCalNightfpiDither output.
+    #Each exposure's dithered grid goes into its own buffer: chipWaveSoln above is
+    #the night solution at the reference (first-exposure) dither, and it is what
+    #gets saved to waveCalFPI, returned, and stored as nightAve_wave_soln. Writing
+    #the per-exposure grids into chipWaveSoln made all three the LAST exposure's
+    #dithered grid instead.
+    expChipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
+    for fname_ind in 1:n_fnames
+        curr_outname = replace(replace(
+            replace(fname_list[fname_ind], "fpiPeaks" => "waveCalNightfpiDither"),
+            "_$(FIRST_CHIP)_" => "_"))
+
+        for chip in CHIP_LIST
+            chipIndx = getChipIndx(chip)
+            for fibIndx in 1:N_FIBERS
+                chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
+                params2ChipPolyParams!(chipPolyParams, nlParams[fibIndx, :], cporder)
+                xt = transform_x_chips(ximport, chipPolyParams[chipIndx, :])
+                xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
+                Ax = positional_poly_mat(xt, porder = wporder)
+                yt = Ax * linParams[fibIndx, :]
+                expChipWaveSoln[:, fibIndx, chipIndx] .= yt
+            end
+        end
+
+        in_exp = findall(fpi_line_expInt[1, :] .== fname_ind)
+        safe_jldsave(curr_outname;
+            linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
+                fname_ind, :, :],
+            resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
+            chipWaveSoln = expChipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
+    end
+    safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
+        exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
+        resid_chipInts = fpi_line_chipInt, resid_peak_ints = peak_ints,
+        resid_exp_ints = fpi_line_expInt, resid_used_in_fit = good_peaks,
+        chipWaveSoln = chipWaveSoln,
+        fpi_m0 = med_m0, fpi_m0_offset = m_offset, fpi_cavity_size = cavity_size, no_metadata = true) # KEVIN FIX THIS!!!!
+
+    return outname, linParams, nlParams, chipWaveSoln
+end
+
+"""
+    comb_fpi_fit_core(fname_list, initial_linParams, initial_nlParams; kw...) -> NamedTuple or nothing
+
+The FPI comb fit of `comb_exp_get_and_save_fpi_wavecal`, without file I/O (the wrapper checks
+the checkpoint and writes the products). With the default keywords it is the production fit
+unchanged. Opt-in switches (used by the arc-anchored comb of `arclamp_refit.jl`; all off by
+default):
+  * `cavity_override`, `m_offset_override`: replace the hard-coded initial cavity (L0, eps0);
+  * `seed_LE_from_initial`: before the first-exposure offset is computed against the comb,
+    set (L, eps) by least squares to the INITIAL solution's wavelengths of the first exposure's
+    peaks (anchors the comb's absolute level on the initial solution, e.g. an arc solution at
+    the first exposure's measured position);
+  * `fix_LE`: keep (L, eps) fixed at their initial values during the iterations.
+The integer order m of every peak is always assigned from `initial_linParams/initial_nlParams`.
+Returns `nothing` for an unknown telescope.
+"""
+function comb_fpi_fit_core(
+        fname_list, initial_linParams, initial_nlParams;
+        cporder = 1, wporder = 4, dporder = 2,
+        n_sigma = 5, max_ang_sigma = 0.2, max_iter = 3, verbose = true,
+        cavity_override = nothing, m_offset_override = nothing,
+        seed_LE_from_initial = false, fix_LE = false)
+    n_fnames = size(fname_list, 1)
+    fname = fname_list[1]
+
     #first guess FPI cavity size, Angstroms
     if occursin("_lco_", fname)
         init_cavity_size = 3.73610e7
@@ -1215,6 +1292,8 @@ function comb_exp_get_and_save_fpi_wavecal(
 
     cavity_size = init_cavity_size
     m_offset = init_m_offset
+    isnothing(cavity_override) || (cavity_size = Float64(cavity_override))
+    isnothing(m_offset_override) || (m_offset = Float64(m_offset_override))
 
     initial_n_lin_coeffs = size(initial_linParams, 2)
     initial_n_nl_coeffs = size(initial_nlParams, 2)
@@ -1299,6 +1378,20 @@ function comb_exp_get_and_save_fpi_wavecal(
     verbose &&
         println("Found $(sum(bad_peaks)) bad peaks (out of a total $(length(bad_peaks)) peaks) that are too offset from the expected peak positions")
     good_peaks = (.!isnan.(fpi_ximport)) .& (.!bad_peaks)
+    if seed_LE_from_initial
+        # anchor (L, eps) on the initial solution's wavelengths of the first exposure's peaks
+        gp1 = good_peaks .& isfinite.(peak_waves) .& (fpi_line_expInt .== 1)
+        seedfun(p) = nansum((peak_waves[gp1] .-
+                             (2.0 * (cavity_size + p[1] * 1.0e3)) ./ (peak_ints[gp1] .+ p[2])) .^ 2)
+        pseed = Optim.minimizer(optimize(seedfun, [0.0, m_offset], LBFGS(),
+            Optim.Options(show_trace = false)))
+        verbose && println("seed_LE_from_initial: dL = $(pseed[1] * 1e3) A, m_offset $(m_offset) -> $(pseed[2])")
+        cavity_size += pseed[1] * 1.0e3
+        m_offset = pseed[2]
+        expect_peak_waves = 2 .* cavity_size ./ (peak_ints .+ m_offset)
+    end
+    seed_cavity_size = cavity_size
+    seed_m_offset = m_offset
 
     linParams = zeros(Float64, N_FIBERS, wporder + 1)
     #every image but the first will have an offset and scaling for dithers
@@ -1734,8 +1827,10 @@ function comb_exp_get_and_save_fpi_wavecal(
         res = optimize(
             nonlinear_expparams_fit, expparams0, LBFGS(), Optim.Options(show_trace = false))
         expparamsOpt = Optim.minimizer(res) .* mults
-        cavity_size += expparamsOpt[1]
-        m_offset = expparamsOpt[2]
+        if !fix_LE
+            cavity_size += expparamsOpt[1]
+            m_offset = expparamsOpt[2]
+        end
 
         #        #EM definition
         #        m_offset = nanmedian(2.0 * cavity_size ./ peak_waves .- peak_ints)
@@ -1776,46 +1871,10 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
     end
 
-    #loop over the exposures and make the expected waveCalNightfpiDither output.
-    #Each exposure's dithered grid goes into its own buffer: chipWaveSoln above is
-    #the night solution at the reference (first-exposure) dither, and it is what
-    #gets saved to waveCalFPI, returned, and stored as nightAve_wave_soln. Writing
-    #the per-exposure grids into chipWaveSoln made all three the LAST exposure's
-    #dithered grid instead.
-    expChipWaveSoln = zeros(Float64, N_XPIX, N_FIBERS, N_CHIPS)
-    for fname_ind in 1:n_fnames
-        curr_outname = replace(replace(
-            replace(fname_list[fname_ind], "fpiPeaks" => "waveCalNightfpiDither"),
-            "_$(FIRST_CHIP)_" => "_"))
-
-        for chip in CHIP_LIST
-            chipIndx = getChipIndx(chip)
-            for fibIndx in 1:N_FIBERS
-                chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
-                params2ChipPolyParams!(chipPolyParams, nlParams[fibIndx, :], cporder)
-                xt = transform_x_chips(ximport, chipPolyParams[chipIndx, :])
-                xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
-                Ax = positional_poly_mat(xt, porder = wporder)
-                yt = Ax * linParams[fibIndx, :]
-                expChipWaveSoln[:, fibIndx, chipIndx] .= yt
-            end
-        end
-
-        in_exp = findall(fpi_line_expInt[1, :] .== fname_ind)
-        safe_jldsave(curr_outname;
-            linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
-                fname_ind, :, :],
-            resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
-            chipWaveSoln = expChipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
-    end
-    safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
-        exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
-        resid_chipInts = fpi_line_chipInt, resid_peak_ints = peak_ints,
-        resid_exp_ints = fpi_line_expInt, resid_used_in_fit = good_peaks,
-        chipWaveSoln = chipWaveSoln,
-        fpi_m0 = med_m0, fpi_m0_offset = m_offset, fpi_cavity_size = cavity_size, no_metadata = true) # KEVIN FIX THIS!!!!
-
-    return outname, linParams, nlParams, chipWaveSoln
+    return (; linParams, nlParams, ditherParams, ditherPolyParams, chipPolyParams0, resid_vec,
+        resid_xt, good_peaks, peak_ints, fpi_line_chipInt, fpi_line_expInt, fpi_line_uxlst,
+        cavity_size, m_offset, med_m0, chipWaveSoln, first_dither_offset, seed_cavity_size,
+        seed_m_offset, init_cavity_size, init_m_offset, cporder, wporder, dporder)
 end
 
 function get_fpi_wavecal(

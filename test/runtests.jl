@@ -16,5 +16,6 @@ using FITSIO: FITS
     include("lsf.jl")
     include("readonly_opens.jl")
     include("arclamp_wavecal.jl")
+    include("arclamp_refit.jl")
     include("scripts_parse.jl")
 end
