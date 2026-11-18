@@ -112,6 +112,7 @@ end
             "src/fpi_gate.jl" => 1,                       # save_fpi_qa!: rewrites fpi_qa/
             "src/utils.jl" => 2,                          # safe_jldsave metadata; modify_saved_dict
             "src/wavecal.jl" => 1,                        # FPI gate promotes best_wave_type
+            "src/trace_qa.jl" => 1,                       # make_traceMain: bitmsk_trace into its own temp traceMain
             "scripts/cal/decorate_almanac_exptype.jl" => 1 # writes exposure_class/
         )
         files = String[]
