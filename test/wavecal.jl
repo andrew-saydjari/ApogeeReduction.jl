@@ -47,6 +47,373 @@ using HDF5
         @test exp_m0s_nan[1, 1] == 1203.0
     end
 
+    @testset "deterministic night-frame anchor (Method A')" begin
+        AR = ApogeeReduction
+        rng = Random.MersenneTwister(2026)
+
+        # ABBA synthetic night, labels HONEST per the verified corpus-wide
+        # sign convention at LCO (direction +1: smaller DITHPIX <-> smaller
+        # measured offset): group at ~0 px labeled 12.995, group at
+        # ~+0.478 px labeled 13.496. The anchor default direction is +1.
+        n_pairs = 6
+        offs_A = 0.0 .+ 0.02 .* randn(rng, n_pairs)
+        offs_B = 0.478 .+ 0.02 .* randn(rng, n_pairs)
+        offsets = collect(Iterators.flatten(zip(offs_A, offs_B)))
+        labels = collect(Iterators.flatten(zip(fill(12.995, n_pairs), fill(13.496, n_pairs))))
+
+        @testset "(a) normal ABBA: smallest-DITHPIX cluster wins, deterministic" begin
+            res = AR.night_frame_anchor(offsets, labels)
+            @test res.mode == "dithpix_group"
+            @test res.canonical_dithpix ≈ 12.995
+            @test isapprox(res.shift_pix, 0.0, atol = 0.05)
+            @test length(res.cluster_n) == 2
+            @test !res.qa_dithpix_frozen_but_motion
+            @test !res.qa_dithpix_changed_but_no_motion
+            @test !res.qa_dithpix_order_inconsistent
+            # every exposure labeled 12.995 is in the canonical cluster
+            canon_members = res.exp_cluster .== res.canonical_cluster
+            @test all(labels[canon_members] .== 12.995)
+            @test all(labels[.!canon_members] .== 13.496)
+
+            # COINCIDENCE property: with honest labels the label rule and the
+            # measured-position tie-break select the SAME cluster -- rerunning
+            # with the labels withheld must pick the identical membership
+            res_nolabel = AR.night_frame_anchor(offsets, fill(NaN, length(offsets)))
+            @test res_nolabel.mode == "measured_position"
+            @test res_nolabel.canonical_cluster == res.canonical_cluster
+            @test res_nolabel.exp_cluster == res.exp_cluster
+            @test res_nolabel.shift_pix == res.shift_pix
+
+            # deterministic under 0.001-px perturbations of the measured offsets
+            for trial in 1:20
+                pert = offsets .+ 0.001 .* randn(rng, length(offsets))
+                res_p = AR.night_frame_anchor(pert, labels)
+                @test res_p.mode == "dithpix_group"
+                @test res_p.canonical_dithpix ≈ 12.995
+                @test isapprox(res_p.shift_pix, res.shift_pix, atol = 0.01)
+            end
+
+            # deterministic under exposure reordering
+            for trial in 1:5
+                perm = Random.randperm(rng, length(offsets))
+                res_r = AR.night_frame_anchor(offsets[perm], labels[perm])
+                @test res_r.mode == "dithpix_group"
+                @test res_r.canonical_dithpix ≈ 12.995
+                @test res_r.shift_pix == res.shift_pix
+            end
+
+            # a NaN offset (failed dither fit) is left unclustered, no crash
+            offsets_nan = copy(offsets)
+            offsets_nan[3] = NaN
+            res_n = AR.night_frame_anchor(offsets_nan, labels)
+            @test res_n.exp_cluster[3] == 0
+            @test res_n.mode == "dithpix_group"
+            @test res_n.canonical_dithpix ≈ 12.995
+        end
+
+        @testset "(b) AAAA: single cluster is canonical" begin
+            offs1 = 0.13 .+ 0.02 .* randn(rng, 8)
+            labs1 = fill(12.995, 8)
+            res = AR.night_frame_anchor(offs1, labs1)
+            @test res.mode == "single_cluster"
+            @test length(res.cluster_n) == 1
+            @test isapprox(res.shift_pix, 0.13, atol = 0.05)
+            @test !res.qa_dithpix_frozen_but_motion
+            @test !res.qa_dithpix_changed_but_no_motion
+            @test !res.qa_dithpix_order_inconsistent
+        end
+
+        @testset "(c) frozen labels + real motion: measured-position ordering + QA flag" begin
+            frozen = fill(13.496, length(offsets))
+            res = AR.night_frame_anchor(offsets, frozen)
+            @test res.mode == "measured_position"
+            @test res.qa_dithpix_frozen_but_motion
+            @test !res.qa_dithpix_changed_but_no_motion
+            @test !res.qa_dithpix_order_inconsistent
+            # direction +1 (LCO): smallest measured position wins (cluster at ~0 px)
+            @test res.canonical_cluster == 1
+            @test isapprox(res.shift_pix, 0.0, atol = 0.05)
+            # direction -1 (APO): the HIGHEST measured position maps to the
+            # smallest DITHPIX, so the other cluster wins
+            res_apo = AR.night_frame_anchor(offsets, frozen; dithpix_direction = -1)
+            @test res_apo.mode == "measured_position"
+            @test res_apo.canonical_cluster == 2
+            @test isapprox(res_apo.shift_pix, 0.478, atol = 0.05)
+            # same behavior when labels are entirely missing, but then the
+            # "frozen" QA flag must NOT fire (nothing was frozen -- just absent)
+            res_nan = AR.night_frame_anchor(offsets, fill(NaN, length(offsets)))
+            @test res_nan.mode == "measured_position"
+            @test !res_nan.qa_dithpix_frozen_but_motion
+            @test res_nan.canonical_cluster == 1
+            # DITHPIX = 0.0 sentinel labels count as missing
+            res_zero = AR.night_frame_anchor(offsets, fill(0.0, length(offsets)))
+            @test res_zero.mode == "measured_position"
+            @test res_zero.canonical_cluster == 1
+        end
+
+        @testset "(d) labels ABBA but no motion: single cluster + QA flag" begin
+            offs1 = 0.0 .+ 0.02 .* randn(rng, length(labels))
+            res = AR.night_frame_anchor(offs1, labels)
+            @test res.mode == "single_cluster"
+            @test length(res.cluster_n) == 1
+            @test res.qa_dithpix_changed_but_no_motion
+            @test !res.qa_dithpix_frozen_but_motion
+            @test !res.qa_dithpix_order_inconsistent
+        end
+
+        @testset "APO direction (-1): honest APO labels coincide too" begin
+            # honest APO night per the verified sign convention (direction
+            # -1): the SMALLER DITHPIX (12.994) sits on the HIGHER-position
+            # cluster (as measured on 133/133 label-discriminating APO nights)
+            labels_apo = collect(Iterators.flatten(
+                zip(fill(13.499, n_pairs), fill(12.994, n_pairs))))
+            res = AR.night_frame_anchor(offsets, labels_apo; dithpix_direction = -1)
+            @test res.mode == "dithpix_group"
+            @test res.canonical_dithpix ≈ 12.994
+            @test res.canonical_cluster == 2
+            @test isapprox(res.shift_pix, 0.478, atol = 0.05)
+            @test !res.qa_dithpix_order_inconsistent
+            # coincidence at APO: withholding the labels picks the same cluster
+            res_nl = AR.night_frame_anchor(offsets, fill(NaN, length(offsets));
+                dithpix_direction = -1)
+            @test res_nl.mode == "measured_position"
+            @test res_nl.canonical_cluster == res.canonical_cluster
+            @test res_nl.shift_pix == res.shift_pix
+        end
+
+        @testset "label ordering inconsistent with measured direction: override + QA flag" begin
+            # labels violate the telescope's verified sign convention (here
+            # direction +1 with the smaller DITHPIX on the HIGHER-position
+            # cluster). Measurement beats label: measured ordering wins and
+            # the inconsistency flags.
+            labels_swapped = collect(Iterators.flatten(
+                zip(fill(13.496, n_pairs), fill(12.995, n_pairs))))
+            res = AR.night_frame_anchor(offsets, labels_swapped)
+            @test res.mode == "measured_position_override"
+            @test res.qa_dithpix_order_inconsistent
+            @test !res.qa_dithpix_frozen_but_motion
+            @test !res.qa_dithpix_changed_but_no_motion
+            # canonical = measured pick under direction +1 (the ~0 px
+            # cluster), which here carries the LARGER label
+            @test res.canonical_cluster == 1
+            @test isapprox(res.shift_pix, 0.0, atol = 0.05)
+            @test res.canonical_dithpix ≈ 13.496
+            # the same disagreement in the APO direction: honest-LCO-looking
+            # labels under direction -1 are an inconsistency there
+            res_apo = AR.night_frame_anchor(offsets, labels; dithpix_direction = -1)
+            @test res_apo.mode == "measured_position_override"
+            @test res_apo.qa_dithpix_order_inconsistent
+            @test res_apo.canonical_cluster == 2
+        end
+
+        @testset "singleton stray cluster is not a canonical candidate" begin
+            offs_stray = vcat(offsets, -0.9)          # one bad fit far away
+            labs_stray = vcat(labels, 12.995)
+            res = AR.night_frame_anchor(offs_stray, labs_stray)
+            @test length(res.cluster_n) == 3
+            @test res.cluster_n[res.canonical_cluster] >= 2
+            @test res.mode == "dithpix_group"
+            @test res.canonical_dithpix ≈ 12.995
+            @test isapprox(res.shift_pix, 0.0, atol = 0.05)
+            @test !res.qa_dithpix_order_inconsistent
+        end
+
+        @testset "recorded labels never choose the cluster (measured positions only)" begin
+            # whatever the labels say -- honest, swapped, frozen, missing, a
+            # few wrong within the night -- the canonical membership and the
+            # shift are those of the measured pick
+            ref = AR.night_frame_anchor(offsets, fill(NaN, length(offsets)))
+            labels_wrong = copy(labels)
+            labels_wrong[[1, 4]] .= labels[[2, 3]]   # two exposures mislabeled
+            for labs in (labels, reverse(labels), fill(13.496, length(offsets)),
+                    fill(0.0, length(offsets)), labels_wrong)
+                res = AR.night_frame_anchor(offsets, labs)
+                @test res.canonical_cluster == ref.canonical_cluster
+                @test res.shift_pix == ref.shift_pix
+                @test res.exp_cluster == ref.exp_cluster
+            end
+            # three measured clusters (e.g. an unrecorded full-step move
+            # within the night) with labels tied on the two NON-extreme
+            # clusters: the labels used to restrict the pool to those two;
+            # now the extreme measured cluster is canonical and the
+            # disagreement is flagged
+            offs3 = vcat(offsets, -1.0 .+ 0.02 .* randn(rng, 4))
+            labs3 = vcat(fill(13.0, length(offsets)), fill(14.0, 4))
+            res3 = AR.night_frame_anchor(offs3, labs3)
+            @test length(res3.cluster_n) == 3
+            @test res3.canonical_cluster == 1            # lowest position (dir +1)
+            @test isapprox(res3.shift_pix, -1.0, atol = 0.05)
+            @test res3.mode == "measured_position_override"
+            @test res3.qa_dithpix_order_inconsistent
+            @test res3.shift_pix ==
+                  AR.night_frame_anchor(offs3, fill(NaN, length(offs3))).shift_pix
+        end
+
+        @testset "(e) pin_night_frame! leaves composed per-exposure solutions invariant" begin
+            NXP = ApogeeReduction.N_XPIX
+            n_lin_coeffs = 5
+            n_fib = ApogeeReduction.N_FIBERS
+            med_linParams = zeros(n_fib, n_lin_coeffs)
+            # APOGEE-like: ~16000 A zero point, ~580 A/unit-xt slope, small curvature
+            for fib in 1:n_fib
+                med_linParams[fib, :] .= [16150.0 + 0.1 * fib, 580.0, -20.0, 3.0, -0.5]
+            end
+
+            shift_pix = 0.478
+            pinned = ApogeeReduction.pin_night_frame!(copy(med_linParams), shift_pix)
+
+            # per-exposure composed solution: wave(xt) = P(off + scale * xt)
+            # against the pinned frame the refit dither is (off - s, scale);
+            # the composition must be numerically unchanged
+            xt = ((1:NXP) .- (NXP ÷ 2)) ./ NXP
+            s = shift_pix / NXP
+            for (off, scale) in ((2.1e-4, 1.0), (-3.7e-4, 0.999985), (0.0, 1.00002))
+                for fib in (1, 150, 300)
+                    p_old = evalpoly.(off .+ scale .* xt, Ref(med_linParams[fib, :]))
+                    p_new = evalpoly.((off - s) .+ scale .* xt, Ref(pinned[fib, :]))
+                    @test maximum(abs.(p_new .- p_old)) < 1e-9
+                end
+            end
+
+            # offset + SCALE pin: against a frame pinned with (s, c) the refit
+            # dither is ((off - s) / c, scale / c); composition unchanged
+            c_pin = 1.0 + 1.5e-5
+            pinned_sc = ApogeeReduction.pin_night_frame!(copy(med_linParams), shift_pix, c_pin)
+            for (off, scale) in ((2.1e-4, 1.0), (-3.7e-4, 0.999985), (0.0, 1.00002))
+                for fib in (1, 150, 300)
+                    p_old = evalpoly.(off .+ scale .* xt, Ref(med_linParams[fib, :]))
+                    p_new = evalpoly.(((off - s) / c_pin) .+ (scale / c_pin) .* xt,
+                        Ref(pinned_sc[fib, :]))
+                    @test maximum(abs.(p_new .- p_old)) < 1e-9
+                end
+            end
+            # a non-finite scale falls back to the offset-only pin
+            @test ApogeeReduction.pin_night_frame!(copy(med_linParams), shift_pix, NaN) == pinned
+
+            # the anchor's scale_pin is the canonical cluster's median scale
+            # (1.0 when no scales are given)
+            exp_scale = [isodd(i) ? 1.0 + 2e-7 * i : 1.0 + 1.5e-5 for i in eachindex(offsets)]
+            res_sc = AR.night_frame_anchor(offsets, labels; exp_scale = exp_scale)
+            canon_members = findall(res_sc.exp_cluster .== res_sc.canonical_cluster)
+            @test res_sc.scale_pin == median(exp_scale[canon_members])
+            @test res_sc.shift_pix == AR.night_frame_anchor(offsets, labels).shift_pix
+            @test AR.night_frame_anchor(offsets, labels).scale_pin == 1.0
+
+            # NaN shift (no clusterable exposures) leaves the frame untouched
+            unpinned = ApogeeReduction.pin_night_frame!(copy(med_linParams), NaN)
+            @test unpinned == med_linParams
+
+            # empty input: mode "none", NaN shift, unit scale, no crash
+            res_none = AR.night_frame_anchor(Float64[], Float64[])
+            @test res_none.mode == "none"
+            @test isnan(res_none.shift_pix)
+            @test res_none.scale_pin == 1.0
+        end
+    end
+
+    @testset "night frame does not inherit the reference exposure's dither scale" begin
+        # Two runs of one synthetic ABBA night that differ only by a tiny noise
+        # realization in the per-exposure sky solutions -- enough to
+        # flip the argmin reference exposure into the OTHER dither cluster. The
+        # sky-line peaks are identical. The clusters differ in dither SCALE by
+        # 1.5e-5 (the size measured on apo 58500), so a night frame that pinned
+        # only the offset would still differ by ~1e-2 A at the chip edges.
+        AR = ApogeeReduction
+        nfib, nx = AR.N_FIBERS, AR.N_XPIX
+        # per-fiber wavelength polynomial in the registered coordinate
+        # xt = (pix - 1024) / 2048 (chip G untransformed), ~ -0.28 A/pix
+        base = hcat(16000.0 .+ 0.01 .* (1:nfib), fill(-580.0, nfib),
+            fill(-3.0, nfib), fill(0.5, nfib))
+        nl = repeat([-1.07 1.0 1.0755 1.0], nfib)          # [R0 R1 B0 B1], cporder 1
+        chip_tr = (R = (-1.07, 1.0), G = (0.0, 1.0), B = (1.0755, 1.0))
+        # true per-exposure dither xt -> d1 + d2 xt: cluster A at 0 px, cluster
+        # B at +0.478 px; small fixed within-cluster scale spread
+        isB = [false, true, true, false, false, true, true, false]
+        n_exp = length(isB)
+        d1 = [(b ? 0.478 : 0.0) / nx for b in isB]
+        d2 = 1.0 .+ 1.5e-5 .* isB .+ 1e-7 .* [0, 1, -1, 2, -2, 0, 2, 1]
+        compose(lin, a, b) = AR.Polynomial(lin)(AR.Polynomial([a, b])).coeffs
+        true_lin = [permutedims(hcat([compose(base[f, :], d1[k], d2[k]) for f in 1:nfib]...))
+                    for k in 1:n_exp]
+        # a run's per-exposure sky solutions: the truth with a tiny per-fiber
+        # position jitter (sigma 5e-4 px, below the ~1e-3 px seen between real
+        # runs); the jitter realization is all that differs between two runs
+        function noisy_lin(seed)
+            r = MersenneTwister(seed)
+            return [permutedims(hcat([compose(base[f, :], d1[k] + 5e-4 / nx * randn(r), d2[k])
+                                      for f in 1:nfib]...)) for k in 1:n_exp]
+        end
+        # sky-line peaks: the same pixel positions in every fiber (passes the
+        # cross-fiber scatter cut), wavelengths from each exposure's TRUE solution
+        xpix = collect(range(30.0, 2018.0, length = 40))
+        function write_night(dir, lins)
+            fnames = String[]
+            for k in 1:n_exp
+                tag = "apo_60000_$(lpad(k, 8, '0'))"
+                wf = joinpath(dir, "waveCalSkyLine_$(tag)_object.h5")
+                h5open(wf, "w") do f
+                    write(f, "linParams", lins[k])
+                    write(f, "nlParams", nl)
+                end
+                for (chip, (a, b)) in pairs(chip_tr)
+                    xt = a .+ b .* ((xpix .- nx ÷ 2) ./ nx)
+                    mat = fill(NaN, length(xpix), 2, nfib)
+                    for f in 1:nfib
+                        mat[:, 1, f] .= xpix
+                        mat[:, 2, f] .= AR.Polynomial(base[f, :]).(d1[k] .+ d2[k] .* xt)
+                    end
+                    h5open(joinpath(dir, "skyLinePeaks_$(tag)_$(chip)_object.h5"), "w") do f
+                        write(f, "sky_line_mat_clean", mat)
+                    end
+                end
+                push!(fnames, wf)
+            end
+            return fnames
+        end
+        # the reference (argmin) exposure get_ave_night_wave_soln seeds from
+        function ref_exposure(lins)
+            L = cat(lins..., dims = 3)
+            m0 = AR.nanmedian(L, 3)
+            off = AR.nanmedian(L .- m0, 2)
+            m = AR.nanmedian(L .- off, 3)
+            return argmin(vec(sum((L .- m) .^ 2, dims = (1, 2))))
+        end
+        lins1 = noisy_lin(1)
+        ref1 = ref_exposure(lins1)
+        seed2 = findfirst(s -> isB[ref_exposure(noisy_lin(s))] != isB[ref1], 2:200) + 1
+        lins2 = noisy_lin(seed2)
+        @test isB[ref_exposure(lins2)] != isB[ref1]     # the reference really flips
+
+        runs = map((lins1, lins2)) do lins
+            AR.get_ave_night_wave_soln(write_night(mktempdir(), lins);
+                fit_dither = true, dithpix_direction = 1)
+        end
+        (lin1, _, wave1, anc1), (lin2, _, wave2, anc2) = runs
+        canon = findall(.!isB)       # direction +1: lowest measured position = A
+        for anc in (anc1, anc2)
+            @test anc.mode == "measured_position"
+            @test findall(anc.exp_cluster .== anc.canonical_cluster) == canon
+        end
+        # the same night frame in both runs: compare the fiber-median wavelength
+        # at every pixel of every chip (the per-fiber scatter is the runs'
+        # genuine jitter difference; an offset-only pin leaves ~1e-2 A here)
+        dwave_fibmed = maximum(abs, AR.nanmedian(wave1 .- wave2, 2))
+        println("scale-pin test: ref ", ref1, " -> ", ref_exposure(lins2), " (seed ", seed2,
+            "), max |fiber-median dwave| = ", dwave_fibmed, " A, max |dwave| = ",
+            maximum(abs, wave1 .- wave2), " A")
+        @test dwave_fibmed < 1e-4                   # ~2 m/s
+        @test maximum(abs, wave1 .- wave2) < 2e-3   # per-fiber jitter only
+        # ... and that frame is the canonical cluster's own (median offset,
+        # median scale) solution, whichever exposure seeded the refinement
+        target = permutedims(hcat([compose(base[f, :], median(d1[canon]), median(d2[canon]))
+                                   for f in 1:nfib]...))
+        for L in (lin1, lin2)
+            @test abs(median(L[:, 1] .- target[:, 1])) < 1e-5
+            @test abs(median(L[:, 2] .- target[:, 2])) < 1e-6
+        end
+        @test anc1.scale_pin ≈ median(d2[canon]) / d2[ref_exposure(lins1)] rtol = 1e-6
+    end
+
     @testset "interpolate_wave_params: no slit-edge bias, outliers rejected" begin
         # Per-fiber wavelength parameters whose true fiber dependence is CURVED
         # (quadratic in fiber), plus noise, a few gross outlier fibers and one
