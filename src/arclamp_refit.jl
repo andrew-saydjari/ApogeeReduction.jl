@@ -529,7 +529,8 @@ end
 
 "Local midnight as a fraction of the UT day (APO UT-7, LCO about UT-4): splits evening from morning arcs."
 const REFIT_LOCAL_MIDNIGHT_FRAC = Dict("apo" => 0.29, "lco" => 0.18)
-refit_is_morning(tele, t) = isfinite(t) && mod(t, 1.0) > REFIT_LOCAL_MIDNIGHT_FRAC[String(tele)]
+"Arc taken after local midnight (the UT day wraps during the night, so compare in local time)."
+refit_is_morning(tele, t) = isfinite(t) && (mod(t - REFIT_LOCAL_MIDNIGHT_FRAC[String(tele)] + 0.5, 1.0) - 0.5) > 0
 
 """
     refit_choose_anchor(A, seq_flags, combs, tele; anchor_block, anchor_pairing, anchor_block_h, pos_match_px)

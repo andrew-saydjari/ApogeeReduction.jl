@@ -202,6 +202,7 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, WAVE_ANCHOR_
 @testset "arclamp_refit anchors" begin
     @test refit_is_morning("apo", 60000.40) && !refit_is_morning("apo", 60000.08)
     @test refit_is_morning("lco", 60000.30) && !refit_is_morning("lco", 60000.05)
+    @test !refit_is_morning("lco", 60000.96) && !refit_is_morning("apo", 60000.99)   # evening before UT midnight
     lin = repeat([16200.0 1300.0 -40.0 3.0 -0.5], N_FIBERS)
     nl = repeat([-1.07 1.0 1.0755 1.0], N_FIBERS)
     L = 3.7363e7
