@@ -77,19 +77,20 @@ const WAVE_ANCHOR_UNVERIFIED = 1 << 28     # anchoring arc sequence not verified
 const WAVE_FPS_NO_COMB = 1 << 29           # FPS era (plate/FPS MJD boundary) but no night comb: arc-route fallback
 const WAVE_ANCHOR_TREND_OUTLIER = 1 << 30  # verified_pair: the kept anchor's fixed-mode comb velocity is more than
                                            # anchor_trend_ms from the neighbouring nights' strict-pair trend
-# in-order nightly pipeline (`--wavecal_order arc_first`, src/wavecal_arcfirst.jl)
-const WAVE_FIBER_FILLED = 1 << 31          # >= 1 fiber has no own fit at its route (arc fiber or template fit
-                                           # missing): filled across the slit (interpolate_wave_params) or by
-                                           # the arc shape / nearest finite fiber
-const WAVE_NOT_ARCFIRST = 1 << 32          # arc_first run, but this exposure has no arc-first solution (no usable
-                                           # arcs on the night, or the night's arc-first chain failed): the legacy
-                                           # chain's product (or its night-average / rough fallback) was resampled
-const WAVE_REANCHORED = 1 << 33            # arc_first: the end-of-night check rejected the first comb anchor;
-                                           # the comb was re-anchored on the next candidate (conditional 2nd pass)
-const WAVE_ANCHOR_CHECK_FAILED = 1 << 34   # arc_first: no candidate passed the end-of-night check (cap reached);
-                                           # the candidate with the smallest check metric is kept
 const WAVE_ARC_SKY_TIE_REPLACED = 1 << 31  # plate era: the night's arc-sky tie was > plate_tie_ms from the telescope's
                                            # arc-sky ensemble offset (arcs not at the science position); replaced by it
+# in-order nightly pipeline (`--wavecal_order arc_first`, src/wavecal_arcfirst.jl); 2^32-2^35, so the
+# bitmask needs 64 bits (`bitmsk_wavecal` is written as Int64)
+const WAVE_FIBER_FILLED = 1 << 32          # >= 1 fiber has no own fit at its route (arc fiber or template fit
+                                           # missing): filled across the slit (interpolate_wave_params) or by
+                                           # the arc shape / nearest finite fiber
+const WAVE_NOT_ARCFIRST = 1 << 33          # arc_first run, but this exposure has no arc-first solution (no usable
+                                           # arcs on the night, or the night's arc-first chain failed): the legacy
+                                           # chain's product (or its night-average / rough fallback) was resampled
+const WAVE_REANCHORED = 1 << 34            # arc_first: the end-of-night check rejected the first comb anchor;
+                                           # the comb was re-anchored on the next candidate (conditional 2nd pass)
+const WAVE_ANCHOR_CHECK_FAILED = 1 << 35   # arc_first: no candidate passed the end-of-night check (cap reached);
+                                           # the candidate with the smallest check metric is kept
 
 """Plate-era arc - sky tie reference (pooled sky - arc model zero point, R/G/B m/s) per telescope: the median
 over run1's plate nights (2026-11-18, `anchor_verified/thA_dist.jl`, robust sigma 29-39 m/s per chip).
@@ -105,7 +106,7 @@ const WAVE_BIT_NAMES = [
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
     "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_FALLBACK", "WAVE_ANCHOR_NOT_SAME_BLOCK",
     "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_ANCHOR_TREND_OUTLIER",
-    "WAVE_FIBER_FILLED", "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED", "WAVE_ARC_SKY_TIE_REPLACED"]
+    "WAVE_ARC_SKY_TIE_REPLACED", "WAVE_FIBER_FILLED", "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED"]
 
 """Era of a telescope-night, keyed ONLY on the canonical plate/FPS MJD boundary
 (`get_fps_plate_divide`: FPS is mjd > divide), never on whether FPI light exists that night."""

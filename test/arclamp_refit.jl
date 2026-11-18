@@ -345,3 +345,19 @@ using ApogeeReduction: refit_comb_mode_velocity, refit_strict_vmodes, REFIT_MODE
     @test ApogeeReduction.WAVE_ANCHOR_TREND_OUTLIER == 1 << 30
     @test refit_check_config(RefitConfig(anchor_trend = "trailing")) && RefitConfig().anchor_trend == "both"
 end
+
+@testset "arclamp_refit wavecal bit constants" begin
+    AR = ApogeeReduction
+    # every WAVE_* integer constant of the module is a wavecal bit: each a power of two, all distinct
+    bitnames = sort([n for n in names(AR; all = true)
+                     if startswith(String(n), "WAVE_") && isconst(AR, n) && getfield(AR, n) isa Integer])
+    vals = [getfield(AR, n) for n in bitnames]
+    @test length(bitnames) == length(AR.WAVE_BIT_NAMES)
+    @test all(v -> v > 0 && ispow2(v), vals)
+    @test allunique(vals)
+    @test Set(String.(bitnames)) == Set(AR.WAVE_BIT_NAMES)
+    # pinned positions: the plate-era tie bit is referenced by a completed run's plan and write-ups
+    @test AR.WAVE_ARC_SKY_TIE_REPLACED == 1 << 31
+    @test (AR.WAVE_FIBER_FILLED, AR.WAVE_NOT_ARCFIRST, AR.WAVE_REANCHORED, AR.WAVE_ANCHOR_CHECK_FAILED) ==
+          (1 << 32, 1 << 33, 1 << 34, 1 << 35)
+end
