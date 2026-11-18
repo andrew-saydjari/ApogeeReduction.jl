@@ -181,7 +181,8 @@ writes the comb product and returns `("ok_arc", "")`; otherwise `(nothing, reaso
 written: the caller decides the fallback).
 """
 function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::RefitConfig,
-        pass1_comb = nothing, provenance = Dict{String, String}(), exclude_seqs = Int[])
+        pass1_comb = nothing, provenance = Dict{String, String}(), exclude_seqs = Int[],
+        almanac_file::AbstractString = "")
     out = refit_path(outroot, "comb", tele, mjd)
     mkpath(dirname(out))
     arcf = refit_path(outroot, "arc", tele, mjd)
@@ -189,10 +190,24 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
     (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
     A === nothing && return nothing, (isfile(arcf) ? "arc fit unusable" : "no arc product")
     sfl = h5open(f -> Int.(read(f["seq_flags"])), arcf, "r")
+    # verified_pair: sequence adjacency of every (used arc sequence, FPI file) from the almanac
+    # (exposure order and commanded moves only; an in-order input)
+    adjacency = nothing; lampoff = nothing
+    if cfg.anchor_block == "verified_pair"
+        ex, code, dith = refit_exposure_sequence(almanac_file, tele, mjd)
+        the, une, lo = h5open(f -> (Int.(read(f["seq_thar_exp"])), Int.(read(f["seq_une_exp"])),
+            Float64.(read(f["seq_lamp_offset_px"]))), arcf, "r")
+        fe = [parse(Int, split(basename(fn), "_")[4]) for fn in fnames]
+        adjacency = [refit_pair_adjacency((the[s], une[s]), e, ex, code, dith) for s in A.used, e in fe]
+        lampoff = lo[A.used]
+        provenance["anchor_adjacency_counts"] = join(["$(c)=$(count(==(c), adjacency))" for c in ("strict", "nomove", "other", "unknown")], ",")
+    end
     Q = refit_arc_anchored_comb(fnames, A, combs, tele; seq_flags = sfl, pass1_comb = pass1_comb,
         pos_match_px = cfg.pos_match_px, comb_arc_qa_ms = cfg.comb_arc_qa_ms, scis,
         anchor_block = cfg.anchor_block, anchor_prefer = cfg.anchor_prefer, anchor_samepos = cfg.anchor_samepos,
-        anchor_pairing = cfg.anchor_pairing,
+        anchor_pairing = cfg.anchor_pairing, adjacency, lamp_off_px = lampoff,
+        anchor_max_candidates = cfg.anchor_max_candidates, anchor_pattern_tol_px = cfg.anchor_pattern_tol_px,
+        anchor_lamp_tol_px = cfg.anchor_lamp_tol_px, anchor_adjacency = cfg.anchor_adjacency,
         anchor_block_h = cfg.anchor_block_h, exclude_seqs)
     Q.ok || return nothing, "arc_unmatched: " * Q.reason
     write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = provenance)
@@ -214,7 +229,7 @@ function refit_comb_refs_pass1(mdir, tele, mjd, fnames)
 end
 
 function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::RefitConfig,
-        allow_arcwin::Bool = false)
+        allow_arcwin::Bool = false, almanac_file::AbstractString = "")
     out = refit_path(outroot, "comb", tele, mjd)
     isfile(out) && return "done"
     mkpath(dirname(out))
@@ -241,7 +256,7 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "n_science_refs" => string(length(scis)))
     st, reason = refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg, pass1_comb = p1,
-        provenance = prov)
+        provenance = prov, almanac_file)
     st === nothing || return st
     allow_arcwin || return refit_write_status(outroot, "comb", tele, mjd, "deferred", reason)
     nb = refit_neighbour_cavity(outroot, tele, mjd, cfg.arcwin_nights)

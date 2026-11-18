@@ -122,7 +122,8 @@ anchor stage (`refit_comb_anchor_stage`) with science exposure TIMES only (`anch
 not be "pass1"). Returns the status string (also written to `status/comb_*.txt`).
 """
 function arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg::RefitConfig, fpi_fnames,
-        sci_exps, fpi_fiberIndxs = Int[], exclude_seqs = Int[], cache = Dict{Symbol, Any}())
+        sci_exps, fpi_fiberIndxs = Int[], exclude_seqs = Int[], cache = Dict{Symbol, Any}(),
+        almanac_file::AbstractString = "")
     out = refit_path(outroot, "comb", tele, mjd)
     isfile(out) && return "done"
     cfg.anchor_samepos == "pass1" &&
@@ -156,7 +157,7 @@ function arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg::RefitConfig, fp
         "g1_lit_fraction" => string(light.lit), "g2_resid_rms_A" => string(info.rms))
     prov["excluded_anchor_seqs"] = join(exclude_seqs, ",")
     st, reason = refit_comb_anchor_stage(tele, mjd; outroot, fnames = fn, combs, scis, cfg,
-        pass1_comb = nothing, provenance = prov, exclude_seqs)
+        pass1_comb = nothing, provenance = prov, exclude_seqs, almanac_file)
     st === nothing || return st
     return refit_write_status(outroot, "comb", tele, mjd,
         arcfirst_comb_decision(length(fn), true, true, true, false), reason)
@@ -296,7 +297,7 @@ function arcfirst_night(tele, mjd; outdir, almanac_file, exps, fpi_fnames, cfg::
         final_fail = attempt > max_reanchor
         final_fail && (extra |= WAVE_ANCHOR_CHECK_FAILED)
         s_comb = arcfirst_night_comb(tele, mjd; apred_dir, outroot, cfg, fpi_fnames, sci_exps = sci,
-            fpi_fiberIndxs = fpi_idx, exclude_seqs = exclude, cache)
+            fpi_fiberIndxs = fpi_idx, exclude_seqs = exclude, cache, almanac_file)
         s_fpifib = refit_night_fpifib(tele, mjd; apred_dir, outroot, cfg, exps)
         cst = refit_read_status(outroot, "comb", tele, mjd)
         gated = cst == "nocomb_gated"

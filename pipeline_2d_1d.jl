@@ -114,6 +114,11 @@ function parse_commandline()
         help = "arc_first only: fill_only (fibers without an arc fit get the across-slit interpolate_wave_params value; fitted fibers unchanged; WAVE_FIBER_FILLED) or none (such fibers have no solution and the exposure falls back at resampling)"
         arg_type = String
         default = "fill_only"
+        "--arcfirst_anchor_block"
+        required = false
+        help = "arc_first only: comb anchor rule (RefitConfig.anchor_block): verified_pair (default: an arc sequence and a full-frame FPI exposure adjacent in the exposure sequence with no commanded move between, checked by lamp offset and chip residual pattern; anchor-verified branch), nearest_science, morning or any"
+        arg_type = String
+        default = "verified_pair"
         "--arcfirst_max_reanchor"
         required = false
         help = "arc_first only: cap on conditional re-anchors per night when the end-of-night check (median sky-line offset of the FPI-fiber exposures against the final solution, per chip, and comb mode slips) fails; each re-anchor takes the anchor rule's next candidate and reruns comb -> exposures for that night (WAVE_REANCHORED; cap reached: WAVE_ANCHOR_CHECK_FAILED, best candidate kept)"
@@ -497,7 +502,7 @@ if parg["relFlux"]
             chip_transform_file = $(CHIP_TRANSFORM_OFF) ? "" : $(parg["chip_transform_cal"]),
             shape_template_file = $(parg["arcfirst_shape_template"]),
             fps_shape_apo = $(parg["arcfirst_fps_shape"]), fps_shape_lco = $(parg["arcfirst_fps_shape"]),
-            anchor_samepos = "none")
+            anchor_samepos = "none", anchor_block = $(parg["arcfirst_anchor_block"]))
         almanac_file_af = joinpath(parg["outdir"], "almanac/$(parg["runname"]).h5")
         sendto(workers(), almanac_file_af = almanac_file_af)
         af_mjd(f) = parse(Int, split(basename(f), "_")[3])

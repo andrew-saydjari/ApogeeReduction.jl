@@ -31,6 +31,7 @@ s = ArgParseSettings()
     "--worker"; arg_type = Int; default = 1
     "--nworkers"; arg_type = Int; default = 1
     "--claim"; action = :store_true
+    "--anchor_block"; arg_type = String; default = "verified_pair"
     "--almanac_name"; arg_type = String; default = "allobs_57618_61230.h5"
     "--chip_transform_cal"; arg_type = String
     default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/chip_transform/chiptransform_pass1dr21_v2_allblock.h5"
@@ -95,7 +96,7 @@ end
 function run_arcfirst(tele, mjd)
     od, md, alm = setup_mode("arc_first", tele, mjd)
     cfg = AR.RefitConfig(chip_transform_file = A_["chip_transform_cal"], shape_template_file = A_["shape_template"],
-        anchor_samepos = "none")
+        anchor_samepos = "none", anchor_block = A_["anchor_block"])
     exps = AR.arcfirst_exps_from_names(files(md, "ar1Dcal", tele, mjd, ".h5"), tele, mjd)
     fpi = files(md, "fpiPeaks", tele, mjd, "_$(FIRST_CHIP)_arclamp.h5")
     r = AR.arcfirst_night(tele, mjd; outdir = od, almanac_file = alm, exps, fpi_fnames = fpi, cfg,
