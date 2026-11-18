@@ -1,4 +1,4 @@
-using CSV, DataFrames, JLD2, HDF5
+using CSV, DataFrames, JLD2, HDF5, Random
 
 @testset "skyline_peaks / sky line list" begin
     AR = ApogeeReduction
@@ -313,6 +313,10 @@ using CSV, DataFrames, JLD2, HDF5
             @test cls == fill(2, length(sc_waves))         # all class B
             @test size(mat) == (length(sc_waves), 9, AR.N_FIBERS)
             @test Int.(mat[:, 9, 1]) == collect(1:length(sc_waves))
+            # assignment QA: healthy exposure, every line on the quartic shape
+            dev = h5open(f -> read(f["sky_line_shape_dev"]), out, "r")
+            @test size(dev) == (length(sc_waves), AR.N_FIBERS)
+            @test maximum(abs.(dev)) < 0.5
         end
     end
 
@@ -338,6 +342,117 @@ using CSV, DataFrames, JLD2, HDF5
             AR.safe_jldsave(fn2; sky_line_mat_clean = mat, no_metadata = true)
             xlst2, wlst2 = AR.ingest_skyLines_file(fn2)
             @test all(.!isnan.(xlst2)) && all(.!isnan.(wlst2))
+        end
+    end
+
+    # ---- sky-line assignment QA flag -------------------------------------
+    @testset "sky-line assignment QA flag: shape deviation" begin
+        # positions exactly on the quartic plus a per-fiber zero-point: dev = 0
+        lams = sc_waves
+        nf = 4
+        M = fill(NaN, length(lams), 9, nf)
+        for f in 1:nf, (i, w) in enumerate(lams)
+            M[i, 1, f] = AR.rough_pix(w, rw_quartic) + 3.0 * f   # zero-point never trusted
+            M[i, 2, f] = w
+        end
+        @test abs(AR.rough_wave(AR.rough_pix(16692.4, rw_quartic), rw_quartic) - 16692.4) < 1e-6
+        cls = fill(2, length(lams))
+        dev = AR.sky_line_shape_dev(M, cls, rw_quartic)
+        @test maximum(abs.(dev)) < 1e-6
+        # fiber 2: L4 on a neighbour's peak 41 px away (the R 16692 theft mode)
+        M[4, 1, 2] -= 41.0
+        dev = AR.sky_line_shape_dev(M, cls, rw_quartic)
+        @test abs(dev[4, 2]) > 30 && all(abs.(dev[[1, 2, 3, 5, 6, 7], 2]) .< 1e-6)
+        @test maximum(abs.(dev[:, [1, 3, 4]])) < 1e-6
+        # non-class-B lines are neither tested nor used for the median
+        cls2 = copy(cls); cls2[4] = 1
+        dev2 = AR.sky_line_shape_dev(M, cls2, rw_quartic)
+        @test all(isnan.(dev2[4, :])) && maximum(abs.(filter(isfinite, dev2))) < 1e-6
+        # fewer than 3 class-B lines on the chip: untested
+        @test all(isnan.(AR.sky_line_shape_dev(M[1:2, :, :], cls[1:2], rw_quartic)))
+        # legacy linear rough model: no shape test
+        @test isnothing(AR.sky_line_shape_dev(M, cls, rw_linear))
+    end
+
+    @testset "sky-line assignment QA flag: bits" begin
+        nl, nf = 12, 20
+        chipInt = repeat(vcat(fill(1, 4), fill(2, 4), fill(3, 4)), 1, nf)
+        in_fit = trues(nl, nf)
+        dev = zeros(nl, nf)
+        dev[2, 1] = 15.0                               # used wrong line
+        dev[5, 2] = -18.0; in_fit[5, 2] = false        # wrong line, removed before the fit
+        in_fit[9:11, 3] .= false                        # only 1 line left on chip B
+        in_fit[1:4, 4] .= false; in_fit[5, 4] = false   # chip R empty, 7 lines total
+        fl = AR.sky_assign_flags(dev, in_fit, chipInt)
+        @test eltype(fl) == UInt8
+        @test fl[1] == AR.SKYASSIGN_OFFSHAPE
+        @test fl[2] == AR.SKYASSIGN_OFFSHAPE_REMOVED
+        @test fl[3] == AR.SKYASSIGN_FEWLINES
+        @test fl[4] == AR.SKYASSIGN_FEWLINES
+        @test all(fl[5:end] .== 0x00)
+        # a 4 px tolerance: 3.9 px is not flagged
+        dev[2, 1] = 3.9
+        @test AR.sky_assign_flags(dev, in_fit, chipInt)[1] == 0x00
+        # exposure bit once >= 10 fibers carry OFFSHAPE (majority theft)
+        dev[2, 5:14] .= 41.0
+        fl = AR.sky_assign_flags(dev, in_fit, chipInt)
+        @test all((fl .& AR.SKYASSIGN_EXPOSURE) .!= 0)
+        @test count(x -> (x & AR.SKYASSIGN_OFFSHAPE) != 0, fl) == 10
+        dev[2, 14] = 0.0
+        @test all((AR.sky_assign_flags(dev, in_fit, chipInt) .& AR.SKYASSIGN_EXPOSURE) .== 0)
+        # no shape deviations available: NOTRUN (never a silent 0)
+        fl = AR.sky_assign_flags(nothing, in_fit, chipInt)
+        @test all((fl .& AR.SKYASSIGN_NOTRUN) .!= 0) && fl[5] == AR.SKYASSIGN_NOTRUN
+    end
+
+    @testset "sky-line assignment QA flag: saved by get_and_save_sky_wavecal" begin
+        # healthy synthetic exposure: one quartic in the green-chip coordinate,
+        # 10 lines per chip on every fiber
+        q = [16000.0, -590.0, -25.0, 3.0, 0.5]
+        lamq(xp) = sum(q[k + 1] * xp^k for k in 0:4)
+        xprime(x, c) = c == 1 ? -1.0707 + x : c == 3 ? 1.0752 + x : x
+        nl = 10
+        pix = collect(range(100.0, 1950.0, length = nl))
+        jit = MersenneTwister(11)
+        function write_exposure(dir, devfun)
+            fname = joinpath(dir, "skyLinePeaks_apo_60500_0001_R_object.h5")
+            for (c, chip) in enumerate(AR.CHIP_LIST)
+                M = fill(NaN, nl, 9, AR.N_FIBERS)
+                for f in 1:AR.N_FIBERS, l in 1:nl
+                    M[l, 1, f] = pix[l] + 1e-4 * randn(jit)
+                    M[l, 2, f] = lamq(xprime((M[l, 1, f] - 1024) / 2048, c))
+                end
+                h5open(replace(fname, "_R_" => "_$(chip)_"), "w") do fo
+                    fo["sky_line_mat_clean"] = M
+                    fo["line_class"] = fill(2, nl)
+                    d = devfun(c)
+                    isnothing(d) || (fo["sky_line_shape_dev"] = d)
+                end
+            end
+            return fname
+        end
+        mktempdir() do dir
+            # shape evidence of a wrong peak on chip G line 3 of fibers 1-12
+            fname = write_exposure(dir, c -> begin
+                d = zeros(nl, AR.N_FIBERS)
+                c == 2 && (d[3, 1:12] .= -41.0)
+                d
+            end)
+            out = AR.get_and_save_sky_wavecal(fname; checkpoint_mode = "clobber")
+            fl = AR.read_skyassign_flag(out)
+            @test length(fl) == AR.N_FIBERS && eltype(fl) == UInt8
+            @test all(fl[1:12] .== (AR.SKYASSIGN_OFFSHAPE | AR.SKYASSIGN_EXPOSURE))
+            @test all(fl[13:end] .== AR.SKYASSIGN_EXPOSURE)
+        end
+        mktempdir() do dir
+            # legacy skyLinePeaks (no shape deviations): NOTRUN in the product
+            fname = write_exposure(dir, c -> nothing)
+            out = AR.get_and_save_sky_wavecal(fname; checkpoint_mode = "clobber")
+            @test all(AR.read_skyassign_flag(out) .== AR.SKYASSIGN_NOTRUN)
+            # and a waveCalSkyLine product written before the flag existed reads as NOTRUN
+            old = joinpath(dir, "waveCalSkyLine_apo_60500_0002_object.h5")
+            h5open(f -> (f["linParams"] = zeros(AR.N_FIBERS, 5)), old, "w")
+            @test AR.read_skyassign_flag(old) == fill(AR.SKYASSIGN_NOTRUN, AR.N_FIBERS)
         end
     end
 end

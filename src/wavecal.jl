@@ -422,6 +422,16 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         println("LOO WHOLESALE flag on $(n_wholesale) fibers in $(fname): " *
                 "association-scale failure survived to the wavelength solution")
     end
+    # sky-line assignment QA flag (see SKYASSIGN_* in skyline_peaks.jl): wrong-peak
+    # evidence on the lines that reached the final fit (after class mask, ingest
+    # IQR mask and LOO drops). QA only; nothing below reads it.
+    skyassign_flag = sky_assign_flags(ingest_skyLines_shape_dev_exp(fname),
+        .!isnan.(sky_line_uxlst), sky_line_chipInt)
+    n_offshape = count(x -> (x & SKYASSIGN_OFFSHAPE) != 0, skyassign_flag)
+    if n_offshape >= SKYASSIGN_EXP_MIN_FIBERS
+        println("SKYASSIGN exposure flag in $(fname): $(n_offshape) fibers fitted with " *
+                "a sky line off the rough-model shape (likely wrong peak)")
+    end
     resid_xt = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(resid_xt, NaN)
 
@@ -525,7 +535,7 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln,
         raw_resid_xt = resid_xt,
         loo_resid = loo_resid, loo_dropped = collect(loo_dropped),
-        loo_status = collect(loo_status))
+        loo_status = collect(loo_status), skyassign_flag = skyassign_flag)
     return outname
 end
 
@@ -2655,6 +2665,27 @@ function ingest_skyLines_file(fileName)
     sky_line_xlst[not_for_solution, :] .= NaN
     sky_line_wlst[not_for_solution, :] .= NaN
     return sky_line_xlst, sky_line_wlst
+end
+
+"""
+    ingest_skyLines_shape_dev_exp(fname)
+
+Stacked (chips in `CHIP_LIST` order, rows aligned with `ingest_skyLines_exp`)
+`sky_line_shape_dev` of an exposure's skyLinePeaks files, or `nothing` if any
+chip's file lacks it (legacy product / linear rough model) or is missing.
+"""
+function ingest_skyLines_shape_dev_exp(fname)
+    devs = Matrix{Float64}[]
+    for chip in CHIP_LIST
+        fnameloc = replace(fname, "_$(FIRST_CHIP)_" => "_$(chip)_")
+        isfile(fnameloc) || return nothing
+        d = h5open(fnameloc, "r") do f
+            haskey(f, "sky_line_shape_dev") ? read(f["sky_line_shape_dev"]) : nothing
+        end
+        isnothing(d) && return nothing
+        push!(devs, d)
+    end
+    return vcat(devs...)
 end
 
 # this takes in a filename and replaces the chip index (make "a" default approx)

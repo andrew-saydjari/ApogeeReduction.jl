@@ -7,6 +7,131 @@ using Optim, HDF5
 #     ingest_skyLines_file); X / unclassed rows are never selected.
 const WAVECAL_CLASS_CODES = Dict("X" => 0, "A" => 1, "B" => 2)
 
+#############################################################################
+# Sky-line assignment QA flag (per fiber, `skyassign_flag` in waveCalSkyLine)
+#
+# Truth-free wrong-peak detector (2026_11_17/skyline_assign study, 3f): for
+# each fiber and chip, every class-B line's fitted pixel minus the pixel the
+# fixed quartic rough model puts its catalog wavelength at, with the
+# fiber-chip median of that difference removed (the zero-point is never
+# trusted; the quartic SHAPE is stable to ~0.1 A). Healthy lines sit at
+# |d| ~ 0.1-1 px; the measured theft modes are 13-45 px. No cross-fiber
+# consensus is used, so the test survives majority errors that the
+# running-median clean cannot see. Measured on 939 pass-1 exposures: 98.9 %
+# of fibers fitted with a wrong line flagged, 0.03 % of fibers in normal
+# exposures flagged.
+#
+# The flag is QA only: nothing in the pipeline reads it yet (excluding flagged
+# fibers/exposures from smoothing and night averages is a separate decision).
+# Bits are fixed; add new ones above 0x08 and below 0x80, never renumber.
+"""A class-B line that reached the final per-fiber fit is off the quartic shape by > `SKYASSIGN_TOL_PIX`."""
+const SKYASSIGN_OFFSHAPE = 0x01
+"""Wrong-peak evidence only on class-B lines removed before the final fit (clean, ingest IQR mask, LOO)."""
+const SKYASSIGN_OFFSHAPE_REMOVED = 0x02
+"""Final fit has < 2 lines on some chip or < 9 in total (minimum-lines rule)."""
+const SKYASSIGN_FEWLINES = 0x04
+"""Exposure-level: >= `SKYASSIGN_EXP_MIN_FIBERS` fibers of this exposure carry `SKYASSIGN_OFFSHAPE` (set on every fiber)."""
+const SKYASSIGN_EXPOSURE = 0x08
+"""Shape test not run: the skyLinePeaks product has no `sky_line_shape_dev` (legacy product or linear rough model)."""
+const SKYASSIGN_NOTRUN = 0x80
+const SKYASSIGN_TOL_PIX = 4.0
+const SKYASSIGN_EXP_MIN_FIBERS = 10
+const SKYASSIGN_MIN_LINES_CHIP = 2
+const SKYASSIGN_MIN_LINES_TOTAL = 9
+
+"""
+    rough_pix(lam, rw; p0 = N_XPIX ÷ 2)
+
+Inverse of `rough_wave`: the pixel at which the rough model `rw` puts
+wavelength `lam` (Newton iteration on the analytic dispersion).
+"""
+function rough_pix(lam, rw; p0 = N_XPIX ÷ 2)
+    p = Float64(p0)
+    for _ in 1:50
+        dp = (rough_wave(p, rw) - lam) / rough_dispersion(p, rw)
+        p -= dp
+        abs(dp) < 1e-6 && break
+    end
+    return p
+end
+
+"""
+    sky_line_shape_dev(sky_line_mat, line_class, rw; min_lines = 3)
+
+Per (line, fiber) deviation in pixels of each class-B line's fitted position
+(`sky_line_mat[:, 1, :]`) from the quartic rough model's prediction for its
+catalog wavelength (`sky_line_mat[:, 2, :]`), after removing the fiber's
+median over its class-B lines on this chip. NaN where the line is unmeasured,
+not class B, or the fiber has fewer than `min_lines` class-B lines. Returns
+`nothing` for a legacy linear rough model (its ±5 Å curvature error makes
+the shape test meaningless).
+"""
+function sky_line_shape_dev(sky_line_mat, line_class, rw; min_lines = 3)
+    length(rw) >= 9 || return nothing
+    nl, nfib = size(sky_line_mat, 1), size(sky_line_mat, 3)
+    dev = fill(NaN, nl, nfib)
+    pred = fill(NaN, nl)
+    for i in 1:nl
+        line_class[i] == WAVECAL_CLASS_CODES["B"] || continue
+        w = filter(isfinite, view(sky_line_mat, i, 2, :))
+        isempty(w) && continue
+        pred[i] = rough_pix(first(w), rw)
+    end
+    for f in 1:nfib
+        r = sky_line_mat[:, 1, f] .- pred
+        g = filter(isfinite, r)
+        length(g) >= min_lines || continue
+        dev[:, f] .= r .- median(g)
+    end
+    return dev
+end
+
+"""
+    sky_assign_flags(shape_dev, in_fit, chipInt)
+
+Per-fiber `skyassign_flag` (UInt8, see the SKYASSIGN_* bits) from the stacked
+(all chips) class-B shape deviations `shape_dev` (lines x fibers, or
+`nothing` when unavailable), the mask `in_fit` of line measurements that
+reached the final per-fiber fit, and the chip index of each row.
+"""
+function sky_assign_flags(shape_dev, in_fit, chipInt)
+    nfib = size(in_fit, 2)
+    flag = zeros(UInt8, nfib)
+    for f in 1:nfib
+        used = view(in_fit, :, f)
+        chips = view(chipInt, :, f)
+        if count(used) < SKYASSIGN_MIN_LINES_TOTAL ||
+           any(c -> count(used .& (chips .== c)) < SKYASSIGN_MIN_LINES_CHIP, 1:N_CHIPS)
+            flag[f] |= SKYASSIGN_FEWLINES
+        end
+        if isnothing(shape_dev)
+            flag[f] |= SKYASSIGN_NOTRUN
+            continue
+        end
+        off = coalesce.(abs.(view(shape_dev, :, f)) .> SKYASSIGN_TOL_PIX, false)
+        any(off .& used) && (flag[f] |= SKYASSIGN_OFFSHAPE)
+        any(off .& .!used) && (flag[f] |= SKYASSIGN_OFFSHAPE_REMOVED)
+    end
+    if count(x -> (x & SKYASSIGN_OFFSHAPE) != 0, flag) >= SKYASSIGN_EXP_MIN_FIBERS
+        flag .|= SKYASSIGN_EXPOSURE
+    end
+    return flag
+end
+
+"""
+    read_skyassign_flag(fname)
+
+The per-fiber `skyassign_flag` of a waveCalSkyLine product. Products written
+before the flag existed return `SKYASSIGN_NOTRUN` for every fiber (never 0,
+which means "tested and clean").
+"""
+function read_skyassign_flag(fname)
+    h5open(fname, "r") do f
+        haskey(f, "skyassign_flag") ? read(f["skyassign_flag"]) :
+        fill(SKYASSIGN_NOTRUN, N_FIBERS)
+    end
+end
+
 """
     rough_wave(pix, rw)
 
@@ -514,9 +639,15 @@ function get_and_save_sky_peaks(fname, roughwave_dict, df_sky_lines; checkpoint_
     # attrs(f["boff"])["axis_1"] = "fibers"
     # close(f)
 
-    safe_jldsave(outname, sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, line_class = line_class,
+    # sky-line assignment QA: class-B shape deviations on the RAW (pre-clean)
+    # positions, so wrong peaks removed later still leave evidence; not written
+    # for a legacy linear rough model (read back as SKYASSIGN_NOTRUN)
+    shape_dev = sky_line_shape_dev(sky_line_mat, line_class, roughwave_dict[tele][chip])
+    qa_out = isnothing(shape_dev) ? (;) : (; sky_line_shape_dev = shape_dev)
+
+    safe_jldsave(outname; sky_line_mat_clean = sky_line_mat_clean, sky_line_mat = sky_line_mat, sky_line_trace_centers = sky_trace_centers, boff = boff, line_class = line_class,
         assoc_niter = collect(assoc_niter), assoc_converged = collect(assoc_converged),
-        assoc_ndrop = collect(assoc_ndrop), no_metadata = true)
+        assoc_ndrop = collect(assoc_ndrop), qa_out..., no_metadata = true)
 
     return
 end
