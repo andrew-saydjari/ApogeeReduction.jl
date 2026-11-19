@@ -1633,6 +1633,8 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
 
         #update chip offset and wavelength solution parameters
+        cav_S = zeros(2, 2)      # cavity information with the per-fiber solutions free (fit_cavity_gn)
+        cav_KtK = zeros(2, 2)
         for i in 1:N_FIBERS
             resid_vec[i, :] .= NaN
             xv = @view fpi_ximport[:, i]
@@ -1714,9 +1716,9 @@ function comb_exp_get_and_save_fpi_wavecal(
                 #		outparamsOpt = vcat(ditherParamsOpt, nlParamsOpt)
                 outparamsOpt = nlParamsOpt
             else
-                res = wavecal_lbfgs(
-                    comb_exp_nonlinear_loss_fit_partial, inparams)
-                outparamsOpt = Optim.minimizer(res)
+                outparamsOpt = comb_chip_fit(comb_exp_nonlinear_loss_fit_partial, inparams,
+                    xv[msk], yv[msk], chipIntv[msk], expIntv[msk], curr_ditherPolyParams, wporder;
+                    fiber = i, iter = r_ind)
                 #		ditherParamsOpt = outparamsOpt[begin:begin+n_dither_coeffs-1]
                 #		nlParamsOpt = outparamsOpt[begin+n_dither_coeffs:end] 
                 ditherParamsOpt = @view ditherParams[i, :]
@@ -1738,6 +1740,13 @@ function comb_exp_get_and_save_fpi_wavecal(
             linParams[i, :] .= linParamsOpt
             ditherParams[i, :] .= ditherParamsOpt
             resid_vec[i, :] .= linResid
+            if any(msk) && WAVECAL_COMB_SOLVER[] != :lbfgs
+                Sf, Kf = comb_fiber_cavity_info(xv[msk], chipIntv[msk], expIntv[msk],
+                    collect(Float64, nlParamsOpt), collect(Float64, linParamsOpt),
+                    curr_ditherPolyParams, peak_ints[msk, i], cavity_size, m_offset, wporder)
+                cav_S .+= Sf
+                cav_KtK .+= Kf
+            end
             curr_ditherPolyParams = copy(ditherPolyParams[:, i, :])
             comb_exp_params2DitherPolyParams!(
                 curr_ditherPolyParams, ditherParams[i, :], dporder)
@@ -1753,11 +1762,8 @@ function comb_exp_get_and_save_fpi_wavecal(
                            (2.0 * (cavity_size + expparams[1] * mults[1])) ./
                            (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
         end
-        res = wavecal_lbfgs(
-            nonlinear_expparams_fit, expparams0)
-        expparamsOpt = Optim.minimizer(res) .* mults
-        cavity_size += expparamsOpt[1]
-        m_offset = expparamsOpt[2]
+        cavity_size, m_offset = comb_cavity_fit(nonlinear_expparams_fit, expparams0, mults,
+            peak_waves, peak_ints, good_peaks, cavity_size, m_offset, cav_S, cav_KtK; iter = r_ind)
 
         #        #EM definition
         #        m_offset = nanmedian(2.0 * cavity_size ./ peak_waves .- peak_ints)
