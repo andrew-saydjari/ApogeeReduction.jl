@@ -110,6 +110,14 @@ uv venv --python 3.12 almanac_env
 uv pip install -p almanac_env/bin/python -e /mnt/home/sdssv/gitcode/almanac
 ```
 
+After each daily pull, `update.repo` re-runs that `uv pip install -e` through
+`airflow/scripts/sync_almanac_env.sh`, so a dependency added to almanac's
+`pyproject.toml` (e.g. healpy) is installed the next morning; if the install
+or `import almanac.cli` fails, the task fails (and retries, then notifies).
+It does not read almanac's `uv.lock`: installed versions that still satisfy
+`pyproject.toml` are kept. Manual runs of `scripts/bulk/run_bulk.sh` use the
+same env and get no re-sync of their own.
+
 Override paths via `ALMANAC_DIR` / `ALMANAC_BIN` (read by ar_common.py,
 run_all.sh, run_bulk.sh). Smoke-tested 2026-09-04 with a live DB query
 through the tunnel (raw/ layout + missing_exposures verified).
