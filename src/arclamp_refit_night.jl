@@ -214,6 +214,7 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
             Qs = refit_stored_cavity_comb(fnames, A, tele, sc...; seq_flags = sfl[A.used],
                 seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r"),
                 exclude_seqs, pass1_comb, comb_arc_qa_ms = cfg.comb_arc_qa_ms)
+            Qs.ok || (provenance["comb_level_effective"] = "pair (stored-cavity comb fit failed: $(Qs.reason))")
             if Qs.ok
                 # monitoring only (changes no solution): tonight's arc-pair cavity level vs the stored cavity
                 mon = cfg.cavity_monitor_ms > 0 ?
