@@ -172,6 +172,24 @@ throughput is dead, this one says the extracted data itself is unusable. Read
 both. Named `bitmsk_ingest`, not `ingestBit`, because arMADGICS has its own
 per-spectrum `ingestBit` column with an entirely different bit table.
 
+### Per-fiber wavelength-quality bits (`bitmsk_wavecal`, in `ar1Duni*`)
+
+Written by `reinterp_spectra` for the per-exposure wavelength solution it used
+(the exposure's `waveCalNightfpiDither` or `waveCalNightskyDither` product, see
+`metadata["wavecal_type"]`), together with `wavecal_dither_nlines`, the number
+of sky lines (FPI peaks for FPI exposures) of the fiber's dither fit (-1 = unknown).
+Bits 0-2 are copied from that product's `dither_flag` (`DITHER_FLAG_*`).
+A fiber with any of bits 0-2 set did NOT get its own per-exposure dither: its
+dither is interpolated from the neighbouring fibers.
+
+| Bit | Value | Constant | Meaning |
+| --- | --- | --- | --- |
+| 0   | 1   | `WAVECAL_BIT_INTERP_NOLINES` | no sky line survived the residual cut; dither interpolated |
+| 1   | 2   | `WAVECAL_BIT_INTERP_FEWLINES` | 1 to `DITHER_MIN_LINES - 1` (= 5) lines; dither interpolated |
+| 2   | 4   | `WAVECAL_BIT_INTERP_LOWTHRPT` | relative-throughput unusable fiber; dither interpolated |
+| 3   | 8   | `WAVECAL_BIT_NO_EXPOSURE_DITHER` | no per-exposure dither product used (night-average or rough fallback), set on every fiber |
+| 4   | 16  | `WAVECAL_BIT_FLAGS_MISSING` | the dither product predates `dither_flag`; line counts unknown |
+
 ## Exposure-Level Flags (1D metadata)
 
 The bit tables above are *per pixel* and *per fiber*. Separately, each exposure

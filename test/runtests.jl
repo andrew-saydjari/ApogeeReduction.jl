@@ -8,6 +8,7 @@ using FITSIO: FITS
     include("ar1D.jl")
     include("fiber_types.jl")
     include("wavecal.jl")
+    include("dither_min_lines.jl")
     include("chip_transform.jl")
     include("chip_transform_bootstrap.jl")
     include("fpi_gate.jl")
