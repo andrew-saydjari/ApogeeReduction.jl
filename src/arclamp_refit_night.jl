@@ -1,6 +1,8 @@
 # Per-night orchestration of the arc + FPI refit (stages A-D) on existing pass-1 products.
 # Every input is opened read-only; every output goes under an output root:
 #   <outroot>/arc/arclampWaveCalNight_<tele>_<mjd>.h5      stage A (stage-1 product, refit settings)
+#   <outroot>/sky/skyNightRefit_<tele>_<mjd>.h5            sky stage (nights without a usable arc fit only;
+#                                                          src/arclamp_refit_noarc.jl)
 #   <outroot>/comb/waveCalFPIArc_<tele>_<mjd>.h5           stage B (stage 3)
 #   <outroot>/fpifib/fpiGuidePos_<tele>_<mjd>.h5           stage C (stage 4)
 #   <outroot>/exp/waveCalRefit_<tele>_<mjd>.h5             stage D (stages 5 + 6, per exposure)
@@ -10,11 +12,13 @@
 # that wrote them when the driver is asked to retry. Every night is processed independently of every
 # other night (AKS 2026-11-18); global inputs are stored calibration files only.
 
-const REFIT_STAGES = ("arc", "comb", "fpifib", "assemble")
+const REFIT_STAGES = ("arc", "sky", "comb", "fpifib", "assemble")
+# routes whose exposures are shifted to their own pooled sky lines minus the global arc-sky offset
+const REFIT_SKYSHIFT_ROUTES = (:arc, :noarc_tmpl, :noarc_sky, :noarc_nightave)
 
 refit_path(outroot, stage, tele, mjd) = joinpath(outroot,
-    stage == "arc" ? "arc" : stage == "comb" ? "comb" : stage == "fpifib" ? "fpifib" : "exp",
-    (stage == "arc" ? "arclampWaveCalNight" : stage == "comb" ? "waveCalFPIArc" :
+    stage == "arc" ? "arc" : stage == "sky" ? "sky" : stage == "comb" ? "comb" : stage == "fpifib" ? "fpifib" : "exp",
+    (stage == "arc" ? "arclampWaveCalNight" : stage == "sky" ? "skyNightRefit" : stage == "comb" ? "waveCalFPIArc" :
      stage == "fpifib" ? "fpiGuidePos" : "waveCalRefit") * "_$(tele)_$(mjd).h5")
 refit_status_path(outroot, stage, tele, mjd) = joinpath(outroot, "status", "$(stage)_$(tele)_$(mjd).txt")
 
@@ -332,6 +336,28 @@ function refit_night_comb(tele, mjd; apred_dir, wavecal_dir, outroot, cfg::Refit
     arcf = refit_path(outroot, "arc", tele, mjd)
     prov = Dict("chip_transform_fingerprint" => refit_fingerprint(cfg.chip_transform_file),
         "n_science_refs" => string(length(scis)))
+    # no usable arc fit: within-night ladder, rung 1 (comb integers from the night's own sky solution, cavity
+    # fixed at the stored global cavity); never a neighbour night
+    if refit_night_is_noarc(outroot, tele, mjd, cfg)
+        cfg.noarc_route == "ladder" || return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noarc",
+            "no usable arc fit; noarc_route = $(cfg.noarc_route) (no comb)")
+        skyf = refit_path(outroot, "sky", tele, mjd)
+        isfile(skyf) || return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noarc",
+            "no usable arc fit and no night sky solution (sky stage: $(refit_read_status(outroot, "sky", tele, mjd)))")
+        sc = comb_cavity_reference(cfg.cavity_ref_file, String(tele), mjd)
+        sc === nothing && return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noarc",
+            "no usable arc fit and no stored cavity in cavity_ref_file")
+        S = load_refit_sky(skyf)
+        skyG = refit_eval_grid((f, c, px) -> refit_sky_eval(S.lin, S.nl, (0.0, 1.0), f, c, px), REFIT_PXG)
+        Q = refit_skyseed_comb(fnames, S.lin, S.nl, sc...; skyG, pass1_comb = p1)
+        Q.ok || return refit_write_status(outroot, "comb", tele, mjd, "nocomb_noarc", "sky-seeded comb: " * Q.reason)
+        prov["comb_level_effective"] = "stored_cavity (no arcs: integers from the night sky solution)"
+        prov["qa_reference"] = "night-average sky solution (chip_arc_minus_comb_ms = sky - comb, at different frames)"
+        keep === nothing || (Q = merge(Q, keep))
+        ispath(out) && rm(out)
+        write_refit_comb(out, Q, fnames; tele, mjd, cfg, arc_fname = "", provenance = prov)
+        return refit_write_status(outroot, "comb", tele, mjd, "ok_noarc_skyseed")
+    end
     st, reason = refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg, pass1_comb = p1,
         provenance = prov, almanac_file, force_pair, keep)
     st === nothing || return st
@@ -458,6 +484,12 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
     fpif = refit_path(outroot, "fpifib", tele, mjd)
     A = isfile(arcf) ? load_refit_arc(arcf) : nothing
     (A !== nothing && !refit_arc_usable(A)) && (A = nothing)
+    cfg.ignore_arcs && (A = nothing)      # validation only: the no-arc ladder on a normal night
+    # no usable arc fit (archive refit): the within-night ladder (src/arclamp_refit_noarc.jl); the in-order
+    # pipeline sends such nights to the legacy chain instead (route :pass1 -> none_none -> caller)
+    noarc = !inorder && A === nothing
+    skyf = refit_path(outroot, "sky", tele, mjd)
+    S = (noarc && isfile(skyf)) ? load_refit_sky(skyf) : nothing
     nfill = 0
     (A !== nothing && fiber_fill == "fill_only") && ((A, nfill) = refit_arc_fill_fibers(A))
     C = isfile(combf) ? load_refit_comb(combf) : nothing
@@ -479,6 +511,16 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
     fps_no_comb = era == "fps" && C === nothing
     Tp = (A !== nothing && shape_choice == "template") ?
          load_refit_template(cfg.shape_template_file, tele, cfg.shape_template_block) : nothing
+    # no-arc rung 2 (template shifted to the sky) vs rung 3 (sky-only chain)
+    TpN = noarc ? load_refit_template(cfg.shape_template_file, tele, cfg.shape_template_block) : nothing
+    TpN_ok = TpN === nothing ? falses(N_FIBERS) : refit_template_ok(TpN)
+    noarc_tmpl = TpN !== nothing && (cfg.noarc_route == "template_sky" ||
+                  (cfg.noarc_route == "ladder" && (era == "fps" || cfg.noarc_plate_shape == "template")))
+    smodel(d) = (f, c, px) -> refit_sky_eval(S.lin, S.nl, view(d, f, :), f, c, px)
+    d_nightave = repeat([0.0 1.0], N_FIBERS)
+    # template fibers without a complete template take the exposure's sky-chain model (`fb`; WAVE_FIBER_FILLED)
+    tmodel(dl, fb) = (f, c, px) -> TpN_ok[f] ? [refit_template_noarc(TpN, dl, f, c, p) for p in px] :
+                                   (fb === nothing ? fill(NaN, length(px)) : fb(f, c, px))
     TP = Tp === nothing ? nothing : refit_fit_template(Tp, A, ll)
     (TP !== nothing && count(TP[2]) < 200) && (Tp = nothing; TP = nothing)
     combbits = 0
@@ -522,6 +564,56 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             p + refit_state_shift_px(A, f, c, p, st)) for p in px] :
             (fiber_fill == "fill_only" ? arcmodel(st)(f, c, px) : fill(NaN, length(px)))
     tp_missing = (Tp !== nothing && fiber_fill == "fill_only") ? count(f -> !TP[2][f], 1:N_FIBERS) : 0
+    # no-arc base model of one exposure: rung 2 (template shifted to the pooled sky), rung 3 (sky-chain dither
+    # solution), else the night-average sky solution; `nothing` when no rung is possible
+    function noarc_base(e, sky, skyP)
+        js = S === nothing ? nothing : findfirst(==(e), S.expnum)
+        fb = S === nothing ? nothing : (js !== nothing && S.ok[js]) ? smodel(S.dither[:, :, js]) : smodel(d_nightave)
+        if sky !== nothing && noarc_tmpl
+            m0 = tmodel(zeros(3), fb)
+            v0 = refit_sky_velocities(skyP, (f, c, p) -> m0(f, c, [p])[1])
+            z0, _, _ = refit_pooled_sky(skyP, v0)
+            dl = refit_template_shift_px(TpN, z0)
+            all(isfinite, dl) && return (; model = tmodel(dl, fb), route = :noarc_tmpl, relname = "templateskyshift",
+                bits = WAVE_NOARC_TEMPLATE_SKY)
+        end
+        (sky !== nothing && js !== nothing && S.ok[js]) && return (; model = smodel(S.dither[:, :, js]),
+            route = :noarc_sky, relname = "skydither", bits = WAVE_NOARC_SKY_ONLY)
+        S === nothing && return nothing
+        return (; model = smodel(d_nightave), route = :noarc_nightave, relname = "skynightave",
+            bits = WAVE_NOARC_SKY_ONLY | WAVE_NIGHT_AVE | (sky === nothing ? WAVE_POS_UNMATCHED : 0))
+    end
+    # no-arc per-fiber zero points (m/s, fiber-relative per chip): neither the template (no per-fiber fit without
+    # arcs) nor the sky chain (smoothed across fibers) carries a fiber's own offset, and offsets beyond the pooled
+    # estimator's 600 m/s row clip never reach the static per-fiber sky term. Robust median over ALL of the night's
+    # sky rows of (row velocity - the exposure's pooled chip value), >= 5 rows, |.| < 5 km/s; applied to every
+    # no-arc model (the static term then corrects the remainder as on every route).
+    fibz = zeros(N_FIBERS, 3)
+    if noarc && (TpN !== nothing || S !== nothing)
+        acc = [Float64[] for _ in 1:N_FIBERS, _ in 1:3]
+        skydir0 = isempty(cfg.sky_peaks_dir) ? mdir : joinpath(cfg.sky_peaks_dir, string(mjd))
+        for (e, kind) in exps
+            kind == "object" || continue
+            sk = refit_read_sky(skydir0, tele, mjd, e)
+            (sk === nothing || isempty(sk.pix)) && continue
+            nb = noarc_base(e, sk, sk)
+            (nb === nothing || nb.route == :noarc_nightave) && continue
+            v = refit_sky_velocities(sk, (f, c, p) -> nb.model(f, c, [p])[1])
+            zp, _, _ = refit_pooled_sky(sk, v)
+            for i in eachindex(v)
+                c = sk.chip[i]
+                (isfinite(v[i]) && isfinite(zp[c]) && abs(v[i] - zp[c]) < 5000) && push!(acc[sk.fiber[i], c], v[i] - zp[c])
+            end
+        end
+        for c in 1:3
+            for f in 1:N_FIBERS
+                length(acc[f, c]) >= 5 && (fibz[f, c] = median(acc[f, c]))
+            end
+            ok = [length(acc[f, c]) >= 5 for f in 1:N_FIBERS]
+            any(ok) && (fibz[ok, c] .-= median(fibz[ok, c]))
+        end
+    end
+    noarc_fibcorr(m) = (f, c, px) -> m(f, c, px) .* (1 + fibz[f, c] / REFIT_C_MPS)
     # ---------------- pass A: relative model and sky measurements per exposure
     for (k, (e, kind)) in enumerate(exps)
         if inorder
@@ -548,8 +640,8 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         end
         skyP === nothing && (sky = nothing)
         hassky[k] = sky !== nothing
-        # (1) FPI fibers on a comb night
-        if C !== nothing && FP !== nothing && cfg.fps_route == "fpifib"
+        # (1) FPI fibers on a comb night (a no-arc night's comb only under the ladder: rung 1)
+        if C !== nothing && FP !== nothing && cfg.fps_route == "fpifib" && (!noarc || cfg.noarc_route == "ladder")
             kk = findfirst(==(e), FP.exp)
             if kk !== nothing
                 P = (; a = FP.a[:, :, kk], b = FP.b[:, :, kk], ea = FP.ea[:, :, kk], eb = FP.eb[:, :, kk],
@@ -611,6 +703,21 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             usesky || (bits[k] |= WAVE_REL_ARC_NEAREST)
             (C !== nothing || (FP !== nothing && kind == "object")) && (bits[k] |= WAVE_FPIFIB_UNAVAILABLE)
         end
+        # (2b) no usable arc fit: rung 2 (template shape shifted to this exposure's sky), rung 3 (sky-only chain
+        # of this exposure), else the night-average sky solution (no own sky lines: position not measured)
+        if route[k] == :pass1 && noarc
+            nb = noarc_base(e, sky, skyP)
+            if nb !== nothing
+                models[k] = noarc_fibcorr(nb.model)
+                route[k] = nb.route
+                relname[k] = nb.relname
+                bits[k] |= nb.bits
+            end
+            route[k] == :pass1 && (bits[k] |= WAVE_POS_UNMATCHED)    # nothing possible: no solution
+            absname[k] = "noarc"
+            (route[k] != :pass1 && (C !== nothing || (FP !== nothing && kind == "object"))) &&
+                (bits[k] |= WAVE_FPIFIB_UNAVAILABLE)
+        end
         fpi_gated_off && (bits[k] |= WAVE_FPI_GATED_OFF)
         fps_no_comb && (bits[k] |= WAVE_FPS_NO_COMB)
         # (3) sky measurements against the relative model
@@ -622,7 +729,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
             vraw[:, k] .= zp
             nlines[:, k] .= nlc
             theta[:, :, k] .= refit_sky_terms(skyP, vP, keepP, zp, nlc,
-                route[k] == :arc ? cfg.sky_exp_terms : "chipzp")
+                route[k] in REFIT_SKYSHIFT_ROUTES ? cfg.sky_exp_terms : "chipzp")
             if cfg.sky_fiber_term in ("static", "full")
                 keep = skyP === sky ? keepP : refit_pooled_sky(sky, v)[3]
                 z, s = refit_fiber_sky_terms(sky, v, keep)
@@ -658,18 +765,16 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
     for (k, (e, kind)) in enumerate(exps)
         src = inorder ? nothing : refit_pass1_source(apred_dir, wavecal_dir, tele, mjd, e, kind, p1type[k])
         G = nothing
-        if route[k] == :pass1 && inorder
-            wtype[k] = "none_none"      # no in-order solution: the caller's fallback decides
-        elseif route[k] == :pass1
-            nm, bb = refit_pass1_type(p1type[k])
-            wtype[k] = nm
-            bits[k] |= bb | WAVE_PASS1_COPY
-            src !== nothing && (G = h5open(f -> Float64.(read(f[src[2]])), src[1], "r"))
+        if route[k] == :pass1
+            # in-order: no solution, the caller's fallback decides; archive refit: no rung of the no-arc ladder
+            # was possible (no sky solution on the night): no solution (NaN coefficients). The pass-1 copy is
+            # retired (WAVE_RESERVED_18).
+            wtype[k] = "none_none"
         else
             wtype[k] = absname[k] * "_" * relname[k]
             G = refit_eval_grid(models[k], px_all)
             T = zeros(3, 3)
-            if route[k] == :arc && hassky[k] && any(isfinite, view(theta, 1, :, k))
+            if route[k] in REFIT_SKYSHIFT_ROUTES && hassky[k] && any(isfinite, view(theta, 1, :, k))
                 # shift the arc fit onto this exposure's own sky lines: T = theta - O (global arc-sky offset);
                 # a chip with < 3 sky lines takes the measured chips' zero point in pixels, stretch/tilt 0
                 pxs = [(theta[1, c, k] - Osky[1, c]) / vpx[c] for c in 1:3 if isfinite(theta[1, c, k])]
@@ -681,6 +786,13 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
                     else
                         T[1, c] = median(pxs) * vpx[c]
                     end
+                end
+                omiss && (bits[k] |= WAVE_MODE_OFFSET_MISSING)
+            elseif route[k] == :noarc_nightave
+                # no own sky lines: the night-average sky solution (sky level) put on the same level as every
+                # sky-shifted route, minus the global arc-sky offset
+                for c in 1:3, q in 1:3
+                    T[q, c] = -Osky[q, c]
                 end
                 omiss && (bits[k] |= WAVE_MODE_OFFSET_MISSING)
             elseif route[k] == :fpifib
@@ -712,6 +824,8 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         # filled arc fibers matter only where the arc model is evaluated (arc route); on the FPI route
         # the arc only seeds the comb (seed fibers are filled anyway, refit_arc_lin_nl)
         if route[k] == :arc && (nfill > 0 || tp_missing > 0)
+            bits[k] |= WAVE_FIBER_FILLED
+        elseif route[k] == :noarc_tmpl && !all(TpN_ok)
             bits[k] |= WAVE_FIBER_FILLED
         end
         # the in-order caller writes the per-exposure product here and may add bits (e.g. a final
@@ -757,7 +871,10 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         "scale_comb" => "comb chip transform (cporder 1) and quartic fitted per night; cavity (L, eps) per night",
         "scale_exposure_fpifib" => cfg.exp_terms * " (per-chip zero point and stretch from the two FPI fibers)",
         "scale_exposure_sky" => cfg.sky_exp_terms * " (per chip, pooled sky minus the global arc-sky offset, applied directly)",
-        "scale_night_average" => "none built: exposures without a new solution keep the pass-1 solution (WAVE_PASS1_COPY)")
+        "scale_night_average" => noarc ? "no-arc night: sky-only chain night average for exposures without sky lines" :
+                                 "none built",
+        "noarc" => noarc, "noarc_route" => cfg.noarc_route, "noarc_template_rung" => noarc_tmpl,
+        "sky_product" => (noarc && isfile(skyf)) ? skyf : "")
     for (kx, v) in refit_config_dict(cfg)
         meta["cfg_" * kx] = v
     end
@@ -771,7 +888,7 @@ function refit_night_assemble(tele, mjd; apred_dir, wavecal_dir = "", outroot, c
         fpifib_tilt_px = tilt, fpifib_n_used = nfpi_used, dv_pass1_ms = dvp1, pass1_zp_ms = p1zp,
         pass1_shape_ms = p1shape, pass1_fiber_rsig_ms = p1rs,
         chip_arc_minus_comb_ms = C === nothing ? fill(NaN, 3) : C.chip_arc_minus_comb_ms,
-        comb_n_mode_slip = C === nothing ? -1 : C.n_slip)
+        comb_n_mode_slip = C === nothing ? -1 : C.n_slip, noarc_fiber_zp_ms = fibz)
     mv(tmp, out; force = true)
     cnt = Dict{String, Int}()
     for w in wtype

@@ -46,7 +46,7 @@ using HDF5
     end
 
     @testset "bits" begin
-        @test length(AR.WAVE_BIT_NAMES) == 39
+        @test length(AR.WAVE_BIT_NAMES) == 42
         for (i, n) in enumerate(AR.WAVE_BIT_NAMES)
             @test getfield(AR, Symbol(n)) == 1 << (i - 1)
         end
