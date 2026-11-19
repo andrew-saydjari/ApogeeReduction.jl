@@ -1,4 +1,20 @@
 using HDF5
+using Optim: Optim, optimize, LBFGS
+
+"""
+Stopping settings for every LBFGS fit in the wavelength solution (per-fiber sky fit, per-fiber dither
+fits, FPI comb fits and exposure terms), written out once instead of relying on Optim's defaults, so a
+future change of Optim's defaults cannot silently move them. The values are Optim's defaults on 1.10 and
+2.x (gradient tolerance 1e-8, 1000 iterations, no x/f tolerance). Gradients are central finite
+differences on both versions. Tighter settings (g 1e-12, x 1e-14, f 1e-15, 20000 iterations) were tried
+on 16 sample nights: they do not make Optim 1.10 and 2.3.2 agree better and do not lower the sky-line
+residuals (as many fits get worse as better, relative changes ~1e-5), so they are not used.
+"""
+const WAVECAL_LBFGS_OPTIONS = Ref(Optim.Options(show_trace = false, g_abstol = 1e-8, x_abstol = 0.0,
+    f_reltol = 0.0, iterations = 1_000))
+
+"""LBFGS minimisation used by the wavelength fits, with `WAVECAL_LBFGS_OPTIONS[]`."""
+wavecal_lbfgs(f, x0) = optimize(f, x0, LBFGS(), WAVECAL_LBFGS_OPTIONS[])
 using Polynomials: Polynomial, fit
 
 function linear_loss_fit(x, y; wporder = 2, returnL2only = false, linparam = nothing)
@@ -392,10 +408,22 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
                 sky_line_chipInt[:, fibIndx], fixed_chip_scales[fibIndx, :])
         end
     end
+    # chip transforms that cannot be fitted (too few lines) are held at the comb-measured offsets of
+    # the chip-transform calibration when one is in use, else at the start values above
+    hold_params = nothing
+    if !isnothing(fixed_chip_scales) && cporder == 0
+        tele_str, mjd_str = split(basename(fname), "_")[2:3]
+        blk = chip_transform_block(chip_transform_cal, tele_str, parse(Int, mjd_str))
+        if !isnothing(blk) && all(isfinite, blk.offset)
+            hold_params = copy(blk.offset)   # N_FIBERS x 2: (a_R, a_B)
+        end
+    end
     linParams, nlParams,
-    resid_vec = get_sky_wavecal(
+    resid_vec, wave_solver_flag = get_sky_wavecal(
         fit_uxlst, sky_line_fwlst, sky_line_chipInt,
-        chipPolyParams0; cporder = cporder, wporder = wporder)
+        chipPolyParams0; cporder = cporder, wporder = wporder, hold_params = hold_params)
+    n_fallback = count(x -> (x & WAVE_SOLVER_LBFGS_FALLBACK) != 0, wave_solver_flag)
+    n_fallback > 0 && println("Sky wavecal: $(n_fallback) fibers fell back to LBFGS in $(fname)")
     resid_xt = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(resid_xt, NaN)
 
@@ -497,7 +525,7 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         resid_xt = interp_resid_xt,
         raw_linParams = linParams, raw_nlParams = nlParams,
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln,
-        raw_resid_xt = resid_xt)
+        raw_resid_xt = resid_xt, wave_solver_flag = wave_solver_flag)
     return outname
 end
 
@@ -998,10 +1026,10 @@ function get_and_save_sky_dither_per_fiber(
     if isnothing(dither_outputs)
         return nothing
     end
-    ditherParams, resid_vec, chipWaveSoln, resid_xt = dither_outputs
-    
+    ditherParams, resid_vec, chipWaveSoln, resid_xt, dither_solver_flag = dither_outputs
+
     safe_jldsave(outname; linParams, nlParams, ditherParams,
-        resid_vec, resid_xt, chipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
+        resid_vec, resid_xt, chipWaveSoln, dither_solver_flag, no_metadata = true) # KEVIN FIX THIS!!!!
 
     return outname
 end
@@ -1040,6 +1068,7 @@ function get_sky_dither_per_fiber(
     end
 
     good_fibers = ones(Bool, N_FIBERS)
+    dither_solver_flag = zeros(UInt8, N_FIBERS)
 
     for fibIndx in fibInds
         xv = sky_line_uxlst[:, fibIndx]
@@ -1070,13 +1099,8 @@ function get_sky_dither_per_fiber(
             continue
         end
 
-        function dither_nonlinear_loss_fit_partial(inparams)
-            dither_nonlinear_loss_fit(inparams, xt[sky_msk], yv[sky_msk], linParams[fibIndx, :];
-                wporder = wporder, returnL2only = true)
-        end
-        res = optimize(
-            dither_nonlinear_loss_fit_partial, ditherPolyParams[fibIndx, :], LBFGS(), Optim.Options(show_trace = false))
-        ditherParamsOpt = Optim.minimizer(res)
+        ditherParamsOpt, dither_solver_flag[fibIndx] = fit_dither_gn(
+            xt[sky_msk], yv[sky_msk], linParams[fibIndx, :], ditherPolyParams[fibIndx, :]; wporder = wporder)
         ditherPolyParams[fibIndx, :] .= ditherParamsOpt
         resid_vec[fibIndx, sky_msk] .= dither_nonlinear_loss_fit(
             ditherParamsOpt, xt[sky_msk], yv[sky_msk], linParams[fibIndx, :];
@@ -1121,41 +1145,43 @@ function get_sky_dither_per_fiber(
                 chipWaveSoln[:, fibIndx, chipIndx] .= yt
             end
         end
-        return ditherPolyParams, resid_vec, chipWaveSoln, resid_xt
+        return ditherPolyParams, resid_vec, chipWaveSoln, resid_xt, dither_solver_flag
     else
-        return ditherPolyParams, resid_vec
+        return ditherPolyParams, resid_vec, dither_solver_flag
     end
 end
 
+"""
+    get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0;
+        cporder = 1, wporder = 2, hold_params = nothing) -> (linParams, nlParams, resid_vec, solver_flag)
+
+Per-fiber sky wavelength fits (`fit_fiber_wavecal_gn`: Gauss-Newton with an LBFGS fallback). A
+chip's transform is held at `hold_params[i, :]` (default: the start `chipPolyParams0`) when that
+chip has fewer than `WAVE_MIN_LINES_CHIP_TRANSFORM` lines or the fiber has no more lines than free
+parameters. `solver_flag` holds the per-fiber `WAVE_SOLVER_*` bits.
+"""
 function get_sky_wavecal(
-        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2)
+        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2,
+        hold_params = nothing)
     linParams = zeros(Float64, N_FIBERS, wporder + 1)
     nlParams = zeros(Float64, N_FIBERS, 2 * (cporder + 1))
     resid_vec = zeros(Float64, N_FIBERS, size(sky_line_uxlst, 1))
     fill!(resid_vec, NaN)
+    solver_flag = zeros(UInt8, N_FIBERS)
     for i in 1:N_FIBERS
         xv = sky_line_uxlst[:, i]
         yv = sky_line_fwlst[:, i]
         chipIntv = sky_line_chipInt[:, i]
         msk = .!isnan.(xv)
         chipPolyParams = copy(chipPolyParams0[i, :, :])
-        inparams = ChipPolyParams2Params(chipPolyParams)
-        function nonlinear_loss_fit_partial(inparams)
-            nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
-                wporder = wporder, cporder = cporder, returnL2only = true)
-        end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
-        nlParamsOpt = Optim.minimizer(res)
-        linResid,
-        linParamsOpt = nonlinear_loss_fit!(
-            chipPolyParams, nlParamsOpt, xv[msk], yv[msk], chipIntv[msk];
-            wporder = wporder, cporder = cporder, returnL2only = false)
+        nlParamsOpt, linParamsOpt, linResid, solver_flag[i] = fit_fiber_wavecal_gn(
+            xv[msk], yv[msk], chipIntv[msk], chipPolyParams; wporder = wporder, cporder = cporder,
+            hold_params = isnothing(hold_params) ? nothing : hold_params[i, :])
         nlParams[i, :] = nlParamsOpt
         linParams[i, :] = linParamsOpt
         resid_vec[i, msk] = linResid
     end
-    return linParams, nlParams, resid_vec
+    return linParams, nlParams, resid_vec, solver_flag
 end
 
 # FPI line wavecal
@@ -1521,6 +1547,7 @@ function comb_exp_get_and_save_fpi_wavecal(
         "$(r_ind) $(sum(good_peaks))/$(length(good_peaks)) $(m_offset) $(cavity_size) $(cavity_size-init_cavity_size) ",
         nanzeropercentile(resids[good_peaks], percent_vec = [16, 50, 84]))
 
+    comb_dither_fallbacks = 0   # per-exposure dither fits that fell back from Gauss-Newton to LBFGS
     for r_ind in 1:max_iter
 
         #outlier masking
@@ -1606,6 +1633,8 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
 
         #update chip offset and wavelength solution parameters
+        cav_S = zeros(2, 2)      # cavity information with the per-fiber solutions free (fit_cavity_gn)
+        cav_KtK = zeros(2, 2)
         for i in 1:N_FIBERS
             resid_vec[i, :] .= NaN
             xv = @view fpi_ximport[:, i]
@@ -1635,14 +1664,9 @@ function comb_exp_get_and_save_fpi_wavecal(
                 curr_y = @view yv[in_exp]
                 curr_msk = @view msk[in_exp]
 
-                function dither_nonlinear_loss_fit_partial(inparams)
-                    dither_nonlinear_loss_fit(
-                        inparams, curr_xt[curr_msk], curr_y[curr_msk], linParams[i, :];
-                        wporder = wporder, returnL2only = true)
-                end
-                res = optimize(
-                    dither_nonlinear_loss_fit_partial, curr_ditherPolyParams[e_ind, :], LBFGS(), Optim.Options(show_trace = false))
-                curr_ditherParamsOpt = Optim.minimizer(res)
+                curr_ditherParamsOpt, dflag = fit_dither_gn(curr_xt[curr_msk], curr_y[curr_msk],
+                    linParams[i, :], curr_ditherPolyParams[e_ind, :]; wporder = wporder)
+                comb_dither_fallbacks += (dflag & WAVE_SOLVER_LBFGS_FALLBACK) != 0
                 curr_ditherPolyParams[e_ind, :] .= curr_ditherParamsOpt
                 if e_ind == 1
                     #push first exposure dither params onto the wavelength solution
@@ -1692,9 +1716,9 @@ function comb_exp_get_and_save_fpi_wavecal(
                 #		outparamsOpt = vcat(ditherParamsOpt, nlParamsOpt)
                 outparamsOpt = nlParamsOpt
             else
-                res = optimize(
-                    comb_exp_nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
-                outparamsOpt = Optim.minimizer(res)
+                outparamsOpt = comb_chip_fit(comb_exp_nonlinear_loss_fit_partial, inparams,
+                    xv[msk], yv[msk], chipIntv[msk], expIntv[msk], curr_ditherPolyParams, wporder;
+                    fiber = i, iter = r_ind)
                 #		ditherParamsOpt = outparamsOpt[begin:begin+n_dither_coeffs-1]
                 #		nlParamsOpt = outparamsOpt[begin+n_dither_coeffs:end] 
                 ditherParamsOpt = @view ditherParams[i, :]
@@ -1716,6 +1740,13 @@ function comb_exp_get_and_save_fpi_wavecal(
             linParams[i, :] .= linParamsOpt
             ditherParams[i, :] .= ditherParamsOpt
             resid_vec[i, :] .= linResid
+            if any(msk) && WAVECAL_COMB_SOLVER[] != :lbfgs
+                Sf, Kf = comb_fiber_cavity_info(xv[msk], chipIntv[msk], expIntv[msk],
+                    collect(Float64, nlParamsOpt), collect(Float64, linParamsOpt),
+                    curr_ditherPolyParams, peak_ints[msk, i], cavity_size, m_offset, wporder)
+                cav_S .+= Sf
+                cav_KtK .+= Kf
+            end
             curr_ditherPolyParams = copy(ditherPolyParams[:, i, :])
             comb_exp_params2DitherPolyParams!(
                 curr_ditherPolyParams, ditherParams[i, :], dporder)
@@ -1731,11 +1762,8 @@ function comb_exp_get_and_save_fpi_wavecal(
                            (2.0 * (cavity_size + expparams[1] * mults[1])) ./
                            (peak_ints[good_peaks] .+ expparams[2] * mults[2])) .^ 2)
         end
-        res = optimize(
-            nonlinear_expparams_fit, expparams0, LBFGS(), Optim.Options(show_trace = false))
-        expparamsOpt = Optim.minimizer(res) .* mults
-        cavity_size += expparamsOpt[1]
-        m_offset = expparamsOpt[2]
+        cavity_size, m_offset = comb_cavity_fit(nonlinear_expparams_fit, expparams0, mults,
+            peak_waves, peak_ints, good_peaks, cavity_size, m_offset, cav_S, cav_KtK; iter = r_ind)
 
         #        #EM definition
         #        m_offset = nanmedian(2.0 * cavity_size ./ peak_waves .- peak_ints)
@@ -1813,7 +1841,8 @@ function comb_exp_get_and_save_fpi_wavecal(
         resid_chipInts = fpi_line_chipInt, resid_peak_ints = peak_ints,
         resid_exp_ints = fpi_line_expInt, resid_used_in_fit = good_peaks,
         chipWaveSoln = chipWaveSoln,
-        fpi_m0 = med_m0, fpi_m0_offset = m_offset, fpi_cavity_size = cavity_size, no_metadata = true) # KEVIN FIX THIS!!!!
+        fpi_m0 = med_m0, fpi_m0_offset = m_offset, fpi_cavity_size = cavity_size,
+        comb_dither_solver_fallbacks = comb_dither_fallbacks, no_metadata = true) # KEVIN FIX THIS!!!!
 
     return outname, linParams, nlParams, chipWaveSoln
 end
@@ -1866,8 +1895,8 @@ function get_fpi_wavecal(
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
                 wporder = wporder, cporder = cporder, returnL2only = true)
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            nonlinear_loss_fit_partial, inparams)
         nlParamsOpt = Optim.minimizer(res)
         linResid,
         linParamsOpt = nonlinear_loss_fit!(
@@ -1892,8 +1921,8 @@ function get_fpi_wavecal(
             nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
                 wporder = wporder, cporder = cporder, returnL2only = true)
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
+        res = wavecal_lbfgs(
+            nonlinear_loss_fit_partial, inparams)
         nlParamsOpt = Optim.minimizer(res)
         linResid,
         linParamsOpt = nonlinear_loss_fit!(
