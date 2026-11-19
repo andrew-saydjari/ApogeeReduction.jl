@@ -59,7 +59,9 @@ const WAVE_HIGHORDER_EVENT = 1 << 15       # needs the cross-night pass; not set
 const WAVE_CHIPSCALE_FREE = 1 << 16
 const WAVE_FPIFIB_ROTATION = 1 << 17
 # refit-only bits (proposed here; not yet in the design table)
-const WAVE_PASS1_COPY = 1 << 18            # no new solution possible: the pass-1 adopted solution is copied
+const WAVE_RESERVED_18 = 1 << 18           # reserved, never set (was WAVE_PASS1_COPY: a night without usable arcs copied
+                                           # the pass-1 adopted solution; retired 2026-11-19 for the within-night
+                                           # no-arc ladder, bits 2^39-2^41)
 const WAVE_SHAPE_ARC = 1 << 19             # no comb shape (no comb, no template file): arc shape used
 const WAVE_RESERVED_20 = 1 << 20           # reserved, never set (was WAVE_SKY_ANCHOR_NIGHT: per-night arc-sky tie, retired)
 const WAVE_POS_UNMATCHED = 1 << 21         # measured position matched no arc position cluster
@@ -100,18 +102,29 @@ const WAVE_MODE_OFFSET_MISSING = 1 << 37   # arc route: no global arc-sky offset
 const WAVE_CAVITY_MONITOR_OUTLIER = 1 << 38 # comb_level = stored_cavity, MONITOR ONLY (changes no solution): the
                                            # night's own arc-pair cavity level (first sequence-adjacent pair) is more
                                            # than cavity_monitor_ms from the stored cavity the comb was fixed at
+# nights without a usable arc fit (no arcs / arc fit unusable): within-night fallback ladder (`noarc_route = "ladder"`),
+# each rung uses only the night's own data plus stored survey-level files (src/arclamp_refit_noarc.jl)
+const WAVE_NOARC_COMB_SKYSEED = 1 << 39   # rung 1: FPS comb whose integer orders are seeded by the night's OWN sky-line
+                                          # solution (no arcs), cavity (L, eps) fixed at the stored global cavity
+const WAVE_NOARC_TEMPLATE_SKY = 1 << 40   # rung 2: no arcs, no comb route: per-fiber shape from the stored survey-level
+                                          # comb shape template, shifted to the exposure's own pooled sky lines minus the
+                                          # global arc-sky offset (as the arc route)
+const WAVE_NOARC_SKY_ONLY = 1 << 41       # rung 3: no arcs: the within-night sky-only chain (legacy per-exposure sky fit ->
+                                          # night average -> per-fiber sky dither) computed fresh from this run's sky peaks,
+                                          # shifted to the pooled sky minus the global arc-sky offset
 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
     "WAVE_ABS_ARC_WINDOW", "WAVE_REL_ARC_TIME", "WAVE_REL_ARC_NEAREST", "WAVE_FPIFIB_UNAVAILABLE",
     "WAVE_ARC_SEQ_REJECTED", "WAVE_ARC_ABS_FAIL", "WAVE_ARC_FEW_SEQ", "WAVE_ARC_MULTIPOS",
     "WAVE_COMB_MODE_SLIP", "WAVE_LEVEL_INCONSISTENT", "WAVE_HIGHORDER_EVENT", "WAVE_CHIPSCALE_FREE",
-    "WAVE_FPIFIB_ROTATION", "WAVE_PASS1_COPY", "WAVE_SHAPE_ARC", "WAVE_RESERVED_20",
+    "WAVE_FPIFIB_ROTATION", "WAVE_RESERVED_18", "WAVE_SHAPE_ARC", "WAVE_RESERVED_20",
     "WAVE_POS_UNMATCHED", "WAVE_FPIFIB_ONE_FIBER", "WAVE_COMB_ARC_INCONSISTENT",
     "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_FALLBACK", "WAVE_ANCHOR_NOT_SAME_BLOCK",
     "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_RESERVED_30",
     "WAVE_RESERVED_31", "WAVE_FIBER_FILLED", "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED",
-    "WAVE_ANCHOR_CAVITY_OUTLIER", "WAVE_MODE_OFFSET_MISSING", "WAVE_CAVITY_MONITOR_OUTLIER"]
+    "WAVE_ANCHOR_CAVITY_OUTLIER", "WAVE_MODE_OFFSET_MISSING", "WAVE_CAVITY_MONITOR_OUTLIER",
+    "WAVE_NOARC_COMB_SKYSEED", "WAVE_NOARC_TEMPLATE_SKY", "WAVE_NOARC_SKY_ONLY"]
 
 """Era of a telescope-night, keyed ONLY on the canonical plate/FPS MJD boundary
 (`get_fps_plate_divide`: FPS is mjd > divide), never on whether FPI light exists that night."""
@@ -273,6 +286,24 @@ Switches of the refit (defaults = the design's recommendation where it has one):
     plate era too: 93/45 m/s within a position against noise of 8).
   * `shape_template_file`, `shape_template_block` ("all"): comb shape template for arc-route
     exposures whose shape switch is "template"; "" = arc shape (flagged WAVE_SHAPE_ARC).
+  * `noarc_route` ("ladder"): a night WITHOUT a usable arc fit (arc stage `noarc` / `unusable`). Every rung uses
+    only the night's own data plus stored survey-level files (AKS 2026-11-19: no neighbour night). "ladder" =
+    (0) sky stage: the within-night sky-only chain (`get_and_save_sky_wavecal` per object exposure -> night average
+    -> per-fiber sky dither) on this run's sky peaks (`sky_peaks_dir`); (1) FPS night with an FPI comb that passed
+    the pass-1 gate: comb integers seeded by that night sky solution, cavity fixed at the stored global cavity
+    (`cavity_ref_file`, `comb_cavity_reference`) -> normal FPI-fiber route (WAVE_NOARC_COMB_SKYSEED); (2) every
+    other exposure with sky lines: shape from the stored comb shape template (`shape_template_file`), shifted to the
+    exposure's pooled sky minus the global arc-sky offset (WAVE_NOARC_TEMPLATE_SKY; plate era only with
+    `noarc_plate_shape = "template"`); (3) otherwise (plate with `noarc_plate_shape = "sky"`, no template file):
+    the sky-only chain's per-exposure solution, shifted the same way (WAVE_NOARC_SKY_ONLY); exposures without sky
+    lines take the night-average sky solution minus the global offset (+ NIGHT_AVE, POS_UNMATCHED). Nothing
+    possible (no sky at all): no solution (`none_none`, NaN coefficients). "template_sky" / "sky_only" =
+    validation routes: every no-arc exposure on rung 2 / rung 3 (no comb). The pass-1 copy (WAVE_PASS1_COPY) is
+    retired (bit 2^18 reserved).
+  * `noarc_plate_shape` ("sky"): plate-era no-arc nights under "ladder": "sky" (rung 3) or "template" (rung 2:
+    the comb template in the plate era, which AKS ruled out as the plate shape for nights WITH arcs).
+  * `ignore_arcs` (false): VALIDATION ONLY: treat every night's arc fit as unusable (accuracy of the ladder on
+    normal nights).
   * `arcwin_nights` (0 = off): archive refit driver only, opt-in: neighbour-night window for the comb cavity
     when a night has no arc anchor. A cross-night input, so off by default (the night takes the arc route,
     WAVE_FPS_NO_COMB, like the in-order pipeline).
@@ -319,6 +350,9 @@ Base.@kwdef struct RefitConfig
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
     arcwin_nights::Int = 0
+    noarc_route::String = "ladder"
+    noarc_plate_shape::String = "sky"
+    ignore_arcs::Bool = false
     nsig::Float64 = 8.0
     pos_match_px::Float64 = 0.25
     xcheck_threshold_ms::Float64 = 60.0
@@ -338,6 +372,7 @@ const REFIT_SWITCH_VALUES = Dict(
     :exp_terms => ("shift", "chipzp", "chipzp_stretch", "chipzp_stretch_tilt"),
     :sky_fiber_term => ("none", "pooled", "static", "full", "stored"),
     :sky_line_fibers => ("all", "faint"),
+    :noarc_route => ("ladder", "template_sky", "sky_only"), :noarc_plate_shape => ("sky", "template"),
     :prefps_time => ("skyshift",),
     :sky_exp_terms => ("chipzp", "chipzp_stretch", "chipzp_stretch_tilt"))
 
@@ -376,7 +411,10 @@ const REFIT_SWITCH_STAGES = Dict(
     "sky_exp_terms" => "assemble",
     "shape_template_file" => "assemble", "shape_template_block" => "assemble",
     "xcheck_threshold_ms" => "assemble",
-    "coeff_degree" => "assemble")
+    "coeff_degree" => "assemble",
+    # no-arc switches change only nights without a usable arc fit: the driver recomputes those nights' stages
+    # (sky, comb, fpifib, assemble) per night instead of invalidating a stage for every night ("none" here)
+    "noarc_route" => "none", "noarc_plate_shape" => "none", "ignore_arcs" => "none")
 
 """Value of each switch added after the first archive run that reproduces the behaviour before it existed
 (used by `--reuse_from` when the base run's config.txt lacks the switch; a switch not listed here, or set to
@@ -385,7 +423,7 @@ const REFIT_SWITCH_LEGACY = Dict("anchor_prefer" => "strict", "anchor_samepos" =
     "anchor_adjacency" => "strict_then_nomove", "anchor_max_candidates" => "3", "anchor_pattern_tol_px" => "0.02",
     "anchor_lamp_tol_px" => "0.1", "fiber_term_file" => "", "sky_line_fibers" => "all", "sky_faint_snr" => "20.0", "sky_peaks_dir" => "",
     "cavity_ref_check" => "off", "cavity_ref_file" => "default", "cavity_ref_ms" => "30.0", "noadjacent_route" => "any", "comb_level" => "pair",
-    "fps_route" => "fpifib")
+    "fps_route" => "fpifib", "noarc_route" => "pass1_copy", "noarc_plate_shape" => "pass1_copy", "ignore_arcs" => "false")
 
 "FNV-1a fingerprint of a file, or \"none\" for an empty path / missing file."
 refit_fingerprint(path::AbstractString) =

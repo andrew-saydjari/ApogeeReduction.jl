@@ -2142,16 +2142,27 @@ end
 
 function ingest_skyLines_file(fileName)
     # Read in sky line peaks data
-    sky_line_mat_clean = h5open(fileName, "r") do f
-        try
+    sky_line_mat_clean, line_class = h5open(fileName, "r") do f
+        m = try
             read(f["sky_line_mat_clean"])
         catch
             println(fileName)
             read(f["sky_line_mat_clean"])
         end
+        m, (haskey(f, "line_class") ? Int.(read(f["line_class"])) : nothing)
     end
     sky_line_xlst = (sky_line_mat_clean[:, 1, :] .- (N_XPIX ÷ 2)) ./ N_XPIX
     sky_line_wlst = sky_line_mat_clean[:, 2, :]
+    # #407 peaks files carry `line_class` (rows aligned with sky_line_mat_clean): only class B (2) lines enter a
+    # solution; class-A association guards are measured but never used (as `refit_read_sky`). Files written before
+    # #407 have no `line_class` and are read unmasked.
+    if line_class !== nothing
+        length(line_class) == size(sky_line_mat_clean, 1) || throw(DimensionMismatch(
+            "$(fileName): line_class has $(length(line_class)) entries, sky_line_mat_clean $(size(sky_line_mat_clean, 1)) lines"))
+        drop = line_class .!= 2
+        sky_line_xlst[drop, :] .= NaN
+        sky_line_wlst[drop, :] .= NaN
+    end
     return sky_line_xlst, sky_line_wlst
 end
 

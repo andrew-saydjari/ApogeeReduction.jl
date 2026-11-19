@@ -5,8 +5,9 @@
 # Phases (each is resumable and skips finished work):
 #   prep   write <outroot>/config.txt (switches, code commit, calibration fingerprints) and the
 #          night list <outroot>/nights.csv; refuses to run into an outroot made with other switches.
-#   night  per night, all stages: arc night fit (A) -> arc-anchored comb (B) -> FPI fibers (C) ->
-#          assembly per exposure (D). The default.
+#   night  per night, all stages: arc night fit (A) -> sky stage (nights without a usable arc fit only: the
+#          within-night sky-only chain) -> comb (B; arc-anchored, or on a no-arc FPS night seeded by the night's
+#          own sky solution at the stored cavity) -> FPI fibers (C) -> assembly per exposure (D). The default.
 #   1, 2   only with the opt-in cross-night arcwin (--arcwin_nights > 0): 1 = arc + comb (nights without
 #          an arc anchor `deferred`), 2 = arcwin comb from a neighbour night's cavity, C, D.
 #   3      single process, read-only summary: run table, comb table, counts (run_table.csv,
@@ -84,6 +85,10 @@ function parse_cli()
         "--xcheck_threshold_ms"; arg_type = Float64; default = 60.0
         "--comb_arc_qa_ms"; arg_type = Float64; default = 150.0
         "--coeff_degree"; arg_type = Int; default = 9
+        "--noarc_route"; arg_type = String; default = "ladder"; help = "nights without a usable arc fit: ladder (sky-seeded comb at the stored cavity -> template shifted to the sky -> sky-only chain) | template_sky | sky_only (validation)"
+        "--noarc_plate_shape"; arg_type = String; default = "sky"; help = "plate-era no-arc nights under the ladder: sky (sky-only chain) | template (comb shape template)"
+        "--ignore_arcs"; action = :store_true; help = "VALIDATION ONLY: treat every night's arc fit as unusable (accuracy of the no-arc ladder)"
+        "--sky_workdir"; arg_type = String; default = ""; help = "scratch directory of the sky stage (default: tempdir(); node-local)"
     end
     return parse_args(s)
 end
@@ -111,7 +116,9 @@ const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset
     shape_template_file = A_["shape_template_file"], shape_template_block = A_["shape_template_block"],
     arcwin_nights = A_["arcwin_nights"], nsig = A_["nsig"],
     pos_match_px = A_["pos_match_px"], xcheck_threshold_ms = A_["xcheck_threshold_ms"],
-    comb_arc_qa_ms = A_["comb_arc_qa_ms"], coeff_degree = A_["coeff_degree"])
+    comb_arc_qa_ms = A_["comb_arc_qa_ms"], coeff_degree = A_["coeff_degree"],
+    noarc_route = A_["noarc_route"], noarc_plate_shape = A_["noarc_plate_shape"], ignore_arcs = A_["ignore_arcs"])
+const SKY_WORKDIR = isempty(A_["sky_workdir"]) ? tempdir() : A_["sky_workdir"]
 AR.refit_check_config(CFG)
 (abspath(OUT) == abspath(PASS1) || startswith(abspath(OUT), abspath(PASS1) * "/")) &&
     error("--outroot must not be inside the pass-1 tree")
@@ -205,7 +212,9 @@ function invalidated_stages(base)
         get(theirs, k, "") == v && continue
         # a switch the base run did not have yet: unchanged behaviour only at its legacy value
         (!haskey(theirs, k) && get(AR.REFIT_SWITCH_LEGACY, k, nothing) == v) && continue
-        foreach(s -> push!(inv, s), split(get(AR.REFIT_SWITCH_STAGES, k, "arc,comb,fpifib,assemble"), ","))
+        sts = get(AR.REFIT_SWITCH_STAGES, k, "arc,comb,fpifib,assemble")
+        sts == "none" && continue     # a no-arc switch: handled per night (`noarc_night_changed`)
+        foreach(s -> push!(inv, s), split(sts, ","))
     end
     # a calibration FILE whose content changed under the same switch value (e.g. "default" -> a rebuilt
     # data/ table) invalidates the stages that read it (fingerprints recorded in config.txt)
@@ -219,7 +228,9 @@ function invalidated_stages(base)
         foreach(s -> push!(inv, s), split(FPSTAGES[k], ","))
     end
     # downstream closure
-    order = ["arc", "comb", "fpifib", "assemble"]
+    # downstream closure; the sky stage feeds only nights without a usable arc fit, so a change upstream of it
+    # (arc) invalidates everything, and a change at comb or later never reaches back to it
+    order = ["arc", "sky", "comb", "fpifib", "assemble"]
     if !isempty(inv)
         first_bad = minimum(findfirst(==(s), order) for s in inv)
         foreach(s -> push!(inv, s), order[first_bad:end])
@@ -228,9 +239,20 @@ function invalidated_stages(base)
 end
 const REUSE = A_["reuse_from"]
 const INVALID = isempty(REUSE) ? Set{String}() : invalidated_stages(REUSE)
+# nights without a usable arc fit in the base run (arc status noarc / unusable / fail, or --ignore_arcs): their
+# sky, comb, fpifib and assemble products are recomputed whenever ANY configuration line differs from the base
+# (the no-arc switches change only these nights, so they invalidate no stage of the other nights)
+const BASE_CONFIG_DIFFERS = isempty(REUSE) ? false :
+    filter(l -> !startswith(l, "#"), readlines(joinpath(REUSE, "config.txt"))) != config_lines()
+function noarc_night_changed(tele, mjd)
+    (isempty(REUSE) || !BASE_CONFIG_DIFFERS) && return false
+    CFG.ignore_arcs && return true
+    return AR.refit_read_status(REUSE, "arc", tele, mjd) in ("noarc", "unusable", "fail", "")
+end
 function link_reused(stage, tele, mjd)
     isempty(REUSE) && return
     stage in INVALID && return
+    (stage != "arc" && noarc_night_changed(tele, mjd)) && return
     src = AR.refit_path(REUSE, stage, tele, mjd)
     dst = AR.refit_path(OUT, stage, tele, mjd)
     if isfile(src) && !ispath(dst)
@@ -291,6 +313,9 @@ function phase12(phase)
             st, dt = run_stage("arc", tele, mjd, () -> AR.refit_night_arc(tele, mjd; apred_dir = APRED,
                 almanac_file = ALMANAC, outroot = OUT, cfg = CFG))
             push!(recs, ("arc", st, dt))
+            st, dt = run_stage("sky", tele, mjd, () -> AR.refit_night_sky(tele, mjd; apred_dir = APRED,
+                outroot = OUT, cfg = CFG, almanac_file = ALMANAC, workroot = SKY_WORKDIR))
+            push!(recs, ("sky", st, dt))
             st, dt = run_stage("comb", tele, mjd, () -> AR.refit_night_comb(tele, mjd; apred_dir = APRED,
                 wavecal_dir = WAVECAL, outroot = OUT, cfg = CFG, allow_arcwin = false, almanac_file = ALMANAC))
             push!(recs, ("comb", st, dt))
@@ -337,7 +362,10 @@ function phase3()
                 wt = read(f["wavecal_type"]); bm = read(f["bitmsk_wavecal"])
                 row[:n_exp] = length(wt)
                 for w in unique(wt); row[Symbol("n_" * w)] = count(==(w), wt); end
-                row[:n_pass1_copy] = count(b -> (b & AR.WAVE_PASS1_COPY) != 0, bm)
+                row[:n_noarc_comb_skyseed] = count(b -> (b & AR.WAVE_NOARC_COMB_SKYSEED) != 0, bm)
+                row[:n_noarc_template_sky] = count(b -> (b & AR.WAVE_NOARC_TEMPLATE_SKY) != 0, bm)
+                row[:n_noarc_sky_only] = count(b -> (b & AR.WAVE_NOARC_SKY_ONLY) != 0, bm)
+                row[:n_no_solution] = count(==("none_none"), wt)
                 row[:n_level_inconsistent] = count(b -> (b & AR.WAVE_LEVEL_INCONSISTENT) != 0, bm)
                 row[:n_fpifib_unavailable] = count(b -> (b & AR.WAVE_FPIFIB_UNAVAILABLE) != 0, bm)
                 row[:n_fps_no_comb] = count(b -> (b & AR.WAVE_FPS_NO_COMB) != 0, bm)
