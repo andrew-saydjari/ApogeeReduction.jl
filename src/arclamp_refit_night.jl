@@ -211,16 +211,19 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
         # below; recorded so a product never claims a stored level it did not use
         provenance["comb_level_effective"] = sc === nothing ? "pair (no stored cavity in cavity_ref_file)" : "stored_cavity"
         if sc !== nothing
-            Qs = refit_stored_cavity_comb(fnames, A, tele, sc...; seq_flags = sfl[A.used],
-                seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r"),
-                exclude_seqs, pass1_comb, comb_arc_qa_ms = cfg.comb_arc_qa_ms)
+            sscore = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r")
+            # frame + integer seed from the first sequence-adjacent pair when there is one (QA at the same position)
+            pc = refit_adjacent_candidates(adjacency; seq_flags = sfl[A.used], seq_score = sscore, exclude_seqs,
+                anchor_adjacency = cfg.anchor_adjacency, anchor_max_candidates = 1)
+            Qs = refit_stored_cavity_comb(fnames, A, tele, sc...; seq_flags = sfl[A.used], seq_score = sscore,
+                exclude_seqs, pass1_comb, comb_arc_qa_ms = cfg.comb_arc_qa_ms,
+                pair = isempty(pc) ? nothing : (pc[1][1], pc[1][2]))
             Qs.ok || (provenance["comb_level_effective"] = "pair (stored-cavity comb fit failed: $(Qs.reason))")
             if Qs.ok
                 # monitoring only (changes no solution): tonight's arc-pair cavity level vs the stored cavity
                 mon = cfg.cavity_monitor_ms > 0 ?
                       refit_cavity_monitor(fnames, A, tele, sc...; adjacency, seq_flags = sfl[A.used],
-                    seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r"),
-                    exclude_seqs, anchor_adjacency = cfg.anchor_adjacency,
+                    seq_score = sscore, exclude_seqs, anchor_adjacency = cfg.anchor_adjacency,
                     anchor_max_candidates = cfg.anchor_max_candidates, tol_ms = cfg.cavity_monitor_ms) :
                       (; cavmon_decision = "off", cavmon_bits = 0)
                 Qs = merge(Qs, mon, (; anchor_kind = "stored_cavity_level", anchor_bits = mon.cavmon_bits))

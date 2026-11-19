@@ -1361,13 +1361,19 @@ night's cleanest usable sequence (a seed good to < 1/2 FSR, ~6 px, is enough; no
 Per-fiber quartic, chip transform and dithers are fitted as usual. Flags FALLBACK | NOT_PREFERRED | UNVERIFIED,
 kind "verified_pair:stored_cavity"."""
 function refit_stored_cavity_comb(fpi_fnames, A::RefitArc, tele, L::Real, eps::Real; seq_flags = nothing,
-        seq_score = nothing, exclude_seqs = Int[], pass1_comb = nothing, comb_arc_qa_ms = 150.0, n_sigma = 4, max_iter = 2)
+        seq_score = nothing, exclude_seqs = Int[], pass1_comb = nothing, comb_arc_qa_ms = 150.0, n_sigma = 4, max_iter = 2,
+        pair = nothing)
     nU = length(A.used)
     sf = seq_flags === nothing ? zeros(Int, nU) : seq_flags
     sc = seq_score === nothing ? zeros(nU) : [isfinite(x) ? x : Inf for x in seq_score]
     js = [j for j in sortperm(sc) if refit_anchor_quality(sf[j]) < 2 && !(j in exclude_seqs)]
     isempty(js) && return (; ok = false, reason = "no usable arc sequence for the integer seed")
-    j = js[1]
+    # `pair` = (j, k) a sequence-adjacent candidate (comb_level = stored_cavity): seed from sequence j with FPI file k
+    # as the frame, so the arc - comb QA (and its WAVE_COMB_ARC_INCONSISTENT flag) compares arcs and comb at the same
+    # position; the level stays the stored (L, eps). Otherwise the cleanest sequence and the first file (frames at
+    # different positions: the QA then measures their offset, km/s, not a level error)
+    j = pair === nothing ? js[1] : pair[1]
+    fpi_fnames = pair === nothing ? fpi_fnames : fpi_fnames[vcat(pair[2], setdiff(eachindex(fpi_fnames), pair[2]))]
     d, t = arcfit_seq_state(A.g, A.lay, j)
     st = (A.grp_u[j], d, t, A.tau_u[j])
     lin0, nl0, nfill = refit_arc_lin_nl(A, st)
@@ -1437,6 +1443,21 @@ function comb_seed_LE(fpi_fname::AbstractString, initial_linParams, initial_nlPa
     return (cavity_size + pseed[1] * 1.0e3, pseed[2], count(gp1))
 end
 
+"""Sequence-adjacent (used arc sequence j, FPI file k, class) candidates in the verified_pair rule's order (strict
+before nomove, cleaner sequences first; never a rejected / position-outlier / excluded sequence), at most
+`anchor_max_candidates`. Empty without an adjacency table."""
+function refit_adjacent_candidates(adjacency; seq_flags = nothing, seq_score = nothing, exclude_seqs = Int[],
+        anchor_adjacency = "strict_then_nomove", anchor_max_candidates = 3)
+    adjacency === nothing && return Tuple{Int, Int, String}[]
+    nU, nC = size(adjacency)
+    cls_ok = anchor_adjacency == "strict" ? ("strict",) : ("strict", "nomove")
+    sf = seq_flags === nothing ? zeros(Int, nU) : seq_flags
+    sc = seq_score === nothing ? zeros(nU) : [isfinite(x) ? x : Inf for x in seq_score]
+    cand = [(j, k, String(adjacency[j, k])) for c in cls_ok for j in sortperm(sc) for k in 1:nC
+            if adjacency[j, k] == c && refit_anchor_quality(sf[j]) < 2 && !(j in exclude_seqs)]
+    return cand[1:min(end, anchor_max_candidates)]
+end
+
 """
     refit_cavity_monitor(fpi_fnames, A, tele, L, eps; adjacency, seq_flags, seq_score, exclude_seqs,
         anchor_adjacency, anchor_max_candidates, tol_ms) -> NamedTuple
@@ -1455,18 +1476,11 @@ function refit_cavity_monitor(fpi_fnames, A::RefitArc, tele, L::Real, eps::Real;
         anchor_max_candidates = 3, tol_ms = 20.0)
     vst = refit_comb_mode_velocity(L, eps, String(tele))
     none = (; cavmon_ref_ms = vst, cavmon_vmode_ms = NaN, cavmon_delta_ms = NaN, cavmon_decision = "nopair",
-        cavmon_class = "", cavmon_seq = 0, cavmon_fpi = "", cavmon_tol_ms = Float64(tol_ms),
+        cavmon_class = "none", cavmon_seq = 0, cavmon_fpi = "none", cavmon_tol_ms = Float64(tol_ms),
         cavmon_vp_seq = Int[], cavmon_vp_fpi = String[], cavmon_vp_class = String[], cavmon_vp_L = Float64[],
         cavmon_vp_eps = Float64[], cavmon_vp_vmode_ms = Float64[], cavmon_bits = 0)
-    adjacency === nothing && return none
-    nU, nC = size(adjacency)
-    cls_ok = anchor_adjacency == "strict" ? ("strict",) : ("strict", "nomove")
-    sf = seq_flags === nothing ? zeros(Int, nU) : seq_flags
-    sc = seq_score === nothing ? zeros(nU) : [isfinite(x) ? x : Inf for x in seq_score]
-    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in sortperm(sc) for k in 1:nC
-            if adjacency[j, k] == c && refit_anchor_quality(sf[j]) < 2 && !(j in exclude_seqs)]
+    cand = refit_adjacent_candidates(adjacency; seq_flags, seq_score, exclude_seqs, anchor_adjacency, anchor_max_candidates)
     isempty(cand) && return none
-    cand = cand[1:min(end, anchor_max_candidates)]
     vs, fs, cs, Ls, es, vm = Int[], String[], String[], Float64[], Float64[], Float64[]
     for (j, k, c) in cand
         d, t = arcfit_seq_state(A.g, A.lay, j)
@@ -1604,9 +1618,9 @@ function write_refit_comb(outname::AbstractString, Q, fpi_fnames; tele, mjd, cfg
         cavmon_vmode_ms = hasproperty(Q, :cavmon_vmode_ms) ? Float64(Q.cavmon_vmode_ms) : NaN,
         cavmon_delta_ms = hasproperty(Q, :cavmon_delta_ms) ? Float64(Q.cavmon_delta_ms) : NaN,
         cavmon_tol_ms = hasproperty(Q, :cavmon_tol_ms) ? Float64(Q.cavmon_tol_ms) : NaN,
-        cavmon_class = hasproperty(Q, :cavmon_class) ? String(Q.cavmon_class) : "",
+        cavmon_class = hasproperty(Q, :cavmon_class) && !isempty(Q.cavmon_class) ? String(Q.cavmon_class) : "none",
         cavmon_seq = hasproperty(Q, :cavmon_seq) ? Int(Q.cavmon_seq) : 0,
-        cavmon_fpi = hasproperty(Q, :cavmon_fpi) ? String(Q.cavmon_fpi) : "",
+        cavmon_fpi = hasproperty(Q, :cavmon_fpi) && !isempty(Q.cavmon_fpi) ? String(Q.cavmon_fpi) : "none",
         cavmon_vp_seq = hasproperty(Q, :cavmon_vp_seq) ? Q.cavmon_vp_seq : Int[],
         cavmon_vp_fpi = hasproperty(Q, :cavmon_vp_fpi) ? Q.cavmon_vp_fpi : String[],
         cavmon_vp_class = hasproperty(Q, :cavmon_vp_class) ? Q.cavmon_vp_class : String[],

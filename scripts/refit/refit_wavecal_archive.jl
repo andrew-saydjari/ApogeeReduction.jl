@@ -360,7 +360,7 @@ function phase3()
                     :comb_level_effective => haskey(f, "metadata/comb_level_effective") ? String(read(f["metadata/comb_level_effective"])) : "",
                     # cavity monitor (stored_cavity runs; flag only): tonight's arc-pair level vs the stored cavity
                     :cavmon_decision => haskey(f, "cavmon_decision") ? String(read(f["cavmon_decision"])) : "",
-                    :cavmon_class => haskey(f, "cavmon_class") ? String(read(f["cavmon_class"])) : "",
+                    :cavmon_class => haskey(f, "cavmon_class") ? (try String(read(f["cavmon_class"])) catch; "" end) : "",
                     :cavmon_vmode_ms => haskey(f, "cavmon_vmode_ms") ? Float64(read(f["cavmon_vmode_ms"])) : NaN,
                     :cavmon_delta_ms => haskey(f, "cavmon_delta_ms") ? Float64(read(f["cavmon_delta_ms"])) : NaN,
                     :cavity_ref_delta_ms => haskey(f, "cavity_ref_delta_ms") ? Float64(read(f["cavity_ref_delta_ms"])) : NaN,
