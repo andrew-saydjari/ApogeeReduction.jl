@@ -12,12 +12,14 @@
 #   "arclamp_q0t0u1" = UNe, "arclamp_q0t0u0" = FPI).
 # - Predictions with max class probability < unknown_tau are reported as
 #   "unknown" (image doesn't resemble any trained class).
-# - The model artifact (random forest) is trained offline; see
-#   scripts under the 2026_07_14 scratch dir (train_classifier.jl et al.).
-#   n.b. those offline scripts still write/read the model's ORIGINAL path;
-#   the artifact the pipeline loads was moved to cal_ref/ on 2026-09-08.
-#   They are analysis tooling, not pipeline code -- retraining means
-#   producing an artifact and pointing the config at it.
+# - The model artifact (random forest) is trained offline by the scripts in
+#   scripts/classifier/ (manifest -> features -> train -> evaluate; the v7
+#   training-exposure manifest is committed at
+#   metadata/exposure_classifier_training_manifest_v7.csv). Earlier v1-v6
+#   iterations lived in the 2026_07_14 scratch dir; the artifact the pipeline
+#   loads lives under cal_ref/ (moved there 2026-09-08). The scripts are
+#   analysis tooling, not pipeline code -- retraining means producing an
+#   artifact and pointing the config at it.
 
 using JLD2, Statistics, StatsBase, HDF5, DataFrames
 using LinearAlgebra: dot

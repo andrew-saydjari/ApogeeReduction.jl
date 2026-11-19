@@ -470,7 +470,7 @@ fi
     echo "- generated: $(date -Is) by ${USER} ($([ "$AR_SLURM" = "true" ] && echo "slurm job ${SLURM_JOB_ID}, nodes ${SLURM_JOB_NODELIST}" || echo "local on $(hostname), ${AR_WORKERS} workers"))"
     echo "- mode: ONE bulk run over all test days (run_bulk.sh sequence), runname ${runname}"
     echo "- julia: ${AR_JULIA_VERSION}; checkpoint_mode: ${AR_CHECKPOINT_MODE}"
-    echo "- exp_class_model: ${AR_EXP_CLASS_MODEL-(pinned v6 default — classifier ON, matching run_all.sh)}"
+    echo "- exp_class_model: ${AR_EXP_CLASS_MODEL-(pinned v7 default — classifier ON, matching run_all.sh)}"
     echo "- almanac: ${AR_ALMANAC_SRC} (bulk raw/-layout file, consumed directly; days selected via the runlist makers' --mjds per tele)"
     echo "- raw: cluster ${AR_RAW_CLUSTER}"
     echo "- cals: darks ${AR_CALDIR_DARKS}; flats ${AR_CALDIR_FLATS}; gain/read ${AR_GAIN_READ_CAL_DIR}"

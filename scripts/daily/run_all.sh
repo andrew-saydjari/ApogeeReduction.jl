@@ -69,11 +69,11 @@ almanac_clobber_mode=${11:-false}
 run_madgics=${12:-${RUN_MADGICS:-true}}
 # Exposure-type classifier: ON BY DEFAULT.
 # Leaving AR_EXP_CLASS_MODEL unset passes no flag, so pipeline.jl falls back to
-# the pinned v6 path in its own arg table — the same shape as --caldir_darks and
+# the pinned v7 path in its own arg table — the same shape as --caldir_darks and
 # --gain_read_cal_dir. Production sets it explicitly from
 # airflow/dags/ar_common.py (EXP_CLASS_MODEL), so swapping the model is a config
 # change beside the other calibration inputs, not a code change.
-#   unset         -> classifier ON with the pinned v6 artifact
+#   unset         -> classifier ON with the pinned v7 artifact
 #   set to ""     -> classifier OFF, deliberately
 #   set to a path -> classifier ON with that artifact
 # n.b. the ${VAR+set} test distinguishes "unset" from "set to empty"; that
