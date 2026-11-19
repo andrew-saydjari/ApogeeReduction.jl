@@ -9,6 +9,7 @@ using FITSIO: FITS
     include("fiber_types.jl")
     include("wavecal.jl")
     include("box_nelder_mead.jl")
+    include("wavecal_gn.jl")
     include("chip_transform.jl")
     include("chip_transform_bootstrap.jl")
     include("fpi_gate.jl")
