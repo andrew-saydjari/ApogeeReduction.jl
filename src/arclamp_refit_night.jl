@@ -207,12 +207,22 @@ function refit_comb_anchor_stage(tele, mjd; outroot, fnames, combs, scis, cfg::R
     # nightly arc -> comb level transfer; arcs only seed the integer orders and calibrate the table globally)
     if cfg.comb_level == "stored_cavity" && cfg.anchor_block == "verified_pair"
         sc = comb_cavity_reference(cfg.cavity_ref_file, String(tele), mjd)
+        # without a stored cavity (no file / no row / no L_A,eps columns) the night falls back to the pair route
+        # below; recorded so a product never claims a stored level it did not use
+        provenance["comb_level_effective"] = sc === nothing ? "pair (no stored cavity in cavity_ref_file)" : "stored_cavity"
         if sc !== nothing
             Qs = refit_stored_cavity_comb(fnames, A, tele, sc...; seq_flags = sfl[A.used],
                 seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r"),
                 exclude_seqs, pass1_comb, comb_arc_qa_ms = cfg.comb_arc_qa_ms)
             if Qs.ok
-                Qs = merge(Qs, (; anchor_kind = "stored_cavity_level", anchor_bits = 0))
+                # monitoring only (changes no solution): tonight's arc-pair cavity level vs the stored cavity
+                mon = cfg.cavity_monitor_ms > 0 ?
+                      refit_cavity_monitor(fnames, A, tele, sc...; adjacency, seq_flags = sfl[A.used],
+                    seq_score = h5open(f -> haskey(f, "seq_reject_score") ? Float64.(read(f["seq_reject_score"]))[A.used] : nothing, arcf, "r"),
+                    exclude_seqs, anchor_adjacency = cfg.anchor_adjacency,
+                    anchor_max_candidates = cfg.anchor_max_candidates, tol_ms = cfg.cavity_monitor_ms) :
+                      (; cavmon_decision = "off", cavmon_bits = 0)
+                Qs = merge(Qs, mon, (; anchor_kind = "stored_cavity_level", anchor_bits = mon.cavmon_bits))
                 keep === nothing || (Qs = merge(Qs, keep))
                 ispath(out) && rm(out)
                 write_refit_comb(out, Qs, fnames; tele, mjd, cfg, arc_fname = arcf, provenance = provenance)

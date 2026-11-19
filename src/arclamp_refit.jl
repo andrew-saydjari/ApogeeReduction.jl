@@ -97,6 +97,9 @@ const WAVE_ANCHOR_CAVITY_OUTLIER = 1 << 36 # verified_pair: the chosen pair's fi
                                            # a calibration file) and no other candidate of the same night is within it
 const WAVE_MODE_OFFSET_MISSING = 1 << 37   # arc route: no global arc-sky offset for this telescope/chip (mode-offset
                                            # file absent or without the row): the sky shift is applied with offset 0
+const WAVE_CAVITY_MONITOR_OUTLIER = 1 << 38 # comb_level = stored_cavity, MONITOR ONLY (changes no solution): the
+                                           # night's own arc-pair cavity level (first sequence-adjacent pair) is more
+                                           # than cavity_monitor_ms from the stored cavity the comb was fixed at
 
 const WAVE_BIT_NAMES = [
     "WAVE_SKY", "WAVE_NIGHT_AVE", "WAVE_ROUGH", "WAVE_FPI_GATED_OFF", "WAVE_NIGHTAVE_POS_MISMATCH",
@@ -108,7 +111,7 @@ const WAVE_BIT_NAMES = [
     "WAVE_ARC_QUARTZ_PATTERN", "WAVE_ANCHOR_FALLBACK", "WAVE_ANCHOR_NOT_SAME_BLOCK",
     "WAVE_ANCHOR_NOT_PREFERRED", "WAVE_ANCHOR_UNVERIFIED", "WAVE_FPS_NO_COMB", "WAVE_RESERVED_30",
     "WAVE_RESERVED_31", "WAVE_FIBER_FILLED", "WAVE_NOT_ARCFIRST", "WAVE_REANCHORED", "WAVE_ANCHOR_CHECK_FAILED",
-    "WAVE_ANCHOR_CAVITY_OUTLIER", "WAVE_MODE_OFFSET_MISSING"]
+    "WAVE_ANCHOR_CAVITY_OUTLIER", "WAVE_MODE_OFFSET_MISSING", "WAVE_CAVITY_MONITOR_OUTLIER"]
 
 """Era of a telescope-night, keyed ONLY on the canonical plate/FPS MJD boundary
 (`get_fps_plate_divide`: FPS is mjd > divide), never on whether FPI light exists that night."""
@@ -205,6 +208,12 @@ Switches of the refit (defaults = the design's recommendation where it has one):
   * `comb_level` ("pair"): experiment switch. "stored_cavity" = on every verified_pair night the comb cavity is
     fixed at the stored (L, eps) of the epoch (no nightly arc -> comb level transfer; the night's comb still fits
     its per-fiber shape, chip transform and dithers; integers from the cleanest arc sequence).
+  * `cavity_monitor_ms` (20; 0 = off): with `comb_level = "stored_cavity"` only, MONITORING, changes no solution:
+    the night's own arc-pair cavity level (`refit_cavity_monitor`: the (L, eps) that the pair route's
+    `seed_LE_from_initial` step would give for the first sequence-adjacent (arc sequence, FPI frame) candidate,
+    strict before nomove, cleanest sequence first; no comb fit, ~1 s) against the stored cavity's fixed-mode
+    velocity; |delta| > cavity_monitor_ms -> WAVE_CAVITY_MONITOR_OUTLIER on the comb (and hence on its
+    exposures). Values `cavmon_*` in the comb product; no other night is read.
   * `noadjacent_route` ("stored_cavity"): verified_pair night with NO sequence-adjacent pair (no-move-less 2021 APO
     nights, a commanded move between arcs and FPI): "stored_cavity" = comb cavity fixed at the stored (L, eps) of
     the epoch (`comb_cavity_reference`, same file), integers from the night's cleanest arc sequence (harness:
@@ -305,6 +314,7 @@ Base.@kwdef struct RefitConfig
     cavity_ref_ms::Float64 = 30.0
     noadjacent_route::String = "stored_cavity"
     comb_level::String = "pair"
+    cavity_monitor_ms::Float64 = 20.0
     fps_route::String = "fpifib"
     anchor_pairing::String = "block"
     anchor_block_h::Float64 = 1.5
@@ -355,6 +365,7 @@ const REFIT_SWITCH_STAGES = Dict(
     "anchor_pattern_tol_px" => "comb,fpifib,assemble", "anchor_lamp_tol_px" => "comb,fpifib,assemble",
     "cavity_ref_check" => "comb,fpifib,assemble", "cavity_ref_file" => "comb,fpifib,assemble",
     "cavity_ref_ms" => "comb,fpifib,assemble", "noadjacent_route" => "comb,fpifib,assemble", "comb_level" => "comb,fpifib,assemble",
+    "cavity_monitor_ms" => "comb,fpifib,assemble",
     "fps_route" => "assemble", "mode_offset_file" => "assemble",
     "anchor_pairing" => "comb,fpifib,assemble", "anchor_block_h" => "comb,fpifib,assemble",
     "plate_shape" => "assemble", "fps_shape_apo" => "assemble", "fps_shape_lco" => "assemble",
@@ -1375,6 +1386,109 @@ function refit_stored_cavity_comb(fpi_fnames, A::RefitArc, tele, L::Real, eps::R
     return merge(Q, (; ok = true))
 end
 
+"""
+    comb_seed_LE(fpi_fname, lin0, nl0) -> (L, eps, n_peaks) or nothing
+
+The (L, eps) that `comb_fpi_fit_core(...; seed_LE_from_initial = true)` sets BEFORE its iterations when
+`fpi_fname` is the frame (first) exposure and (lin0, nl0) the initial (arc) solution: integer orders from the
+initial solution and the hard-coded initial cavity, then least squares of 2L/(m + eps) to the initial solution's
+wavelengths of that exposure's good peaks. Same steps as the core (exposure 1 only; other exposures never enter
+the seed), no comb fit: ~1 s. In the pair route the iterations move (L, eps) from this seed by 0.01 m/s median
+(cavity_first/CAVITY_FIRST.md), so this is the night's arc-pair cavity level. `nothing` for an unknown telescope.
+"""
+function comb_seed_LE(fpi_fname::AbstractString, initial_linParams, initial_nlParams)
+    if occursin("_lco_", fpi_fname)
+        cavity_size, m_offset = 3.73610e7, 0.20
+    elseif occursin("_apo_", fpi_fname)
+        cavity_size, m_offset = 3.7363125e7, 0.225
+    else
+        return nothing
+    end
+    initial_wporder = size(initial_linParams, 2) - 1
+    initial_cporder = Int(size(initial_nlParams, 2) / 2) - 1
+    uxlst, _, chipInt, expInt, peakInt = ingest_fpiLines([fpi_fname])
+    n_peaks = size(uxlst, 1)
+    peak_waves = zeros(Float64, n_peaks, N_FIBERS)
+    peak_ints = copy(peakInt)
+    ximport = (uxlst .- (N_XPIX ÷ 2)) ./ N_XPIX
+    cpp0 = zeros(Float64, (N_FIBERS, N_CHIPS, initial_cporder + 1))
+    initial_cporder > 0 && (cpp0[:, 2, 2] .= 1.0)
+    for chip in CHIP_LIST
+        ci = getChipIndx(chip)
+        for f in 1:N_FIBERS
+            on = findall((chipInt[:, f] .== ci) .& (expInt[:, f] .== 1))
+            cpp = copy(cpp0[f, :, :])
+            params2ChipPolyParams!(cpp, initial_nlParams[f, :], initial_cporder)
+            cpp0[f, :, :] .= cpp
+            isempty(on) && continue
+            xt = transform_x_chips(ximport[on, f], cpp[ci, :])
+            peak_waves[on, f] .= positional_poly_mat(xt, porder = initial_wporder) * initial_linParams[f, :]
+            io = round(nanmedian(2 * cavity_size ./ peak_waves[on, f] .- (peak_ints[on, f] .+ m_offset)))
+            isfinite(io) || (io = 0)
+            peak_ints[on, f] .+= Int(io)
+        end
+    end
+    test_ints = round.(2 .* cavity_size ./ peak_waves .- m_offset)
+    bad = (abs.(test_ints .- peak_ints) .> 5) .| isnan.(ximport) .| isnan.(peak_ints)
+    gp1 = (.!isnan.(ximport)) .& (.!bad) .& isfinite.(peak_waves) .& (expInt .== 1)
+    count(gp1) < 100 && return nothing
+    seedfun(p) = nansum((peak_waves[gp1] .- (2.0 * (cavity_size + p[1] * 1.0e3)) ./ (peak_ints[gp1] .+ p[2])) .^ 2)
+    pseed = Optim.minimizer(optimize(seedfun, [0.0, m_offset], LBFGS(), Optim.Options(show_trace = false)))
+    return (cavity_size + pseed[1] * 1.0e3, pseed[2], count(gp1))
+end
+
+"""
+    refit_cavity_monitor(fpi_fnames, A, tele, L, eps; adjacency, seq_flags, seq_score, exclude_seqs,
+        anchor_adjacency, anchor_max_candidates, tol_ms) -> NamedTuple
+
+MONITOR ONLY for `comb_level = "stored_cavity"` (changes no solution; reads only tonight's arc product and comb
+peak files): the night's arc-pair cavity level against the stored cavity (L, eps) the comb was fixed at.
+Candidates exactly as `refit_verified_pair_comb` lists them (sequence-adjacent (arc sequence, FPI frame) pairs,
+strict before nomove, cleaner sequences first, at most `anchor_max_candidates`); each gets `comb_seed_LE` (the
+pair route's level before its comb iterations). The monitored level is the FIRST candidate's fixed-mode velocity
+(the pair rule's unverified choice; pattern verification needs the full candidate comb fits and is not done).
+Decision: "nopair" (no adjacent pair / no seed), "ok", "flag" (|v_pair - v_stored| > tol_ms ->
+WAVE_CAVITY_MONITOR_OUTLIER). Fields `cavmon_*` are written to the comb product.
+"""
+function refit_cavity_monitor(fpi_fnames, A::RefitArc, tele, L::Real, eps::Real; adjacency, seq_flags = nothing,
+        seq_score = nothing, exclude_seqs = Int[], anchor_adjacency = "strict_then_nomove",
+        anchor_max_candidates = 3, tol_ms = 20.0)
+    vst = refit_comb_mode_velocity(L, eps, String(tele))
+    none = (; cavmon_ref_ms = vst, cavmon_vmode_ms = NaN, cavmon_delta_ms = NaN, cavmon_decision = "nopair",
+        cavmon_class = "", cavmon_seq = 0, cavmon_fpi = "", cavmon_tol_ms = Float64(tol_ms),
+        cavmon_vp_seq = Int[], cavmon_vp_fpi = String[], cavmon_vp_class = String[], cavmon_vp_L = Float64[],
+        cavmon_vp_eps = Float64[], cavmon_vp_vmode_ms = Float64[], cavmon_bits = 0)
+    adjacency === nothing && return none
+    nU, nC = size(adjacency)
+    cls_ok = anchor_adjacency == "strict" ? ("strict",) : ("strict", "nomove")
+    sf = seq_flags === nothing ? zeros(Int, nU) : seq_flags
+    sc = seq_score === nothing ? zeros(nU) : [isfinite(x) ? x : Inf for x in seq_score]
+    cand = [(j, k, adjacency[j, k]) for c in cls_ok for j in sortperm(sc) for k in 1:nC
+            if adjacency[j, k] == c && refit_anchor_quality(sf[j]) < 2 && !(j in exclude_seqs)]
+    isempty(cand) && return none
+    cand = cand[1:min(end, anchor_max_candidates)]
+    vs, fs, cs, Ls, es, vm = Int[], String[], String[], Float64[], Float64[], Float64[]
+    for (j, k, c) in cand
+        d, t = arcfit_seq_state(A.g, A.lay, j)
+        lin0, nl0, _ = refit_arc_lin_nl(A, (A.grp_u[j], d, t, A.tau_u[j]))
+        r = try
+            comb_seed_LE(fpi_fnames[k], lin0, nl0)
+        catch
+            nothing
+        end
+        r === nothing && continue
+        push!(vs, A.used[j]); push!(fs, basename(fpi_fnames[k])); push!(cs, c)
+        push!(Ls, r[1]); push!(es, r[2]); push!(vm, refit_comb_mode_velocity(r[1], r[2], String(tele)))
+    end
+    isempty(vm) && return none
+    dv = vm[1] - vst
+    dec = abs(dv) > tol_ms ? "flag" : "ok"
+    return (; cavmon_ref_ms = vst, cavmon_vmode_ms = vm[1], cavmon_delta_ms = dv, cavmon_decision = dec,
+        cavmon_class = cs[1], cavmon_seq = vs[1], cavmon_fpi = fs[1], cavmon_tol_ms = Float64(tol_ms),
+        cavmon_vp_seq = vs, cavmon_vp_fpi = fs, cavmon_vp_class = cs, cavmon_vp_L = Ls, cavmon_vp_eps = es,
+        cavmon_vp_vmode_ms = vm, cavmon_bits = dec == "flag" ? WAVE_CAVITY_MONITOR_OUTLIER : 0)
+end
+
 """Stage 3 for a night WITHOUT an arc anchor: integer orders from the pass-1 seed (`lin0`, `nl0`,
 the night-average sky solution), cavity (L, eps) FIXED at a neighbouring night's arc-anchored
 values (`arcwin`). `arcG` (optional) is an arc grid at the frame for QA only."""
@@ -1485,6 +1599,20 @@ function write_refit_comb(outname::AbstractString, Q, fpi_fnames; tele, mjd, cfg
         cavity_ref_ms = hasproperty(Q, :cavity_ref_ms) ? Q.cavity_ref_ms : NaN,
         cavity_ref_delta_ms = hasproperty(Q, :cavity_ref_delta_ms) ? Q.cavity_ref_delta_ms : NaN,
         cavity_ref_decision = hasproperty(Q, :cavity_ref_decision) ? String(Q.cavity_ref_decision) : "nocheck",
+        cavmon_decision = hasproperty(Q, :cavmon_decision) ? String(Q.cavmon_decision) : "off",
+        cavmon_ref_ms = hasproperty(Q, :cavmon_ref_ms) ? Float64(Q.cavmon_ref_ms) : NaN,
+        cavmon_vmode_ms = hasproperty(Q, :cavmon_vmode_ms) ? Float64(Q.cavmon_vmode_ms) : NaN,
+        cavmon_delta_ms = hasproperty(Q, :cavmon_delta_ms) ? Float64(Q.cavmon_delta_ms) : NaN,
+        cavmon_tol_ms = hasproperty(Q, :cavmon_tol_ms) ? Float64(Q.cavmon_tol_ms) : NaN,
+        cavmon_class = hasproperty(Q, :cavmon_class) ? String(Q.cavmon_class) : "",
+        cavmon_seq = hasproperty(Q, :cavmon_seq) ? Int(Q.cavmon_seq) : 0,
+        cavmon_fpi = hasproperty(Q, :cavmon_fpi) ? String(Q.cavmon_fpi) : "",
+        cavmon_vp_seq = hasproperty(Q, :cavmon_vp_seq) ? Q.cavmon_vp_seq : Int[],
+        cavmon_vp_fpi = hasproperty(Q, :cavmon_vp_fpi) ? Q.cavmon_vp_fpi : String[],
+        cavmon_vp_class = hasproperty(Q, :cavmon_vp_class) ? Q.cavmon_vp_class : String[],
+        cavmon_vp_L = hasproperty(Q, :cavmon_vp_L) ? Q.cavmon_vp_L : Float64[],
+        cavmon_vp_eps = hasproperty(Q, :cavmon_vp_eps) ? Q.cavmon_vp_eps : Float64[],
+        cavmon_vp_vmode_ms = hasproperty(Q, :cavmon_vp_vmode_ms) ? Q.cavmon_vp_vmode_ms : Float64[],
         vmode_ms = refit_comb_mode_velocity(R.cavity_size, R.m_offset, String(tele)))
     mv(tmp, outname; force = true)
     return outname

@@ -73,6 +73,7 @@ function parse_cli()
         "--cavity_ref_file"; arg_type = String; default = "default"
         "--cavity_ref_ms"; arg_type = Float64; default = 30.0
         "--comb_level"; arg_type = String; default = "pair"; help = "pair | stored_cavity (experiment: comb level from the stored cavity every night)"
+        "--cavity_monitor_ms"; arg_type = Float64; default = 20.0; help = "stored_cavity only: flag (WAVE_CAVITY_MONITOR_OUTLIER, monitor only) when the night's arc-pair cavity level is farther than this from the stored cavity; 0 = off"
         "--noadjacent_route"; arg_type = String; default = "stored_cavity"; help = "verified_pair night without an adjacent pair: stored_cavity | any"
         "--fps_route"; arg_type = String; default = "fpifib"; help = "fpifib | sky (experiment)"
         "--anchor_pairing"; arg_type = String; default = "block"
@@ -101,7 +102,7 @@ const CFG = AR.RefitConfig(neon = A_["neon"], neon_offset_file = A_["neon_offset
     anchor_adjacency = A_["anchor_adjacency"], anchor_max_candidates = A_["anchor_max_candidates"],
     anchor_pattern_tol_px = A_["anchor_pattern_tol_px"], anchor_lamp_tol_px = A_["anchor_lamp_tol_px"],
     cavity_ref_check = A_["cavity_ref_check"], cavity_ref_file = A_["cavity_ref_file"], cavity_ref_ms = A_["cavity_ref_ms"],
-    noadjacent_route = A_["noadjacent_route"], comb_level = A_["comb_level"], fps_route = A_["fps_route"], mode_offset_file = A_["mode_offset_file"],
+    noadjacent_route = A_["noadjacent_route"], comb_level = A_["comb_level"], cavity_monitor_ms = A_["cavity_monitor_ms"], fps_route = A_["fps_route"], mode_offset_file = A_["mode_offset_file"],
     anchor_pairing = A_["anchor_pairing"], anchor_block_h = A_["anchor_block_h"],
     chip_transform_file = A_["chip_transform_file"],
     exp_terms = A_["exp_terms"], sky_fiber_term = A_["sky_fiber_term"], fiber_term_file = A_["fiber_term_file"],

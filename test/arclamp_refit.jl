@@ -237,7 +237,7 @@ using ApogeeReduction: refit_is_morning, refit_order_change_lambda, refit_anchor
     # era: canonical plate/FPS boundary (FPS = mjd > get_fps_plate_divide), the same for any FPI light
     @test refit_era("apo", 59393) == "plate" && refit_era("apo", 59558) == "fps"
     @test refit_era("lco", 59808) == "plate" && refit_era("lco", 59809) == "fps"
-    @test length(WAVE_BIT_NAMES) == 38 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
+    @test length(WAVE_BIT_NAMES) == 39 && WAVE_BIT_NAMES[26] == "WAVE_ANCHOR_FALLBACK" &&
           WAVE_BIT_NAMES[30] == "WAVE_FPS_NO_COMB" && WAVE_FPS_NO_COMB == 1 << 29
     # anchor quality tiers
     @test refit_anchor_quality(0) == 0 && refit_anchor_quality(ARCSEQ_FEW_LINES) == 1 &&
@@ -410,7 +410,7 @@ end
     @test Set(String.(bitnames)) == Set(AR.WAVE_BIT_NAMES)
     # pinned positions: retired bits stay reserved (a completed run's plan and write-ups reference them)
     @test AR.WAVE_RESERVED_31 == 1 << 31 && AR.WAVE_RESERVED_20 == 1 << 20
-    @test AR.WAVE_MODE_OFFSET_MISSING == 1 << 37
+    @test AR.WAVE_MODE_OFFSET_MISSING == 1 << 37 && AR.WAVE_CAVITY_MONITOR_OUTLIER == 1 << 38
     @test (AR.WAVE_FIBER_FILLED, AR.WAVE_NOT_ARCFIRST, AR.WAVE_REANCHORED, AR.WAVE_ANCHOR_CHECK_FAILED) ==
           (1 << 32, 1 << 33, 1 << 34, 1 << 35)
 end
