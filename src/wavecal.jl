@@ -1883,11 +1883,16 @@ function comb_exp_get_and_save_fpi_wavecal(
         end
 
         in_exp = findall(fpi_line_expInt[1, :] .== fname_ind)
+        # same per-fiber datasets as the per-fiber sky/FPI dither products: here the dither comes from
+        # the comb fit pooled over the FPI peaks, so no minimum-line rule applies (flag 0) and the count
+        # is the number of FPI peaks of the fiber in this exposure
+        dither_nlines = [count(isfinite, view(resid_vec, k, in_exp)) for k in 1:N_FIBERS]
+        dither_flag = zeros(UInt8, N_FIBERS)
         safe_jldsave(curr_outname;
             linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
                 fname_ind, :, :],
             resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
-            chipWaveSoln = expChipWaveSoln, no_metadata = true) # KEVIN FIX THIS!!!!
+            chipWaveSoln = expChipWaveSoln, dither_nlines, dither_flag, no_metadata = true) # KEVIN FIX THIS!!!!
     end
     safe_jldsave(outname; linParams = linParams, nlParams = nlParams, ditherParams = ditherParams,
         exposure_names = fname_list, resid_vec = resid_vec, resid_xt = resid_xt,
