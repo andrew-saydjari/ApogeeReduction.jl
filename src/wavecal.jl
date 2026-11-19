@@ -2121,6 +2121,10 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     unique_mtp = 1:10
     # fibers that do not enter any smoothing fit (they still receive the smooth values)
     smooth_keep = isnothing(smooth_exclude) ? trues(length(fibInds)) : .!smooth_exclude
+    # the exclusion is dropped for a fit that would keep too few fibers (fewer than
+    # `block_min_fibers` in a block, fewer than 3 x that over the slit): then every finite fiber is
+    # used, as without the exclusion
+    usekeep(k, y, nmin) = count(k .& isfinite.(y)) >= nmin ? k : trues(length(k))
 
     interp_linParams = zeros(Float64, size(linParams))
     interp_nlParams = zeros(Float64, size(nlParams))
@@ -2130,7 +2134,7 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     for mtp_ind in unique_mtp
         keep_mtp = (mtp_inds .== mtp_ind)
         func, keep = fit_poly_without_outliers(fibInds[keep_mtp], linParams[keep_mtp, 1], 2;
-            keep = smooth_keep[keep_mtp])
+            keep = usekeep(smooth_keep[keep_mtp], linParams[keep_mtp, 1], block_min_fibers))
         func_eval = func.(fibInds[keep_mtp])
         interp_linParams[keep_mtp, 1] .= func_eval .+
                                          nanmedian((linParams[keep_mtp, 1] .- func_eval)[keep])
@@ -2139,7 +2143,8 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     #second order poly in fiber for the first and all higher order terms
     #(a first order poly for the higher order terms bowed the slit edges)
     for j in 2:size(linParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2; keep = copy(smooth_keep))
+        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2;
+            keep = copy(usekeep(smooth_keep, linParams[:, j], 3block_min_fibers)))
         func_eval = func.(fibInds)
         interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
     end
@@ -2147,7 +2152,8 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     #second order poly in fiber for the chip offset,scale parameters
     #(a first order poly bowed the slit edges, with opposite signs on chips R and G)
     for j in 1:size(nlParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2; keep = copy(smooth_keep))
+        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2;
+            keep = copy(usekeep(smooth_keep, nlParams[:, j], 3block_min_fibers)))
         func_eval = func.(fibInds)
         interp_nlParams[:, j] .= func_eval .+ nanmedian((nlParams[:, j] .- func_eval)[keep])
     end

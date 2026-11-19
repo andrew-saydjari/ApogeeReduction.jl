@@ -93,4 +93,13 @@ end
     @test a_nl ≈ b_nl      # the excluded fiber has no influence at all
     @test a_lin[2:end, :] ≈ b_lin[2:end, :]
     @test isfinite(a_nl[1, 1]) && abs(a_nl[1, 1] - nl[1, 1]) < 1e-5   # and gets the smooth value
+    # a block in which every fiber is excluded (few lines everywhere, e.g. half the lines held out):
+    # the exclusion is dropped for that fit instead of leaving no fiber (no NaN solution)
+    nl2 = copy(nlines); nl2[1:30] .= 4; nl2[31:60] .= 5
+    c_nl, c_lin = interpolate_wave_params(fib, nl, ln; n_lines = nl2, smooth_exclude = nl2 .< WAVE_SMOOTH_MIN_LINES)
+    @test all(isfinite, c_nl) && all(isfinite, c_lin)
+    allex = trues(N_FIBERS)
+    d_nl, d_lin = interpolate_wave_params(fib, nl, ln; n_lines = fill(4, N_FIBERS), smooth_exclude = allex)
+    e_nl, e_lin = interpolate_wave_params(fib, nl, ln; n_lines = fill(4, N_FIBERS))
+    @test d_nl ≈ e_nl && d_lin ≈ e_lin
 end
