@@ -1026,10 +1026,12 @@ with DAG(
                 # editable install tracks code changes automatically; the
                 # `uv pip install -e` re-sync only matters when almanac's
                 # DEPENDENCIES change, and is a fast no-op otherwise.
+                # It now fails the task when the install or the import of
+                # almanac.cli fails (the old `| tail -1 || echo WARNING` took
+                # tail's exit status, so a failed install passed silently).
                 f"prod_pull {C.ALMANAC_DIR} almanac || exit 1\n"
-                f"uv pip install -p {os.path.dirname(C.ALMANAC_BIN)}/python "
-                f"-e {C.ALMANAC_DIR} --quiet 2>&1 | tail -1 || "
-                "echo 'WARNING: almanac env re-sync failed (env unchanged)'\n"),
+                f"{C.AR_REPO}/airflow/scripts/sync_almanac_env.sh "
+                f"{C.ALMANAC_PYTHON} {C.ALMANAC_DIR} || exit 1\n"),
         )
 
         t_sdsscore = BashOperator(

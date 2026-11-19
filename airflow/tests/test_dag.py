@@ -111,6 +111,16 @@ class DagImport(unittest.TestCase):
             self.assertIn('--output "$TMP"', t.bash_command)
             self.assertIn("check_almanac_output.py", t.bash_command)
 
+    def test_update_repo_resyncs_almanac_env_and_fails_on_error(self):
+        cmd = self.dag.get_task("update.repo").bash_command
+        self.assertIn(
+            f"{self.C.AR_REPO}/airflow/scripts/sync_almanac_env.sh "
+            f"{self.C.ALMANAC_PYTHON} {self.C.ALMANAC_DIR} || exit 1", cmd)
+        # the pull comes first, so the re-sync sees the new pyproject.toml
+        self.assertLess(cmd.index(f"prod_pull {self.C.ALMANAC_DIR} almanac"),
+                        cmd.index("sync_almanac_env.sh"))
+        self.assertNotIn("| tail -1 ||", cmd)
+
     def test_tunnel_check_runs_a_query(self):
         cmd = self.dag.get_task("lco.tunnel_check").bash_command
         self.assertIn("select 1", cmd)

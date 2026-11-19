@@ -94,7 +94,10 @@ lco.join >> lco.metrics_append >> lco.daily_summary
   a months-stale arM main that predated the raw/-layout almanac handling;
   almanac runs from a local clone + editable env instead of a uvx commit
   pin, per AKS 2026-09-04 — hash logged at every invocation, and the
-  update task re-syncs the env for dependency changes);
+  update task re-syncs the env for dependency changes with
+  `airflow/scripts/sync_almanac_env.sh`, which FAILS the task if
+  `uv pip install -e` or `import almanac.cli` fails — the earlier inline
+  `| tail -1 || echo WARNING` reported a failed install as success);
   **update.sync_logs** rsyncs both observatories'
   `.log.html` pages into the public `apogee_logs` mirror.
 - **update.sdsscore is default ON** (O1 punch list #2 — a fresh night after
