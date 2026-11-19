@@ -355,7 +355,16 @@ function phase3()
                     :anchor_kind => haskey(f, "anchor_kind") ? String(read(f["anchor_kind"])) : "",
                     :anchor_bits => haskey(f, "anchor_bits") ? Int(read(f["anchor_bits"])) : 0,
                     :n_slip => read(f["n_mode_slip"]), :n_order_changed => read(f["n_fiberchip_order_changed"]),
-                    :rms_mA => read(f["comb_resid_rms_mA"]))
+                    :rms_mA => read(f["comb_resid_rms_mA"]),
+                    :vmode_ms => haskey(f, "vmode_ms") ? Float64(read(f["vmode_ms"])) : NaN,
+                    :comb_level_effective => haskey(f, "metadata/comb_level_effective") ? String(read(f["metadata/comb_level_effective"])) : "",
+                    # cavity monitor (stored_cavity runs; flag only): tonight's arc-pair level vs the stored cavity
+                    :cavmon_decision => haskey(f, "cavmon_decision") ? String(read(f["cavmon_decision"])) : "",
+                    :cavmon_class => haskey(f, "cavmon_class") ? String(read(f["cavmon_class"])) : "",
+                    :cavmon_vmode_ms => haskey(f, "cavmon_vmode_ms") ? Float64(read(f["cavmon_vmode_ms"])) : NaN,
+                    :cavmon_delta_ms => haskey(f, "cavmon_delta_ms") ? Float64(read(f["cavmon_delta_ms"])) : NaN,
+                    :cavity_ref_delta_ms => haskey(f, "cavity_ref_delta_ms") ? Float64(read(f["cavity_ref_delta_ms"])) : NaN,
+                    :cavity_ref_decision => haskey(f, "cavity_ref_decision") ? String(read(f["cavity_ref_decision"])) : "")
                 lin = read(f["linParams"]); nl = read(f["nlParams"])
                 cr[:lam_G_f150_p1024] = AR.refit_prod_wave(lin, nl, 150, 2, [1024.0])[1]
                 a = read(f["chip_arc_minus_comb_ms"])
@@ -368,6 +377,12 @@ function phase3()
     end
     CSV.write(joinpath(OUT, "run_table.csv"), rows)
     CSV.write(joinpath(OUT, "comb_table.csv"), combrows)
+    # per-run QA table of the cavity monitor (one row per comb night; flag only, nothing reads it back)
+    if nrow(combrows) > 0 && "cavmon_decision" in names(combrows)
+        CSV.write(joinpath(OUT, "cavity_monitor.csv"), select(combrows, intersect([:tele, :mjd, :anchor_kind,
+            :comb_level_effective, :vmode_ms, :cavmon_decision, :cavmon_class, :cavmon_vmode_ms, :cavmon_delta_ms,
+            :cavity_ref_decision, :cavity_ref_delta_ms], Symbol.(names(combrows)))))
+    end
     open(joinpath(OUT, "run_summary.txt"), "w") do io
         println(io, "arc + FPI refit run summary, $(now()); outroot $(OUT); code $(CODE_COMMIT)")
         for s in AR.REFIT_STAGES
