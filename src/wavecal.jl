@@ -987,65 +987,96 @@ function get_ave_night_wave_soln(
 end
 
 # ------------------------------------------------------------------------------------------
-# Per-fiber dither fit: minimum line counts and flags
+# Per-fiber dither fit: minimum line count and flags
 #
-# The dither transform of one fiber is xt' = d0 + d1 * xt (dporder = 1): two free parameters
-# fitted to that fiber's sky lines against the night (or FPI) solution. With 1 line the fit is
-# underdetermined and with 2 it has no redundancy; on 16 sample nights these fits were 0.4-0.5 %
-# of fiber-exposures, 90 % of them on fibers the relative-throughput mask already calls unusable
-# and most of the rest on very bright stars (sky lines found on the stellar spectrum and rejected
-# by the across-fiber clean). They were written unflagged and their scale was arbitrary.
-# Rules (per fiber, after the max_offset residual cut):
-#   relative-throughput unusable           -> no fit, interpolated from neighbouring fibers
-#   fewer than DITHER_MIN_LINES lines      -> no fit, interpolated from neighbouring fibers
-#   fewer than DITHER_MIN_LINES_FULL lines -> offset only (scale held at its starting value 1)
-#   otherwise                              -> offset and scale (unchanged)
-# The line count and a flag are written to the waveCalNight*Dither product.
+# The dither transform of one fiber is xt' = d0 + d1 * xt (dporder 1, sky night solution) or
+# d0 + d1 * xt + d2 * xt^2 (dporder 2, FPI night solution), fitted to that fiber's sky lines.
+# With few lines these fits are under- or barely determined: on 16 sample nights fibers with
+# 1-2 lines had an arbitrary scale, and fibers with 3-5 lines differed from their neighbouring
+# fibers by a median 1.7 km/s whether the scale was fitted or held (offset only). 90 % of the
+# 1-2-line fibers are fibers the relative-throughput mask already calls unusable; most of the
+# rest carry very bright stars (sky lines found on the stellar spectrum and rejected by the
+# across-fiber clean).
+# Rule (per fiber, after the max_offset residual cut), as decided in review:
+#   relative-throughput unusable        -> no fit, interpolated from the neighbouring fibers
+#   no line                             -> no fit, interpolated (behaviour unchanged)
+#   fewer than DITHER_MIN_LINES lines   -> no fit, interpolated
+#   otherwise                           -> fitted (unchanged)
+# Every waveCalNight*Dither product carries the per-fiber line count (`dither_nlines`) and the
+# flag (`dither_flag`, bits DITHER_FLAG_*). `reinterp_spectra` copies both into the ar1Duni /
+# ar1Dunical products as `bitmsk_wavecal` and `wavecal_dither_nlines` (see README).
 # ------------------------------------------------------------------------------------------
-"""Fewest sky lines for any per-fiber dither fit; fewer -> interpolated from neighbouring fibers."""
-const DITHER_MIN_LINES = 3
-"""Fewest sky lines for fitting the dither scale; fewer -> offset only."""
-const DITHER_MIN_LINES_FULL = 6
+"""Fewest sky lines for a per-fiber dither fit; fewer -> interpolated from neighbouring fibers."""
+const DITHER_MIN_LINES = 6
 """No sky line left after the residual cut: interpolated (behaviour unchanged)."""
 const DITHER_FLAG_INTERP_NOLINES = 0x01
 """1 to DITHER_MIN_LINES - 1 lines: interpolated instead of fitted."""
 const DITHER_FLAG_INTERP_FEWLINES = 0x02
-"""Fewer than DITHER_MIN_LINES_FULL lines: only the offset was fitted."""
-const DITHER_FLAG_OFFSET_ONLY = 0x04
 """Fiber unusable by the relative-throughput mask (`relthrpt_fiber_unusable`): interpolated."""
-const DITHER_FLAG_INTERP_LOWTHRPT = 0x08
+const DITHER_FLAG_INTERP_LOWTHRPT = 0x04
 
 """
-    dither_fit_mode(n_lines, unusable; dporder = 1, min_lines = DITHER_MIN_LINES,
-        min_lines_full = DITHER_MIN_LINES_FULL) -> (mode, flag)
+    dither_fit_mode(n_lines, unusable; min_lines = DITHER_MIN_LINES) -> (mode, flag)
 
-What to do with one fiber in the per-fiber dither fit: `mode` is `:interp`, `:offset` or `:full`.
+What to do with one fiber in the per-fiber dither fit: `mode` is `:interp` (not fitted,
+interpolated from the neighbouring fibers) or `:fit`; `flag` is its `DITHER_FLAG_*` value (0 when
+fitted).
 """
-function dither_fit_mode(n_lines, unusable; dporder = 1, min_lines = DITHER_MIN_LINES,
-        min_lines_full = DITHER_MIN_LINES_FULL)
+function dither_fit_mode(n_lines, unusable; min_lines = DITHER_MIN_LINES)
     unusable && return :interp, DITHER_FLAG_INTERP_LOWTHRPT
     n_lines == 0 && return :interp, DITHER_FLAG_INTERP_NOLINES
     n_lines < min_lines && return :interp, DITHER_FLAG_INTERP_FEWLINES
-    (dporder > 0 && n_lines < min_lines_full) && return :offset, DITHER_FLAG_OFFSET_ONLY
-    return :full, 0x00
+    return :fit, 0x00
 end
 
 """
-    fit_fiber_dither(xt, yv, linparam, p0; wporder, offset_only = false) -> params
+    interpolate_bad_fibers!(params, good) -> params
 
-Fit one fiber's dither polynomial (`transform_x_chips` coefficients) to its sky lines. With
-`offset_only`, only the constant term is fitted and the others stay at `p0`.
+Replace the rows (fibers) of `params` where `good` is false by the straight line through the two
+nearest good fibers (the scheme of the per-fiber dither fit); one good fiber is copied; no good
+fiber leaves `params` unchanged.
 """
-function fit_fiber_dither(xt, yv, linparam, p0; wporder, offset_only = false)
-    if offset_only
-        loss1(p) = dither_nonlinear_loss_fit(vcat(p[1], p0[2:end]), xt, yv, linparam;
-            wporder = wporder, returnL2only = true)
-        res = optimize(loss1, [p0[1]], LBFGS(), Optim.Options(show_trace = false))
-        return vcat(Optim.minimizer(res)[1], p0[2:end])
+function interpolate_bad_fibers!(params::AbstractMatrix, good::AbstractVector{Bool})
+    gi = findall(good)
+    isempty(gi) && return params
+    for b in findall(.!good)
+        if length(gi) == 1
+            params[b, :] .= params[gi[1], :]
+            continue
+        end
+        k1, k2 = gi[sortperm(abs.(b .- gi))[[1, 2]]]
+        params[b, :] .= params[k1, :] .+ (params[k2, :] .- params[k1, :]) ./ (k2 - k1) .* (b - k1)
     end
-    loss(p) = dither_nonlinear_loss_fit(p, xt, yv, linparam; wporder = wporder, returnL2only = true)
-    res = optimize(loss, p0, LBFGS(), Optim.Options(show_trace = false))
-    return Optim.minimizer(res)
+    return params
+end
+
+"""Per-fiber wavelength-quality bits written by `reinterp_spectra` as `bitmsk_wavecal` (ar1Duni*):
+bits 1, 2, 4 are the `DITHER_FLAG_*` bits of the per-exposure dither product used for the exposure."""
+const WAVECAL_BIT_INTERP_NOLINES = Int(DITHER_FLAG_INTERP_NOLINES)
+const WAVECAL_BIT_INTERP_FEWLINES = Int(DITHER_FLAG_INTERP_FEWLINES)
+const WAVECAL_BIT_INTERP_LOWTHRPT = Int(DITHER_FLAG_INTERP_LOWTHRPT)
+"""No per-exposure dither product was used: the night-average (or rough) solution, for every fiber."""
+const WAVECAL_BIT_NO_EXPOSURE_DITHER = 8
+"""The per-exposure dither product predates `dither_flag`: its per-fiber line counts are unknown."""
+const WAVECAL_BIT_FLAGS_MISSING = 16
+
+"""
+    wavecal_fiber_quality(wavefname) -> (bitmsk_wavecal::Vector{Int}, nlines::Vector{Int})
+
+Per-fiber wavelength-quality bits (`WAVECAL_BIT_*`) and dither line counts for an exposure whose
+solution comes from the per-exposure dither product `wavefname` (`nothing` = no such product used:
+night-average or rough fallback). Line counts are -1 where unknown.
+"""
+function wavecal_fiber_quality(wavefname)
+    if isnothing(wavefname)
+        return fill(WAVECAL_BIT_NO_EXPOSURE_DITHER, N_FIBERS), fill(-1, N_FIBERS)
+    end
+    flag, nl = h5open(wavefname, "r") do f
+        (haskey(f, "dither_flag") ? read(f["dither_flag"]) : nothing,
+            haskey(f, "dither_nlines") ? read(f["dither_nlines"]) : nothing)
+    end
+    isnothing(flag) && return fill(WAVECAL_BIT_FLAGS_MISSING, N_FIBERS), fill(-1, N_FIBERS)
+    return Int.(flag), isnothing(nl) ? fill(-1, N_FIBERS) : Int.(nl)
 end
 
 """
@@ -1149,15 +1180,20 @@ function get_sky_dither_per_fiber(
         good_resids = abs.(resid_vec[fibIndx, sky_msk]) .<= max_offset
         sky_msk[sky_msk] .&= good_resids
         dither_nlines[fibIndx] = sum(sky_msk)
-        mode, flag = dither_fit_mode(dither_nlines[fibIndx], unusable[fibIndx]; dporder = dporder)
+        mode, flag = dither_fit_mode(dither_nlines[fibIndx], unusable[fibIndx])
         dither_flag[fibIndx] = flag
         if mode == :interp
             good_fibers[fibIndx] = false
             continue
         end
 
-        ditherParamsOpt = fit_fiber_dither(xt[sky_msk], yv[sky_msk], linParams[fibIndx, :],
-            ditherPolyParams[fibIndx, :]; wporder = wporder, offset_only = (mode == :offset))
+        function dither_nonlinear_loss_fit_partial(inparams)
+            dither_nonlinear_loss_fit(inparams, xt[sky_msk], yv[sky_msk], linParams[fibIndx, :];
+                wporder = wporder, returnL2only = true)
+        end
+        res = optimize(
+            dither_nonlinear_loss_fit_partial, ditherPolyParams[fibIndx, :], LBFGS(), Optim.Options(show_trace = false))
+        ditherParamsOpt = Optim.minimizer(res)
         ditherPolyParams[fibIndx, :] .= ditherParamsOpt
         resid_vec[fibIndx, sky_msk] .= dither_nonlinear_loss_fit(
             ditherParamsOpt, xt[sky_msk], yv[sky_msk], linParams[fibIndx, :];
@@ -1869,28 +1905,32 @@ function comb_exp_get_and_save_fpi_wavecal(
             replace(fname_list[fname_ind], "fpiPeaks" => "waveCalNightfpiDither"),
             "_$(FIRST_CHIP)_" => "_"))
 
+        # peaks (rows) of this exposure; the exposure index is the same for every fiber of a row
+        in_exp = findall(fpi_line_expInt[:, 1] .== fname_ind)
+        # same per-fiber line count and flag as the per-fiber sky/FPI dither products: the count is
+        # the number of FPI peaks of the fiber used in the comb fit in this exposure, and a fiber
+        # with fewer than DITHER_MIN_LINES of them gets this exposure's dither interpolated from the
+        # neighbouring fibers (the first exposure's dither is the identity for every fiber)
+        dither_nlines = [count(view(good_peaks, in_exp, k)) for k in 1:N_FIBERS]
+        dither_flag = UInt8[last(dither_fit_mode(n, false)) for n in dither_nlines]
+        exp_dither = ditherPolyParams[fname_ind, :, :]
+        interpolate_bad_fibers!(exp_dither, dither_flag .== 0x00)
+
         for chip in CHIP_LIST
             chipIndx = getChipIndx(chip)
             for fibIndx in 1:N_FIBERS
                 chipPolyParams = copy(chipPolyParams0[fibIndx, :, :])
                 params2ChipPolyParams!(chipPolyParams, nlParams[fibIndx, :], cporder)
                 xt = transform_x_chips(ximport, chipPolyParams[chipIndx, :])
-                xt = transform_x_chips(xt, ditherPolyParams[fname_ind, fibIndx, :])
+                xt = transform_x_chips(xt, exp_dither[fibIndx, :])
                 Ax = positional_poly_mat(xt, porder = wporder)
                 yt = Ax * linParams[fibIndx, :]
                 expChipWaveSoln[:, fibIndx, chipIndx] .= yt
             end
         end
 
-        in_exp = findall(fpi_line_expInt[1, :] .== fname_ind)
-        # same per-fiber datasets as the per-fiber sky/FPI dither products: here the dither comes from
-        # the comb fit pooled over the FPI peaks, so no minimum-line rule applies (flag 0) and the count
-        # is the number of FPI peaks of the fiber in this exposure
-        dither_nlines = [count(isfinite, view(resid_vec, k, in_exp)) for k in 1:N_FIBERS]
-        dither_flag = zeros(UInt8, N_FIBERS)
         safe_jldsave(curr_outname;
-            linParams = linParams, nlParams = nlParams, ditherParams = ditherPolyParams[
-                fname_ind, :, :],
+            linParams = linParams, nlParams = nlParams, ditherParams = exp_dither,
             resid_vec = resid_vec[:, in_exp], resid_xt = resid_xt[:, in_exp],
             chipWaveSoln = expChipWaveSoln, dither_nlines, dither_flag, no_metadata = true) # KEVIN FIX THIS!!!!
     end

@@ -917,6 +917,7 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     end
     found_soln = false
     wavecal_type = ""
+    used_wavefname = nothing
     for wavetype in wavetype_order
         wavecal_type = "waveCalNight$(wavetype)Dither"
         wavefname = replace(replace(fname, fnameType => wavecal_type), "_$(FIRST_CHIP)_" => "_")
@@ -926,10 +927,13 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
             close(f)
 	    if all(isfinite.(chipWaveSoln))
                 found_soln = true
+                used_wavefname = wavefname
                 break
 	    end
         end
     end
+    # per-fiber wavelength quality of the solution used (README: `bitmsk_wavecal`)
+    bitmsk_wavecal, wavecal_dither_nlines = wavecal_fiber_quality(used_wavefname)
 
     if !found_soln
         if !isfile(backupWave_fname)
@@ -1087,7 +1091,8 @@ function reinterp_spectra(fname, roughwave_dict; checkpoint_mode = "commit_same"
     safe_jldsave(
         outname, metadata; flux_1d = outflux, ivar_1d = outivar, mask_1d = outmsk,
         extract_trace_coords = outTraceCoords, relthrpt = thrpt_stack,
-        bitmsk_relthrpt = bitmsk_thrpt_stack, bitmsk_ingest = ingestBit)
+        bitmsk_relthrpt = bitmsk_thrpt_stack, bitmsk_ingest = ingestBit,
+        bitmsk_wavecal = bitmsk_wavecal, wavecal_dither_nlines = wavecal_dither_nlines)
     return
 end
 
