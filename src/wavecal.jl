@@ -392,20 +392,27 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
                 sky_line_chipInt[:, fibIndx], fixed_chip_scales[fibIndx, :])
         end
     end
+    # a chip offset is fitted only if that chip has >= WAVE_MIN_LINES_CHIP_TRANSFORM lines; otherwise
+    # it is held at the comb-measured offset of the chip-transform calibration when one is in use,
+    # else at the start value above
+    hold_params = chip_offset_hold_values(chip_transform_cal, fname, cporder)
     linParams, nlParams,
-    resid_vec = get_sky_wavecal(
+    resid_vec, wave_chip_hold = get_sky_wavecal(
         fit_uxlst, sky_line_fwlst, sky_line_chipInt,
-        chipPolyParams0; cporder = cporder, wporder = wporder)
+        chipPolyParams0; cporder = cporder, wporder = wporder, hold_params = hold_params)
     resid_xt = zeros(Float64, (size(fibInds, 1), size(sky_line_uxlst, 1)))
     fill!(resid_xt, NaN)
 
     # iterpolate between fibers to
     # regularize the nlParams and linParams
     # sky lines per fiber: fibers with too few lines for a well-determined per-fiber
-    # fit are not used to estimate the per-MTP-block steps
+    # fit are not used to estimate the per-MTP-block steps, and fibers with fewer than
+    # WAVE_SMOOTH_MIN_LINES lines (too few for the leave-one-out line test) do not enter the
+    # smooth across-slit fits at all; they receive the smooth values
     n_lines_per_fiber = vec(sum(.!isnan.(sky_line_uxlst), dims = 1))
+    smooth_exclude = WAVE_SMOOTH_EXCLUDE_FEWLINES[] ? n_lines_per_fiber .< WAVE_SMOOTH_MIN_LINES : nothing
     interp_nlParams, interp_linParams = interpolate_wave_params(
-        fibInds, nlParams, linParams; n_lines = n_lines_per_fiber)
+        fibInds, nlParams, linParams; n_lines = n_lines_per_fiber, smooth_exclude = smooth_exclude)
 
     # do final pass with interp params to
     # get a new constant-term for wave soln
@@ -497,7 +504,8 @@ function get_and_save_sky_wavecal(fname; cporder = 0, wporder = 4, checkpoint_mo
         resid_xt = interp_resid_xt,
         raw_linParams = linParams, raw_nlParams = nlParams,
         raw_resid_vec = resid_vec, raw_chipWaveSoln = chipWaveSoln,
-        raw_resid_xt = resid_xt)
+        raw_resid_xt = resid_xt, wave_chip_hold = wave_chip_hold,
+        smooth_excluded = isnothing(smooth_exclude) ? falses(N_FIBERS) : smooth_exclude)
     return outname
 end
 
@@ -1127,12 +1135,57 @@ function get_sky_dither_per_fiber(
     end
 end
 
+"""Fewest sky lines on a chip for fitting that chip's offset in the per-exposure sky fit; a chip
+with fewer is held (`chip_offset_hold_values`). With one line the free offset fits that line
+exactly, whatever its error, and a run-away offset then enters the across-slit smoothing."""
+const WAVE_MIN_LINES_CHIP_TRANSFORM = 2
+"""Per-fiber bits of `wave_chip_hold` in waveCalSkyLine: chip R / chip B offset held."""
+const WAVE_CHIP_HOLD_R = 0x02
+const WAVE_CHIP_HOLD_B = 0x04
+
+"""
+Fewest sky lines of a fiber for it to enter the across-slit smoothing (`interpolate_wave_params`,
+`smooth_exclude`): the per-fiber fit has 7 parameters (cporder 0, wporder 4) and the leave-one-out
+line test of PR #407 needs 3 more (its `LOO_UNTESTED` threshold), so fewer lines = untested.
+"""
+const WAVE_SMOOTH_MIN_LINES = 10
+"""Switch for `smooth_exclude` in `get_and_save_sky_wavecal` (on in production)."""
+const WAVE_SMOOTH_EXCLUDE_FEWLINES = Ref(true)
+
+"""
+    chip_offset_hold_values(chip_transform_cal, fname, cporder) -> Matrix (N_FIBERS x 2) or nothing
+
+Values a held chip offset takes: the comb-measured offsets (a_R, a_B) of the chip-transform
+calibration block for this exposure when a calibration is in use with cporder 0; `nothing` (=
+the start values) otherwise.
+"""
+function chip_offset_hold_values(chip_transform_cal, fname, cporder)
+    (isnothing(chip_transform_cal) || cporder != 0) && return nothing
+    tele_str, mjd_str = split(basename(fname), "_")[2:3]
+    blk = chip_transform_block(chip_transform_cal, tele_str, parse(Int, mjd_str))
+    (isnothing(blk) || !all(isfinite, blk.offset)) && return nothing
+    return copy(blk.offset)
+end
+
+"""
+    get_sky_wavecal(sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0;
+        cporder = 1, wporder = 2, hold_params = nothing,
+        min_lines_chip = WAVE_MIN_LINES_CHIP_TRANSFORM) -> (linParams, nlParams, resid_vec, hold_flag)
+
+Per-fiber sky wavelength fits (LBFGS over the chip transforms, polynomial solved linearly). The
+transform of chip R or B is fitted only if that chip has at least `min_lines_chip` lines;
+otherwise it is held at `hold_params[i, :]` (layout [a_R..; a_B..], default = the start
+`chipPolyParams0`). `hold_flag` holds the per-fiber `WAVE_CHIP_HOLD_*` bits.
+"""
 function get_sky_wavecal(
-        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2)
+        sky_line_uxlst, sky_line_fwlst, sky_line_chipInt, chipPolyParams0; cporder = 1, wporder = 2,
+        hold_params = nothing, min_lines_chip = WAVE_MIN_LINES_CHIP_TRANSFORM)
     linParams = zeros(Float64, N_FIBERS, wporder + 1)
     nlParams = zeros(Float64, N_FIBERS, 2 * (cporder + 1))
     resid_vec = zeros(Float64, N_FIBERS, size(sky_line_uxlst, 1))
     fill!(resid_vec, NaN)
+    hold_flag = zeros(UInt8, N_FIBERS)
+    na = cporder + 1
     for i in 1:N_FIBERS
         xv = sky_line_uxlst[:, i]
         yv = sky_line_fwlst[:, i]
@@ -1140,13 +1193,26 @@ function get_sky_wavecal(
         msk = .!isnan.(xv)
         chipPolyParams = copy(chipPolyParams0[i, :, :])
         inparams = ChipPolyParams2Params(chipPolyParams)
-        function nonlinear_loss_fit_partial(inparams)
-            nonlinear_loss_fit!(chipPolyParams, inparams, xv[msk], yv[msk], chipIntv[msk];
+        freeR = count(==(1), chipIntv[msk]) >= min_lines_chip
+        freeB = count(==(3), chipIntv[msk]) >= min_lines_chip
+        if !isnothing(hold_params)
+            freeR || (inparams[1:na] .= hold_params[i, 1:na])
+            freeB || (inparams[(na + 1):(2na)] .= hold_params[i, (na + 1):(2na)])
+        end
+        hold_flag[i] = (freeR ? 0x00 : WAVE_CHIP_HOLD_R) | (freeB ? 0x00 : WAVE_CHIP_HOLD_B)
+        free = vcat(fill(freeR, na), fill(freeB, na))
+        function nonlinear_loss_fit_partial(pfree)
+            p = copy(inparams)
+            p[free] .= pfree
+            nonlinear_loss_fit!(chipPolyParams, p, xv[msk], yv[msk], chipIntv[msk];
                 wporder = wporder, cporder = cporder, returnL2only = true)
         end
-        res = optimize(
-            nonlinear_loss_fit_partial, inparams, LBFGS(), Optim.Options(show_trace = false))
-        nlParamsOpt = Optim.minimizer(res)
+        nlParamsOpt = copy(inparams)
+        if any(free) && any(msk)
+            res = optimize(
+                nonlinear_loss_fit_partial, inparams[free], LBFGS(), Optim.Options(show_trace = false))
+            nlParamsOpt[free] .= Optim.minimizer(res)
+        end
         linResid,
         linParamsOpt = nonlinear_loss_fit!(
             chipPolyParams, nlParamsOpt, xv[msk], yv[msk], chipIntv[msk];
@@ -1155,7 +1221,7 @@ function get_sky_wavecal(
         linParams[i, :] = linParamsOpt
         resid_vec[i, msk] = linResid
     end
-    return linParams, nlParams, resid_vec
+    return linParams, nlParams, resid_vec, hold_flag
 end
 
 # FPI line wavecal
@@ -1906,7 +1972,83 @@ function get_fpi_wavecal(
     return linParams, nlParams, cavity_size, m_offset, resid_vec
 end
 
+"""Switch: `fit_poly_without_outliers` uses the bounded-influence fit `fit_poly_robust` (on in
+production) instead of the iterated 16/84-percentile clip (`fit_poly_percentile_clip`)."""
+const WAVE_SMOOTH_ROBUST = Ref(true)
+
+"""
+    fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5, keep = nothing)
+        -> (func, keep)
+
+Outlier-resistant polynomial fit of `yvals` against `xvals` (the across-slit smoothing of the
+wavelength parameters). `keep` (optional) excludes points from the start. Returns a callable
+`func` and the points that carry weight in the final fit. Uses `fit_poly_robust` when
+`WAVE_SMOOTH_ROBUST[]`, else the original hard percentile clip.
+"""
 function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5, keep = nothing)
+    WAVE_SMOOTH_ROBUST[] && return fit_poly_robust(xvals, yvals, deg; keep = keep)
+    return fit_poly_percentile_clip(xvals, yvals, deg; nsigma = nsigma, max_repeat = max_repeat,
+        keep = keep)
+end
+
+"""
+    fit_poly_robust(xvals, yvals, deg; keep = nothing, c = 4.685, maxit = 100) -> (func, keep)
+
+Bounded-influence polynomial fit: iteratively reweighted least squares with Tukey's biweight
+(weight (1 - (r / (c s))^2)^2 inside |r| < c s, 0 outside; s = 1.4826 x the median absolute
+residual of the points in use), started from the least-absolute-deviation fit. Unlike a hard
+clip, a point's weight goes to zero continuously as it moves out, so no single point can switch
+the curve between two solutions by crossing a threshold, and a far outlier has no influence.
+Non-finite points and points with `keep == false` get weight 0. `keep` on return = weight > 0.
+"""
+function fit_poly_robust(xvals, yvals, deg; keep = nothing, c = 4.685, maxit = 100)
+    x = Float64.(collect(xvals)); y = Float64.(collect(yvals))
+    use = isfinite.(x) .& isfinite.(y)
+    isnothing(keep) || (use .&= keep)
+    n = count(use)
+    if n <= deg
+        # not enough points: plain fit of what there is (constant / NaN as the old code would give)
+        func = n > 0 ? fit(x[use], y[use], min(deg, n - 1)) : (t -> NaN)
+        return func, use
+    end
+    # scale x for conditioning
+    x0 = (maximum(x[use]) + minimum(x[use])) / 2
+    xs = max((maximum(x[use]) - minimum(x[use])) / 2, eps())
+    V = hcat([((x .- x0) ./ xs) .^ k for k in 0:deg]...)
+    wls(w) = (sw = sqrt.(w[use]); (V[use, :] .* sw) \ (y[use] .* sw))
+    # least-absolute-deviation start (IRLS)
+    beta = wls(ones(length(y)))
+    for _ in 1:50
+        r = abs.(y .- V * beta)
+        delta = max(1e-12 * maximum(abs.(y[use])), 1e-300)
+        bnew = wls(1 ./ max.(r, delta))
+        maximum(abs.(bnew .- beta)) <= 1e-12 * (maximum(abs.(beta)) + 1e-300) && (beta = bnew; break)
+        beta = bnew
+    end
+    w = zeros(length(y))
+    for _ in 1:maxit
+        r = y .- V * beta
+        s = 1.4826 * median(abs.(r[use]))
+        if !(s > 0)
+            w .= use
+            break
+        end
+        u = r ./ (c * s)
+        w .= ifelse.(use .& (abs.(u) .< 1), (1 .- u .^ 2) .^ 2, 0.0)
+        count(>(0), w) > deg || break
+        bnew = wls(w)
+        conv = maximum(abs.(bnew .- beta)) <= 1e-10 * (maximum(abs.(beta)) + 1e-300)
+        beta = bnew
+        conv && break
+    end
+    b = copy(beta)
+    func = t -> evalpoly((t - x0) / xs, b)
+    return func, w .> 0
+end
+
+"""Original smoothing fit: polynomial with an iterated hard clip at `nsigma` times the
+16th/84th-percentile half-widths (kept for comparison; see `WAVE_SMOOTH_ROBUST`)."""
+function fit_poly_percentile_clip(xvals, yvals, deg; nsigma = 3, max_repeat = 5, keep = nothing)
     summary = nanzeropercentile(yvals, percent_vec = [16.0, 50.0, 84.0])
     #change to median,-sigma,+sigma
     summary = [summary[2], summary[2] - summary[1], summary[3] - summary[2]]
@@ -1914,6 +2056,7 @@ function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5
     if isnothing(keep)
         keep = ones(Bool, size(xvals, 1))
     end
+    keep_in = copy(keep)
     keep = keep .&
            (yvals .>= summary[1] - nsigma * summary[2]) .&
            (yvals .<= summary[1] + nsigma * summary[3])
@@ -1928,7 +2071,7 @@ function fit_poly_without_outliers(xvals, yvals, deg; nsigma = 3, max_repeat = 5
             resid_summary[3] - resid_summary[2]]
 
         new_good = (curr_resids .>= resid_summary[1] - nsigma * resid_summary[2]) .&
-                   (curr_resids .<= resid_summary[1] + nsigma * resid_summary[3])
+                   (curr_resids .<= resid_summary[1] + nsigma * resid_summary[3]) .& keep_in
 
         if all(new_good .== keep)
             break
@@ -1973,9 +2116,15 @@ chip offsets alone makes the block-to-block residuals worse, not better.
 """
 function interpolate_wave_params(fibInds, nlParams, linParams;
         block_steps = true, block_min_fibers = 10, block_nsigma = 4.0,
-        n_lines = nothing, block_min_lines = 12)
+        n_lines = nothing, block_min_lines = 12, smooth_exclude = nothing)
     mtp_inds = floor.((fibInds .- 1) ./ 30) .+ 1
     unique_mtp = 1:10
+    # fibers that do not enter any smoothing fit (they still receive the smooth values)
+    smooth_keep = isnothing(smooth_exclude) ? trues(length(fibInds)) : .!smooth_exclude
+    # the exclusion is dropped for a fit that would keep too few fibers (fewer than
+    # `block_min_fibers` in a block, fewer than 3 x that over the slit): then every finite fiber is
+    # used, as without the exclusion
+    usekeep(k, y, nmin) = count(k .& isfinite.(y)) >= nmin ? k : trues(length(k))
 
     interp_linParams = zeros(Float64, size(linParams))
     interp_nlParams = zeros(Float64, size(nlParams))
@@ -1984,7 +2133,8 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     #need a second order poly for zeroth order term
     for mtp_ind in unique_mtp
         keep_mtp = (mtp_inds .== mtp_ind)
-        func, keep = fit_poly_without_outliers(fibInds[keep_mtp], linParams[keep_mtp, 1], 2)
+        func, keep = fit_poly_without_outliers(fibInds[keep_mtp], linParams[keep_mtp, 1], 2;
+            keep = usekeep(smooth_keep[keep_mtp], linParams[keep_mtp, 1], block_min_fibers))
         func_eval = func.(fibInds[keep_mtp])
         interp_linParams[keep_mtp, 1] .= func_eval .+
                                          nanmedian((linParams[keep_mtp, 1] .- func_eval)[keep])
@@ -1993,7 +2143,8 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     #second order poly in fiber for the first and all higher order terms
     #(a first order poly for the higher order terms bowed the slit edges)
     for j in 2:size(linParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2)
+        func, keep = fit_poly_without_outliers(fibInds, linParams[:, j], 2;
+            keep = copy(usekeep(smooth_keep, linParams[:, j], 3block_min_fibers)))
         func_eval = func.(fibInds)
         interp_linParams[:, j] .= func_eval .+ nanmedian((linParams[:, j] .- func_eval)[keep])
     end
@@ -2001,7 +2152,8 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
     #second order poly in fiber for the chip offset,scale parameters
     #(a first order poly bowed the slit edges, with opposite signs on chips R and G)
     for j in 1:size(nlParams, 2)
-        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2)
+        func, keep = fit_poly_without_outliers(fibInds, nlParams[:, j], 2;
+            keep = copy(usekeep(smooth_keep, nlParams[:, j], 3block_min_fibers)))
         func_eval = func.(fibInds)
         interp_nlParams[:, j] .= func_eval .+ nanmedian((nlParams[:, j] .- func_eval)[keep])
     end
@@ -2018,6 +2170,7 @@ function interpolate_wave_params(fibInds, nlParams, linParams;
             if !isnothing(n_lines)
                 resids[n_lines[in_mtp] .< block_min_lines, :] .= NaN
             end
+            resids[.!smooth_keep[in_mtp], :] .= NaN
             steps = mtp_block_steps(resids; min_fibers = block_min_fibers, nsigma = block_nsigma)
             isnothing(steps) && continue #too few good fibers: keep the smooth solution
             interp_nlParams[in_mtp, :] .+= steps[1:n_nl]'
