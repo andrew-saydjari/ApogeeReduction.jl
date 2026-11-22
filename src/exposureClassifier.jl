@@ -1,23 +1,29 @@
-# Exposure-type classifier: predicts the exposure type from the ar2D image
-# alone and compares it to the (possibly wrong) commanded image_type label.
+# Exposure-type classifier: predicts the CONTENT of an exposure from its ar2D
+# images and compares it to the (possibly wrong) commanded image_type label.
 # Mislabeled calibration exposures (e.g. ThAr/UNe swaps, FPI labeled arclamp)
-# can silently poison wavelength calibration; this check runs right after the
-# 2D stage and raises warnings — it never mutates labels on its own.
+# can silently poison wavelength calibration, and commanded-object frames with
+# no sky light or non-sky content are not science; this check runs right after
+# the 2D stage. It never mutates labels and never drops an exposure from the
+# reduction: its verdict is the `exposure_flags` metadata below.
 #
 # Design notes:
-# - Features are computed from dimage ONLY. Commanded metadata (n_read, lamp
-#   flags, exptime) is deliberately excluded: it is generated alongside the
-#   label being checked, so it would leak the label.
-# - Class labels are image_type + lamp flags (e.g. "arclamp_q0t1u0" = ThAr,
-#   "arclamp_q0t0u1" = UNe, "arclamp_q0t0u0" = FPI).
+# - Since AKS 2026-11-22 the model is the 2D content forest
+#   (src/exposureClassifier2D.jl): ten content classes (`CLASSIFIER2D_CLASSES`:
+#   sky, twilight, dark, dark_persist, ledflat, quartzflat, domeflat, thar, une,
+#   fpi), 175 features. It replaced the v6 forest (11 commanded-label classes,
+#   67 features); v6 verdict strings are still readable via
+#   `classifier_content_class`.
+# - Features come from the ar2D products only, with ONE documented exception:
+#   the forest's feature list contains `n_read` (the commanded number of reads,
+#   read from the ar2D file's metadata/nread_total), inherited from the prototype
+#   that produced the approved scores; see exposureClassifier2D.jl.
+# - Commanded labels are image_type + lamp flags (e.g. "arclamp_q0t1u0" = ThAr,
+#   "arclamp_q0t0u1" = UNe, "arclamp_q0t0u0" = FPI); `expected_content_class`
+#   maps a label to the content the forest should see.
 # - Predictions with max class probability < unknown_tau are reported as
 #   "unknown" (image doesn't resemble any trained class).
-# - The model artifact (random forest) is trained offline; see
-#   scripts under the 2026_07_14 scratch dir (train_classifier.jl et al.).
-#   n.b. those offline scripts still write/read the model's ORIGINAL path;
-#   the artifact the pipeline loads was moved to cal_ref/ on 2026-09-08.
-#   They are analysis tooling, not pipeline code -- retraining means
-#   producing an artifact and pointing the config at it.
+# - The model artifact is trained offline by scripts/classifier/ (see the
+#   README there); it is a calibration input configured by path.
 
 using JLD2, Statistics, StatsBase, HDF5, DataFrames
 using LinearAlgebra: dot
@@ -640,8 +646,10 @@ end
 """
     exposure_class_label(image_type, lamp_quartz, lamp_thar, lamp_une)
 
-Build the class label string used by the classifier from almanac metadata,
-e.g. ("arclamp", false, true, false) -> "arclamp_q0t1u0" (= ThAr).
+Build the COMMANDED class label string from almanac metadata, e.g.
+("arclamp", false, true, false) -> "arclamp_q0t1u0" (= ThAr). This is the label
+being checked; the forest itself predicts CONTENT classes
+(`CLASSIFIER2D_CLASSES`), and `expected_content_class` maps one to the other.
 Lamp values may be Bool, 0/1, or "T"/"F" strings; anything else maps to "?".
 """
 function exposure_class_label(image_type, lamp_quartz, lamp_thar, lamp_une)
@@ -652,68 +660,121 @@ function exposure_class_label(image_type, lamp_quartz, lamp_thar, lamp_une)
 end
 
 """
-    load_exposure_classifier(model_path)
-
-Load the trained exposure-type classifier artifact (random forest, classes,
-and decision thresholds) saved by the offline training scripts.
+Commanded label -> the content class the 2D forest should predict for it.
+The commanded labels are unchanged; only the forest's vocabulary changed when
+the 2D content forest replaced v6 (AKS 2026-11-22). A commanded label not listed
+here (rare lamp combinations) has no expected content, so any confident
+prediction reads as a mislabel, exactly as v6 never predicted those labels.
 """
-function load_exposure_classifier(model_path)
-    d = JLD2.load(model_path)
-    (model = d["model"], classes = d["classes"],
-        unknown_tau = d["unknown_tau"], flag_tau = d["flag_tau"])
+const CLASSIFIER_LABEL_CONTENT = Dict(
+    "object_q0t0u0" => "sky",
+    "dark_q0t0u0" => "dark",
+    "arclamp_q0t1u0" => "thar",
+    "arclamp_q0t0u1" => "une",
+    "arclamp_q0t0u0" => "fpi",
+    "quartzflat_q1t0u0" => "quartzflat",
+    "domeflat_q0t0u0" => "domeflat",
+    "internalflat_q0t0u0" => "ledflat",
+    "twilightflat_q0t0u0" => "twilight")
+
+"""
+v6 (11 label-string classes) -> 2D content class. Used ONLY to read verdicts
+written by the v6 model (old per-MJD exposureTypeCheck tables, old almanac
+decorations) under the current policy; the deployed forest predicts the new
+names directly. `twilightflat_faint` (night-sky "flats") is sky content.
+"""
+const CLASSIFIER_LEGACY_PRED = Dict(
+    "object_q0t0u0" => "sky", "twilightflat_faint" => "sky",
+    "twilightflat_q0t0u0" => "twilight", "dark_q0t0u0" => "dark",
+    "dark_persist" => "dark_persist", "internalflat_q0t0u0" => "ledflat",
+    "quartzflat_q1t0u0" => "quartzflat", "domeflat_q0t0u0" => "domeflat",
+    "arclamp_q0t1u0" => "thar", "arclamp_q0t0u1" => "une", "arclamp_q0t0u0" => "fpi")
+
+"Content class of a prediction string (identity for 2D-forest names; v6 strings translated)."
+classifier_content_class(pred) = get(CLASSIFIER_LEGACY_PRED, String(pred), String(pred))
+"Expected content class of a commanded label, or `nothing` when the label has none."
+expected_content_class(labeled) = get(CLASSIFIER_LABEL_CONTENT, String(labeled), nothing)
+"True for a COMMANDED object exposure (any lamp flags): the object-frame rule applies."
+is_commanded_object(labeled) = startswith(lowercase(String(labeled)), "object_")
+
+# decision thresholds carried over from v6 unchanged (AKS 2026-11-22: calibration
+# masking intent unchanged; no new calibration cuts). The training script writes
+# them into the artifact; these are the defaults for an artifact without them.
+"max class probability below this -> prediction \"unknown\" (v6 value)"
+const CLASSIFIER_UNKNOWN_TAU = 0.5
+"confidence above which a content/label disagreement is flagged (v6 value)"
+const CLASSIFIER_FLAG_TAU = 0.7
+
+"""
+    load_exposure_classifier(model_path, templates_path, light_reference_path)
+
+Load THE exposure classifier: the 2D content forest (`load_exposure_classifier_2d`)
+plus the v6-era decision thresholds (`unknown_tau`, `flag_tau`, from the artifact
+or `CLASSIFIER_UNKNOWN_TAU` / `CLASSIFIER_FLAG_TAU`). Returns `nothing` (logged:
+check DISABLED) when the forest or either stored reference is absent.
+
+A v6 artifact (no `features` list) is rejected with an error: its 11
+label-string classes and 67-feature design row are no longer supported.
+"""
+function load_exposure_classifier(model_path, templates_path, light_reference_path)
+    if model_path !== nothing && !isempty(model_path) && isfile(model_path)
+        keys_ = JLD2.jldopen(model_path, "r") do f
+            collect(keys(f))
+        end
+        "features" in keys_ ||
+            error("$model_path looks like a v6 exposure-classifier artifact (no `features` " *
+                  "list). The 2D content forest replaced v6 (AKS 2026-11-22); point " *
+                  "--exp_class_model at a classifier_2d artifact " *
+                  "(scripts/classifier/train_classifier_2d.jl).")
+    end
+    c = load_exposure_classifier_2d(model_path, templates_path, light_reference_path)
+    c === nothing && return nothing
+    d = JLD2.jldopen(model_path, "r") do f
+        (haskey(f, "unknown_tau") ? f["unknown_tau"] : CLASSIFIER_UNKNOWN_TAU,
+            haskey(f, "flag_tau") ? f["flag_tau"] : CLASSIFIER_FLAG_TAU)
+    end
+    merge(c, (unknown_tau = Float64(d[1]), flag_tau = Float64(d[2])))
 end
 
 """
-    classify_exposure_type(clf, chip_features, tele)
+    classify_exposure_type(clf, features::AbstractDict)
 
-Given per-chip feature vectors (Dict chip => features from
-`exposure_class_features`), predict the exposure class label.
-Returns (pred, prob, decision) where decision is one of
-"ok"/"unknown", and pred is the predicted class label string.
+Score one exposure's 2D feature Dict (`exposure_class_features_2d`).
+Returns `(pred, prob, decision, proba, p_sky)` where `pred` is a content class,
+`decision` is "unknown" when `prob < clf.unknown_tau`, else "ok".
 """
-function classify_exposure_type(clf, chip_features::AbstractDict, tele)
-    x = reduce(vcat, [chip_features[chip] for chip in CHIP_LIST])
-    q90i = findfirst(==(0.9), CLASSIFIER_QUANTS)
-    r = chip_features[CHIP_LIST[1]][q90i]
-    g = chip_features[CHIP_LIST[2]][q90i]
-    b = chip_features[CHIP_LIST[3]][q90i]
-    colors = [(r - g) / (abs(r) + abs(g) + 1e-3), (b - g) / (abs(b) + abs(g) + 1e-3),
-        (r - b) / (abs(r) + abs(b) + 1e-3)]
-    x = vcat(x, colors, lowercase(tele) == "apo" ? 1.0 : 0.0)
-    x[.!isfinite.(x)] .= -9999.0
-
-    P = apply_forest_proba(clf.model, reshape(x, 1, :), clf.classes)
-    maxp, mi = findmax(vec(P))
-    pred = clf.classes[mi]
-    decision = maxp < clf.unknown_tau ? "unknown" : "ok"
-    (pred = pred, prob = maxp, decision = decision, proba = vec(P))
+function classify_exposure_type(clf, features::AbstractDict)
+    s = classify_exposure_2d(clf, features)
+    decision = s.prob < clf.unknown_tau ? "unknown" : "ok"
+    (pred = s.pred, prob = s.prob, decision = decision, proba = s.proba, p_sky = s.p_sky)
 end
 
 """
-    exposure_check_category(labeled_class, res)
+    exposure_check_category(labeled_class, res, flag_tau = CLASSIFIER_FLAG_TAU)
 
-Interpret a classification result against the commanded label (v5 content
-taxonomy: the classifier predicts what the image IS; causes are expressed
-here). Categories:
-- "unknown": image doesn't resemble any trained class
-- "faint_twilight": labeled twilightflat but content is faint line-sky
-  (counts too low to flat-field with)
-- "lamp_off_candidate": labeled as an illuminated exposure but content is a
-  dark (lamp/LED off — equivalent to having taken a dark)
-- "mislabel_candidate": confident content prediction that contradicts the
-  label (e.g. ThAr/UNe swaps)
+Interpret a content prediction against the commanded label (the v6 categories,
+translated to the 2D content classes; intent unchanged, AKS 2026-11-22):
+- "unknown": max probability below `unknown_tau`
+- "faint_twilight": labeled twilightflat but the content is night sky
+  (v6 predicted `twilightflat_faint`, which is `sky` content now)
+- "lamp_off_candidate": labeled as an illuminated exposure but the content is
+  `dark` (lamp/LED off: equivalent to having taken a dark)
+- "mislabel_candidate": confident content that is not the label's expected
+  content (`expected_content_class`), e.g. ThAr/UNe swaps, `dark_persist` on a
+  commanded dark
 - "ok"
+For commanded objects this category is informational only; their mask comes from
+`object_frame_rule` (see `exposure_predicted_bad`).
 """
-function exposure_check_category(labeled_class, res, flag_tau = 0.7)
+function exposure_check_category(labeled_class, res, flag_tau = CLASSIFIER_FLAG_TAU)
+    pred = classifier_content_class(res.pred)
     if res.decision == "unknown"
         "unknown"
-    elseif labeled_class == "twilightflat_q0t0u0" &&
-           res.pred == "twilightflat_faint" && res.prob > flag_tau
+    elseif labeled_class == "twilightflat_q0t0u0" && pred == "sky" && res.prob > flag_tau
         "faint_twilight"
-    elseif labeled_class in CLASSIFIER_ILLUMINATED && res.pred == "dark_q0t0u0" &&
-           res.prob > flag_tau
+    elseif labeled_class in CLASSIFIER_ILLUMINATED && pred == "dark" && res.prob > flag_tau
         "lamp_off_candidate"
-    elseif res.pred != labeled_class && res.prob > flag_tau
+    elseif pred != expected_content_class(labeled_class) && res.prob > flag_tau
         "mislabel_candidate"
     else
         "ok"
@@ -721,43 +782,36 @@ function exposure_check_category(labeled_class, res, flag_tau = 0.7)
 end
 
 """
-    exposure_predicted_bad(labeled_class, pred, status)
+    exposure_predicted_bad(labeled_class, pred, status; p_sky, oh_rel, line_z, tr_dyn)
 
-Masking policy for downstream consumers (cal runlists, wavecal arc/FPI
-selection): should this exposure be excluded based on the classifier verdict?
+Masking policy behind `EXPFLAG_PREDICTED_BAD`: should this exposure be excluded?
 
-- object_q0t0u0: never masked (science frames are handled downstream).
-  n.b. this exemption is keyed on the EXACT label string, not on
-  `image_type == "object"`. An object frame with anomalous lamp flags is
-  labeled e.g. "object_q0t0u1" and does NOT take this branch, so it can come
-  back masked (4 such frames exist in DR21, all on lco 57802). That is
-  harmless today because the only consumer of the mask is the fiber-flat
-  runlist builder, which selects on `image_type == "<flat_type>flat"` first and
-  so can never see an object frame. If a future consumer masks science
-  exposures with this, revisit the exemption before doing so.
-- dark_q0t0u0: masked when the content prediction is anything but a clean
-  dark (dark_persist, illuminated content) or the prediction is unknown.
-  Sequence-only persistence risks whose image still classifies as a clean
-  dark are kept.
-- internalflat_q0t0u0 and arclamp_q0t0u0 (FPI): masked on any
-  predicted-vs-labeled mismatch or unknown
-- all other classes: masked whenever the check status is not "ok"
-  (mislabel / lamp-off / faint-twilight / unknown / rare label)
-- exposures without reduced 2D data ("nofiles"/"unclassified") are not
-  masked here; missing products already exclude them downstream
+- COMMANDED OBJECTS (`is_commanded_object`, any lamp flags): bad exactly when the
+  approved object-frame rule acts (AKS 2026-11-22, thresholds approved
+  2026-11-21/22): `object_frame_rule(1 - p_sky, oh_rel, line_z, tr_dyn).act`, i.e.
+  (P(non-sky) >= 0.8 OR (oh_rel < -0.6 AND line_z < 2.2)) AND NOT tr_dyn >= 0.9.
+  There is NO object exemption any more. Missing evidence (NaN, e.g. a table
+  written by the v6 model) means the rule cannot fire -> not bad.
+- commanded dark, internal (LED) flat and FPI (`arclamp_q0t0u0`): masked when the
+  content prediction is not the label's expected content (`dark`, `ledflat`,
+  `fpi`; so `dark_persist` masks a dark) or the prediction is unknown.
+- every other commanded class: masked whenever the check status is not "ok"
+  (mislabel / lamp-off / faint-twilight / unknown / rare label).
+- no verdict ("nofiles", "unclassified", "notrun", "checkfail"): never masked.
 
-This returns a Bool: it answers "did the classifier judge this bad?", and it
-presumes the classifier actually ran. It cannot express "we do not know" — that
-information lives one level up, in whether an `exposure_flags` field was written
-at all. See `exposure_class_metadata` and `exposure_class_verdict`.
+`pred` may be a 2D content class or a legacy v6 string (translated by
+`classifier_content_class`). Returns a Bool; "we do not know" is carried by
+`EXPFLAG_NOTRUN`, see `exposure_class_metadata` and `exposure_class_verdict`.
 """
-function exposure_predicted_bad(labeled_class, pred, status)
+function exposure_predicted_bad(labeled_class, pred, status; p_sky = NaN, oh_rel = NaN,
+        line_z = NaN, tr_dyn = NaN)
     if status in ("nofiles", "unclassified", EXP_CLASS_STATUS_NOTRUN, "checkfail")
         false
-    elseif labeled_class == "object_q0t0u0"
-        false
+    elseif is_commanded_object(labeled_class)
+        object_frame_rule(1 - _rule_float(p_sky), oh_rel, line_z, tr_dyn).act
     elseif labeled_class in ("dark_q0t0u0", "internalflat_q0t0u0", "arclamp_q0t0u0")
-        (pred != labeled_class) || (status == "unknown")
+        (classifier_content_class(pred) != expected_content_class(labeled_class)) ||
+            (status == "unknown")
     else
         status != "ok"
     end
@@ -814,20 +868,52 @@ or when the check errored. A 1D file written before these fields existed carries
 no `exposure_flags` at all, and reads as unknown by the compatibility path in
 `exposure_class_verdict`.
 """
-exposure_class_unknown_metadata(status = EXP_CLASS_STATUS_NOTRUN) = Dict{String, Any}(
-    "exposure_flags" => exposure_flag_bits(false, false; notrun = true),
-    "exp_class_status" => String(status),
-    "exp_class_pred" => EXP_CLASS_UNKNOWN_STR,
-    "exp_class_labeled" => EXP_CLASS_UNKNOWN_STR,
-    "exp_class_prob" => NaN)
+exposure_class_unknown_metadata(status = EXP_CLASS_STATUS_NOTRUN) = merge(
+    Dict{String, Any}(
+        "exposure_flags" => exposure_flag_bits(false, false; notrun = true),
+        "exp_class_status" => String(status),
+        "exp_class_pred" => EXP_CLASS_UNKNOWN_STR,
+        "exp_class_labeled" => EXP_CLASS_UNKNOWN_STR,
+        "exp_class_prob" => NaN),
+    exposure_object_rule_metadata(false, NaN, NaN, NaN, NaN))
 
 """
-    exposure_class_metadata(labeled, pred, prob, status; engineering = false)
+    exposure_object_rule_metadata(is_object, p_sky, oh_rel, line_z, tr_dyn)
+
+The object-frame rule's provenance fields (written for EVERY exposure, so the
+columns exist uniformly in the 1D products and the almanac decoration):
+- `exp_class_p_sky`, `exp_class_oh_rel`, `exp_class_line_z`, `exp_class_tr_dyn`:
+  the measured inputs (NaN when not measured);
+- `exp_class_object_rule`: `object_frame_rule(...).reason` for a commanded object
+  ("forest", "no_sky_light", "forest+no_sky_light", "guard_exempt", "none"),
+  "n/a" for any other commanded type;
+- `exp_class_rule_forest`, `exp_class_rule_no_sky_light`, `exp_class_rule_guard`:
+  the three tests individually (false for non-objects).
+"""
+function exposure_object_rule_metadata(is_object::Bool, p_sky, oh_rel, line_z, tr_dyn)
+    p, o, z, t = _rule_float(p_sky), _rule_float(oh_rel), _rule_float(line_z),
+    _rule_float(tr_dyn)
+    r = is_object ? object_frame_rule(1 - p, o, z, t) : nothing
+    Dict{String, Any}(
+        "exp_class_p_sky" => p, "exp_class_oh_rel" => o,
+        "exp_class_line_z" => z, "exp_class_tr_dyn" => t,
+        "exp_class_object_rule" => r === nothing ? "n/a" : r.reason,
+        "exp_class_rule_forest" => r === nothing ? false : r.forest,
+        "exp_class_rule_no_sky_light" => r === nothing ? false : r.no_sky_light,
+        "exp_class_rule_guard" => r === nothing ? false : r.guard)
+end
+
+"""
+    exposure_class_metadata(labeled, pred, prob, status; engineering = false,
+                            p_sky = NaN, oh_rel = NaN, line_z = NaN, tr_dyn = NaN)
 
 Build the metadata block for one exposure from a classifier verdict, including
 the `exposure_flags` bitmask. `status` is the category from
 `exposure_check_category` (plus "persistence_prior", which `pipeline.jl` adds,
-and "checkfail").
+and "checkfail"). `p_sky`, `oh_rel`, `line_z`, `tr_dyn` are the object-frame
+rule's inputs; for a commanded object they decide `EXPFLAG_PREDICTED_BAD`
+(see `exposure_predicted_bad`) and are recorded with the test that fired
+(`exposure_object_rule_metadata`).
 
 A "checkfail" verdict returns the UNKNOWN block — `EXPFLAG_NOTRUN` set, never
 `EXPFLAG_PREDICTED_BAD` — and keeps "checkfail" as its status string. An
@@ -838,16 +924,21 @@ never be recorded as an adverse opinion, nor as a favourable one.
 producer only knows the classifier's verdict, so it passes `false` by default;
 the engineering check ORs its bit in here rather than writing a competing field.
 """
-function exposure_class_metadata(labeled, pred, prob, status; engineering::Bool = false)
+function exposure_class_metadata(labeled, pred, prob, status; engineering::Bool = false,
+        p_sky = NaN, oh_rel = NaN, line_z = NaN, tr_dyn = NaN)
     (status == "checkfail" || status == EXP_CLASS_STATUS_NOTRUN) &&
         return exposure_class_unknown_metadata(status)
-    bad = exposure_predicted_bad(labeled, pred, status)
-    Dict{String, Any}(
-        "exposure_flags" => exposure_flag_bits(bad, engineering),
-        "exp_class_status" => String(status),
-        "exp_class_pred" => String(pred),
-        "exp_class_labeled" => String(labeled),
-        "exp_class_prob" => Float64(prob))
+    bad = exposure_predicted_bad(labeled, pred, status; p_sky = p_sky, oh_rel = oh_rel,
+        line_z = line_z, tr_dyn = tr_dyn)
+    merge(
+        Dict{String, Any}(
+            "exposure_flags" => exposure_flag_bits(bad, engineering),
+            "exp_class_status" => String(status),
+            "exp_class_pred" => String(pred),
+            "exp_class_labeled" => String(labeled),
+            "exp_class_prob" => Float64(prob)),
+        exposure_object_rule_metadata(is_commanded_object(labeled), p_sky, oh_rel, line_z,
+            tr_dyn))
 end
 
 """
@@ -888,9 +979,12 @@ an empty Dict if the file is absent or unreadable, so that every caller degrades
 to the explicit-unknown block rather than failing: this table is advisory
 metadata and must never be able to break a reduction.
 
-The block is rebuilt from `(labeled, pred, prob, flag)` through
+The block is rebuilt from `(labeled, pred, prob, flag)` and, when present, the
+object-rule inputs `(p_sky, oh_rel, line_z, tr_dyn)` through
 `exposure_class_metadata`, so a table written by any version of the pipeline
 yields the current encoding and the masking policy lives in exactly one place.
+A table written by the v6 model has no rule inputs: its commanded objects read
+back with NaN evidence, which cannot fire the rule (not bad).
 """
 function read_exposure_type_check(path)
     out = Dict{Int, Dict{String, Any}}()
@@ -900,37 +994,18 @@ function read_exposure_type_check(path)
         expnum = d["expnum"]
         labeled, pred = d["labeled"], d["pred"]
         prob, flag = d["prob"], d["flag"]
+        n = length(expnum)
+        col(k) = haskey(d, k) ? d[k] : fill(NaN, n)
+        p_sky, oh_rel, line_z, tr_dyn = col("p_sky"), col("oh_rel"), col("line_z"),
+        col("tr_dyn")
         for i in eachindex(expnum)
             out[Int(expnum[i])] = exposure_class_metadata(
-                labeled[i], pred[i], prob[i], flag[i])
+                labeled[i], pred[i], prob[i], flag[i]; p_sky = p_sky[i],
+                oh_rel = oh_rel[i], line_z = line_z[i], tr_dyn = tr_dyn[i])
         end
     catch e
         @warn "Could not read exposure-type check table $path; treating as unknown" exception=e
         return Dict{Int, Dict{String, Any}}()
     end
     out
-end
-
-"""
-    check_exposure_type!(warnings, clf, fnames, tele, mjd, expnum, image_type, lamp_flags)
-
-Post-2D hook: compute features for the three chip ar2D files `fnames`
-(Dict chip => path), classify, and compare to the labeled class
-(image_type + lamp flags, e.g. "arclamp_q0t1u0"). Pushes a NamedTuple row
-into `warnings` when the prediction disagrees confidently or is unknown.
-Returns the classification result.
-"""
-function check_exposure_type!(warnings, clf, fnames::AbstractDict, tele, mjd, expnum,
-        labeled_class)
-    chip_features = Dict(chip => exposure_class_features(load(fnames[chip], "dimage"))
-    for chip in CHIP_LIST)
-    res = classify_exposure_type(clf, chip_features, tele)
-    flagged = exposure_check_category(labeled_class, res, clf.flag_tau)
-    if flagged != "ok"
-        @warn "Exposure-type check: $tele $mjd exp $expnum labeled '$labeled_class' but classified '$(res.pred)' (p=$(round(res.prob, digits = 3)), $flagged)"
-        push!(warnings,
-            (tele = tele, mjd = mjd, expnum = expnum, labeled = labeled_class,
-                pred = res.pred, prob = res.prob, flag = flagged))
-    end
-    res
 end
