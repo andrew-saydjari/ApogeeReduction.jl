@@ -194,7 +194,7 @@ without re-deriving anything from the 2D products or the almanac.
 
 | Bit | Value | Meaning |
 | --- | ----- | ------- |
-| 0   | 1     | `predicted_bad` — exposure-type classifier verdict |
+| 0   | 1     | `predicted_bad` — exposure-type classifier verdict (calibrations: content disagrees with the commanded type; commanded objects: the object-frame rule acts) |
 | 1   | 2     | `engineering` — configuration's science fibers are an engineering carton |
 | 2   | 4     | `notrun` — **no verdict was formed** for this exposure |
 
@@ -230,12 +230,33 @@ The almanac carries the same byte at
 `exposure_class/<tele>/<mjd>/exposure_flags`, with every row that had no verdict
 set to bit 2.
 
+### Commanded objects: the object-frame rule
+
+Since AKS 2026-11-22, bit 0 is also set for **commanded-object** exposures, when
+the approved rule acts (`object_frame_rule`, thresholds approved 2026-11-21/22,
+the guard threshold "for now"):
+
+> (P(non-sky) ≥ 0.8 **OR** (`oh_rel` < −0.6 **AND** `line_z` < 2.2)) **AND NOT** `tr_dyn` ≥ 0.9
+
+P(non-sky) = 1 − P(sky) from the 2D content forest; `oh_rel`, `line_z` and
+`tr_dyn` are chip-G OH level relative to the NORMAL median, OH detection
+significance, and trace-height dynamic range (the starlight guard). The inputs
+and the test that fired are recorded as `exp_class_p_sky`, `exp_class_oh_rel`,
+`exp_class_line_z`, `exp_class_tr_dyn`, `exp_class_object_rule` (`forest`,
+`no_sky_light`, `forest+no_sky_light`, `guard_exempt`, `none`, or `n/a` for
+non-objects) and `exp_class_rule_{forest,no_sky_light,guard}` in the 1D metadata,
+and as `exposure_class_*` columns in the almanac decoration. There is no
+twilight / sun-altitude rule.
+
 ### It is advisory
 
 No exposure is dropped from the reduction because of these flags: engineering
-and known-bad frames are still reduced. The one place they exclude anything is
+and known-bad frames are still reduced, including commanded objects with bit 0
+set. The one place in this repository they exclude anything is
 `make_runlist_fiber_flats.jl`, which drops flats with bit 0 set from the
-trace/fluxing runlists and logs every exclusion.
+trace/fluxing runlists and logs every exclusion (it selects on the flat image
+type first, so it never sees an object frame). Science-sample assemblers
+downstream should exclude on `exposure_ok_for_science(flags)`.
 
 ### Configuration
 
@@ -244,7 +265,41 @@ configured by path exactly like `caldir_darks` / `caldir_flats` /
 `gain_read_cal_dir`: `pipeline.jl --exp_class_model` holds the default and
 `airflow/dags/ar_common.py` (`EXP_CLASS_MODEL`) sets it for production, so
 swapping models is a config change beside the other calibration inputs. The
-version is pinned (v6) — never a glob, never newest-wins.
+version is pinned (classifier_2d v2, the 2D content forest with ten content
+classes that replaced v6 on AKS 2026-11-22, retrained without the read-count
+inputs of the approved prototype; artifact checksum in
+`metadata/exposure_classifier_2d.sha256`, rebuild tooling in
+`scripts/classifier/`) — never a glob, never newest-wins. Its two stored
+references, `data/exposure_classifier_2d/line_templates.h5` and
+`light_reference.csv`, are `--exp_class_templates` /
+`--exp_class_light_reference`; when either is missing the check is disabled with
+a log line and every exposure records `notrun`.
+
+Rebuilding the classifier from scratch (all scripts in `scripts/classifier/`,
+run with `--project=<repo>`; every stored reference has its own rebuild):
+
+1. `extract_features_2d.jl --manifest M --apred_dir <apred> --outfile F.h5`
+   (reference-free features + spectral profiles through the pipeline's own
+   feature code; the full archive is a Slurm-sized job).
+2. `build_light_reference_2d.jl --reference_list
+   metadata/exposure_classifier_2d_light_reference_list.csv --apred_dir <apred>
+   --outfile light_reference.csv` (per telescope/era chip-G medians of normal
+   science frames).
+3. `build_line_templates_2d.jl --manifest M --features F.h5
+   --out_template_nights N.csv --outfile line_templates.h5` (seeded template-night
+   selection, then median line excess per kind/telescope/chip).
+4. `assemble_features_2d.jl --features F.h5 --templates line_templates.h5
+   --light_reference light_reference.csv --outfile F.csv`.
+5. `train_classifier_2d.jl --features F.csv --manifest M --template_nights N.csv
+   --out_model exposure_classifier_2d_vN.jld2 --out_oof oof.csv` (night-grouped
+   out-of-fold scores + the final model).
+6. `evaluate_classifier_2d.jl --oof oof.csv --manifest M --outdir eval/
+   [--model ... --features F.csv]` (object-rule list, final-model vs out-of-fold,
+   calibration masking v6 vs 2D).
+
+`M` is the label manifest (columns `tele, mjd, expnum, image_type, lamp_*,
+n_read, label, role, v6_*, rel_*`); like the model it is not in git, and its
+sha256 is recorded with the model's in `metadata/exposure_classifier_2d.sha256`.
 
 To disable deliberately: `pipeline.jl --exp_class_model ""`, or
 `AR_EXP_CLASS_MODEL="" ./run_all.sh ...`. Leaving `AR_EXP_CLASS_MODEL` unset
@@ -252,7 +307,8 @@ means on; setting it to the empty string means off. **A model path that does not
 exist is a hard error at startup**, never a silent skip, so a moved or
 cleaned-up artifact cannot quietly downgrade a run to "no classification".
 
-Measured cost: **~1.75 s per exposure of worker time** (3 chips), of which
+Measured cost (v6, before the 2D forest; the 2D features add a few running
+medians per chip, not yet re-timed in the pipeline): **~1.75 s per exposure of worker time** (3 chips), of which
 ~1.34 s is re-reading the `ar2D` images and only ~0.3 ms is the forest itself,
 plus a one-off ~3.6 s model load and ~183 MiB resident per worker process —
 about **0.2%** of the reduction's total CPU.

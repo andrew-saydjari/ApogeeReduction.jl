@@ -5,6 +5,7 @@ using FITSIO: FITS
 @testset verbose=true "ApogeeReduction.jl" begin
     include("ar3D.jl")
     include("exposureClassifier.jl")
+    include("exposureClassifier2D.jl")
     include("ar1D.jl")
     include("fiber_types.jl")
     include("wavecal.jl")

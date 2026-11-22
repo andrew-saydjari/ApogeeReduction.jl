@@ -21,6 +21,9 @@ include("exposureClassifier.jl")
 include("ar1D.jl")
 include("fileNameHandling.jl")
 include("utils.jl")
+# 2D content classifier + approved commanded-object rule (not wired into the
+# pipeline yet; uses exposureClassifier.jl and CSV/HDF5 readers)
+include("exposureClassifier2D.jl")
 
 # acceptance gate for the FPI nightly wavelength solution
 # (uses nanmedian from utils.jl and fiberID2fiberIndx from fileNameHandling.jl)

@@ -681,10 +681,10 @@ end
 Dark-subtract and flat-field one chip's `ar2D` image into `ar2Dcal`.
 
 With `exp_class_features = true`, additionally returns the exposure-type
-classifier's per-chip feature vector, computed from the `ar2D` array this
-function already holds in memory. That is purely an I/O saving: the classifier's
-own pass used to re-open and re-read the same file, measured at 1.344 s of its
-1.751 s per exposure.
+classifier's per-chip products (`classifier2d_chip_products`, plus the file's
+`nread_total`), computed from the `ar2D` arrays this function already holds in
+memory. That is purely an I/O saving: the classifier's own pass would otherwise
+re-open and re-read the same file.
 
 Returns `nothing` when features were not requested, and also when the checkpoint
 short-circuit fires — in that case no `dimage` was ever loaded, so there is
@@ -709,20 +709,29 @@ function process_2Dcal(fname; chi2perdofcut = 100, checkpoint_mode = "commit_sam
     chisqimage = load(fname, "chisqimage")
     last_unsaturated = load(fname, "last_unsaturated")
 
-    # Classifier features from the ar2D image, computed HERE because this is the
-    # last point at which the untouched ar2D array exists in memory: the dark
-    # subtraction below mutates `dimage` in place, and everything after it is
-    # ar2Dcal content. The model was trained on ar2D, so featurising the
-    # post-dark, post-flat array would silently change every prediction while
-    # still appearing to work.
-    #
-    # n.b. `exposure_class_features` copies before it zeroes NaNs, so this does
-    # not perturb the array the calibration below depends on.
-    feats = exp_class_features ? exposure_class_features(dimage) : nothing
-
     metadata = read_metadata(fname)
     # n.b. every pixel does't use this many diffs. Some are truncated due to saturation
     ndiff_used = metadata["ndiff_used"]
+
+    # Classifier products from the ar2D arrays, computed HERE because this is the
+    # last point at which the untouched ar2D arrays exist in memory: the dark
+    # subtraction below mutates `dimage` in place, and everything after it is
+    # ar2Dcal content. The model was trained on ar2D, so featurising the
+    # post-dark, post-flat array would silently change every prediction while
+    # still appearing to work. Chip G also carries the up-the-ramp products,
+    # exactly as `read_classifier2d_chip_products` reads them from disk.
+    #
+    # n.b. the helpers copy before they zero NaNs, so this does not perturb the
+    # arrays the calibration below depends on.
+    feats = if !exp_class_features
+        nothing
+    else
+        p = chip == "G" ?
+            classifier2d_chip_products(dimage; last_unsaturated = last_unsaturated,
+            chisqimage = chisqimage, CRimage = CRimage, ndiff_used = ndiff_used,
+            quarters = true) : classifier2d_chip_products(dimage)
+        merge(p, (nread_total = Int(get(metadata, "nread_total", -1)),))
+    end
 
     ### dark current subtraction
     darkRateflst = sort(glob("darkRate_$(tele)_$(chip)_*.h5", dirname(fname)))

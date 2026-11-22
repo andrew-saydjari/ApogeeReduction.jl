@@ -43,6 +43,14 @@ git_branch, git_commit, git_clean = initalize_git(dirname(dirname(@__DIR__)) * "
 ##                          exposure the classifier never judged is 2^1|2^2.
 ##   exposure_class_pred    predicted content class ("unknown" if no verdict)
 ##   exposure_class_prob    max forest probability (NaN if no verdict)
+##   exposure_class_p_sky, exposure_class_oh_rel, exposure_class_line_z,
+##   exposure_class_tr_dyn  object-frame rule inputs (Float64; NaN when not
+##                          measured, e.g. offline v6 sweeps)
+##   exposure_class_object_rule  object_frame_rule reason for commanded objects
+##                          (forest / no_sky_light / forest+no_sky_light /
+##                          guard_exempt / none), "n/a" otherwise. For commanded
+##                          objects 2^0 predicted_bad is set exactly when the
+##                          rule acts (AKS 2026-11-22).
 ##   exposure_class_status  ok / mislabel_candidate / lamp_off_candidate /
 ##                          persistence_risk / faint_twilight / unknown /
 ##                          rare_label / nofiles / unclassified
@@ -98,19 +106,25 @@ if (parg["results_file"] == "") == (parg["apred_dir"] == "")
     error("give exactly one of --results_file (offline sweep) or --apred_dir (in-pipeline exposureTypeCheck tables)")
 end
 
-# classifier verdicts keyed by (obs, mjd, expnum) => (pred, maxp, status)
+# classifier verdicts keyed by (obs, mjd, expnum) =>
+# (pred, maxp, status, p_sky, oh_rel, line_z, tr_dyn); the last four are the
+# object-frame rule's inputs (NaN when the source does not carry them)
 verdict = if parg["results_file"] != ""
     res = h5open(parg["results_file"], "r") do f
         DataFrame(obs = read(f["obs"]), mjd = read(f["mjd"]), expnum = read(f["expnum"]),
             pred = read(f["pred"]), maxp = read(f["maxp"]), status = read(f["status"]))
     end
     println("source: offline results file ", parg["results_file"])
+    @warn "offline results files carry no object-rule inputs: commanded objects " *
+          "will decorate with NaN evidence and are never predicted_bad from this source"
     Dict(zip(zip(res.obs, res.mjd, res.expnum),
-        zip(res.pred, res.maxp, res.status)))
+        zip(res.pred, res.maxp, res.status, fill(NaN, nrow(res)), fill(NaN, nrow(res)),
+            fill(NaN, nrow(res)), fill(NaN, nrow(res)))))
 else
     # In-pipeline mode: the per-MJD tables pipeline.jl writes after the 2D stage.
     # Column names differ from the offline sweep (tele/flag vs obs/status).
-    d = Dict{Tuple{String, Int, Int}, Tuple{String, Float64, String}}()
+    d = Dict{Tuple{String, Int, Int},
+        Tuple{String, Float64, String, Float64, Float64, Float64, Float64}}()
     files = String[]
     for mjddir in readdir(parg["apred_dir"]; join = true)
         isdir(mjddir) || continue
@@ -122,9 +136,13 @@ else
         parg["apred_dir"])
     for p in files
         t = load(p)
+        # tables written before the 2D forest have no rule inputs -> NaN
+        col(k) = haskey(t, k) ? Float64.(t[k]) : fill(NaN, length(t["expnum"]))
+        ps, oh, lz, td = col("p_sky"), col("oh_rel"), col("line_z"), col("tr_dyn")
         for i in eachindex(t["expnum"])
             d[(String(t["tele"][i]), Int(t["mjd"][i]), Int(t["expnum"][i]))] = (
-                String(t["pred"][i]), Float64(t["prob"][i]), String(t["flag"][i]))
+                String(t["pred"][i]), Float64(t["prob"][i]), String(t["flag"][i]),
+                ps[i], oh[i], lz[i], td[i])
         end
     end
     d
@@ -179,6 +197,9 @@ h5open(parg["almanac_file"], "r+") do f
             pred = fill(EXP_CLASS_UNKNOWN_STR, n)
             prob = fill(NaN, n)
             status = fill("unclassified", n)
+            p_sky, oh_rel, line_z, tr_dyn = fill(NaN, n), fill(NaN, n), fill(NaN, n),
+            fill(NaN, n)
+            objrule = fill("n/a", n)
             # Default every row to NOTRUN, not to zero: a row we never formed a
             # verdict for must not decorate as "judged and fine". Rows with a
             # verdict overwrite the classifier bits below; the engineering bit
@@ -195,11 +216,14 @@ h5open(parg["almanac_file"], "r+") do f
                 # classifier verdict (only for exposures that were classified)
                 v = get(verdict, (tele, parse(Int, mjd), expnum[i]), nothing)
                 if !isnothing(v)
-                    pred[i], prob[i], status[i] = v
+                    pred[i], prob[i], status[i], p_sky[i], oh_rel[i], line_z[i], tr_dyn[i] = v
                     labeled = exposure_class_label(imtype[i], lq[i], lt[i], lu[i])
                     # a checkfail verdict comes back with NOTRUN still set
-                    flags[i] = UInt8(exposure_class_metadata(
-                        labeled, pred[i], prob[i], status[i])["exposure_flags"])
+                    md = exposure_class_metadata(labeled, pred[i], prob[i], status[i];
+                        p_sky = p_sky[i], oh_rel = oh_rel[i], line_z = line_z[i],
+                        tr_dyn = tr_dyn[i])
+                    flags[i] = UInt8(md["exposure_flags"])
+                    objrule[i] = md["exp_class_object_rule"]
                 end
                 # engineering carton check — INDEPENDENT of the image classifier:
                 # it runs on every object exposure whether or not a 2D prediction
@@ -243,6 +267,11 @@ h5open(parg["almanac_file"], "r+") do f
             out["exposure_class_pred"] = pred
             out["exposure_class_prob"] = prob
             out["exposure_class_status"] = status
+            out["exposure_class_p_sky"] = p_sky
+            out["exposure_class_oh_rel"] = oh_rel
+            out["exposure_class_line_z"] = line_z
+            out["exposure_class_tr_dyn"] = tr_dyn
+            out["exposure_class_object_rule"] = objrule
             out["engineering"] = UInt8.(eng)
             out["engineering_frac"] = engfrac
             out["engineering_carton"] = engcarton

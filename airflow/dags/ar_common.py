@@ -124,7 +124,10 @@ GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/
 # above, and configured in the same place for the same reason: swapping the
 # model is a config change here, not a code change in ApogeeReduction.
 #
-# THE VERSION IS PINNED (v6). Never a glob and never "newest wins": the class
+# THE VERSION IS PINNED (classifier_2d v2, the 2D content forest that replaced
+# v6 on AKS 2026-11-22, retrained without the read counts; sha256 in metadata/exposure_classifier_2d.sha256; its two
+# stored references are pipeline.jl defaults under data/exposure_classifier_2d/).
+# Never a glob and never "newest wins": the class
 # list, feature layout and decision thresholds all belong to one trained forest,
 # and a reduction has to be able to say which forest judged it. Retraining means
 # editing this line deliberately.
@@ -139,7 +142,7 @@ GAIN_READ_CAL_DIR = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/
 # rather than silently skipping the check. See mved.txt in the old directory.
 # Only the v6 artifact moved; v1-v5 and the sweep outputs stay behind.
 EXP_CLASS_MODEL = ("/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/"
-                   "exposure_classifier/exposure_classifier_rf_v6.jld2")
+                   "exposure_classifier/exposure_classifier_2d_v2.jld2")
 
 # Comb-measured chip-transform calibration (HDF5 built by
 # scripts/cal/chip_transform/build_chip_transform.jl): the sky-line wavelength fit
