@@ -10,13 +10,12 @@
 # - Since AKS 2026-11-22 the model is the 2D content forest
 #   (src/exposureClassifier2D.jl): ten content classes (`CLASSIFIER2D_CLASSES`:
 #   sky, twilight, dark, dark_persist, ledflat, quartzflat, domeflat, thar, une,
-#   fpi), 175 features. It replaced the v6 forest (11 commanded-label classes,
+#   fpi), 173 features. It replaced the v6 forest (11 commanded-label classes,
 #   67 features); v6 verdict strings are still readable via
 #   `classifier_content_class`.
-# - Features come from the ar2D products only, with ONE documented exception:
-#   the forest's feature list contains `n_read` (the commanded number of reads,
-#   read from the ar2D file's metadata/nread_total), inherited from the prototype
-#   that produced the approved scores; see exposureClassifier2D.jl.
+# - Features come from the ar2D image products only (v2, AKS 2026-11-22: the read
+#   counts n_read / n_ndiff of the approved prototype were removed). The one
+#   non-image input is the telescope flag, as in v6; see exposureClassifier2D.jl.
 # - Commanded labels are image_type + lamp flags (e.g. "arclamp_q0t1u0" = ThAr,
 #   "arclamp_q0t0u1" = UNe, "arclamp_q0t0u0" = FPI); `expected_content_class`
 #   maps a label to the content the forest should see.

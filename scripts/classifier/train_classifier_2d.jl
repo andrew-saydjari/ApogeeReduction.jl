@@ -3,8 +3,10 @@
 #
 # Recipe (identical to the prototype that produced the approved scores,
 # 2026_11_19/classifier_2d s20_train_eval.jl, feature set "full"):
-#   * features: classifier2d_feature_names() (175; order matters, see there),
-#     every non-finite value -> -9999;
+#   * features: classifier2d_feature_names(--feature_version) (v2 = 173, the
+#     deployed set without the read counts n_read / n_ndiff, AKS 2026-11-22;
+#     v1 = the approved prototype's 175; order matters, see there), every
+#     non-finite value -> -9999;
 #   * classes: CLASSIFIER2D_CLASSES (sky, twilight, dark, dark_persist, ledflat,
 #     quartzflat, domeflat, thar, une, fpi);
 #   * training rows: manifest role "train" (strong) or "train_weak" with a label in
@@ -23,8 +25,9 @@
 #
 # Inputs:
 #   --features   training feature table (assemble_features_2d.jl; or any CSV with
-#                tele, mjd, expnum, image_type and the feature columns). n_read is
-#                taken from the manifest when the table has no n_read column.
+#                tele, mjd, expnum, image_type and the feature columns). For
+#                --feature_version 1 only, n_read is taken from the manifest when
+#                the table has no n_read column.
 #   --manifest   label manifest CSV: tele, mjd, expnum, image_type, n_read, label, role
 #                (role: train | train_weak | eval_only | unlabeled)
 #   --template_nights  CSV tele, mjd (build_line_templates_2d.jl)
@@ -36,7 +39,7 @@
 #
 # Run: JULIA_NUM_THREADS=n julia --project=<repo> scripts/classifier/train_classifier_2d.jl \
 #        --features F.csv --manifest M.csv --template_nights N.csv \
-#        --out_model exposure_classifier_2d_v1.jld2 --out_oof oof.csv --out_confusion conf.csv
+#        --out_model exposure_classifier_2d_v2.jld2 --out_oof oof.csv --out_confusion conf.csv
 using ArgParse, CSV, DataFrames, DecisionTree, JLD2, Random, Statistics, Printf, Dates, SHA
 using ApogeeReduction
 using ApogeeReduction: classifier2d_feature_names, CLASSIFIER2D_CLASSES,
@@ -66,6 +69,10 @@ function parse_commandline()
         "--final_only"
         action = :store_true
         help = "skip the cross-validation; train and write the final model only"
+        "--feature_version"
+        default = 2
+        help = "feature set: 2 = deployed (no read counts), 1 = approved prototype (with n_read, n_ndiff)"
+        arg_type = Int
         "--cap"
         default = 4000
         arg_type = Int
@@ -86,7 +93,7 @@ function parse_commandline()
 end
 parg = parse_commandline()
 const CLASSES = CLASSIFIER2D_CLASSES
-cols = classifier2d_feature_names()
+cols = classifier2d_feature_names(parg["feature_version"])
 
 t0 = time()
 F = CSV.read(parg["features"], DataFrame; select = (i, nm) -> String(nm) in
@@ -96,7 +103,7 @@ L = CSV.read(parg["manifest"], DataFrame; select = [:tele, :mjd, :expnum, :n_rea
     types = Dict(:tele => String, :label => String, :role => String))
 L.label = coalesce.(L.label, "")
 L.role = coalesce.(L.role, "")
-"n_read" in names(F) && select!(L, Not(:n_read))
+("n_read" in names(F) || !("n_read" in cols)) && select!(L, Not(:n_read))
 D = innerjoin(F, L, on = [:tele, :mjd, :expnum])
 sort!(D, [:tele, :mjd, :expnum])
 missing_cols = setdiff(cols, names(D))
@@ -172,7 +179,7 @@ JLD2.jldsave(parg["out_model"]; model = final, classes = CLASSES, features = col
     trained_utc = string(Dates.now(Dates.UTC)),
     manifest_sha256 = bytes2hex(open(sha256, parg["manifest"])),
     template_nights_sha256 = bytes2hex(open(sha256, parg["template_nights"])),
-    n_train = length(tr))
+    n_train = length(tr), feature_version = parg["feature_version"])
 println("wrote ", parg["out_model"], "  sha256 ", bytes2hex(open(sha256, parg["out_model"])))
 
 if !parg["final_only"]

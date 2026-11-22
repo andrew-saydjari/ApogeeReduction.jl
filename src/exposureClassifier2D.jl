@@ -1,7 +1,7 @@
 # 2D content classifier ("classifier_2d") and the approved commanded-object rule.
 #
 # Port of the phase-1 prototype (2026_11_19/classifier_2d, AKS 2026-11-19..22):
-# a random forest over 175 image features that answers "what light is in this
+# a random forest over 173 image features that answers "what light is in this
 # frame" with ten content classes, plus a thresholded rule that decides when a
 # COMMANDED-OBJECT exposure should not be used for science.
 #
@@ -14,7 +14,7 @@
 # Inputs are the same ar2D products the deployed check sees (`dimage` per chip),
 # plus, for chip G only, the up-the-ramp products that live in the same file and
 # are in memory in `process_2Dcal` (`last_unsaturated`, `chisqimage`, `CRimage`,
-# `metadata/ndiff_used`) and the file's `metadata/nread_total`. No fiber map and
+# `metadata/ndiff_used`). No fiber map and
 # no wavelength solution.
 #
 # STORED REFERENCES (calibration inputs; each has a from-scratch rebuild script):
@@ -40,12 +40,17 @@
 #   1. the prototype stored the spectral (ps) and fiber (pf) profiles as Float32
 #      and computed every profile feature and template correlation from the
 #      Float32-rounded profiles. `classifier2d_chip_products` rounds the same way.
-#   2. the forest's feature list contains `n_read`, the COMMANDED number of reads
-#      (it entered through the prototype's "n_" column prefix, from the almanac).
-#      This contradicts the stated principle that the forest uses the image
-#      alone. It is reproduced here from the ar2D file's `metadata/nread_total`
-#      (equal to the almanac n_read on every test exposure) so the approved
-#      scores are reproduced; dropping it is a retraining decision.
+#   2. (v1 only) the approved prototype forest also used two READ-COUNT inputs that
+#      are not image content: `n_read`, the commanded number of reads (it entered
+#      through the prototype's "n_" column prefix, from the almanac), and
+#      `n_ndiff`, the number of read differences the ramp fit used
+#      (metadata/ndiff_used). AKS 2026-11-22: "retrain without the number of
+#      reads" -> the v2 feature set (`classifier2d_feature_names()`, 173
+#      features) drops both. `n_read` is no longer computed; `n_ndiff` stays in
+#      the feature Dict as a diagnostic only. The telescope flag `d_is_apo` is a
+#      non-image input too; it was in the approved v1 model (and in v6) and is
+#      kept. A v1 artifact cannot be scored by this code (it lacks `n_read`) and
+#      is rejected by `classify_exposure_2d`.
 
 using FFTW: rfft
 using LinearAlgebra: dot
@@ -71,17 +76,31 @@ const CLASSIFIER2D_TEMPLATE_KINDS = ("oh", "thar", "une", "fpi")
 const CLASSIFIER2D_CLASSES = ["sky", "twilight", "dark", "dark_persist", "ledflat",
     "quartzflat", "domeflat", "thar", "une", "fpi"]
 
-"""
-    classifier2d_feature_names() -> Vector{String}
+"Features of the v1 (approved prototype) forest that are read counts, not image content; removed in v2."
+const CLASSIFIER2D_READCOUNT_FEATURES = ["n_read", "n_ndiff"]
 
-The 175 features of the 2D content forest, in the column order the prototype
-trained the approved forest with (`d_*` deployed block; `n_*` per-chip profile
-and image features, quarters, ramp, continuum colors; `t_*` template
-correlations; `n_read`; `oh_rel`, `cont_rel`, `trq90_rel`). The training script
-uses this order by default: the forest's random feature subsets index columns,
-so the order is part of what makes a retrain reproduce the artifact.
 """
-function classifier2d_feature_names()
+    classifier2d_feature_names(version = 2) -> Vector{String}
+
+The features of the 2D content forest, in training column order (`d_*`
+deployed block incl. the telescope flag `d_is_apo`; `n_*` per-chip profile and
+image features, quarters, ramp, continuum colors; `t_*` template correlations;
+`oh_rel`, `cont_rel`, `trq90_rel`).
+- `version = 2` (deployed, AKS 2026-11-22): 173 features, without the read
+  counts `CLASSIFIER2D_READCOUNT_FEATURES`.
+- `version = 1`: the 175 features of the approved prototype forest, incl.
+  `n_read` (after the `t_*` block) and `n_ndiff`; kept so the v1 retrain stays
+  reproducible.
+The order matters: the forest's random feature subsets index columns, so it is
+part of what makes a retrain reproduce an artifact.
+"""
+function classifier2d_feature_names(version::Integer = 2)
+    v1 = _classifier2d_feature_names_v1()
+    version == 1 && return v1
+    version == 2 && return filter(!in(CLASSIFIER2D_READCOUNT_FEATURES), v1)
+    throw(ArgumentError("unknown classifier_2d feature-set version $version"))
+end
+function _classifier2d_feature_names_v1()
     d = vcat(["d_" * c * "_" * n for c in CHIP_LIST for n in CLASSIFIER2D_DEPNAMES],
         ["d_col_rg", "d_col_bg", "d_col_rb", "d_is_apo"])
     n = vcat(["n_" * c * "_" * nm for c in CHIP_LIST
@@ -389,11 +408,11 @@ end
 ## the feature dictionary
 ## ---------------------------------------------------------------------------
 """
-    exposure_class_features_2d(prods, tele, mjd, n_read; refs = nothing) -> Dict{String, Float64}
+    exposure_class_features_2d(prods, tele, mjd; refs = nothing) -> Dict{String, Float64}
 
 All features of the 2D content forest for one exposure, keyed by the names the
-model artifact stores (`d_*`, `n_*`, `t_*`, `n_read`, `oh_rel`, `cont_rel`,
-`trq90_rel`). `prods` maps chip ("R", "G", "B") to `classifier2d_chip_products`
+model artifact stores (`d_*`, `n_*`, `t_*`, `oh_rel`, `cont_rel`, `trq90_rel`;
+plus the diagnostic `n_ndiff`, which the v2 forest does not use). `prods` maps chip ("R", "G", "B") to `classifier2d_chip_products`
 (chip G with the ramp products and quarters).
 
 `d_*` follow `classify_exposure_type` exactly (non-finite -> -9999 inside this
@@ -404,7 +423,7 @@ Without `refs` the template correlations (`t_*`) and the relative light metrics
 (`*_rel`) are NaN: the reference-free features are still all there, but the
 approved rule's no-sky-light test cannot run (it needs `oh_rel`).
 """
-function exposure_class_features_2d(prods::AbstractDict, tele, mjd, n_read; refs = nothing)
+function exposure_class_features_2d(prods::AbstractDict, tele, mjd; refs = nothing)
     tele = lowercase(String(tele))
     F = Dict{String, Float64}()
     # deployed block (identical to classify_exposure_type's design row)
@@ -443,7 +462,6 @@ function exposure_class_features_2d(prods::AbstractDict, tele, mjd, n_read; refs
     cR, cG, cB = F["n_R_cont"], F["n_G_cont"], F["n_B_cont"]
     F["n_lcont_RG"] = log10(max(cR, 1e-3) / max(cG, 1e-3))
     F["n_lcont_BG"] = log10(max(cB, 1e-3) / max(cG, 1e-3))
-    F["n_read"] = Float64(n_read)
     classifier2d_add_reference_features!(F, Dict(c => prods[c].ps for c in CHIP_LIST),
         tele, mjd, refs)
     F
@@ -587,7 +605,11 @@ forest. Returns `(pred, prob, proba, p_nonsky, p_sky)`, with
 `p_nonsky = 1 - P(sky)` computed exactly as the prototype did.
 """
 function classify_exposure_2d(clf2d, features::AbstractDict)
-    x = Float64[get(features, nm, NaN) for nm in clf2d.features]
+    absent = [nm for nm in clf2d.features if !haskey(features, nm)]
+    isempty(absent) || error("the 2D forest artifact wants features this code does not " *
+          "compute: $(absent). A v1 artifact (with the read count n_read) is not " *
+          "supported since v2 (AKS 2026-11-22); use a v2 artifact.")
+    x = Float64[features[nm] for nm in clf2d.features]
     x[.!isfinite.(x)] .= -9999.0
     P = vec(apply_forest_proba(clf2d.model, reshape(x, 1, :), clf2d.classes))
     maxp, mi = findmax(P)
@@ -609,8 +631,7 @@ function check_exposure_2d(clf2d, fnames::AbstractDict, tele, mjd, image_type)
     clf2d === nothing && return nothing
     prods = Dict(chip => read_classifier2d_chip_products(fnames[chip], chip)
     for chip in CHIP_LIST)
-    n_read = prods["G"].nread_total
-    feats = exposure_class_features_2d(prods, tele, mjd, n_read; refs = clf2d.refs)
+    feats = exposure_class_features_2d(prods, tele, mjd; refs = clf2d.refs)
     score = classify_exposure_2d(clf2d, feats)
     rule = lowercase(strip(String(image_type))) == "object" ?
            object_frame_rule(score.p_nonsky, feats["oh_rel"], feats["n_G_line_z"],

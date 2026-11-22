@@ -5,9 +5,15 @@
 # reproduction, forest scoring) run only where the data are reachable and are
 # skipped with an @info otherwise:
 #   AR_TEST_PASS1_APRED          pass-1 apred directory with ar2D files
-#   AR_TEST_CLASSIFIER2D_PROTO   prototype folder (tables/oof_full.csv,
-#                                tuning_object/tables/acted/acted_recommended.csv)
-#   AR_TEST_CLASSIFIER2D_MODEL   a classifier_2d artifact (JLD2)
+#   AR_TEST_CLASSIFIER2D_OOF     out-of-fold table of the v2 forest
+#                                (train_classifier_2d.jl --out_oof)
+#   AR_TEST_CLASSIFIER2D_MODEL   a classifier_2d v2 artifact (JLD2)
+#
+# The committed object-rule list (data/classifier_2d/object_rule_acted_v2.csv)
+# is the v2 forest's out-of-fold list at the approved thresholds. The list AKS
+# approved was computed with the v1 (prototype) forest, which used the read
+# counts n_read / n_ndiff; v2 differs from it by one exposure each way
+# (LCO 57831/77 added, LCO 59821/40 removed).
 using ApogeeReduction: object_frame_rule, exposure_predicted_bad, exposure_check_category,
                        exposure_class_metadata, exposure_class_unknown_metadata,
                        read_exposure_type_check, exposure_class_verdict,
@@ -30,10 +36,10 @@ const C2D_TEMPLATES = joinpath(C2D_REFDIR, "line_templates.h5")
 const C2D_LIGHTREF = joinpath(C2D_REFDIR, "light_reference.csv")
 const C2D_APRED = get(ENV, "AR_TEST_PASS1_APRED",
     "/mnt/ceph/users/sdssv/work/asaydjari/pass1_dr21/apred")
-const C2D_PROTO = get(ENV, "AR_TEST_CLASSIFIER2D_PROTO",
-    "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_19/classifier_2d")
+const C2D_OOF = get(ENV, "AR_TEST_CLASSIFIER2D_OOF",
+    "/mnt/ceph/users/sdssv/work/asaydjari/2026_11_22/classifier_port/artifacts/oof_v2.csv")
 const C2D_MODEL = get(ENV, "AR_TEST_CLASSIFIER2D_MODEL",
-    "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_2d_v1.jld2")
+    "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_2d_v2.jld2")
 
 # equal to numerical precision: identical, both NaN, or within 1e-12 relative.
 # (Bitwise identity does not hold across CPU types: the BLAS dot / SIMD sums in
@@ -89,8 +95,8 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
         @test !object_frame_rule(0.85, 0.0, 3.0, 0.5; p_min = 0.9).act
     end
 
-    @testset "object rule reproduces the approved archive list (compact fixture)" begin
-        T = _CSV.read(joinpath(C2D_DATA, "object_rule_fixture.csv"), _DF;
+    @testset "object rule reproduces the committed v2 archive list (compact fixture)" begin
+        T = _CSV.read(joinpath(C2D_DATA, "object_rule_fixture_v2.csv"), _DF;
             types = Dict(:tele => String))
         act = [object_frame_rule(1 - r.p_sky, r.oh_rel, r.line_z, r.tr_dyn).act for r in eachrow(T)]
         @test sum(T.acted_reference) == 437
@@ -98,21 +104,20 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
         @test any(isnan, T.tr_dyn)   # the fixture exercises the NaN path
     end
 
-    @testset "object rule reproduces acted_recommended.csv (full archive)" begin
-        oof = joinpath(C2D_PROTO, "tables", "oof_full.csv")
-        ref = joinpath(C2D_PROTO, "tuning_object", "tables", "acted", "acted_recommended.csv")
-        if isfile(oof) && isfile(ref)
-            O = _CSV.read(oof, _DF; select = [:tele, :mjd, :expnum, :image_type, :p_full_sky,
+    @testset "object rule reproduces the committed v2 list (full archive)" begin
+        R = _CSV.read(joinpath(C2D_DATA, "object_rule_acted_v2.csv"), _DF;
+            types = Dict(:tele => String))
+        @test size(R, 1) == 437
+        if isfile(C2D_OOF)
+            O = _CSV.read(C2D_OOF, _DF; select = [:tele, :mjd, :expnum, :image_type, :p_sky,
                     :oh_rel, :n_G_line_z, :n_G_tr_dyn], types = Dict(:tele => String))
             O = O[O.image_type .== "object", :]
             a = Set((r.tele, r.mjd, r.expnum) for r in eachrow(O)
-            if object_frame_rule(1 - r.p_full_sky, r.oh_rel, r.n_G_line_z, r.n_G_tr_dyn).act)
-            R = _CSV.read(ref, _DF; select = [:tele, :mjd, :expnum], types = Dict(:tele => String))
+            if object_frame_rule(1 - r.p_sky, r.oh_rel, r.n_G_line_z, r.n_G_tr_dyn).act)
             @test size(O, 1) == 153869
-            @test length(a) == 437
             @test a == Set(zip(R.tele, R.mjd, R.expnum))
         else
-            @info "skipping full-archive rule reproduction: prototype tables not found under $C2D_PROTO"
+            @info "skipping full-archive rule reproduction: v2 out-of-fold table not found at $C2D_OOF"
             @test_skip false
         end
     end
@@ -238,7 +243,14 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
 
     @testset "features on synthetic images" begin
         names_ = classifier2d_feature_names()
-        @test length(names_) == 175 && allunique(names_)
+        @test length(names_) == 173 && allunique(names_)
+        # v2 has no read-count input (AKS 2026-11-22); v1 = the approved prototype's 175
+        @test !any(in(names_), ("n_read", "n_ndiff"))
+        v1 = classifier2d_feature_names(1)
+        @test length(v1) == 175 && "n_read" in v1 && "n_ndiff" in v1
+        @test filter(!in(("n_read", "n_ndiff")), v1) == names_
+        @test "d_is_apo" in names_   # telescope flag: accepted non-image input (v6, v1)
+        @test_throws ArgumentError classifier2d_feature_names(3)
         @test classifier2d_era("apo", 59422) == 1 && classifier2d_era("apo", 59423) == 2
         @test classifier2d_era("lco", 59808) == 1 && classifier2d_era("lco", 59809) == 2
         rng = MersenneTwister(7)
@@ -256,19 +268,24 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
                 CRimage = cr, ndiff_used = 30, quarters = true))
         @test isequal(img, before)   # inputs are not mutated
         @test eltype(prods["G"].ps) == Float32
-        F = exposure_class_features_2d(prods, "apo", 60000, 31)
-        @test Set(keys(F)) == Set(names_)
+        F = exposure_class_features_2d(prods, "apo", 60000)
+        @test issubset(Set(names_), keys(F))
+        @test !haskey(F, "n_read")                     # never computed since v2
         @test all(isnan, (F["oh_rel"], F["t_oh_G"]))   # no references -> NaN
-        @test F["n_read"] == 31 && F["n_ndiff"] == 30 && F["n_sat_frac"] == 0.0
+        @test F["n_ndiff"] == 30 && F["n_sat_frac"] == 0.0   # n_ndiff: diagnostic only
+        # an artifact that wants a feature this code does not compute (a v1 forest
+        # with n_read) is rejected instead of being scored with a filler value
+        @test_throws ErrorException classify_exposure_2d(
+            (model = nothing, classes = ["sky"], features = vcat(names_, "n_read")), F)
         @test F["d_G_nanfrac"] > 0
         refs = load_classifier2d_references(C2D_TEMPLATES, C2D_LIGHTREF)
-        F2 = exposure_class_features_2d(prods, "apo", 60000, 31; refs = refs)
+        F2 = exposure_class_features_2d(prods, "apo", 60000; refs = refs)
         @test isfinite(F2["oh_rel"]) && isfinite(F2["t_thar_R"])
         # a blank (all-zero) frame: finite deployed block, no traces -> NaN tr_dyn
         z = zeros(2560, 2048)
         pz = Dict("R" => classifier2d_chip_products(z), "B" => classifier2d_chip_products(z),
             "G" => classifier2d_chip_products(z; quarters = true))
-        Fz = exposure_class_features_2d(pz, "apo", 59226, 46; refs = refs)
+        Fz = exposure_class_features_2d(pz, "apo", 59226; refs = refs)
         @test isnan(Fz["n_G_tr_dyn"]) && Fz["n_G_line_z"] == -3.0
         @test all(isfinite(Fz[k]) for k in names_ if startswith(k, "d_"))
         @test isnan(Fz["n_sat_frac"])   # no ramp arrays given
@@ -294,9 +311,8 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
             for r in eachrow(X)
                 fn = Dict(c => c2d_ar2d(r, c) for c in CHIP_LIST)
                 prods = Dict(c => read_classifier2d_chip_products(fn[c], c) for c in CHIP_LIST)
-                @test prods["G"].nread_total == r.n_read
-                F = exposure_class_features_2d(prods, r.tele, r.mjd, prods["G"].nread_total;
-                    refs = refs)
+                @test prods["G"].nread_total == r.n_read   # provenance field only
+                F = exposure_class_features_2d(prods, r.tele, r.mjd; refs = refs)
                 ok = all(c2d_close(F[k], Float64(r[k])) for k in names_)
                 ok || (nbad += 1; @warn "prototype feature mismatch" r.tele r.mjd r.expnum)
                 @test ok

@@ -2,8 +2,8 @@
 # (12 template correlations t_*, and oh_rel / cont_rel / trq90_rel) to the
 # reference-free features of extract_features_2d.jl, and write the training
 # feature table: one CSV row per exposure with all three chips (ok = 1), columns
-# tele, mjd, expnum, image_type + classifier2d_feature_names() (n_read from the
-# ar2D metadata/nread_total).
+# tele, mjd, expnum, image_type + classifier2d_feature_names() (the v2 set: no
+# read-count inputs).
 #
 # Uses ApogeeReduction.classifier2d_add_reference_features!, the same function
 # the pipeline uses, on the same Float32 spectral profiles.
@@ -50,7 +50,6 @@ out = fill(NaN, length(names_), length(rows))
 Threads.@threads for j in eachindex(rows)
     i = rows[j]
     F = Dict{String, Float64}(zip(names_, X[:, i]))
-    F["n_read"] = Float64(nread[i])
     classifier2d_add_reference_features!(F,
         Dict(c => PS[:, ci, i] for (ci, c) in enumerate(CHIP_LIST)), tele[i], mjd[i], refs)
     out[:, j] = [F[k] for k in names_]

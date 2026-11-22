@@ -265,8 +265,9 @@ configured by path exactly like `caldir_darks` / `caldir_flats` /
 `gain_read_cal_dir`: `pipeline.jl --exp_class_model` holds the default and
 `airflow/dags/ar_common.py` (`EXP_CLASS_MODEL`) sets it for production, so
 swapping models is a config change beside the other calibration inputs. The
-version is pinned (classifier_2d v1, the 2D content forest with ten content
-classes that replaced v6 on AKS 2026-11-22; artifact checksum in
+version is pinned (classifier_2d v2, the 2D content forest with ten content
+classes that replaced v6 on AKS 2026-11-22, retrained without the read-count
+inputs of the approved prototype; artifact checksum in
 `metadata/exposure_classifier_2d.sha256`, rebuild tooling in
 `scripts/classifier/`) — never a glob, never newest-wins. Its two stored
 references, `data/exposure_classifier_2d/line_templates.h5` and

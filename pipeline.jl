@@ -92,9 +92,9 @@ function parse_commandline()
         default = "/mnt/ceph/users/sdssv/work/asaydjari/2026_09_06/pass_clean/"
         "--exp_class_model"
         required = false
-        help = "exposure-type classifier artifact (JLD2): the 2D content forest (classifier_2d; replaced v6 on AKS 2026-11-22). A calibration input, configured by path like --caldir_darks / --gain_read_cal_dir; airflow/dags/ar_common.py sets it for production. The post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). A path that does not exist is a hard error; a v6 artifact is rejected."
+        help = "exposure-type classifier artifact (JLD2): the 2D content forest (classifier_2d v2, without read-count inputs; replaced v6 on AKS 2026-11-22). A calibration input, configured by path like --caldir_darks / --gain_read_cal_dir; airflow/dags/ar_common.py sets it for production. The post-2D check RUNS BY DEFAULT. Pass an empty string to turn it off deliberately (1D products then record exp_class_status=\"notrun\"). A path that does not exist is a hard error; a v6 artifact is rejected."
         arg_type = String
-        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_2d_v1.jld2"
+        default = "/mnt/ceph/users/sdssv/work/asaydjari/cal_ref/exposure_classifier/exposure_classifier_2d_v2.jld2"
         "--exp_class_templates"
         required = false
         help = "line templates of the 2D content forest (HDF5; stored reference, rebuilt by scripts/classifier/build_line_templates_2d.jl). If absent the exposure-type check is DISABLED (logged) and every exposure records exp_class_status=\"notrun\"."
@@ -364,8 +364,7 @@ if parg["exp_class_model"] != ""
                             prods_by_chip[chip] :
                             read_classifier2d_chip_products(fnames_by_chip[chip], chip)
                 for chip in keys(fnames_by_chip))
-                feats = exposure_class_features_2d(prods, tele, mjd,
-                    prods["G"].nread_total; refs = clf.refs)
+                feats = exposure_class_features_2d(prods, tele, mjd; refs = clf.refs)
                 res = classify_exposure_type(clf, feats)
                 flag = exposure_check_category(labeled, res, clf.flag_tau)
                 # persistence prior: a dark taken right after a bright exposure

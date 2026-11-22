@@ -6,7 +6,8 @@
 #
 # Output HDF5 (row-aligned with the manifest):
 #   tele, mjd, expnum, image_type, ok (1 = all three chips read, 0 = missing/failed),
-#   nread_total (metadata/nread_total of chip G), features (nfeat x n, the
+#   nread_total (metadata/nread_total of chip G; provenance only, not a feature),
+#   features (nfeat x n, the
 #   reference-free features of classifier2d_feature_names(); t_* / *_rel are NaN
 #   here and are filled by assemble_features_2d.jl), feature_names,
 #   PS (2048 x 3 x n Float32 spectral profiles, chips R,G,B: the input of
@@ -59,8 +60,8 @@ parg = parse_commandline()
     try
         prods = Dict(chip => read_classifier2d_chip_products(paths[chip], chip)
         for chip in CHIP_LIST)
-        nr = prods["G"].nread_total
-        F = exposure_class_features_2d(prods, tele, mjd, nr)
+        nr = prods["G"].nread_total   # provenance only; not a v2 feature
+        F = exposure_class_features_2d(prods, tele, mjd)
         PS = hcat([prods[c].ps for c in CHIP_LIST]...)
         (ok = true, nread = nr, feats = Float64[F[k] for k in names_], PS = PS)
     catch e
