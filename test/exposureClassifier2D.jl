@@ -20,7 +20,7 @@ using ApogeeReduction: object_frame_rule, exposure_predicted_bad, exposure_check
                        OBJECT_RULE_P_NONSKY_MIN, OBJECT_RULE_OH_REL_MAX,
                        OBJECT_RULE_LINE_Z_MAX, OBJECT_RULE_TR_DYN_GUARD,
                        CLASSIFIER2D_CLASSES
-using HDF5, Printf
+using HDF5
 const _CSV = ApogeeReduction.CSV
 const _DF = ApogeeReduction.DataFrame
 
@@ -39,6 +39,8 @@ const C2D_MODEL = get(ENV, "AR_TEST_CLASSIFIER2D_MODEL",
 # (Bitwise identity does not hold across CPU types: the BLAS dot / SIMD sums in
 # the profile means differ by an ulp between the cluster nodes that made the
 # prototype tables and a workstation; measured max relative difference 1.4e-14.)
+c2d_ar2d(r, chip) = joinpath(C2D_APRED, string(r.mjd),
+    "ar2D_$(r.tele)_$(r.mjd)_$(lpad(r.expnum, 4, '0'))_$(chip)_$(r.image_type).h5")
 c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-12, atol = 1e-13)
 
 @testset "exposureClassifier2D" begin
@@ -276,8 +278,7 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
         X = _CSV.read(joinpath(C2D_DATA, "prototype_features.csv"), _DF;
             types = Dict(:tele => String, :image_type => String))
         have = isdir(C2D_APRED) && all(eachrow(X)) do r
-            all(isfile(joinpath(C2D_APRED, string(r.mjd), @sprintf("ar2D_%s_%d_%04d_%s_%s.h5",
-                r.tele, r.mjd, r.expnum, c, r.image_type))) for c in CHIP_LIST)
+            all(isfile(c2d_ar2d(r, c)) for c in CHIP_LIST)
         end
         if !have
             @info "skipping prototype feature reproduction: ar2D files not found under $C2D_APRED"
@@ -291,9 +292,7 @@ c2d_close(a, b) = (isnan(a) && isnan(b)) || a == b || isapprox(a, b; rtol = 1e-1
             @test size(X, 1) == 33
             nbad = 0
             for r in eachrow(X)
-                fn = Dict(c => joinpath(C2D_APRED, string(r.mjd), @sprintf(
-                    "ar2D_%s_%d_%04d_%s_%s.h5", r.tele, r.mjd, r.expnum, c, r.image_type))
-                for c in CHIP_LIST)
+                fn = Dict(c => c2d_ar2d(r, c) for c in CHIP_LIST)
                 prods = Dict(c => read_classifier2d_chip_products(fn[c], c) for c in CHIP_LIST)
                 @test prods["G"].nread_total == r.n_read
                 F = exposure_class_features_2d(prods, r.tele, r.mjd, prods["G"].nread_total;
