@@ -98,20 +98,26 @@ using HDF5
         @test exposure_class_verdict(e) == :fine   # engineering is not "bad"
         @test !exposure_ok_for_science(e["exposure_flags"])
 
-        # standard science frames are never masked, whatever the forest thinks
+        # commanded objects (AKS 2026-11-22): masked ONLY by the object-frame
+        # rule, from its measured inputs; with no inputs (a v6-era verdict)
+        # the rule cannot fire, whatever the forest predicted
         o = exposure_class_metadata(
             "object_q0t0u0", "dark_q0t0u0", 1.0, "mislabel_candidate")
         @test exposure_class_verdict(o) == :fine
+        o1 = exposure_class_metadata("object_q0t0u0", "dark", 1.0, "mislabel_candidate";
+            p_sky = 0.0, oh_rel = -1.5, line_z = 1.0, tr_dyn = 0.3)
+        @test exposure_class_verdict(o1) == :bad
 
-        # ...but the exemption is on the EXACT label, not image_type == object.
-        # An object frame with an anomalous lamp flag (lco 57802 209-212 in
-        # DR21) is labeled object_q0t0u1 and DOES come back masked. Harmless
-        # while the only consumer is the fiber-flat runlist builder, which
-        # never sees an object frame; asserted here so the nuance is recorded
-        # rather than rediscovered.
+        # the rule applies to every COMMANDED object, whatever its lamp flags:
+        # an object frame with an anomalous lamp flag (lco 57802 209-212 in
+        # DR21) is labeled object_q0t0u1 and is judged by the same rule (under
+        # v6 it was masked by the generic "status != ok" branch)
         o2 = exposure_class_metadata(
             "object_q0t0u1", "object_q0t0u0", 1.0, "mislabel_candidate")
-        @test exposure_class_verdict(o2) == :bad
+        @test exposure_class_verdict(o2) == :fine
+        o3 = exposure_class_metadata("object_q0t0u1", "sky", 1.0, "ok";
+            p_sky = 0.05, oh_rel = 0.0, line_z = 3.0, tr_dyn = 0.5)
+        @test exposure_class_verdict(o3) == :bad
 
         # a dark following a bright exposure is informational, not bad
         p = exposure_class_metadata(
