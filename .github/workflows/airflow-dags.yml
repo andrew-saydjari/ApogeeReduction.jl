@@ -28,7 +28,7 @@ jobs:
       PYTHON_VERSION: '3.12'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Airflow (pinned with the official constraints) + h5py
