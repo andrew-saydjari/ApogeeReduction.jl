@@ -240,7 +240,9 @@ def slurm_submit_and_wait(tele, **context):
 
     Addition kept beyond ar_main.py: a final `sacct` state check so a
     FAILED/TIMEOUT job fails this task (ar_main.py had no verdict — failure
-    surfaced only via the job's own mail).
+    surfaced only via the job's own mail). Because accounting lags the
+    queue, the verdict (C.slurm_job_verdict) re-queries sacct until the
+    state is terminal (>= 30 s apart, up to SACCT_SETTLE_TIMEOUT_S).
 
     NOTE the current run_all.sh takes the NEW 12-arg signature (R1 layout;
     ar_main.py drove the old 5-arg script whose 5th arg was
@@ -307,15 +309,9 @@ def slurm_submit_and_wait(tele, **context):
         if q.returncode != 0 or not q.stdout.strip():
             break
         time.sleep(5)  # ar_main.py's 5 s cadence (AKS's explicit call)
-    acct = subprocess.run(
-        ["sacct", "-j", job_id, "-n", "-X", "-o", "State,ExitCode"],
-        capture_output=True, text=True)
-    state = acct.stdout.strip().split()
-    print(f"job {job_id} final: {acct.stdout.strip()}")
-    if not state or not state[0].startswith("COMPLETED"):
-        raise RuntimeError(f"Slurm job {job_id} ended in state "
-                           f"{state[0] if state else 'UNKNOWN'}")
-    return job_id
+    # Accounting lags the queue: re-query sacct (>= 30 s apart, bounded)
+    # until the state is terminal instead of trusting one immediate call.
+    return C.slurm_job_verdict(job_id)
 
 
 def start_notification(tele, **context):

@@ -323,6 +323,122 @@ def stale_run_reason(run_type, logical_date, now,
             "(see airflow/INSTALL.md, 'Re-running a failed night').")
 
 
+# Slurm job verdict. Accounting (slurmdbd) lags the queue: a job can leave
+# `squeue` while `sacct` still reports RUNNING for a few seconds. A single
+# sacct call right after the job left the queue therefore produced false
+# failures (2026-11-26: APO job 7548417 COMPLETED 0:0 at 15:18:06 UTC, the
+# task failed at 15:18:10 with "ended in state RUNNING"). The verdict now
+# re-queries sacct until the state is terminal, at most every
+# SACCT_SETTLE_POLL_S (cluster rule: never repeat a Slurm command with less
+# than a 30 s sleep), for up to SACCT_SETTLE_TIMEOUT_S.
+SACCT_MIN_POLL_S = 30
+SACCT_SETTLE_POLL_S = max(SACCT_MIN_POLL_S,
+                          _env_int("AR_SACCT_SETTLE_POLL_S", 30))
+SACCT_SETTLE_TIMEOUT_S = _env_int("AR_SACCT_SETTLE_TIMEOUT_S", 600)
+
+# Job states after which accounting will not change again. Anything else
+# (RUNNING, PENDING, COMPLETING, REQUEUED, RESIZING, SUSPENDED, empty output,
+# a failed sacct call, ...) means "not settled yet".
+SLURM_TERMINAL_STATES = frozenset({
+    "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY",
+    "NODE_FAIL", "PREEMPTED", "BOOT_FAIL", "DEADLINE", "REVOKED",
+})
+
+SACCT_STATE_CMD = ["sacct", "-n", "-X", "-P", "-o", "State,ExitCode"]
+
+
+class SlurmStateUnsettled(RuntimeError):
+    """The job left the queue but sacct never reported a terminal state."""
+
+
+def parse_sacct_state(stdout: str) -> tuple[str | None, str | None]:
+    """(state, exit_code) from `sacct -n -X [-P] -o State,ExitCode` output.
+
+    Handles the parsable form ("CANCELLED by 1234|0:0") and the
+    whitespace-aligned form ("CANCELLED by 1234   0:0"). The state is the
+    first word with any truncation '+' removed ("CANCELLED by 1234" ->
+    "CANCELLED"). Uses the last non-empty line (the latest record if sacct
+    ever returns several). Returns (None, None) for empty output."""
+    lines = [ln.strip() for ln in (stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        return None, None
+    line = lines[-1]
+    if "|" in line:
+        fields = [f.strip() for f in line.split("|")]
+        state_field = fields[0]
+        exit_code = (fields[1] or None) if len(fields) > 1 else None
+    else:
+        toks = line.split()
+        state_field = line
+        exit_code = toks[-1] if len(toks) > 1 and ":" in toks[-1] else None
+    words = state_field.split()
+    if not words:
+        return None, exit_code
+    return words[0].rstrip("+").upper(), exit_code
+
+
+def _default_runner(argv):
+    import subprocess
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def wait_for_sacct_terminal(job_id, runner=None, sleep=time.sleep,
+                            timeout_s: float | None = None,
+                            poll_s: float | None = None,
+                            log=print) -> tuple[str, str | None, str]:
+    """Query sacct for `job_id` until its State is terminal.
+
+    Returns (state, exit_code, raw_line). The first query is immediate;
+    after an unsettled answer it sleeps `poll_s` (never below
+    SACCT_MIN_POLL_S) and re-queries, up to `timeout_s` of total sleeping.
+    Raises SlurmStateUnsettled if no terminal state was seen.
+
+    `runner(argv)` must return an object with returncode/stdout/stderr
+    (subprocess.CompletedProcess); `sleep(s)` is injectable for tests."""
+    runner = runner or _default_runner
+    timeout_s = SACCT_SETTLE_TIMEOUT_S if timeout_s is None else timeout_s
+    poll_s = max(SACCT_MIN_POLL_S,
+                 SACCT_SETTLE_POLL_S if poll_s is None else poll_s)
+    argv = ["sacct", "-j", str(job_id)] + SACCT_STATE_CMD[1:]
+    waited = 0.0
+    last = ""
+    while True:
+        res = runner(argv)
+        out = (getattr(res, "stdout", "") or "").strip()
+        if getattr(res, "returncode", 0) != 0:
+            log(f"sacct for job {job_id} failed (rc={res.returncode}): "
+                f"{(getattr(res, 'stderr', '') or '').strip()}")
+            state, exit_code = None, None
+        else:
+            state, exit_code = parse_sacct_state(out)
+        last = out.splitlines()[-1].strip() if out else ""
+        if state in SLURM_TERMINAL_STATES:
+            return state, exit_code, last
+        if waited + poll_s > timeout_s:
+            raise SlurmStateUnsettled(
+                f"Slurm job {job_id} left the queue but its accounting state "
+                f"never settled within {timeout_s:.0f} s (last sacct: "
+                f"{last or 'no output'!r}); final state UNKNOWN/unsettled — "
+                f"check `sacct -j {job_id}`")
+        log(f"job {job_id}: sacct state not settled yet "
+            f"({last or 'no output'!r}); re-checking in {poll_s:.0f} s")
+        sleep(poll_s)
+        waited += poll_s
+
+
+def slurm_job_verdict(job_id, **kwargs) -> str:
+    """Wait for a terminal sacct state and return job_id on success
+    (COMPLETED with exit code 0:0); raise RuntimeError naming the real
+    terminal state otherwise. kwargs go to wait_for_sacct_terminal."""
+    log = kwargs.get("log", print)
+    state, exit_code, raw = wait_for_sacct_terminal(job_id, **kwargs)
+    log(f"job {job_id} final: {raw}")
+    if state == "COMPLETED" and exit_code == "0:0":
+        return str(job_id)
+    raise RuntimeError(f"Slurm job {job_id} ended in state {state} "
+                       f"(exit {exit_code or '?'})")
+
+
 # DB tunnel. The almanac DB (operations.sdss.org:5432) is reached through
 # localhost:<port>, forwarded by the mwm-tunnel.service systemd user unit,
 # which owns the ssh ControlMaster to `mwm` in the foreground and
