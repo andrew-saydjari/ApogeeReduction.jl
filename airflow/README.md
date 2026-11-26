@@ -118,7 +118,9 @@ lco.join >> lco.metrics_append >> lco.daily_summary
 - **Execution modes**: `slurm` (DEFAULT — production dailies as run
   historically; AKS launches the Airflow instance himself, so submission is
   human-initiated) submits the whole run_all.sh chain as one sbatch job with
-  ar_main.py's 5-second `squeue -j` polls + a final `sacct` verdict;
+  ar_main.py's 5-second `squeue -j` polls + a final `sacct` verdict
+  (re-queried >= 30 s apart, up to `AR_SACCT_SETTLE_TIMEOUT_S`=600 s,
+  until the state is terminal: accounting lags the queue);
   `local` runs every step directly on the
   host (ccalin051) under `nice -n 10` with
   `AR_LOCAL_WORKERS`/`--workers_per_node` = `workers` param and all
@@ -248,6 +250,9 @@ rejected because PostgreSQL reads them as ms and Airflow as s.
   stale-run check, step announce, failure hints (any python3).
 - `test_render_units.py` — unit templates + `render_systemd_units.sh`
   (any python3; uses `systemd-analyze verify` if present).
+- `test_slurm_verdict.py` — the sacct verdict: lagging accounting,
+  unsettled timeout, >= 30 s between sacct calls (any python3; fakes, no
+  Slurm command is run).
 - `test_check_almanac_output.py` — the almanac output check, including
   the 96-byte stub (needs h5py: run with the almanac env's python).
 - `test_dag.py` — DagBag import with the deployed Airflow, structure
