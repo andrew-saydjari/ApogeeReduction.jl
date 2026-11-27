@@ -519,54 +519,26 @@ def almanac_cmd(tele: str) -> str:
         'echo "installed $AF"\'')
 
 
-# tunnel_check: a real `select 1` through the forward, with timeouts. The
-# master and the forward belong to the tunnel systemd unit; if the forward
-# is missing while the master is up (a tunnel unit installed before it
-# carried the LocalForward), add it once over the master as a stopgap and
-# say so.
-TUNNEL_CHECK_CMD = (
-    "set -uo pipefail\n"
-    f"UNIT={C.TUNNEL_UNIT}\n"
-    f"HOST={C.TUNNEL_HOST}\n"
-    f"PORT={C.DB_FORWARD_PORT}\n"
-    "fatal() {\n"
-    '  echo "FATAL: $1"\n'
-    '  echo "The ssh ControlMaster and the DB port-forward are owned by the '
-    'systemd user unit $UNIT on $(hostname -s). Check:"\n'
-    '  echo "  systemctl --user status $UNIT"\n'
-    '  echo "  journalctl --user -u $UNIT -n 50"\n'
-    '  echo "If it hit its start limit (e.g. after a password change), fix '
-    'the cause, then: systemctl --user reset-failed $UNIT && '
-    'systemctl --user start $UNIT"\n'
-    "  exit 1\n"
-    "}\n"
-    "db_ok() {\n"
-    f"  PGCONNECT_TIMEOUT=10 PGOPTIONS='-c statement_timeout=15000' "
-    f"timeout 30 {C.PSQL_BIN} -X -w -At -h localhost -p \"$PORT\" "
-    f"-U {C.DB_USER} -d {C.DB_NAME} -c 'select 1' 2>&1\n"
-    "}\n"
-    "command -v "
-    f"{C.PSQL_BIN} >/dev/null || fatal '{C.PSQL_BIN} not found on PATH "
-    "(needed for the DB check; set AR_PSQL)'\n"
-    'ssh -O check "$HOST" 2>&1 || fatal "the ssh ControlMaster to $HOST is '
-    'down."\n'
-    'out=$(db_ok); rc=$?\n'
-    'if [ "$rc" -ne 0 ] || [ "$out" != "1" ]; then\n'
-    '  echo "select 1 via localhost:$PORT failed (rc=$rc): $out"\n'
-    "  if ! timeout 5 bash -c \"echo > /dev/tcp/localhost/$PORT\" "
-    "2>/dev/null; then\n"
-    '    echo "WARNING: port $PORT is not forwarded although the master is '
-    'up. The installed $UNIT predates the LocalForward; reinstall it from '
-    'airflow/systemd. Adding the forward over the master as a stopgap."\n'
-    f'    ssh -O forward -L "$PORT:{C.DB_REMOTE}" "$HOST" || true\n'
-    "    sleep 2\n"
-    "    out=$(db_ok); rc=$?\n"
-    "  fi\n"
-    "fi\n"
-    'if [ "$rc" -ne 0 ] || [ "$out" != "1" ]; then\n'
-    '  fatal "select 1 through localhost:$PORT failed (rc=$rc): $out"\n'
-    "fi\n"
-    'echo "tunnel OK: select 1 through localhost:$PORT returned 1"\n')
+def tunnel_check(**context):
+    """The daily needs the DB port, so that is what is checked: pass iff a
+    real `select 1` through localhost:<port> returns 1 (no ssh involved).
+    On failure C.check_tunnel restarts the tunnel unit at most once
+    (`systemctl --user restart`, never when the unit is failed/start-limited
+    or the DB is rejecting the login) and re-probes, then names the broken
+    part. Only the FIRST try may restart; the Airflow retries
+    (C.TUNNEL_CHECK_RETRIES x C.TUNNEL_CHECK_RETRY_DELAY_S) only re-probe,
+    for verdicts that can clear on their own (network, systemd cycling the
+    unit, the watchdog's restart). Verdicts that need a human fail at once
+    without retries."""
+    ti = context.get("ti") or context.get("task_instance")
+    try_number = int(getattr(ti, "try_number", 1) or 1)
+    r = C.check_tunnel(C.TunnelEnv(), allow_restart=try_number <= 1)
+    print(r.message)
+    if r.ok:
+        return
+    if r.retryable:
+        raise RuntimeError(r.message)
+    raise AirflowFailException(r.message)
 
 
 # ---------------------------------------------------------------------------
@@ -595,9 +567,12 @@ def build_observatory_group(tele: str) -> TaskGroup:
             soft_fail=True,  # timeout (never transferred) -> clean skip
         )
 
-        t_tunnel = BashOperator(
+        t_tunnel = PythonOperator(
             task_id="tunnel_check",
-            bash_command=TUNNEL_CHECK_CMD,
+            python_callable=tunnel_check,
+            retries=C.TUNNEL_CHECK_RETRIES,
+            retry_delay=timedelta(seconds=C.TUNNEL_CHECK_RETRY_DELAY_S),
+            execution_timeout=timedelta(minutes=5),
         )
 
         t_almanac = BashOperator(

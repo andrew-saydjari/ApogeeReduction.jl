@@ -125,15 +125,14 @@ chmod 600 /mnt/home/sdssv/airflow/airflow_env.sh
 ```
 
 The almanac DB identity is NOT in this file: it comes from
-`~/.almanac/config.yaml` + `~/.pgpass` of the account running Airflow, and
-the DB is reached through localhost:63333, forwarded by the
-`mwm-tunnel.service` systemd user unit (step 4), which owns the `mwm` ssh
-ControlMaster in the foreground and establishes the forward itself. The
-`tunnel_check` task checks the master (`ssh -O check mwm`) and runs a real
-`select 1` through the forward; when either fails, it names the unit to
-check (`systemctl --user status mwm-tunnel.service`, `journalctl --user -u
-mwm-tunnel.service`). The account running Airflow therefore needs the `mwm`
-ssh alias (with a `ControlPath`), `~/.almanac/config.yaml` + `~/.pgpass`,
+`~/.almanac/config.yaml` + `~/.pgpass` (or `PGPASSFILE`) of the account
+running Airflow, and the DB is reached through localhost:63333, forwarded by
+the `mwm-tunnel.service` systemd user unit (step 4): one foreground ssh with
+the forward on its command line and no shared control socket. The
+`tunnel_check` task checks exactly what the daily needs, a real `select 1`
+through that port; on failure it restarts the unit at most once and then says
+which part is broken (step 4, "Tunnel health"). The account running Airflow
+therefore needs the `mwm` ssh alias, `~/.almanac/config.yaml` + `~/.pgpass`,
 and `psql` on the PATH of airflow_env.sh (currently on asaydjari, not sdssv —
 step 7). `tunnel_check`'s DB user/name default to `sdss`/`sdss5db` (the
 current `~/.almanac/config.yaml`); override with `AR_DB_USER`/`AR_DB_NAME`
@@ -141,23 +140,50 @@ if that file changes.
 
 ## 4. systemd user units (**AKS**; replaces `startAirflow()`/tmux)
 
-Three user units, kept in the repo as templates (`airflow/systemd/*.service.in`)
+Five user units, kept in the repo as templates (`airflow/systemd/*.in`)
 whose paths are parameters, not `%h` (the account running the units is not
 the one whose home holds AIRFLOW_HOME — `%h` made the unit loop 7,760 times
 on a missing EnvironmentFile on 2026-11-17):
 
 | unit | role |
 |---|---|
-| `mwm-tunnel.service` | the `mwm` ssh ControlMaster **and** the DB forward `localhost:63333 → operations.sdss.org:5432`, one foreground ssh (`ControlMaster=yes`, `ControlPersist=no`, keep-alives 30 s × 3, `ExitOnForwardFailure=yes`). Pre-start asks any existing master to exit and removes a stale socket. Restart cap 3 starts/h, so a changed password cannot lock the Utah account; after that it stays failed until reset by hand |
+| `mwm-tunnel.service` | the DB forward `localhost:63333 → operations.sdss.org:5432`: one foreground `ssh -N` with `-L` on its command line, `ExitOnForwardFailure=yes`, keep-alives 30 s × 3, and **no connection sharing** (`ControlMaster=no`, `ControlPath=none`, overriding `~/.ssh/config`). Pre-start refuses to start, before any login, if the port is already taken, and names the holder. Restart cap 3 starts/h, so a changed password cannot lock the Utah account; after that it stays failed until reset by hand |
+| `ar-db-tunnel-watchdog.timer` + `.service` | every 10 min: the same `select 1`; on failure at most one restart of the tunnel unit per failure episode and per hour (never when it is failed, never `reset-failed`); Slack only on state changes |
 | `airflow-standalone.service` | `airflow standalone`; ordered `After=`/`Wants=` the tunnel; restart cap 5 starts/30 min, then `OnFailure=` → Slack |
 | `airflow-failure-notify.service` | the Slack outage alert |
 
-On ccalin051, as the account chosen in step 7 (today: asaydjari). Render
-into a scratch directory, compare with what is installed, then copy:
+### Why the tunnel has no ControlMaster (2026-11-27)
+
+The previous unit was an ssh ControlMaster on the `ControlPath` from
+`~/.ssh/config` (`~/.ssh/.%r@%h:%p`, on the GPFS home shared by every node),
+and `tunnel_check` gated on `ssh -O check mwm`. Any other ssh master on the
+same path (an ad-hoc `ssh -fN mwm`, `run_all.sh`'s tunnel opener, possibly
+ssh on another node treating the socket as stale) unlinks the socket file
+when it exits. The unit's ssh stays "active (running)" and the DB port keeps
+working, but `ssh -O check` fails: reproduced 2026-11-27, and the cause of
+`tunnel_check` failing on 6 of 11 scheduled runs (11-17, 19, 20, 21, 25,
+27). Nothing in `airflow/` needs a master (the daily only needs the DB
+port), so the unit now has no socket at all, and `tunnel_check` tests the
+DB query itself. Ad-hoc `ssh -fN mwm` masters are no longer needed for the
+daily; for interactive `ssh mwm`, use a host-local socket so a session on
+one node can never touch another node's (recommended `~/.ssh/config`):
+
+```
+Host mwm
+    ControlPath ${XDG_RUNTIME_DIR}/ssh-%C   # host-local tmpfs, not GPFS
+```
+
+### Install / upgrade (ccalin051)
+
+On ccalin051, as the account chosen in step 7 (today: asaydjari), **after**
+this change is promoted to the production clone (the watchdog runs
+`$REPO/airflow/scripts/db_tunnel_watchdog.py` from there). Render into a
+scratch directory, compare with what is installed, then copy:
 
 ```bash
 loginctl enable-linger $USER        # keeps user services alive w/o login
 REPO=/mnt/home/sdssv/gitcode/ApogeeReduction.jl
+UNITS="mwm-tunnel.service airflow-standalone.service airflow-failure-notify.service ar-db-tunnel-watchdog.service ar-db-tunnel-watchdog.timer"
 OUT=$(mktemp -d)
 $REPO/airflow/scripts/render_systemd_units.sh \
     --sshpass /mnt/home/asaydjari/local/bin/sshpass \
@@ -166,37 +192,81 @@ $REPO/airflow/scripts/render_systemd_units.sh \
 # defaults: --airflow-home /mnt/home/sdssv/airflow,
 #   --env-file <airflow-home>/airflow_env.sh,
 #   --airflow-bin /mnt/home/sdssv/uv_env/airflow_env/bin/airflow,
-#   --tunnel-host mwm, --db-forward 63333:operations.sdss.org:5432
-for u in mwm-tunnel airflow-standalone airflow-failure-notify; do
-  diff -u ~/.config/systemd/user/$u.service "$OUT/$u.service"
-done
-systemd-analyze --user verify "$OUT"/*.service
+#   --tunnel-host mwm, --db-forward 63333:operations.sdss.org:5432,
+#   --repo /mnt/home/sdssv/gitcode/ApogeeReduction.jl,
+#   --python <dir of --airflow-bin>/python
+for u in $UNITS; do diff -u ~/.config/systemd/user/$u "$OUT/$u"; done
+systemd-analyze --user verify "$OUT"/*
 mkdir -p ~/.config/systemd/user
-for u in mwm-tunnel airflow-standalone airflow-failure-notify; do
-  cp ~/.config/systemd/user/$u.service ~/.config/systemd/user/$u.service.bak-$(date +%Y%m%d) 2>/dev/null
-  cp "$OUT/$u.service" ~/.config/systemd/user/
+for u in $UNITS; do
+  [ -e ~/.config/systemd/user/$u ] && cp ~/.config/systemd/user/$u ~/.config/systemd/user/$u.bak-$(date +%Y%m%d)
+  cp "$OUT/$u" ~/.config/systemd/user/
 done
 systemctl --user daemon-reload
 systemctl --user enable mwm-tunnel.service airflow-standalone.service
 ```
 
-Against the units installed on 2026-11-17 the rendered `airflow-*` units
-differ only in comments; `mwm-tunnel.service` gains the DB forward
-(`-L 63333:operations.sdss.org:5432`, `ExitOnForwardFailure=yes`), keep-alive
-30 s instead of 60 s, and an explicit password-file path. **The new tunnel
-unit takes effect only when it restarts** — pick a moment when no daily is
-in the almanac/tunnel stage:
+`airflow-*` units differ only in comments. **The new tunnel unit takes
+effect only when it restarts** — pick a moment when no daily is in the
+almanac/tunnel stage (the forward drops for a few seconds):
 
 ```bash
-systemctl --user restart mwm-tunnel.service   # drops + rebuilds the master
-systemctl --user status mwm-tunnel.service
-ssh -O check mwm
+systemctl --user restart mwm-tunnel.service
+systemctl --user status mwm-tunnel.service      # active (running)
+ss -ltnp 'sport = :63333'                       # held by the unit's ssh
 PGCONNECT_TIMEOUT=10 psql -X -w -h localhost -p 63333 -U sdss -d sdss5db -Atc 'select 1'
+# then start the watchdog (its first run is immediate, then every 10 min):
+systemctl --user enable --now ar-db-tunnel-watchdog.timer
+systemctl --user list-timers ar-db-tunnel-watchdog.timer
 ```
 
-Restarting `airflow-standalone.service` is not needed for these changes
-(its unit file changes are comments only; DAG changes are picked up by the
-DAG processor after promotion).
+If the restart fails with "port 63333 is already in use" in the journal,
+another process holds the port (typically an old ad-hoc ssh master that had
+the forward added to it). `ss -ltnp 'sport = :63333'` names it; ask it to
+exit (`ssh -O exit mwm` while the old shared socket still exists, otherwise
+end that ssh process by its PID), then
+`systemctl --user reset-failed mwm-tunnel.service; systemctl --user start mwm-tunnel.service`.
+That pre-start check runs before any login, so it never costs a Utah
+password attempt (it does count toward the 3 starts/h).
+
+Restarting `airflow-standalone.service` is not needed (its unit file changes
+are comments only; DAG changes are picked up by the DAG processor after
+promotion).
+
+### Tunnel health
+
+```bash
+systemctl --user status mwm-tunnel.service
+$REPO/airflow/scripts/db_tunnel_watchdog.py --probe-only  # select 1 + unit
+                     # state + watchdog state; no restart, no Slack; rc 0 = OK
+                     # (run it with airflow_env.sh's PATH/PGPASSFILE if those
+                     # differ from your shell's)
+journalctl --user -u ar-db-tunnel-watchdog.service -n 20
+cat $XDG_RUNTIME_DIR/ar-db-tunnel-watchdog.json
+```
+
+What runs automatically, and its bounds:
+
+- **`tunnel_check`** (each observatory, before almanac): passes iff
+  `select 1` through localhost:63333 returns 1. Otherwise, on its first try
+  only, one `systemctl --user restart mwm-tunnel.service` and up to 60 s of
+  re-probing; then it fails with a verdict: unit failed/start-limited
+  (likely the password), unit cycling, unit active but port closed, port
+  open but the query failing (far end / DB), DB rejecting the login
+  (credentials; the tunnel is not restarted), or psql missing. Transient
+  verdicts are retried twice, 10 min apart, re-probing only
+  (`AR_TUNNEL_CHECK_RETRIES`, `AR_TUNNEL_CHECK_RETRY_DELAY`); the
+  human-only verdicts fail at once.
+- **watchdog**: at most one restart per failure episode and one per hour;
+  gives up ("needs a human", Slack) when the unit is failed, the DB rejects
+  the login, or its one restart did not help; silent until the tunnel is
+  healthy again, then posts the recovery. It posts to `AR_SLACK_ALERT_CHANNEL`
+  (default prod), never on a healthy tick.
+- Both share a host-local restart stamp
+  (`$XDG_RUNTIME_DIR/ar-db-tunnel-last-restart`): neither restarts the unit
+  within 15 min of a restart by the other.
+- Neither ever runs `sshpass`/`ssh` itself or `systemctl reset-failed`: every
+  login attempt is a start of the unit, bounded by its 3 starts/h.
 
 If the tunnel unit hit its start limit (journal shows "Start request
 repeated too quickly"), fix the cause (e.g. the password file after a
@@ -246,7 +316,7 @@ see airflow_env.sh, so no channel needs to be passed here.
 ## 7. Open decisions (**AKS**)
 
 1. **Which account hosts the service?** AIRFLOW_HOME is sdssv's, but the
-   mwm ControlMaster, `~/.almanac` identity, juliaup, and public_www slug
+   mwm tunnel (ssh alias + pass file), `~/.almanac` identity, juliaup, and public_www slug
    currently live on asaydjari. Either move those onto sdssv (cleaner) or
    run the systemd unit as asaydjari with AIRFLOW_HOME=/mnt/home/sdssv/airflow.
 2. **local vs slurm mode** — `slurm` is the DEFAULT (production dailies as

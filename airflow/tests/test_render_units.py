@@ -12,7 +12,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "..", "scripts", "render_systemd_units.sh")
 UNITS = ("airflow-standalone.service", "airflow-failure-notify.service",
-         "mwm-tunnel.service")
+         "mwm-tunnel.service", "ar-db-tunnel-watchdog.service",
+         "ar-db-tunnel-watchdog.timer")
 REQ = ["--sshpass", "/opt/bin/sshpass", "--pass-file", "/home/u/pass_file"]
 
 
@@ -79,14 +80,47 @@ class RenderUnits(unittest.TestCase):
         self.assertNotIn("StartLimitBurst", t["Service"])
         start = t["Service"]["ExecStart"][0]
         for frag in ("/opt/bin/sshpass -f /home/u/pass_file",
-                     "ControlMaster=yes", "ControlPersist=no",
+                     # nothing shared: no control socket to use or unlink
+                     "-o ControlMaster=no", "-o ControlPath=none",
                      "ServerAliveInterval=30", "ServerAliveCountMax=3",
-                     "ExitOnForwardFailure=yes",
+                     "-o ExitOnForwardFailure=yes",
                      "-L 63333:operations.sdss.org:5432", " -N "):
             self.assertIn(frag, start)
         self.assertTrue(start.endswith(" mwm"))
-        self.assertIn("rm -f", t["Service"]["ExecStartPre"][0])
+        for bad in ("ControlMaster=yes", "ControlMaster=auto",
+                    "ControlPersist", "ControlPath=~", "ControlPath=/"):
+            self.assertNotIn(bad, start)
+        # the pre-start no longer touches any ssh master or socket; it only
+        # refuses to start (before any login) when the port is taken
+        pre = t["Service"]["ExecStartPre"][0]
+        self.assertNotIn("/usr/bin/ssh", pre)  # runs no ssh itself
+        self.assertNotIn("rm -f", pre)
+        self.assertIn('ss -Hltn "sport = :63333"', pre)
+        self.assertIn("already in use", pre)
+        self.assertIn("exit 1", pre)
+        directives = "\n".join(
+            ln for ln in open(os.path.join(self.d, "mwm-tunnel.service"))
+            if not ln.lstrip().startswith("#"))
+        self.assertNotIn("reset-failed", directives)
         self.assertEqual(t["Service"]["Restart"], ["always"])
+        self.assertEqual(t["Service"]["RestartSec"], ["300"])
+
+        w = sections(os.path.join(self.d, "ar-db-tunnel-watchdog.service"))
+        self.assertEqual(w["Service"]["Type"], ["oneshot"])
+        # same environment as Airflow: PATH/psql, PGPASSFILE, SLACK_TOKEN
+        self.assertEqual(w["Service"]["EnvironmentFile"],
+                         ["/mnt/home/sdssv/airflow/airflow_env.sh"])
+        self.assertEqual(
+            w["Service"]["ExecStart"],
+            ["/mnt/home/sdssv/uv_env/airflow_env/bin/python "
+             "/mnt/home/sdssv/gitcode/ApogeeReduction.jl/airflow/scripts/"
+             "db_tunnel_watchdog.py"])
+        self.assertNotIn("Install", w)  # started by the timer only
+        tm = sections(os.path.join(self.d, "ar-db-tunnel-watchdog.timer"))
+        self.assertEqual(tm["Timer"]["OnUnitActiveSec"], ["10min"])
+        self.assertEqual(tm["Timer"]["Unit"],
+                         ["ar-db-tunnel-watchdog.service"])
+        self.assertEqual(tm["Install"]["WantedBy"], ["timers.target"])
 
     def test_overrides(self):
         r = render(self.d, *REQ, "--airflow-home", "/srv/af",
@@ -99,7 +133,14 @@ class RenderUnits(unittest.TestCase):
         t = sections(os.path.join(self.d, "mwm-tunnel.service"))
         self.assertIn("-L 5433:db.example.org:5432 utah",
                       t["Service"]["ExecStart"][0])
-        self.assertIn("ssh -G utah", t["Service"]["ExecStartPre"][0])
+        self.assertIn('"sport = :5433"', t["Service"]["ExecStartPre"][0])
+        r = render(self.d, *REQ, "--repo", "/srv/arj", "--python",
+                   "/usr/bin/python3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        w = sections(os.path.join(self.d, "ar-db-tunnel-watchdog.service"))
+        self.assertEqual(w["Service"]["ExecStart"],
+                         ["/usr/bin/python3 /srv/arj/airflow/scripts/"
+                          "db_tunnel_watchdog.py"])
 
     def test_refusals(self):
         cases = [
@@ -109,6 +150,8 @@ class RenderUnits(unittest.TestCase):
             REQ + ["--env-file", "/a b/env"],          # whitespace
             REQ + ["--db-forward", "63333"],           # malformed -L
             REQ + ["--bogus", "x"],
+            REQ + ["--repo", "rel/repo"],              # not absolute
+            REQ + ["--python", "/a b/python"],         # whitespace
         ]
         for args in cases:
             with self.subTest(args=args):

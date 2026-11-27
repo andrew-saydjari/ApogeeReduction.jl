@@ -440,28 +440,42 @@ def slurm_job_verdict(job_id, **kwargs) -> str:
 
 
 # DB tunnel. The almanac DB (operations.sdss.org:5432) is reached through
-# localhost:<port>, forwarded by the mwm-tunnel.service systemd user unit,
-# which owns the ssh ControlMaster to `mwm` in the foreground and
-# establishes the forward itself (ExitOnForwardFailure). tunnel_check runs a
-# real `select 1` through it. DB user/name must match the account's
-# ~/.almanac/config.yaml (password from ~/.pgpass or PGPASSFILE).
-TUNNEL_HOST = os.environ.get("AR_TUNNEL_HOST", "mwm")
+# localhost:<port>, forwarded by the mwm-tunnel.service systemd user unit:
+# ONE foreground ssh with the forward on its command line and no connection
+# sharing (ControlPath=none), so no other ssh invocation can break it. What
+# the daily needs is the DB port, so that is what is checked: a real
+# `select 1` through it (tunnel_check task, ar-db-tunnel-watchdog timer;
+# check_tunnel() below). DB user/name must match the account's
+# ~/.almanac/config.yaml (password from ~/.pgpass or PGPASSFILE, inherited
+# from the environment exactly as almanac sees it).
 TUNNEL_UNIT = os.environ.get("AR_TUNNEL_UNIT", "mwm-tunnel.service")
 DB_FORWARD_PORT = _env_int("AR_DB_FORWARD_PORT", 63333, minimum=1)
 DB_REMOTE = os.environ.get("AR_DB_REMOTE", "operations.sdss.org:5432")
 DB_USER = os.environ.get("AR_DB_USER", "sdss")
 DB_NAME = os.environ.get("AR_DB_NAME", "sdss5db")
 PSQL_BIN = os.environ.get("AR_PSQL", "psql")
+# tunnel_check: Airflow retries for the transient verdicts (see check_tunnel)
+TUNNEL_CHECK_RETRIES = _env_int("AR_TUNNEL_CHECK_RETRIES", 2)
+TUNNEL_CHECK_RETRY_DELAY_S = _env_duration_s("AR_TUNNEL_CHECK_RETRY_DELAY",
+                                             "10min")
+# Outage-class alerts (the tunnel watchdog) use the alert channel knob, like
+# airflow-failure-notify.service and check_airflow_heartbeat.sh.
+AR_SLACK_ALERT_CHANNEL = os.environ.get("AR_SLACK_ALERT_CHANNEL",
+                                        SLACK_CHANNEL_PROD)
 
 # Hints appended to failure notifications for tasks whose fix needs a human.
 FAILURE_HINTS = {
-    "tunnel_check": (f"The DB tunnel is down. It is owned by the systemd "
-                     f"user unit `{TUNNEL_UNIT}` on ccalin051: check "
-                     f"`systemctl --user status {TUNNEL_UNIT}` and "
-                     f"`journalctl --user -u {TUNNEL_UNIT}`. If it hit its "
-                     "start limit (e.g. a changed password), fix the cause, "
-                     f"then `systemctl --user reset-failed {TUNNEL_UNIT}` "
-                     f"and `systemctl --user start {TUNNEL_UNIT}`."),
+    "tunnel_check": (f"The DB tunnel (localhost:{DB_FORWARD_PORT}) is not "
+                     "answering `select 1`; the task log says why (unit "
+                     "failed / port closed / DB rejecting the query) and "
+                     "whether it already restarted the tunnel once. It is "
+                     f"owned by the systemd user unit `{TUNNEL_UNIT}` on "
+                     f"ccalin051: `systemctl --user status {TUNNEL_UNIT}`, "
+                     f"`journalctl --user -u {TUNNEL_UNIT} -n 50`. If the "
+                     "unit is failed (start limit; e.g. a changed password) "
+                     "nothing restarts it automatically: fix the cause, then "
+                     f"`systemctl --user reset-failed {TUNNEL_UNIT}` and "
+                     f"`systemctl --user start {TUNNEL_UNIT}`."),
     "stale_run_guard": ("A scheduled run outlived an outage and was failed "
                         "on purpose without running anything. To process "
                         "that night, trigger a fresh run with conf "
@@ -486,6 +500,359 @@ FAILURE_HINTS = {
                 "uninitialized new config-range submodule, or an "
                 "upstream-empty range repo (seen for lco 10021XXX)."),
 }
+
+
+# ---------------------------------------------------------------------------
+# DB tunnel: probe, check with one bounded self-heal, watchdog state machine
+# ---------------------------------------------------------------------------
+# Shared by the DAG's tunnel_check task and airflow/scripts/
+# db_tunnel_watchdog.py (the ar-db-tunnel-watchdog systemd timer). Every side
+# effect goes through a TunnelEnv, so the logic is tested with fakes.
+#
+# Restart rules (retries must never lock the Utah account):
+#  * only `systemctl --user restart <unit>`, never sshpass/ssh directly, so
+#    the unit's start limit (3 starts/h) bounds every login attempt;
+#  * never when the unit is `failed` (start limit hit, or a hard failure),
+#    and never `reset-failed`: that is a human decision after fixing the
+#    cause (typically a changed password);
+#  * never while systemd itself is cycling the unit (auto-restart pending);
+#  * never when the port answers and the DB rejects the login (credentials:
+#    the tunnel is fine);
+#  * at most one per call, and none if one of these tools restarted the unit
+#    within TUNNEL_RESTART_COOLDOWN_S (a host-local stamp file under
+#    $XDG_RUNTIME_DIR, shared by the task and the watchdog).
+TUNNEL_RESTART_COOLDOWN_S = 15 * 60
+TUNNEL_RESTART_WAIT_S = 60
+TUNNEL_RESTART_POLL_S = 5
+WATCHDOG_RESTART_COOLDOWN_S = 3600
+
+TV_OK = "ok"
+TV_PSQL_MISSING = "psql_missing"
+TV_DB_REJECTED = "db_rejected"      # port open, the DB refuses login/query
+TV_QUERY_FAILED = "query_failed"    # port open, query fails otherwise
+TV_PORT_CLOSED = "port_closed"      # unit active, nothing on the port
+TV_UNIT_INACTIVE = "unit_inactive"
+TV_UNIT_FAILED = "unit_failed"      # incl. start-limit-hit
+TV_UNIT_CYCLING = "unit_cycling"    # systemd auto-restart pending
+TV_UNIT_UNKNOWN = "unit_unknown"    # systemctl unusable / unit not found
+# Only a human can fix these: no Airflow retry, the watchdog gives up.
+TUNNEL_HUMAN_VERDICTS = frozenset({TV_PSQL_MISSING, TV_DB_REJECTED,
+                                   TV_UNIT_FAILED, TV_UNIT_UNKNOWN})
+
+_DB_REJECT_RE = re.compile(
+    r"password authentication failed|no password supplied|"
+    r"role \S+ does not exist|database \S+ does not exist|"
+    r"permission denied|pg_hba\.conf", re.I)
+
+
+def tunnel_restart_stamp_path() -> str:
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return os.path.join(base, "ar-db-tunnel-last-restart")
+
+
+class TunnelEnv:
+    """The side effects of the tunnel check (tests substitute a fake)."""
+
+    def __init__(self, stamp_path: str | None = None):
+        self.stamp_path = stamp_path or tunnel_restart_stamp_path()
+
+    def which(self, name):
+        import shutil
+        return shutil.which(name)
+
+    def run(self, argv, timeout, extra_env=None):
+        """-> (returncode, stdout+stderr stripped). The environment is
+        inherited (PGPASSFILE etc. exactly as the caller has it)."""
+        import subprocess
+        env = dict(os.environ)
+        env.update(extra_env or {})
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True,
+                               timeout=timeout, env=env)
+        except subprocess.TimeoutExpired:
+            return 124, f"timed out after {timeout} s"
+        except OSError as e:
+            return 127, str(e)
+        return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+
+    def port_open(self, port) -> bool:
+        import socket
+        try:
+            with socket.create_connection(("localhost", port), timeout=5):
+                return True
+        except OSError:
+            return False
+
+    def sleep(self, s):
+        time.sleep(s)
+
+    def now(self) -> float:
+        return time.time()
+
+    def last_restart(self):
+        try:
+            with open(self.stamp_path) as f:
+                return float(f.read().strip())
+        except (OSError, ValueError):
+            return None
+
+    def mark_restart(self):
+        try:
+            with open(self.stamp_path, "w") as f:
+                f.write(f"{self.now():.0f}\n")
+        except OSError as e:
+            print(f"WARNING: cannot write {self.stamp_path}: {e}")
+
+
+class TunnelResult:
+    def __init__(self, ok, verdict, message, restarted=False):
+        self.ok, self.verdict, self.message = ok, verdict, message
+        self.restarted = restarted
+
+    @property
+    def retryable(self) -> bool:
+        return not self.ok and self.verdict not in TUNNEL_HUMAN_VERDICTS
+
+    def __repr__(self):
+        return (f"TunnelResult(ok={self.ok}, verdict={self.verdict!r}, "
+                f"restarted={self.restarted})")
+
+
+def probe_db(env, port: int | None = None) -> tuple[str, str]:
+    """`select 1` through localhost:<port> with psql (10 s connect, 15 s
+    statement, 30 s wall clock) -> (verdict, detail). Never touches ssh."""
+    port = port or DB_FORWARD_PORT
+    if not env.which(PSQL_BIN):
+        return TV_PSQL_MISSING, f"{PSQL_BIN} not found on PATH"
+    rc, out = env.run(
+        [PSQL_BIN, "-X", "-w", "-At", "-h", "localhost", "-p", str(port),
+         "-U", DB_USER, "-d", DB_NAME, "-c", "select 1"],
+        timeout=30,
+        extra_env={"PGCONNECT_TIMEOUT": "10",
+                   "PGOPTIONS": "-c statement_timeout=15000"})
+    if rc == 0 and out.strip() == "1":
+        return TV_OK, "1"
+    detail = f"rc={rc}: {out}"
+    if not env.port_open(port):
+        return TV_PORT_CLOSED, detail
+    if _DB_REJECT_RE.search(out or ""):
+        return TV_DB_REJECTED, detail
+    return TV_QUERY_FAILED, detail
+
+
+def unit_state(env, unit: str | None = None) -> dict:
+    """systemctl --user show -> {LoadState, ActiveState, SubState, Result},
+    or {"error": ...} when systemctl cannot answer."""
+    unit = unit or TUNNEL_UNIT
+    rc, out = env.run(["systemctl", "--user", "show", "-p", "LoadState",
+                       "-p", "ActiveState", "-p", "SubState", "-p", "Result",
+                       unit], timeout=30)
+    if rc != 0:
+        return {"error": f"systemctl rc={rc}: {out}"}
+    st = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
+    if "ActiveState" not in st:
+        return {"error": f"unexpected systemctl output: {out!r}"}
+    return st
+
+
+def _unit_kind(st: dict) -> str:
+    if "error" in st or st.get("LoadState") not in (None, "loaded"):
+        return "unknown"
+    a, s = st.get("ActiveState"), st.get("SubState")
+    if a == "failed":
+        return "failed"
+    if a == "activating" and s == "auto-restart":
+        return "cycling"
+    if a in ("active", "inactive", "activating"):
+        return a
+    return "other"  # deactivating, reloading, ...
+
+
+def _tunnel_failure(verdict, detail, unit, port, restarted, st):
+    kind = _unit_kind(st) if st is not None else None
+    if verdict in (TV_PSQL_MISSING, TV_DB_REJECTED):
+        pass
+    elif kind == "failed":
+        verdict = TV_UNIT_FAILED
+    elif kind == "cycling":
+        verdict = TV_UNIT_CYCLING
+    elif kind == "unknown":
+        verdict = TV_UNIT_UNKNOWN
+    elif kind == "inactive":
+        verdict = TV_UNIT_INACTIVE
+    journal = f"journalctl --user -u {unit} -n 50"
+    msgs = {
+        TV_PSQL_MISSING: (
+            f"{PSQL_BIN} not found on PATH (needed for the DB check; set "
+            "AR_PSQL or fix PATH in airflow_env.sh)."),
+        TV_DB_REJECTED: (
+            f"localhost:{port} is reachable but the DB rejected the query "
+            f"({detail}). The tunnel is fine, so it was not restarted; "
+            f"check the DB identity: user {DB_USER} / db {DB_NAME} "
+            "(~/.almanac/config.yaml) and the PGPASSFILE / ~/.pgpass entry."),
+        TV_QUERY_FAILED: (
+            f"localhost:{port} accepts connections but select 1 fails "
+            f"({detail}): the forward is up, the far end is not answering "
+            "(operations.sdss.org via the Utah host, or the DB itself)."),
+        TV_PORT_CLOSED: (
+            f"{unit} is active but nothing answers on localhost:{port}: the "
+            "forward is missing. If the installed unit predates the -L "
+            "forward, reinstall it from airflow/systemd. If the journal "
+            "says the port is already in use, find the holder with "
+            f"`ss -ltnp 'sport = :{port}'` (typically an old ssh master), "
+            f"stop it, then `systemctl --user restart {unit}`. {journal}"),
+        TV_UNIT_INACTIVE: (
+            f"{unit} is inactive (stopped): `systemctl --user start "
+            f"{unit}`; {journal}"),
+        TV_UNIT_FAILED: (
+            f"{unit} is FAILED (Result={(st or {}).get('Result', '?')}): "
+            "systemd stopped retrying (start limit 3 starts/h). Most likely "
+            "a changed Utah password (pass file), an ssh config/host-key "
+            "problem, or the port held by another process. It is NOT "
+            "restarted automatically (protects the Utah account): fix the "
+            f"cause, then `systemctl --user reset-failed {unit} && "
+            f"systemctl --user start {unit}`. {journal}"),
+        TV_UNIT_CYCLING: (
+            f"{unit} keeps exiting and systemd will start it again in up to "
+            f"5 min (at most 3 starts/h, then it stays failed): {journal} "
+            "(authentication, network, or port already in use)."),
+        TV_UNIT_UNKNOWN: (
+            f"cannot read the state of {unit} with systemctl --user "
+            f"({(st or {}).get('error') or 'LoadState=' + str((st or {}).get('LoadState'))}): "
+            "is the unit installed, and does this process run under the "
+            "account's systemd user manager?"),
+    }
+    head = (f"DB tunnel check FAILED [{verdict}]: select 1 through "
+            f"localhost:{port} did not return 1 (last: {detail}). ")
+    tail = (f" Restarted {unit} once in this check: "
+            f"{'yes, without success' if restarted else 'no'}.")
+    return TunnelResult(False, verdict, head + msgs[verdict] + tail,
+                        restarted)
+
+
+def check_tunnel(env, allow_restart: bool = True, unit: str | None = None,
+                 port: int | None = None, log=print) -> TunnelResult:
+    """Pass iff `select 1` through localhost:<port> returns 1. Otherwise at
+    most ONE `systemctl --user restart <unit>` (see the restart rules
+    above), a wait of up to TUNNEL_RESTART_WAIT_S for the port to answer,
+    and a verdict that says which part is broken."""
+    unit = unit or TUNNEL_UNIT
+    port = port or DB_FORWARD_PORT
+    verdict, detail = probe_db(env, port)
+    if verdict == TV_OK:
+        return TunnelResult(True, TV_OK, f"tunnel OK: select 1 through "
+                            f"localhost:{port} returned 1")
+    log(f"select 1 through localhost:{port} failed [{verdict}]: {detail}")
+    if verdict in (TV_PSQL_MISSING, TV_DB_REJECTED):
+        return _tunnel_failure(verdict, detail, unit, port, False, None)
+
+    st = unit_state(env, unit)
+    kind = _unit_kind(st)
+    log(f"{unit}: {st}")
+    restarted = False
+    if kind in ("active", "inactive"):
+        last = env.last_restart()
+        if not allow_restart:
+            log(f"not restarting {unit}: restarts are disabled for this "
+                "check (an earlier try already had its one restart)")
+        elif last is not None and env.now() - last < TUNNEL_RESTART_COOLDOWN_S:
+            log(f"not restarting {unit}: it was restarted "
+                f"{env.now() - last:.0f} s ago by the tunnel check or the "
+                f"watchdog (cooldown {TUNNEL_RESTART_COOLDOWN_S} s)")
+        else:
+            log(f"restarting {unit} once: systemctl --user restart {unit}")
+            env.mark_restart()
+            rc, out = env.run(["systemctl", "--user", "restart", unit],
+                              timeout=90)
+            restarted = True
+            if rc != 0:
+                log(f"systemctl --user restart {unit} returned {rc}: {out}")
+    if kind in ("active", "inactive", "activating"):
+        waited = 0
+        while waited < TUNNEL_RESTART_WAIT_S:
+            env.sleep(TUNNEL_RESTART_POLL_S)
+            waited += TUNNEL_RESTART_POLL_S
+            verdict, detail = probe_db(env, port)
+            if verdict == TV_OK:
+                how = (f"after restarting {unit}" if restarted
+                       else f"after waiting {waited} s")
+                return TunnelResult(True, TV_OK, f"tunnel OK {how}: select "
+                                    f"1 through localhost:{port} returned "
+                                    "1", restarted)
+            if verdict in (TV_PSQL_MISSING, TV_DB_REJECTED):
+                break
+        st = unit_state(env, unit)
+    return _tunnel_failure(verdict, detail, unit, port, restarted, st)
+
+
+def watchdog_tick(state: dict | None, env, unit: str | None = None,
+                  port: int | None = None, log=print):
+    """One run of the tunnel watchdog -> (new_state, alerts).
+
+    state: {"status": healthy|broken|gave_up, "since": ts,
+            "episode_restarts": n, "last_watchdog_restart": ts,
+            "verdict": str}
+    Rules: alerts only on transitions (healthy -> broken, broken ->
+    gave_up, broken/gave_up -> healthy; a same-tick self-heal is one
+    message). At most one watchdog restart per failure episode and at most
+    one per WATCHDOG_RESTART_COOLDOWN_S overall (plus check_tunnel's shared
+    cooldown and its never-when-failed rules). After giving up it never
+    restarts again until the tunnel is seen healthy."""
+    unit = unit or TUNNEL_UNIT
+    st = dict(state or {})
+    status = st.get("status", "healthy")
+    now = env.now()
+    episode_restarts = 0 if status == "healthy" else int(
+        st.get("episode_restarts", 0))
+    last_wd = st.get("last_watchdog_restart")
+    may_restart = (status != "gave_up" and episode_restarts == 0 and
+                   (last_wd is None or
+                    now - last_wd >= WATCHDOG_RESTART_COOLDOWN_S))
+    r = check_tunnel(env, allow_restart=may_restart, unit=unit, port=port,
+                     log=log)
+    if r.restarted:
+        last_wd = now
+    alerts = []
+    if r.ok:
+        if status in ("broken", "gave_up"):
+            alerts.append(
+                f":white_check_mark: DB tunnel healthy again ({r.message}); "
+                f"it had been {status.replace('_', ' ')} since "
+                f"{_fmt_ts(st.get('since'))}.")
+        elif r.restarted:
+            alerts.append(
+                f":wrench: DB tunnel was not answering select 1; the "
+                f"watchdog restarted {unit} once and it is healthy again.")
+        new = {"status": "healthy",
+               "since": st.get("since", now) if status == "healthy" else now,
+               "episode_restarts": 0, "last_watchdog_restart": last_wd,
+               "verdict": TV_OK}
+        return new, alerts
+
+    episode_restarts += int(r.restarted)
+    give_up = (r.verdict in TUNNEL_HUMAN_VERDICTS or
+               (episode_restarts >= 1 and not r.restarted and
+                r.verdict != TV_UNIT_CYCLING))
+    new_status = "gave_up" if give_up or status == "gave_up" else "broken"
+    new = {"status": new_status,
+           "since": now if status == "healthy" else st.get("since", now),
+           "episode_restarts": episode_restarts,
+           "last_watchdog_restart": last_wd, "verdict": r.verdict}
+    human = (":sos: DB tunnel needs a human: the watchdog will not restart "
+             f"{unit} again until it is healthy. {r.message}")
+    if status == "healthy":
+        alerts.append(human if new_status == "gave_up" else
+                      f":rotating_light: DB tunnel broken. {r.message}")
+    elif status == "broken" and new_status == "gave_up":
+        alerts.append(human)
+    return new, alerts
+
+
+def _fmt_ts(ts) -> str:
+    if not ts:
+        return "?"
+    return datetime.fromtimestamp(float(ts), timezone.utc).strftime(
+        "%Y-%m-%d %H:%M UTC")
 
 
 # ---------------------------------------------------------------------------

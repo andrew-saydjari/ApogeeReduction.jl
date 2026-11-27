@@ -1,0 +1,16 @@
+# Fires ar-db-tunnel-watchdog.service every 10 min (see that unit).
+# TEMPLATE: rendered by airflow/scripts/render_systemd_units.sh — see
+# airflow/INSTALL.md step 4. Enable with
+#   systemctl --user enable --now ar-db-tunnel-watchdog.timer
+
+[Unit]
+Description=Every 10 min: APOGEE DB tunnel watchdog
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+AccuracySec=30s
+Unit=ar-db-tunnel-watchdog.service
+
+[Install]
+WantedBy=timers.target

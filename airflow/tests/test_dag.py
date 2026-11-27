@@ -111,12 +111,43 @@ class DagImport(unittest.TestCase):
             self.assertIn('--output "$TMP"', t.bash_command)
             self.assertIn("check_almanac_output.py", t.bash_command)
 
-    def test_tunnel_check_runs_a_query(self):
-        cmd = self.dag.get_task("lco.tunnel_check").bash_command
-        self.assertIn("select 1", cmd)
-        self.assertIn(self.C.TUNNEL_UNIT, cmd)
-        self.assertNotIn("sshpass", cmd)
-        self.assertNotIn("pass_file", cmd)
+    def test_tunnel_check_is_the_query_check(self):
+        import apogee_daily as D
+        for tele in ("lco", "apo"):
+            t = self.dag.get_task(f"{tele}.tunnel_check")
+            self.assertEqual(t.python_callable.__name__, "tunnel_check")
+            self.assertEqual(t.retries, self.C.TUNNEL_CHECK_RETRIES)
+            self.assertEqual(t.retry_delay.total_seconds(),
+                             self.C.TUNNEL_CHECK_RETRY_DELAY_S)
+            self.assertIn(f"{tele}.almanac", t.downstream_task_ids)
+        self.assertFalse(hasattr(D, "TUNNEL_CHECK_CMD"))  # no ssh -O check
+
+    def test_tunnel_check_callable(self):
+        """Only the first try may restart; human verdicts skip retries."""
+        import apogee_daily as D
+        from unittest import mock
+
+        class TI:
+            def __init__(self, n):
+                self.try_number = n
+
+        seen = []
+
+        def fake_check(env, allow_restart=True, **_):
+            seen.append(allow_restart)
+            return result
+
+        with mock.patch.object(D.C, "check_tunnel", fake_check):
+            result = self.C.TunnelResult(True, self.C.TV_OK, "ok")
+            D.tunnel_check(ti=TI(1))
+            D.tunnel_check(ti=TI(2))
+            self.assertEqual(seen, [True, False])
+            result = self.C.TunnelResult(False, self.C.TV_PORT_CLOSED, "x")
+            with self.assertRaises(RuntimeError):
+                D.tunnel_check(ti=TI(1))
+            result = self.C.TunnelResult(False, self.C.TV_UNIT_FAILED, "y")
+            with self.assertRaises(AirflowFailException):
+                D.tunnel_check(ti=TI(1))
 
     def test_stale_run_guard_callable(self):
         import apogee_daily as D

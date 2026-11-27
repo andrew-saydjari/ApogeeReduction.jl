@@ -1,0 +1,23 @@
+# Oneshot run of the DB tunnel watchdog, fired every 10 min by
+# ar-db-tunnel-watchdog.timer.
+# TEMPLATE: the @-delimited placeholders are filled in by
+# airflow/scripts/render_systemd_units.sh — see airflow/INSTALL.md step 4.
+#
+# It runs the same `select 1` through localhost:@DB_PORT@ as the DAG's
+# tunnel_check (same EnvironmentFile as airflow-standalone.service, so the
+# same PATH/psql, PGPASSFILE and DB identity), restarts mwm-tunnel.service
+# at most once per failure episode and at most once an hour (never when the
+# unit is failed/start-limited; never reset-failed), and posts to Slack
+# (AR_SLACK_ALERT_CHANNEL, default prod) only when the state CHANGES.
+# Logic: ar_common.watchdog_tick; script: airflow/scripts/db_tunnel_watchdog.py.
+
+[Unit]
+Description=APOGEE DB tunnel watchdog (select 1 through localhost:@DB_PORT@)
+After=mwm-tunnel.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=@AIRFLOW_ENV_FILE@
+ExecStart=@PYTHON@ @REPO@/airflow/scripts/db_tunnel_watchdog.py
+# check (<=30 s) + one restart + up to 60 s wait, with margin
+TimeoutStartSec=300
