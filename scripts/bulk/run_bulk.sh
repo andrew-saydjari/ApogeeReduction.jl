@@ -139,8 +139,23 @@ fi
 # Only run almanac if file doesn't exist or clobber mode is true
 if [ ! -f "$almanac_file" ] || $almanac_clobber_mode; then
     print_elapsed_time "Running Almanac"
-    #  need to have .ssh/config setup for mwm and a pass_file that is chmod 400
-    sshpass -f ~/pass_file ssh -f -N -L 63333:operations.sdss.org:5432 mwm
+    # DB tunnel (localhost:63333 -> operations.sdss.org:5432). On ccalin051
+    # the mwm-tunnel.service systemd unit owns this port (airflow/INSTALL.md
+    # step 4): if something already listens, use it and open nothing. Only
+    # when the port is closed (a compute node, a manual run elsewhere) open a
+    # private forward with NO connection sharing (ControlPath=none): an ssh
+    # master on the ~/.ssh/config ControlPath unlinks that shared socket when
+    # it exits, which broke the daily's tunnel check (2026-11-27).
+    # Needs the mwm alias in ~/.ssh/config and a chmod-400 ~/pass_file.
+    db_port=63333
+    if timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/$db_port" 2>/dev/null; then
+        echo "DB port localhost:$db_port already open: using it, not opening a tunnel"
+    else
+        echo "DB port localhost:$db_port closed: opening a private (non-shared) forward via mwm"
+        sshpass -f ~/pass_file ssh -f -N -o ControlMaster=no -o ControlPath=none \
+            -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+            -L $db_port:operations.sdss.org:5432 mwm
+    fi
     echo "almanac clone: $(git -C $almanac_dir rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
     $almanac_bin -p 12 -v --mjd-start $mjd_start --mjd-end $mjd_end  --output $almanac_file --fibers
 fi

@@ -1,32 +1,42 @@
-# systemd USER unit: the ssh ControlMaster to the Utah host AND the almanac
-# DB port-forward, owned by one foreground process.
+# systemd USER unit: the almanac DB port-forward to the Utah host, owned by
+# ONE foreground ssh process that shares nothing with any other ssh.
 #
 # TEMPLATE: the @-delimited placeholders are filled in by
 # airflow/scripts/render_systemd_units.sh. Install: airflow/INSTALL.md
 # step 4. Install it under the account whose ~/.ssh/config defines the
-# @TUNNEL_HOST@ alias (its ControlPath is used as-is).
+# @TUNNEL_HOST@ alias (HostName/User/keys are taken from there; connection
+# sharing is NOT).
 #
-# Why this shape (2026-11-17 restart):
-#  * ControlMaster=yes + ControlPersist=no + -N: this process IS the master
-#    and stays in the foreground, so systemd supervises the real connection
-#    (with ControlPersist=yes ssh forks a background master that systemd
-#    cannot see, and an exiting unit could remove the socket of a master it
-#    did not own).
-#  * The DB forward (-L) is established by the master itself, with
-#    ExitOnForwardFailure=yes: the forward lives and dies with the master,
-#    instead of being added ad hoc by the DAG's tunnel_check and silently
-#    vanishing when the master is rebuilt.
+# Why this shape (2026-11-27):
+#  * No connection sharing at all: ControlMaster=no + ControlPath=none on
+#    the command line override whatever ~/.ssh/config says, so this process
+#    neither creates nor uses a control socket. The old unit was a
+#    ControlMaster on the ControlPath from ~/.ssh/config, a socket on the
+#    shared GPFS home: any other ssh master on that path (an ad-hoc
+#    `ssh -fN @TUNNEL_HOST@`, run_all.sh's tunnel opener, possibly ssh on
+#    another node treating the socket as stale) unlinked it when it
+#    exited. The unit stayed "active (running)" and the DB port kept
+#    working, but `ssh -O check` failed, and the DAG's tunnel_check failed
+#    on that on 6 of 11 scheduled runs (2026-11-17 .. 11-27). Nothing in
+#    airflow/ needs a master: the daily only needs the DB port.
+#  * The DB forward (-L) is on this command line with ExitOnForwardFailure:
+#    the forward lives and dies with this process. It binds the default
+#    loopback addresses (127.0.0.1 and ::1), as before.
+#  * Port already in use (e.g. a leftover forward from an old master):
+#    ExecStartPre refuses to start, before any login to the Utah host, with
+#    a log line naming the holder; clear it as INSTALL.md step 4 says.
 #  * Keep-alives (30 s x 3): a dead link is noticed in ~90 s; ssh exits and
 #    systemd restarts it.
 #  * The restart cap protects the Utah account: a changed password makes
 #    every attempt fail, and unbounded retries could lock the account. After
 #    3 starts within an hour the unit stays failed until a human runs
 #    `systemctl --user reset-failed mwm-tunnel.service` and starts it.
+#    Neither the DAG's tunnel_check nor the watchdog ever resets it.
 #  * The password file path is a render parameter (--pass-file); its CONTENT
 #    is never in this repo.
 
 [Unit]
-Description=SSH ControlMaster + DB port-forward to @TUNNEL_HOST@ (APOGEE daily reduction)
+Description=DB port-forward localhost:@DB_PORT@ via @TUNNEL_HOST@, no shared ssh socket (APOGEE daily reduction)
 After=network-online.target
 # At most 3 start attempts per hour, so a changed password cannot lock the
 # Utah account. (Start limits belong in [Unit].)
@@ -35,10 +45,10 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-# Before starting, ask any existing master to exit and remove a stale
-# socket, so the new master can always create its own.
-ExecStartPre=/bin/sh -c 'p=$(/usr/bin/ssh -G @TUNNEL_HOST@ | /usr/bin/awk "/^controlpath /{print \\$2}"); /usr/bin/ssh -O exit @TUNNEL_HOST@ >/dev/null 2>&1; [ -n "$p" ] && /usr/bin/rm -f "$p"; exit 0'
-ExecStart=@SSHPASS@ -f @PASS_FILE@ /usr/bin/ssh -N -o ControlMaster=yes -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -L @DB_FORWARD@ @TUNNEL_HOST@
+# Refuse to start (no Utah login attempted) if something already listens on
+# the forward port.
+ExecStartPre=/bin/sh -c 'if /usr/sbin/ss -Hltn "sport = :@DB_PORT@" | /usr/bin/grep -q .; then echo "mwm-tunnel: port @DB_PORT@ is already in use, not starting. Holder (ss -ltnp):"; /usr/sbin/ss -Hltnp "sport = :@DB_PORT@"; echo "Stop that process (often an old ssh master: ssh -O exit <alias>), then: systemctl --user restart mwm-tunnel.service"; exit 1; fi'
+ExecStart=@SSHPASS@ -f @PASS_FILE@ /usr/bin/ssh -N -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -L @DB_FORWARD@ @TUNNEL_HOST@
 Restart=always
 RestartSec=300
 

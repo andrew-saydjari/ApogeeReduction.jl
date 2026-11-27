@@ -11,10 +11,11 @@ airflow/
 │   ├── ar_common.py          shared config/helpers (Slack, paths, metrics)
 │   ├── apogee_daily.py       apogee_daily (ONE DAG, lco→apo serial)
 │   └── apogee_heartbeat.py   10-min liveness beacon
-├── systemd/                  user unit TEMPLATES (*.service.in)
+├── systemd/                  user unit TEMPLATES (*.service.in, *.timer.in)
 ├── scripts/
 │   ├── check_airflow_heartbeat.sh   cross-machine watchdog (scrontab)
 │   ├── check_almanac_output.py      does an almanac file hold a night?
+│   ├── db_tunnel_watchdog.py        DB tunnel watchdog (systemd timer)
 │   ├── render_systemd_units.sh      fill the unit templates (never installs)
 │   └── airflow_env.sh.example       env template (secrets NOT committed)
 ├── tests/                    unittest suite (see "Tests" below)
@@ -100,15 +101,18 @@ lco.join >> lco.metrics_append >> lco.daily_summary
 - **update.sdsscore is default ON** (O1 punch list #2 — a fresh night after
   any gap dies on missing confSummary otherwise), with new-submodule
   bootstrap (--init + SSH→HTTPS rewrite).
-- **tunnel_check** verifies the `mwm` ControlMaster (`ssh -O check`) and
-  runs a real `select 1` through the localhost:63333 forward (psql, 10 s
-  connect timeout, 15 s statement timeout, 30 s wall clock). The master and
-  the forward belong to the `mwm-tunnel.service` systemd unit; on failure
-  the task (and its Slack hint) names that unit and the `systemctl`/
-  `journalctl` commands to check it. Stopgap: if the master is up but the
-  port is not forwarded (a tunnel unit installed before it carried `-L`),
-  it adds the forward over the master once and logs a warning to reinstall
-  the unit.
+- **tunnel_check** checks what the daily needs: it passes iff a real
+  `select 1` through localhost:63333 returns 1 (psql, 10 s connect timeout,
+  15 s statement timeout, 30 s wall clock; no ssh involved). The forward
+  belongs to the `mwm-tunnel.service` systemd unit (one ssh, no shared
+  control socket). On failure the first try restarts that unit once
+  (`systemctl --user restart`; never when it is failed/start-limited, never
+  `reset-failed`, never when the DB is rejecting the login), re-probes for up
+  to 60 s, then fails with a verdict naming the broken part (unit failed,
+  unit cycling, port closed, query failing, DB rejecting the login, psql
+  missing). Transient verdicts get 2 retries 10 min apart (re-probe only);
+  human-only ones fail at once. A systemd timer runs the same check every
+  10 min between dailies (watchdog; INSTALL.md step 4, "Tunnel health").
 - **almanac** (see "Robustness" below): reuses an existing output only if
   it really holds the night, writes to a `.partial` file moved into place
   on success, and runs under a statement timeout, an execution timeout and
@@ -205,6 +209,7 @@ the DAG import.
 | almanac retries | 1, after 10 min | `AR_ALMANAC_RETRIES`, `AR_ALMANAC_RETRY_DELAY` | covers a transient tunnel drop; the first attempt has partly warmed the DB cache |
 | startup retries (`stale_run_guard`, `update.*`, `setup.*`) | 3, 60 s apart | `AR_STARTUP_RETRIES`, `AR_STARTUP_RETRY_DELAY` | runs launched ~20 s after service start failed after "Pre Execute", before any command ran (most likely before the API server was up). These tasks are idempotent |
 | stale scheduled runs | 36 h | `AR_STALE_RUN_MAX_AGE_H` (conf `stale_run_max_age_h`; 0 disables) | the 2026-09-27 scheduled run resumed 51 days later next to the day's run. 36 h still lets a run delayed by up to a day go |
+| tunnel_check retries | 2, after 10 min, re-probe only | `AR_TUNNEL_CHECK_RETRIES`, `AR_TUNNEL_CHECK_RETRY_DELAY` | only the first try may restart the tunnel unit (one restart per task, bounded by the unit's 3 starts/h); the retries ride out a network blip or the unit's own 5-min restart, so a short outage at 7 am no longer fails the night. Verdicts that need a human (unit failed, DB rejecting the login, psql missing) do not retry |
 | `max_active_runs` | 1 (was 2) | — | serial chain + SQLite; two active runs doubled the slow DB lookup load. A run still going at the next 7 am makes the new run queue (and the stale guard fails it if it waits > 36 h) |
 
 Durations take a unit (`ms`, `s`, `min`, `h`, `d`); bare numbers are
@@ -250,6 +255,11 @@ rejected because PostgreSQL reads them as ms and Airflow as s.
   stale-run check, step announce, failure hints (any python3).
 - `test_render_units.py` — unit templates + `render_systemd_units.sh`
   (any python3; uses `systemd-analyze verify` if present).
+- `test_tunnel_check.py` — the DB tunnel check and watchdog with fake
+  psql/systemctl: query ok touches nothing else, one bounded restart, no
+  restart when the unit is failed/cycling or the DB rejects the login,
+  verdict messages, shared cooldown, watchdog alerts only on transitions
+  and bounded restarts (any python3).
 - `test_slurm_verdict.py` — the sacct verdict: lagging accounting,
   unsettled timeout, >= 30 s between sacct calls (any python3; fakes, no
   Slurm command is run).
@@ -323,7 +333,9 @@ drift dashboards; promote to HDF5/DB when N2 lands if needed.
 10 min. `scripts/check_airflow_heartbeat.sh` (run from rusty scrontab —
 different failure domain) alerts to Slack when the heartbeat or the daily
 metrics table goes stale. systemd user units restart `airflow standalone` on
-failure and alert when restarts are exhausted. Installation requires AKS
+failure and alert when restarts are exhausted, and the
+`ar-db-tunnel-watchdog` timer checks the DB tunnel every 10 min (bounded
+self-heal, Slack on state changes only). Installation requires AKS
 action — see INSTALL.md.
 
 ## Smoke-testing without spamming Slack

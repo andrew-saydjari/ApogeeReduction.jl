@@ -2,7 +2,7 @@
 #
 # TEMPLATE: the @-delimited placeholders are filled in by
 # airflow/scripts/render_systemd_units.sh. Paths are parameters, not %h: the
-# unit runs under the account that owns the mwm ControlMaster and the DB
+# unit runs under the account that owns the mwm tunnel and the DB
 # identity, while AIRFLOW_HOME and its env file live under the sdssv service
 # account. (%h pointed at the wrong home on 2026-11-17 and the unit looped
 # 7,760 times on a missing EnvironmentFile.) Install: airflow/INSTALL.md
